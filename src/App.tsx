@@ -98,11 +98,6 @@ export default function App() {
             >
               <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" strokeWidth={2} />
               <span>Rules</span>
-              {activeRulesCount > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.2 bg-amber-400/20 text-amber-300 text-[10px] font-black rounded-full">
-                  {activeRulesCount}
-                </span>
-              )}
             </button>
           </div>
 
@@ -213,7 +208,7 @@ export default function App() {
         {/* 2. CENTER FRAME: CANVAS OR RULES */}
         <main className="flex-1 bg-white rounded-3xl border border-slate-300/80 shadow-xs flex flex-col overflow-hidden min-w-0">
           {activeView === 'canvas' ? (
-            <div className="flex-1 p-2 sm:p-3 relative flex items-center justify-center min-h-0">
+            <div className="flex-1 relative flex items-center justify-center min-h-0 overflow-hidden">
               <Scene onOpenCreateModal={() => setIsCreateModalOpen(true)} />
             </div>
           ) : (

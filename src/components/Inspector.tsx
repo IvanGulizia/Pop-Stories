@@ -112,28 +112,37 @@ export function Inspector() {
         />
       )}
 
-      {/* Header */}
-      <div className="border-b border-slate-100 pb-3 space-y-1">
+      {/* Header with Prominent Entity Name Editing */}
+      <div className="border-b border-slate-100 pb-3 space-y-2">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">
-              {selectedEntity.type === 'plant' ? '🌱' : selectedEntity.type === 'apple' ? '🍎' : '🎨'}
-            </span>
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+            Paramètres de l'objet
+          </span>
+          <button
+            onClick={() => deleteEntity(selectedEntity.id)}
+            className="text-slate-400 hover:text-rose-600 p-1.5 rounded-xl hover:bg-rose-50 transition-colors cursor-pointer"
+            title="Supprimer cet objet de la scène"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 bg-slate-50 hover:bg-white focus-within:bg-white border border-slate-200 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 rounded-2xl p-2 transition-all">
+          <div className="w-9 h-9 rounded-xl bg-white border border-slate-200/80 flex items-center justify-center text-lg shrink-0 shadow-2xs">
+            {selectedEntity.type === 'plant' ? '🌱' : selectedEntity.type === 'apple' ? '🍎' : '🎨'}
+          </div>
+          <div className="flex-1 min-w-0">
+            <label className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider">
+              Nom de l'objet
+            </label>
             <input
               type="text"
               value={selectedEntity.name}
               onChange={(e) => updateEntityDetails(selectedEntity.id, { name: e.target.value })}
-              className="font-bold text-slate-800 bg-transparent hover:bg-slate-50 focus:bg-white focus:ring-1 focus:ring-indigo-500 rounded-lg px-2 py-1 text-base w-40 outline-none border border-transparent focus:border-slate-300"
+              className="font-bold text-slate-800 bg-transparent text-sm w-full outline-none"
+              placeholder="Nommer cet objet..."
             />
           </div>
-
-          <button
-            onClick={() => deleteEntity(selectedEntity.id)}
-            className="text-slate-400 hover:text-rose-600 p-1.5 rounded-xl hover:bg-rose-50 transition-colors cursor-pointer"
-            title="Supprimer cette entité"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
         </div>
       </div>
 

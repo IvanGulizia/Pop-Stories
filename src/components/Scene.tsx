@@ -63,7 +63,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
     <div
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className="relative w-full h-full min-h-[500px] bg-white rounded-3xl border-2 border-slate-200/90 overflow-hidden shadow-inner cursor-crosshair select-none flex flex-col"
+      className="relative w-full h-full min-h-[500px] bg-white overflow-hidden cursor-crosshair select-none flex flex-col"
       onClick={() => selectEntity(null)}
     >
       {/* Canvas Grid Background */}

@@ -1,5 +1,5 @@
 import { motion, useMotionValue } from 'motion/react';
-import { Entity } from '../types';
+import { Entity, EntityState } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
 import { useEffect, useRef, useState } from 'react';
 
@@ -22,7 +22,8 @@ export function CustomShape({ entity }: CustomShapeProps) {
   const isDraggingRef = useRef(false);
 
   const isSelected = selectedEntityId === entity.id;
-  const currentState = entity.states[entity.currentStateId] || {
+  const currentState: EntityState = entity.states[entity.currentStateId] || {
+    id: entity.currentStateId,
     name: entity.currentStateId,
     color: '#eab308',
     scale: 1,
@@ -182,13 +183,13 @@ export function CustomShape({ entity }: CustomShapeProps) {
 
       {/* Visuel personnalisé : Vectoriel SVG, Image, Icône ou Forme SVG par défaut */}
       <div className="relative w-full h-full flex items-center justify-center">
-        {(currentState?.vectorPaths ?? entity.vectorPaths) ? (
+        {(currentState?.vectorPaths && currentState.vectorPaths.length > 0) ? (
           <div className="w-full h-full flex items-center justify-center select-none p-1">
             <svg
               viewBox="0 0 200 200"
               className="w-full h-full pointer-events-none overflow-visible"
             >
-              {(currentState?.vectorPaths ?? entity.vectorPaths ?? []).map((p) => (
+              {currentState.vectorPaths.map((p) => (
                 <path
                   key={p.id}
                   d={p.d}
@@ -201,9 +202,32 @@ export function CustomShape({ entity }: CustomShapeProps) {
               ))}
             </svg>
           </div>
-        ) : entity.drawingDataUrl ? (
+        ) : (currentState?.drawingDataUrl || entity.drawingDataUrl) ? (
           <div className="w-full h-full flex items-center justify-center p-1 select-none overflow-hidden">
-            <img src={entity.drawingDataUrl} alt={entity.name} className="w-full h-full object-contain pointer-events-none" />
+            <img
+              src={currentState?.drawingDataUrl || entity.drawingDataUrl}
+              alt={entity.name}
+              className="w-full h-full object-contain pointer-events-none"
+            />
+          </div>
+        ) : (entity.vectorPaths && entity.vectorPaths.length > 0) ? (
+          <div className="w-full h-full flex items-center justify-center select-none p-1">
+            <svg
+              viewBox="0 0 200 200"
+              className="w-full h-full pointer-events-none overflow-visible"
+            >
+              {entity.vectorPaths.map((p) => (
+                <path
+                  key={p.id}
+                  d={p.d}
+                  stroke={p.stroke}
+                  strokeWidth={p.strokeWidth}
+                  fill={p.fill || 'none'}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ))}
+            </svg>
           </div>
         ) : entity.icon ? (
           <div

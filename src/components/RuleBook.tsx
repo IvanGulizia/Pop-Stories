@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useSceneStore } from '../store/useSceneStore';
 import {
   TriggerType,
@@ -7,7 +7,7 @@ import {
   RuleAction,
   EntityType,
   DynamicRule,
-  Entity,
+  ActionTargetMode,
 } from '../types';
 import { EntityMiniPreview } from './EntityMiniPreview';
 import {
@@ -16,13 +16,11 @@ import {
   Zap,
   ArrowRight,
   X,
-  Volume2,
   Sparkles,
   MousePointer,
-  ChevronRight,
   ChevronLeft,
+  Filter,
   Check,
-  Flame,
 } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
 
@@ -33,16 +31,18 @@ type ActiveModal =
   | {
       type: 'action';
       ruleId: string;
-      actionIndex?: number; // undefined if adding a new action
+      actionIndex?: number;
       actionId?: string;
       step: 1 | 2 | 3;
       actionType?: ActionType;
-      targetMode?: 'subject' | 'target';
+      targetMode?: ActionTargetMode;
+      selectedTargetType?: EntityType;
     }
   | null;
 
 export function RuleBook() {
   const entities = useSceneStore((state) => state.entities);
+  const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
   const rules = useSceneStore((state) => state.rules);
   const addRule = useSceneStore((state) => state.addRule);
   const updateRule = useSceneStore((state) => state.updateRule);
@@ -50,29 +50,49 @@ export function RuleBook() {
   const toggleRule = useSceneStore((state) => state.toggleRule);
 
   const [filterType, setFilterType] = useState<'all' | 'collision' | 'click'>('all');
+  const [filterObject, setFilterObject] = useState<string>('all');
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
 
   const entityList = Object.values(entities);
 
-  // Available entity options (archetypes & custom)
-  const availableEntityOptions: { type: EntityType; label: string; icon?: string }[] = [
+  // Helper to find representative entity from canvas or archetype library
+  const getEntityObj = (type?: string) => {
+    if (!type) return undefined;
+    return entityList.find((e) => e.type === type) || customArchetypes[type];
+  };
+
+  // Available entity options (archetypes & custom drawn)
+  const availableEntityOptions: { type: EntityType; label: string }[] = [];
+
+  // 1. Add all from customArchetypes
+  Object.entries(customArchetypes).forEach(([archetypeType, arch]) => {
+    if (!availableEntityOptions.some((opt) => opt.type === archetypeType)) {
+      availableEntityOptions.push({
+        type: archetypeType,
+        label: arch.name || (archetypeType === 'plant' ? 'Plante' : archetypeType === 'apple' ? 'Pomme' : 'Étoile'),
+      });
+    }
+  });
+
+  // 2. Base fallbacks
+  const baseDefaults = [
     { type: 'apple', label: 'Pomme' },
     { type: 'plant', label: 'Plante' },
     { type: 'custom', label: 'Étoile' },
   ];
+  baseDefaults.forEach((b) => {
+    if (!availableEntityOptions.some((opt) => opt.type === b.type)) {
+      availableEntityOptions.push(b);
+    }
+  });
 
-  // Include any user-drawn custom types
+  // 3. Include any custom created entities from the active canvas
   entityList.forEach((e) => {
-    if (
-      e.type !== 'apple' &&
-      e.type !== 'plant' &&
-      e.type !== 'custom' &&
-      !availableEntityOptions.some((opt) => opt.type === e.type)
-    ) {
+    if (!availableEntityOptions.some((opt) => opt.type === e.type)) {
       availableEntityOptions.push({
         type: e.type,
-        label: e.name,
+        label: e.name || e.type,
       });
     }
   });
@@ -86,27 +106,26 @@ export function RuleBook() {
         type: 'collision',
         phase: 'enter',
         subjectMode: 'type',
-        subjectType: 'apple',
+        subjectType: availableEntityOptions[0]?.type || 'apple',
         targetMode: 'type',
-        targetType: 'plant',
+        targetType: availableEntityOptions[1]?.type || 'plant',
       },
       actions: [
         {
           id: `act-${Date.now()}`,
           type: 'change_state',
           targetMode: 'target',
-          targetType: 'plant',
+          targetType: availableEntityOptions[1]?.type || 'plant',
           targetStateId: 'fleur',
         },
       ],
     });
 
-    // Automatically open step 1 for the newly created rule's subject
     setActiveModal({
       type: 'subject',
       ruleId: newId,
       step: 1,
-      selectedEntityType: 'apple',
+      selectedEntityType: availableEntityOptions[0]?.type || 'apple',
     });
   };
 
@@ -165,110 +184,140 @@ export function RuleBook() {
           });
         }
       } else if (slotType === 'action' && actionId) {
-        const actionIdx = targetRule.actions.findIndex((a) => a.id === actionId);
-        if (actionIdx !== -1) {
-          const updatedActions = [...targetRule.actions];
+        const updatedActions = targetRule.actions.map((act) => {
+          if (act.id !== actionId) return act;
           if (data.kind === 'entity-state') {
-            updatedActions[actionIdx] = {
-              ...updatedActions[actionIdx],
-              type: 'change_state',
+            return {
+              ...act,
+              type: 'change_state' as ActionType,
+              targetType: data.entityType,
               targetStateId: data.stateId,
             };
-            updateRule(ruleId, { actions: updatedActions });
           }
-        }
+          return act;
+        });
+        updateRule(ruleId, { actions: updatedActions });
       }
     } catch (err) {
-      console.error('Error on slot drop:', err);
+      console.error('Error in handleDropOnSlot:', err);
     }
   };
 
+  // Filter rules by trigger type and by object
   const filteredRules = rules.filter((r) => {
-    if (filterType === 'collision') return r.trigger.type === 'collision';
-    if (filterType === 'click') return r.trigger.type === 'click';
+    if (filterType !== 'all' && r.trigger.type !== filterType) return false;
+    if (filterObject !== 'all') {
+      const matchSubject = r.trigger.subjectType === filterObject;
+      const matchTarget = r.trigger.targetType === filterObject;
+      const matchAction = r.actions.some((a) => a.targetType === filterObject);
+      if (!matchSubject && !matchTarget && !matchAction) return false;
+    }
     return true;
   });
 
   return (
-    <div className="flex flex-col h-full space-y-4 text-slate-800 relative">
+    <div className="flex flex-col h-full space-y-4 overflow-hidden">
       {/* Top Header & Filter Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200/80 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/90 text-xs font-bold">
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200 shrink-0">
+        {/* Left: Filters */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Trigger Type Filter */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-2xs">
             <button
+              type="button"
               onClick={() => setFilterType('all')}
-              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+              className={`px-3 py-1 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                 filterType === 'all'
                   ? 'bg-white text-slate-900 shadow-2xs'
-                  : 'text-slate-500 hover:text-slate-800'
+                  : 'text-slate-500 hover:text-slate-900'
               }`}
             >
-              Toutes ({rules.length})
+              Toutes
             </button>
             <button
+              type="button"
               onClick={() => setFilterType('collision')}
-              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+              className={`px-3 py-1 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                 filterType === 'collision'
                   ? 'bg-white text-slate-900 shadow-2xs'
-                  : 'text-slate-500 hover:text-slate-800'
+                  : 'text-slate-500 hover:text-slate-900'
               }`}
             >
               💥 Collisions
             </button>
             <button
+              type="button"
               onClick={() => setFilterType('click')}
-              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+              className={`px-3 py-1 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                 filterType === 'click'
                   ? 'bg-white text-slate-900 shadow-2xs'
-                  : 'text-slate-500 hover:text-slate-800'
+                  : 'text-slate-500 hover:text-slate-900'
               }`}
             >
               👆 Clics
             </button>
           </div>
+
+          {/* Object Filter */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-2xs">
+            <Filter className="w-3.5 h-3.5 text-slate-400 ml-1.5" />
+            <select
+              value={filterObject}
+              onChange={(e) => setFilterObject(e.target.value)}
+              className="text-xs font-bold text-slate-700 bg-transparent pr-2 py-0.5 outline-none cursor-pointer"
+            >
+              <option value="all">Tous les objets</option>
+              {availableEntityOptions.map((opt) => (
+                <option key={opt.type} value={opt.type}>
+                  Objet : {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
+        {/* Right: New Rule Button */}
         <button
+          type="button"
           onClick={handleCreateNewRule}
-          className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-2xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
         >
-          <Plus className="w-4 h-4" /> Nouvelle Règle
+          <Plus className="w-4 h-4" strokeWidth={2.5} />
+          <span>Nouvelle règle</span>
         </button>
       </div>
 
-      {/* Rules List - Direct Card Manipulator without internal scrolling issues */}
+      {/* Rules List (Horizontal Storyboard Rows) */}
       <div className="flex-1 overflow-y-auto space-y-4 pr-1">
         {filteredRules.length === 0 ? (
           <div
             onClick={handleCreateNewRule}
-            className="p-8 text-center bg-slate-50 hover:bg-slate-100/80 rounded-3xl border-2 border-dashed border-slate-200 hover:border-slate-400 text-slate-400 space-y-3 cursor-pointer transition-all group"
+            className="border-2 border-dashed border-slate-300 hover:border-indigo-400 bg-slate-50/60 hover:bg-indigo-50/30 rounded-3xl p-8 text-center flex flex-col items-center justify-center cursor-pointer transition-all min-h-[220px] group"
           >
-            <div className="w-12 h-12 rounded-2xl bg-white border border-slate-200 mx-auto flex items-center justify-center text-slate-400 group-hover:text-slate-900 group-hover:scale-110 transition-all shadow-xs">
-              <Plus className="w-6 h-6" />
+            <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 shadow-2xs flex items-center justify-center text-2xl group-hover:scale-110 transition-transform mb-3">
+              ⚡
             </div>
-            <div>
-              <div className="text-sm font-bold text-slate-700">Créer une règle interactive</div>
-              <p className="text-xs text-slate-400 max-w-xs mx-auto mt-0.5">
-                Cliquez pour ajouter une règle et touchez directement les cases pour configurer chaque étape.
-              </p>
-            </div>
+            <div className="text-sm font-bold text-slate-700">Créer une règle interactive</div>
+            <p className="text-xs text-slate-400 max-w-xs mx-auto mt-0.5">
+              Cliquez pour ajouter une règle et touchez directement les cases pour configurer chaque étape.
+            </p>
           </div>
         ) : (
           filteredRules.map((rule) => {
             const isCollision = rule.trigger.type === 'collision';
 
             // Find subject display info
-            const subjectType = rule.trigger.subjectType || 'apple';
+            const subjectType = rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
             const subjectOpt = availableEntityOptions.find((o) => o.type === subjectType);
-            const subjectEntity = entityList.find((e) => e.type === subjectType);
+            const subjectEntity = getEntityObj(subjectType);
             const subjectStateName = rule.trigger.subjectStateId
               ? subjectEntity?.states[rule.trigger.subjectStateId]?.name || rule.trigger.subjectStateId
               : 'Tous les états';
 
             // Find target display info
-            const targetType = rule.trigger.targetType || 'plant';
+            const targetType = rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
             const targetOpt = availableEntityOptions.find((o) => o.type === targetType);
-            const targetEntity = entityList.find((e) => e.type === targetType);
+            const targetEntity = getEntityObj(targetType);
             const targetStateName = rule.trigger.targetStateId
               ? targetEntity?.states[rule.trigger.targetStateId]?.name || rule.trigger.targetStateId
               : 'Tous les états';
@@ -276,23 +325,29 @@ export function RuleBook() {
             // Event badge info
             let eventName = 'Contact';
             let eventIcon = '💥';
+            let eventSub = 'Collision';
             if (rule.trigger.type === 'click') {
               eventName = 'Clic';
               eventIcon = '👆';
+              eventSub = 'Sur l’objet';
               if (rule.trigger.phase === 'mouse_down') {
                 eventName = 'Appui';
                 eventIcon = '✋';
+                eventSub = 'Enfoncé';
               } else if (rule.trigger.phase === 'mouse_up') {
                 eventName = 'Relâcher';
                 eventIcon = '👋';
+                eventSub = 'Relâché';
               }
             } else if (rule.trigger.type === 'collision') {
               if (rule.trigger.phase === 'release') {
                 eventName = 'Séparation';
                 eventIcon = '💨';
+                eventSub = 'Fin contact';
               } else if (rule.trigger.phase === 'stay') {
                 eventName = 'Pendant';
                 eventIcon = '⏳';
+                eventSub = 'Continu';
               }
             }
 
@@ -320,8 +375,9 @@ export function RuleBook() {
 
                   <div className="flex items-center gap-1.5">
                     <button
+                      type="button"
                       onClick={() => toggleRule(rule.id)}
-                      className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-colors cursor-pointer ${
+                      className={`px-2.5 py-0.5 text-[10px] font-bold rounded-lg transition-colors cursor-pointer ${
                         rule.enabled
                           ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                           : 'bg-slate-100 text-slate-500 border border-slate-200'
@@ -331,6 +387,7 @@ export function RuleBook() {
                     </button>
 
                     <button
+                      type="button"
                       onClick={() => deleteRule(rule.id)}
                       className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                       title="Supprimer la règle"
@@ -389,7 +446,7 @@ export function RuleBook() {
                       </div>
                     </button>
 
-                    {/* CASE 2: ÉVÉNEMENT */}
+                    {/* CASE 2: ÉVÉNEMENT (Standard size w-28 h-32) */}
                     <button
                       type="button"
                       onClick={() =>
@@ -398,19 +455,26 @@ export function RuleBook() {
                           ruleId: rule.id,
                         })
                       }
-                      className="w-14 h-32 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl p-2 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group"
+                      className="w-28 h-32 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl p-2.5 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group"
                       title="Cliquer pour changer le type d'événement"
                     >
-                      <span className="text-[8px] font-bold text-slate-400 uppercase">Événement</span>
-                      <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-base">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                        Événement
+                      </span>
+                      <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center text-xl shadow-inner group-hover:scale-105 transition-transform">
                         {eventIcon}
                       </div>
-                      <div className="text-[10px] font-black uppercase tracking-tight text-amber-300 truncate w-full">
-                        {eventName}
+                      <div className="w-full">
+                        <div className="text-xs font-black uppercase tracking-tight text-amber-300 truncate">
+                          {eventName}
+                        </div>
+                        <div className="text-[9px] text-slate-400 truncate mt-0.5">
+                          {eventSub}
+                        </div>
                       </div>
                     </button>
 
-                    {/* CASE 3: CIBLE (Si Collision) */}
+                    {/* CASE 3: CIBLE (Seulement si Collision) */}
                     {isCollision && (
                       <button
                         type="button"
@@ -458,45 +522,57 @@ export function RuleBook() {
                     )}
                   </div>
 
-                  {/* Storyboard Direction Arrow */}
-                  <div className="text-slate-400 shrink-0">
-                    <ArrowRight className="w-5 h-5" strokeWidth={2.5} />
+                  {/* Connecteur Arrow */}
+                  <div className="text-slate-400 flex items-center justify-center shrink-0">
+                    <ArrowRight className="w-5 h-5 text-indigo-500" strokeWidth={2.5} />
                   </div>
 
-                  {/* --- 2. SÉQUENCE D'ACTIONS --- */}
-                  <div className="flex items-center gap-2.5 shrink-0">
+                  {/* --- 2. ACTIONS SÉQUENCE --- */}
+                  <div className="flex items-center gap-2.5 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/90 shrink-0">
                     {rule.actions.map((act, actIdx) => {
-                      let actTargetEntity = targetEntity;
-                      let actTargetLabel = targetOpt?.label || 'Cible';
-                      let actTargetType = targetType;
+                      const actTargetMode = act.targetMode || 'target';
+                      const actTargetType =
+                        actTargetMode === 'subject'
+                          ? subjectType
+                          : actTargetMode === 'target'
+                          ? targetType
+                          : act.targetType || targetType;
 
-                      if (act.targetMode === 'subject') {
-                        actTargetEntity = subjectEntity;
-                        actTargetLabel = subjectOpt?.label || 'Sujet';
-                        actTargetType = subjectType;
+                      const actEntity = getEntityObj(actTargetType);
+                      const actStateObj = actEntity && act.targetStateId ? actEntity.states[act.targetStateId] : null;
+
+                      let actionBadge = 'Action';
+                      let actionDetail = 'Exécuter';
+
+                      if (act.type === 'change_state') {
+                        actionBadge = "Changer d'état";
+                        actionDetail = actStateObj?.name ? `Devient ${actStateObj.name}` : `État ${act.targetStateId || '...'}`;
+                      } else if (act.type === 'delete_entity') {
+                        actionBadge = 'Détruire';
+                        actionDetail = 'Faire disparaître';
+                      } else if (act.type === 'play_sound') {
+                        actionBadge = 'Jouer Son';
+                        actionDetail = act.soundType ? `Son ${act.soundType}` : 'Effet sonore';
                       }
-
-                      let actionTypeName = "Changer d'état";
-                      if (act.type === 'delete_entity') actionTypeName = 'Détruire';
-                      else if (act.type === 'play_sound') actionTypeName = 'Jouer un son';
-
-                      let actionDetail = act.targetStateId || 'Fleur';
-                      if (act.type === 'delete_entity') actionDetail = 'Disparaît';
-                      else if (act.type === 'play_sound') actionDetail = `Son: ${act.soundType || 'magic'}`;
 
                       const actionSlotKey = `${rule.id}-act-${act.id}`;
 
                       return (
-                        <div
-                          key={act.id}
-                          className="relative"
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            setDragOverSlot(actionSlotKey);
-                          }}
-                          onDragLeave={() => setDragOverSlot(null)}
-                          onDrop={(e) => handleDropOnSlot(e, rule.id, 'action', act.id)}
-                        >
+                        <div key={act.id} className="relative group">
+                          {/* Remove Action Button */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const updatedActions = rule.actions.filter((_, idx) => idx !== actIdx);
+                              updateRule(rule.id, { actions: updatedActions });
+                            }}
+                            className="absolute -top-2 -right-2 w-5 h-5 bg-rose-500 hover:bg-rose-600 text-white rounded-full flex items-center justify-center text-xs shadow-md opacity-0 group-hover:opacity-100 transition-opacity z-10 cursor-pointer"
+                            title="Supprimer cette action"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+
                           <button
                             type="button"
                             onClick={() =>
@@ -507,46 +583,37 @@ export function RuleBook() {
                                 actionId: act.id,
                                 step: 1,
                                 actionType: act.type,
-                                targetMode: act.targetMode === 'subject' ? 'subject' : 'target',
+                                targetMode: act.targetMode || 'target',
                               })
                             }
-                            className={`w-28 h-32 bg-white border rounded-2xl p-2.5 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group relative ${
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              setDragOverSlot(actionSlotKey);
+                            }}
+                            onDragLeave={() => setDragOverSlot(null)}
+                            onDrop={(e) => handleDropOnSlot(e, rule.id, 'action', act.id)}
+                            className={`w-28 h-32 bg-white border rounded-2xl p-2.5 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group ${
                               dragOverSlot === actionSlotKey
                                 ? 'border-indigo-500 ring-4 ring-indigo-300/50 bg-indigo-50/40 scale-105'
                                 : 'border-slate-200 hover:border-slate-400'
                             }`}
+                            title="Cliquer pour modifier cette action ou glisser un état ici"
                           >
-                            {/* Delete Action Button */}
-                            {rule.actions.length > 1 && (
-                              <div
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  updateRule(rule.id, {
-                                    actions: rule.actions.filter((a) => a.id !== act.id),
-                                  });
-                                }}
-                                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-rose-100 hover:bg-rose-200 text-rose-600 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                                title="Supprimer cette action"
-                              >
-                                <X className="w-3 h-3" />
-                              </div>
-                            )}
-
-                            <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider truncate w-full">
-                              {actionTypeName}
+                            <div className="text-[9px] font-bold text-indigo-600 uppercase tracking-wider">
+                              {actionBadge}
                             </div>
 
-                            {act.type === 'play_sound' ? (
-                              <div className="w-11 h-11 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center text-xl shadow-2xs">
-                                🔊
-                              </div>
-                            ) : act.type === 'delete_entity' ? (
-                              <div className="w-11 h-11 rounded-2xl bg-rose-50 text-rose-600 border border-rose-200 flex items-center justify-center text-xl shadow-2xs">
+                            {act.type === 'delete_entity' ? (
+                              <div className="w-11 h-11 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-xl shadow-2xs">
                                 💥
+                              </div>
+                            ) : act.type === 'play_sound' ? (
+                              <div className="w-11 h-11 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-xl shadow-2xs">
+                                🔊
                               </div>
                             ) : (
                               <EntityMiniPreview
-                                entity={actTargetEntity}
+                                entity={actEntity}
                                 type={actTargetType}
                                 stateId={act.targetStateId}
                                 size={44}
@@ -557,7 +624,9 @@ export function RuleBook() {
                               <div className="text-[11px] font-bold text-slate-800 truncate">
                                 {act.targetMode === 'subject'
                                   ? `Sujet (${subjectOpt?.label || 'Objet'})`
-                                  : `Cible (${targetOpt?.label || 'Objet'})`}
+                                  : act.targetMode === 'target'
+                                  ? `Cible (${targetOpt?.label || 'Objet'})`
+                                  : act.targetType || 'Objet'}
                               </div>
                               <div className="text-[9px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md font-medium truncate mt-0.5">
                                 {actionDetail}
@@ -568,7 +637,7 @@ export function RuleBook() {
                       );
                     })}
 
-                    {/* Quick + Action Card Button at the End */}
+                    {/* Quick + Action Card Button */}
                     <button
                       type="button"
                       onClick={() =>
@@ -578,7 +647,7 @@ export function RuleBook() {
                           actionIndex: undefined,
                           step: 1,
                           actionType: 'change_state',
-                          targetMode: 'target',
+                          targetMode: isCollision ? 'target' : 'subject',
                         })
                       }
                       className="w-14 h-32 border-2 border-dashed border-slate-300 hover:border-slate-400 hover:bg-slate-50 rounded-2xl flex flex-col items-center justify-center gap-1.5 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer shrink-0"
@@ -605,8 +674,12 @@ export function RuleBook() {
               if (!rule) return null;
 
               const isSubject = activeModal.type === 'subject';
-              const currentType = activeModal.selectedEntityType || (isSubject ? rule.trigger.subjectType : rule.trigger.targetType) || 'apple';
-              const targetEntity = entityList.find((e) => e.type === currentType);
+              const currentType =
+                activeModal.selectedEntityType ||
+                (isSubject ? rule.trigger.subjectType : rule.trigger.targetType) ||
+                availableEntityOptions[0]?.type ||
+                'apple';
+              const targetEntity = getEntityObj(currentType);
 
               return (
                 <div className="space-y-4">
@@ -627,11 +700,14 @@ export function RuleBook() {
                           {isSubject ? 'Sélectionner le Sujet' : 'Sélectionner la Cible'}
                         </h3>
                         <p className="text-xs text-slate-500">
-                          {activeModal.step === 1 ? 'Étape 1 sur 2 : Choisissez l’objet' : 'Étape 2 sur 2 : Choisissez l’état requis'}
+                          {activeModal.step === 1
+                            ? 'Étape 1 sur 2 : Choisissez l’objet'
+                            : 'Étape 2 sur 2 : Choisissez l’état requis'}
                         </p>
                       </div>
                     </div>
                     <button
+                      type="button"
                       onClick={() => setActiveModal(null)}
                       className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer"
                     >
@@ -644,7 +720,7 @@ export function RuleBook() {
                     <div className="space-y-3">
                       <div className="grid grid-cols-3 gap-3">
                         {availableEntityOptions.map((opt) => {
-                          const ent = entityList.find((e) => e.type === opt.type);
+                          const ent = getEntityObj(opt.type);
                           return (
                             <button
                               key={opt.type}
@@ -700,8 +776,8 @@ export function RuleBook() {
                           }}
                           className="p-4 bg-slate-50 hover:bg-emerald-50/70 border border-slate-200 hover:border-emerald-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
                         >
-                          <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl shadow-2xs">
-                            ⭐
+                          <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
+                            <EntityMiniPreview entity={targetEntity} type={currentType} size={36} />
                           </div>
                           <div>
                             <div className="text-xs font-bold text-slate-800">Tous les états</div>
@@ -738,7 +814,12 @@ export function RuleBook() {
                               className="p-3.5 bg-slate-50 hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
                             >
                               <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
-                                <EntityMiniPreview entity={targetEntity} type={currentType} stateId={st.id} size={36} />
+                                <EntityMiniPreview
+                                  entity={targetEntity}
+                                  type={currentType}
+                                  stateId={st.id}
+                                  size={36}
+                                />
                               </div>
                               <div>
                                 <div className="text-xs font-bold text-slate-800">État {st.name}</div>
@@ -766,6 +847,7 @@ export function RuleBook() {
                       <p className="text-xs text-slate-500">Quand cette règle doit-elle se déclencher ?</p>
                     </div>
                     <button
+                      type="button"
                       onClick={() => setActiveModal(null)}
                       className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer"
                     >
@@ -793,7 +875,7 @@ export function RuleBook() {
                         💥
                       </div>
                       <div>
-                        <div className="text-sm font-bold text-slate-900">Contact / Collision</div>
+                        <div className="text-sm font-bold text-slate-900">Contact / Collision (Début)</div>
                         <div className="text-xs text-slate-500">Quand l'objet entre en contact avec une cible</div>
                       </div>
                     </button>
@@ -817,7 +899,7 @@ export function RuleBook() {
                       </div>
                       <div>
                         <div className="text-sm font-bold text-slate-900">Clic Souris / Pointeur</div>
-                        <div className="text-xs text-slate-500">Quand l'utilisateur clique sur l'objet</div>
+                        <div className="text-xs text-slate-500">Quand l'utilisateur clique sur le sujet</div>
                       </div>
                     </button>
 
@@ -854,13 +936,17 @@ export function RuleBook() {
               const rule = rules.find((r) => r.id === activeModal.ruleId);
               if (!rule) return null;
 
+              const isCollision = rule.trigger.type === 'collision';
               const actionType = activeModal.actionType || 'change_state';
-              const targetMode = activeModal.targetMode || 'target';
+              const targetMode = activeModal.targetMode || (isCollision ? 'target' : 'subject');
 
               const subjectType = rule.trigger.subjectType || 'apple';
               const targetType = rule.trigger.targetType || 'plant';
-              const relevantType = targetMode === 'subject' ? subjectType : targetType;
-              const relevantEntity = entityList.find((e) => e.type === relevantType);
+              const chosenType = activeModal.selectedTargetType || (targetMode === 'subject' ? subjectType : targetType);
+
+              const subjectEntity = getEntityObj(subjectType);
+              const targetEntity = getEntityObj(targetType);
+              const relevantEntity = getEntityObj(chosenType);
 
               const applyActionChange = (finalActionData: Partial<RuleAction>) => {
                 if (activeModal.actionIndex !== undefined) {
@@ -875,7 +961,7 @@ export function RuleBook() {
                     id: `act-${Date.now()}`,
                     type: actionType,
                     targetMode,
-                    targetType: relevantType,
+                    targetType: chosenType,
                     ...finalActionData,
                   };
                   updateRule(rule.id, { actions: [...rule.actions, newAct] });
@@ -908,12 +994,13 @@ export function RuleBook() {
                         </h3>
                         <p className="text-xs text-slate-500">
                           {activeModal.step === 1 && 'Étape 1 : Choisissez le type de réaction'}
-                          {activeModal.step === 2 && 'Étape 2 : Sur quel objet appliquer la réaction ?'}
-                          {activeModal.step === 3 && 'Étape 3 : Choisissez le nouvel état ou le son'}
+                          {activeModal.step === 2 && 'Étape 2 : Choisissez l’objet concerné'}
+                          {activeModal.step === 3 && 'Étape 3 : Choisissez le nouvel état ou l’effet'}
                         </p>
                       </div>
                     </div>
                     <button
+                      type="button"
                       onClick={() => setActiveModal(null)}
                       className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer"
                     >
@@ -927,11 +1014,22 @@ export function RuleBook() {
                       <button
                         type="button"
                         onClick={() => {
-                          setActiveModal({
-                            ...activeModal,
-                            step: 2,
-                            actionType: 'change_state',
-                          });
+                          if (isCollision) {
+                            setActiveModal({
+                              ...activeModal,
+                              step: 2,
+                              actionType: 'change_state',
+                            });
+                          } else {
+                            // If Click: directly target the Subject
+                            setActiveModal({
+                              ...activeModal,
+                              step: 3,
+                              actionType: 'change_state',
+                              targetMode: 'subject',
+                              selectedTargetType: subjectType,
+                            });
+                          }
                         }}
                         className="w-full p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
                       >
@@ -962,7 +1060,7 @@ export function RuleBook() {
                         </div>
                         <div>
                           <div className="text-sm font-bold text-slate-900">Faire disparaître / Détruire</div>
-                          <div className="text-xs text-slate-500">Supprimer l'objet de la scène</div>
+                          <div className="text-xs text-slate-500">Supprimer un objet de la scène</div>
                         </div>
                       </button>
 
@@ -988,10 +1086,11 @@ export function RuleBook() {
                     </div>
                   )}
 
-                  {/* STEP 2: CHOOSE TARGET (SUBJECT OR TARGET) */}
+                  {/* STEP 2: CHOOSE TARGET OBJECT */}
                   {activeModal.step === 2 && (
                     <div className="space-y-3">
                       <div className="grid grid-cols-2 gap-3">
+                        {/* Option: Subject */}
                         <button
                           type="button"
                           onClick={() => {
@@ -999,52 +1098,89 @@ export function RuleBook() {
                               applyActionChange({
                                 type: 'delete_entity',
                                 targetMode: 'subject',
+                                targetType: subjectType,
                               });
                             } else {
                               setActiveModal({
                                 ...activeModal,
                                 step: 3,
                                 targetMode: 'subject',
+                                selectedTargetType: subjectType,
                               });
                             }
                           }}
                           className="p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
                         >
                           <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
-                            <EntityMiniPreview type={subjectType} size={40} />
+                            <EntityMiniPreview entity={subjectEntity} type={subjectType} size={40} />
                           </div>
                           <div>
-                            <div className="text-xs font-bold text-slate-900">Sujet Déclencheur</div>
+                            <div className="text-xs font-bold text-slate-900">Sujet (Déclencheur)</div>
                             <div className="text-[10px] text-slate-500 capitalize">{subjectType}</div>
                           </div>
                         </button>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (actionType === 'delete_entity') {
-                              applyActionChange({
-                                type: 'delete_entity',
-                                targetMode: 'target',
-                              });
-                            } else {
-                              setActiveModal({
-                                ...activeModal,
-                                step: 3,
-                                targetMode: 'target',
-                              });
-                            }
-                          }}
-                          className="p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
-                        >
-                          <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
-                            <EntityMiniPreview type={targetType} size={40} />
-                          </div>
-                          <div>
-                            <div className="text-xs font-bold text-slate-900">Cible Touchée</div>
-                            <div className="text-[10px] text-slate-500 capitalize">{targetType}</div>
-                          </div>
-                        </button>
+                        {/* Option: Target (if collision) */}
+                        {isCollision && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (actionType === 'delete_entity') {
+                                applyActionChange({
+                                  type: 'delete_entity',
+                                  targetMode: 'target',
+                                  targetType: targetType,
+                                });
+                              } else {
+                                setActiveModal({
+                                  ...activeModal,
+                                  step: 3,
+                                  targetMode: 'target',
+                                  selectedTargetType: targetType,
+                                });
+                              }
+                            }}
+                            className="p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
+                          >
+                            <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
+                              <EntityMiniPreview entity={targetEntity} type={targetType} size={40} />
+                            </div>
+                            <div>
+                              <div className="text-xs font-bold text-slate-900">Cible (Touchée)</div>
+                              <div className="text-[10px] text-slate-500 capitalize">{targetType}</div>
+                            </div>
+                          </button>
+                        )}
+
+                        {/* Option: Other entity archetype on delete */}
+                        {actionType === 'delete_entity' &&
+                          availableEntityOptions
+                            .filter((opt) => opt.type !== subjectType && (!isCollision || opt.type !== targetType))
+                            .map((opt) => {
+                              const ent = getEntityObj(opt.type);
+                              return (
+                                <button
+                                  key={opt.type}
+                                  type="button"
+                                  onClick={() => {
+                                    applyActionChange({
+                                      type: 'delete_entity',
+                                      targetMode: 'type',
+                                      targetType: opt.type,
+                                    });
+                                  }}
+                                  className="p-4 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
+                                >
+                                  <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
+                                    <EntityMiniPreview entity={ent} type={opt.type} size={40} />
+                                  </div>
+                                  <div>
+                                    <div className="text-xs font-bold text-slate-900">{opt.label}</div>
+                                    <div className="text-[10px] text-rose-600 font-semibold">Détruire cet objet</div>
+                                  </div>
+                                </button>
+                              );
+                            })}
                       </div>
                     </div>
                   )}
@@ -1063,14 +1199,19 @@ export function RuleBook() {
                                   applyActionChange({
                                     type: 'change_state',
                                     targetMode,
-                                    targetType: relevantType,
+                                    targetType: chosenType,
                                     targetStateId: st.id,
                                   });
                                 }}
                                 className="p-3.5 bg-slate-50 hover:bg-emerald-50/70 border border-slate-200 hover:border-emerald-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
                               >
                                 <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
-                                  <EntityMiniPreview entity={relevantEntity} type={relevantType} stateId={st.id} size={40} />
+                                  <EntityMiniPreview
+                                    entity={relevantEntity}
+                                    type={chosenType}
+                                    stateId={st.id}
+                                    size={40}
+                                  />
                                 </div>
                                 <div>
                                   <div className="text-xs font-bold text-slate-800">État {st.name}</div>

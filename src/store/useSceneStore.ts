@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import {
   Entity,
   EntityId,
@@ -15,11 +16,13 @@ import {
   AppMode,
   VectorPath,
   AppSettings,
+  ProjectExportData,
 } from '../types';
 import { soundSynth } from '../utils/sound';
 
 interface SceneState {
   entities: Record<EntityId, Entity>;
+  customArchetypes: Record<string, Entity>;
   rules: DynamicRule[];
   activeCollisions: Record<string, boolean>; // Trace l'état de collision pour chaque pair (ruleId_subId_tarId)
   selectedEntityId: EntityId | null;
@@ -52,6 +55,7 @@ interface SceneState {
     color?: string;
     tags?: string[];
   }) => void;
+  deleteCustomArchetype: (type: string) => void;
   spawnEntity: (params: {
     type: EntityType;
     position: Position;
@@ -61,6 +65,10 @@ interface SceneState {
   clearAllEntities: () => void;
   clearProject: () => void;
   restoreDefaultScene: () => void;
+
+  // Project Import / Export
+  exportProject: () => ProjectExportData;
+  importProject: (data: any) => { success: boolean; message?: string };
 
   // Rules management
   addRule: (rule: Omit<DynamicRule, 'id'>) => string;
@@ -161,6 +169,94 @@ const initialEntities: Record<EntityId, Entity> = {
   },
 };
 
+const defaultCustomArchetypes: Record<string, Entity> = {
+  'plant': {
+    id: 'plant-archetype',
+    name: 'Plante',
+    type: 'plant',
+    tags: ['plante', 'nature'],
+    position: { x: 0, y: 0 },
+    size: { width: 120, height: 160 },
+    currentStateId: 'pousse',
+    isDraggable: false,
+    states: {
+      'pousse': {
+        id: 'pousse',
+        name: 'Jeune Pousse',
+        color: '#22c55e',
+        scale: 0.85,
+        rotation: 0,
+        stemHeight: 30,
+        flowerColor: '#f472b6',
+        flowerPetals: 0,
+      },
+      'fleur': {
+        id: 'fleur',
+        name: 'Grande Fleur',
+        color: '#16a34a',
+        scale: 1.15,
+        rotation: 0,
+        stemHeight: 85,
+        flowerColor: '#ec4899',
+        flowerPetals: 8,
+      },
+    },
+  },
+  'apple': {
+    id: 'apple-archetype',
+    name: 'Pomme',
+    type: 'apple',
+    tags: ['nourriture', 'fruit'],
+    position: { x: 0, y: 0 },
+    size: { width: 64, height: 64 },
+    currentStateId: 'default',
+    isDraggable: true,
+    states: {
+      'default': {
+        id: 'default',
+        name: 'Normal',
+        color: '#ef4444',
+        scale: 1.0,
+        rotation: 0,
+      },
+      'croquee': {
+        id: 'croquee',
+        name: 'Croquée',
+        color: '#dc2626',
+        scale: 0.85,
+        rotation: -12,
+      },
+    },
+  },
+  'custom': {
+    id: 'star-archetype',
+    name: 'Étoile',
+    type: 'custom',
+    tags: ['magique', 'etoile'],
+    position: { x: 0, y: 0 },
+    size: { width: 70, height: 70 },
+    currentStateId: 'default',
+    isDraggable: true,
+    icon: '⭐',
+    states: {
+      'default': {
+        id: 'default',
+        name: 'Calme',
+        color: '#eab308',
+        scale: 1,
+        rotation: 0,
+      },
+      'brillant': {
+        id: 'brillant',
+        name: 'Étincelant',
+        color: '#facc15',
+        scale: 1.3,
+        rotation: 45,
+      },
+    },
+  },
+};
+
 const initialRules: DynamicRule[] = [
   {
     id: 'rule-plant-bloom',
@@ -195,19 +291,22 @@ const checkCollision = (ent1: Entity, ent2: Entity) => {
   );
 };
 
-export const useSceneStore = create<SceneState>((set, get) => ({
-  entities: initialEntities,
-  rules: initialRules,
-  activeCollisions: {},
-  selectedEntityId: 'plant-1',
-  appMode: 'edit',
-  snapshotEntities: null,
-  settings: {
-    showCanvasLabels: false,
-    showGrid: true,
-    gridStyle: 'dots',
-    showTagsSystem: false,
-  },
+export const useSceneStore = create<SceneState>()(
+  persist(
+    (set, get) => ({
+      entities: {},
+      customArchetypes: { ...defaultCustomArchetypes },
+      rules: [],
+      activeCollisions: {},
+      selectedEntityId: null,
+      appMode: 'edit',
+      snapshotEntities: null,
+      settings: {
+        showCanvasLabels: false,
+        showGrid: true,
+        gridStyle: 'dots',
+        showTagsSystem: false,
+      },
 
   updateSettings: (partial) => {
     set((state) => ({
@@ -234,7 +333,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       });
     } else {
       set({
-        entities: JSON.parse(JSON.stringify(initialEntities)),
+        entities: {},
         activeCollisions: {},
       });
     }
@@ -555,21 +654,23 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   },
 
   addCustomEntity: ({ name, type, icon, drawingDataUrl, vectorPaths, color, tags }) => {
-    const entities = get().entities;
-    const count = Object.keys(entities).length + 1;
-    const id = `custom-${Date.now().toString(36)}`;
-    const entityType = type || name.toLowerCase().trim().replace(/\s+/g, '_') || 'custom';
+    const cleanName = (name && name.trim()) || 'Mon Dessin';
+    const slug = cleanName.toLowerCase().replace(/[^a-z0-9]/gi, '_') || 'dessin';
+    const uniqueType = type || `custom_${slug}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     const mainColor = color || '#8b5cf6';
+    const id = `custom-${Date.now().toString(36)}`;
+    const currentEntities = Object.values(get().entities);
+    const count = currentEntities.length + 1;
 
     const newEntity: Entity = {
       id,
-      name: name || `Entité #${count}`,
-      type: entityType,
+      name: cleanName,
+      type: uniqueType,
       icon: icon || '🎨',
       drawingDataUrl,
-      vectorPaths,
-      tags: tags && tags.length > 0 ? tags : [entityType, 'custom'],
-      position: { x: 200 + ((count * 30) % 200), y: 150 + ((count * 25) % 150) },
+      vectorPaths: vectorPaths ? JSON.parse(JSON.stringify(vectorPaths)) : [],
+      tags: tags && tags.length > 0 ? tags : [slug, 'custom'],
+      position: { x: 180 + ((count * 35) % 220), y: 140 + ((count * 30) % 180) },
       size: { width: 80, height: 80 },
       currentStateId: 'state_a',
       isDraggable: true,
@@ -588,7 +689,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           color: mainColor,
           scale: 1,
           rotation: 0,
-          vectorPaths: [],
+          vectorPaths: vectorPaths ? JSON.parse(JSON.stringify(vectorPaths)) : [],
         },
       },
     };
@@ -598,26 +699,38 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         ...state.entities,
         [id]: newEntity,
       },
+      customArchetypes: {
+        ...state.customArchetypes,
+        [uniqueType]: JSON.parse(JSON.stringify(newEntity)),
+      },
       selectedEntityId: id,
     }));
+    get().evaluateRules();
+  },
+
+  deleteCustomArchetype: (type: string) => {
+    set((state) => {
+      const { [type]: _, ...remainingArchetypes } = state.customArchetypes;
+      return { customArchetypes: remainingArchetypes };
+    });
   },
 
   spawnEntity: ({ type, position, initialStateId }) => {
     const currentEntities = Object.values(get().entities);
-    const existingPeer = currentEntities.find((e) => e.type === type);
+    const archetype = get().customArchetypes[type] || currentEntities.find((e) => e.type === type);
 
     const count = currentEntities.length + 1;
     const id = `${type}-${Date.now().toString(36)}`;
 
     let newEntity: Entity;
 
-    if (existingPeer) {
-      const clonedStates = JSON.parse(JSON.stringify(existingPeer.states));
-      const targetState = initialStateId && clonedStates[initialStateId] ? initialStateId : existingPeer.currentStateId;
+    if (archetype) {
+      const clonedStates = JSON.parse(JSON.stringify(archetype.states));
+      const targetState = initialStateId && clonedStates[initialStateId] ? initialStateId : archetype.currentStateId;
       newEntity = {
-        ...JSON.parse(JSON.stringify(existingPeer)),
+        ...JSON.parse(JSON.stringify(archetype)),
         id,
-        name: `${existingPeer.name.replace(/#\d+/, '').trim()} #${count}`,
+        name: `${archetype.name.replace(/#\d+/, '').trim()} #${count}`,
         position,
         currentStateId: targetState,
       };
@@ -673,7 +786,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         ...state.entities,
         [id]: newEntity,
       },
+      selectedEntityId: id,
     }));
+    get().evaluateRules();
   },
 
   deleteEntity: (id) => {
@@ -702,17 +817,69 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       rules: [],
       selectedEntityId: null,
       activeCollisions: {},
+      snapshotEntities: null,
     });
   },
 
   restoreDefaultScene: () => {
     set({
       entities: JSON.parse(JSON.stringify(initialEntities)),
+      customArchetypes: JSON.parse(JSON.stringify(defaultCustomArchetypes)),
+      rules: JSON.parse(JSON.stringify(initialRules)),
       snapshotEntities: null,
       selectedEntityId: 'plant-1',
       activeCollisions: {},
+      appMode: 'edit',
     });
     get().evaluateRules();
+  },
+
+  exportProject: () => {
+    const { entities, customArchetypes, rules, settings } = get();
+    return {
+      version: 1,
+      name: 'Projet Atelier Vivant',
+      exportedAt: new Date().toISOString(),
+      entities,
+      customArchetypes,
+      rules,
+      settings,
+    };
+  },
+
+  importProject: (data: any) => {
+    try {
+      if (!data || typeof data !== 'object') {
+        return { success: false, message: 'Format de fichier JSON invalide.' };
+      }
+      if (!data.entities && !data.rules) {
+        return { success: false, message: 'Le fichier ne contient ni entités ni règles.' };
+      }
+
+      const importedEntities = data.entities && typeof data.entities === 'object' ? data.entities : {};
+      const importedArchetypes =
+        data.customArchetypes && typeof data.customArchetypes === 'object'
+          ? { ...defaultCustomArchetypes, ...data.customArchetypes }
+          : { ...defaultCustomArchetypes };
+      const importedRules = Array.isArray(data.rules) ? data.rules : [];
+      const importedSettings = data.settings && typeof data.settings === 'object' ? data.settings : undefined;
+
+      set((state) => ({
+        entities: importedEntities,
+        customArchetypes: importedArchetypes,
+        rules: importedRules,
+        settings: importedSettings ? { ...state.settings, ...importedSettings } : state.settings,
+        selectedEntityId: Object.keys(importedEntities)[0] || null,
+        activeCollisions: {},
+        appMode: 'edit',
+        snapshotEntities: null,
+      }));
+
+      get().evaluateRules();
+      return { success: true, message: 'Projet importé avec succès !' };
+    } catch (err: any) {
+      return { success: false, message: err?.message || "Erreur lors de l'importation." };
+    }
   },
 
   // Gestion des Règles
@@ -991,7 +1158,18 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
     set({ activeCollisions: nextCollisions });
   },
-}));
+}),
+    {
+      name: 'atelier-vivant-project-v1',
+      partialize: (state) => ({
+        entities: state.entities,
+        customArchetypes: state.customArchetypes,
+        rules: state.rules,
+        settings: state.settings,
+      }),
+    }
+  )
+);
 
 // Helper pour exécuter une action ciblée
 function executeAction(

@@ -13,12 +13,29 @@ export interface Size {
 
 export type EntityType = 'plant' | 'apple' | 'custom' | string;
 
+export interface VectorPoint {
+  x: number;
+  y: number;
+}
+
+export interface VectorRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  cornerRadius?: number;
+}
+
 export interface VectorPath {
   id: string;
   d: string;
   stroke: string;
   strokeWidth: number;
   fill?: string;
+  // Metadata for geometric manipulation & interpolation
+  type?: 'freehand' | 'polyline' | 'rectangle';
+  points?: VectorPoint[];
+  rect?: VectorRect;
 }
 
 export interface EntityState {
@@ -29,6 +46,7 @@ export interface EntityState {
   rotation: number;
   // Vector drawing overrides per state
   vectorPaths?: VectorPath[];
+  drawingDataUrl?: string;
   // Specific visual properties for drawing customization
   stemHeight?: number;
   flowerColor?: string;
@@ -118,6 +136,16 @@ export interface AppSettings {
   showGrid: boolean;
   gridStyle: 'dots' | 'lines' | 'clean';
   showTagsSystem: boolean;
+}
+
+export interface ProjectExportData {
+  version: number;
+  name?: string;
+  exportedAt: string;
+  entities: Record<EntityId, Entity>;
+  customArchetypes?: Record<string, Entity>;
+  rules: DynamicRule[];
+  settings?: AppSettings;
 }
 
 

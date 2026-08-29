@@ -1,7 +1,8 @@
+import React from 'react';
 import { useSceneStore } from '../store/useSceneStore';
 import { EntityMiniPreview } from './EntityMiniPreview';
-import { Plus, Sparkles, Box, GripVertical } from 'lucide-react';
-import { EntityType } from '../types';
+import { Plus, GripVertical, Trash2 } from 'lucide-react';
+import { EntityType, Entity } from '../types';
 
 interface EntityGalleryProps {
   onOpenCreateModal: () => void;
@@ -12,46 +13,60 @@ interface ArchetypeItem {
   name: string;
   defaultStateId?: string;
   statesCount: number;
+  isCustom?: boolean;
+  archetypeData?: Entity;
 }
 
 export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
   const entities = useSceneStore((state) => state.entities);
-  const addEntity = useSceneStore((state) => state.addEntity);
+  const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
   const spawnEntity = useSceneStore((state) => state.spawnEntity);
+  const deleteCustomArchetype = useSceneStore((state) => state.deleteCustomArchetype);
 
   const entityList = Object.values(entities);
 
-  // Build unique catalog of available objects (base objects + any custom created ones)
-  const catalog: ArchetypeItem[] = [
-    {
-      type: 'plant',
-      name: 'Plante',
-      statesCount: 2,
-    },
-    {
-      type: 'apple',
-      name: 'Pomme',
-      statesCount: 2,
-    },
-    {
-      type: 'custom',
-      name: 'Étoile',
-      statesCount: 2,
-    },
-  ];
+  // Build complete catalog of available objects
+  const catalog: ArchetypeItem[] = [];
 
-  // Include custom types from the scene or drawings
+  // Add all custom and standard archetypes from store
+  Object.entries(customArchetypes).forEach(([archetypeType, arch]) => {
+    if (!catalog.some((item) => item.type === archetypeType)) {
+      const isBase = archetypeType === 'plant' || archetypeType === 'apple' || archetypeType === 'custom';
+      catalog.push({
+        type: archetypeType,
+        name: arch.name || (archetypeType === 'plant' ? 'Plante' : archetypeType === 'apple' ? 'Pomme' : 'Étoile'),
+        statesCount: Object.keys(arch.states || {}).length || 1,
+        isCustom: !isBase,
+        archetypeData: arch,
+      });
+    }
+  });
+
+  // Ensure standard fallbacks if archetypes store was empty
+  const defaultFallbacks = [
+    { type: 'plant', name: 'Plante', statesCount: 2 },
+    { type: 'apple', name: 'Pomme', statesCount: 2 },
+    { type: 'custom', name: 'Étoile', statesCount: 2 },
+  ];
+  defaultFallbacks.forEach((fb) => {
+    if (!catalog.some((item) => item.type === fb.type)) {
+      catalog.push({
+        type: fb.type,
+        name: fb.name,
+        statesCount: fb.statesCount,
+      });
+    }
+  });
+
+  // Include any entities from the active canvas that might have distinct types
   entityList.forEach((e) => {
-    if (
-      e.type !== 'plant' &&
-      e.type !== 'apple' &&
-      e.type !== 'custom' &&
-      !catalog.some((item) => item.type === e.type)
-    ) {
+    if (!catalog.some((item) => item.type === e.type)) {
       catalog.push({
         type: e.type,
-        name: e.name,
+        name: e.name || e.type,
         statesCount: Object.keys(e.states || {}).length || 1,
+        isCustom: true,
+        archetypeData: e,
       });
     }
   });
@@ -68,20 +83,17 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
   };
 
   const handleSpawn = (item: ArchetypeItem) => {
-    if (item.type === 'plant' || item.type === 'apple' || item.type === 'custom') {
-      addEntity(item.type);
-    } else {
-      spawnEntity({
-        type: item.type,
-        position: { x: 200 + Math.random() * 80, y: 200 + Math.random() * 80 },
-      });
-    }
+    spawnEntity({
+      type: item.type,
+      position: { x: 200 + Math.floor(Math.random() * 80), y: 180 + Math.floor(Math.random() * 80) },
+    });
   };
 
   return (
     <div className="flex flex-col h-full space-y-4 text-slate-800">
       {/* 1. CREATION CARD AT THE VERY TOP */}
       <button
+        type="button"
         onClick={onOpenCreateModal}
         className="w-full p-3.5 bg-slate-900 hover:bg-slate-800 active:scale-[0.98] text-white rounded-2xl shadow-xs transition-all flex flex-col items-center justify-center gap-2 cursor-pointer border border-slate-700/50 group"
       >
@@ -105,7 +117,10 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
 
         <div className="space-y-2 overflow-y-auto flex-1 pr-1">
           {catalog.map((item) => {
-            const representativeEntity = entityList.find((e) => e.type === item.type);
+            const representativeEntity =
+              entityList.find((e) => e.type === item.type) ||
+              item.archetypeData ||
+              customArchetypes[item.type];
 
             return (
               <div
@@ -130,14 +145,29 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleSpawn(item)}
-                  className="px-2.5 py-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-900 hover:text-white text-slate-700 rounded-xl transition-all cursor-pointer shrink-0 shadow-2xs"
-                  title="Placer sur le canvas"
-                >
-                  + Placer
-                </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {item.isCustom && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteCustomArchetype(item.type);
+                      }}
+                      className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                      title="Supprimer du catalogue"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleSpawn(item)}
+                    className="px-2.5 py-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-900 hover:text-white text-slate-700 rounded-xl transition-all cursor-pointer shadow-2xs"
+                    title="Placer sur le canvas"
+                  >
+                    + Placer
+                  </button>
+                </div>
               </div>
             );
           })}
