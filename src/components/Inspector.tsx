@@ -186,6 +186,7 @@ export function Inspector() {
         <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
           <Hand className="w-3.5 h-3.5 text-indigo-600" /> Comportement
         </label>
+        
         <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-2xl border border-slate-200">
           <span className="text-xs font-bold text-slate-700">Déplaçable à la souris</span>
           <input

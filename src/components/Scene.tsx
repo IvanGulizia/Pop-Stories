@@ -2,7 +2,7 @@ import { useSceneStore } from '../store/useSceneStore';
 import { Apple } from './Apple';
 import { Plant } from './Plant';
 import { CustomShape } from './CustomShape';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Paintbrush, PlayCircle } from 'lucide-react';
 
 interface SceneProps {
   onOpenCreateModal?: () => void;
@@ -10,10 +10,15 @@ interface SceneProps {
 
 export function Scene({ onOpenCreateModal }: SceneProps) {
   const entities = useSceneStore((state) => state.entities);
+  const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
   const selectEntity = useSceneStore((state) => state.selectEntity);
-  const addEntity = useSceneStore((state) => state.addEntity);
   const spawnEntity = useSceneStore((state) => state.spawnEntity);
+  const restoreDefaultScene = useSceneStore((state) => state.restoreDefaultScene);
   const settings = useSceneStore((state) => state.settings);
+
+  const hasEntitiesOnCanvas = Object.keys(entities).length > 0;
+  const hasArchetypesInCatalog = Object.keys(customArchetypes).length > 0;
+  const isCompletelyEmptyProject = !hasEntitiesOnCanvas && !hasArchetypesInCatalog;
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -74,38 +79,71 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         />
       )}
 
-      {/* Empty State Overlay when no entities exist */}
-      {Object.keys(entities).length === 0 && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 pointer-events-auto">
-          <div className="w-16 h-16 bg-indigo-50 border border-indigo-100 rounded-3xl flex items-center justify-center text-3xl shadow-xs mb-4">
+      {/* Empty State Overlay when no entities and no archetypes exist */}
+      {isCompletelyEmptyProject && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 pointer-events-auto bg-slate-50/50 backdrop-blur-2xs">
+          <div className="w-16 h-16 bg-white border border-slate-200 rounded-3xl flex items-center justify-center text-3xl shadow-sm mb-4 animate-in zoom-in-95 duration-200">
             🎨
           </div>
-          <h3 className="text-lg font-bold text-slate-800 tracking-tight">
-            Votre atelier vivant est vide
+          <h3 className="text-xl font-bold text-slate-800 tracking-tight">
+            Nouveau Projet Atelier Vivant
           </h3>
-          <p className="text-xs text-slate-500 max-w-sm mt-1 mb-6 leading-relaxed">
-            Commencez par dessiner une forme vectorielle originale ou ajoutez un modèle de départ.
+          <p className="text-xs text-slate-500 max-w-md mt-1.5 mb-6 leading-relaxed">
+            Le canvas et vos règles sont vides. Choisissez comment démarrer votre projet :
           </p>
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            {onOpenCreateModal && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenCreateModal();
-                }}
-                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-2xl shadow-md transition-all flex items-center gap-2 cursor-pointer active:scale-95"
-              >
-                <Sparkles className="w-4 h-4" /> ✨ Dessiner un objet vectoriel
-              </button>
-            )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg w-full">
+            {/* Option 1: Créer une Entité */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                addEntity('plant');
+                if (onOpenCreateModal) onOpenCreateModal();
               }}
-              className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-2xl border border-slate-200 transition-colors cursor-pointer"
+              className="p-5 bg-white hover:bg-indigo-50/40 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl shadow-xs hover:shadow-md transition-all text-left flex flex-col justify-between gap-3 group cursor-pointer active:scale-[0.98]"
             >
-              🌱 Ajouter une plante
+              <div className="flex items-center justify-between">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                  <Paintbrush className="w-5 h-5" />
+                </div>
+                <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                  Nouveau
+                </span>
+              </div>
+              <div>
+                <div className="text-sm font-bold text-slate-800 group-hover:text-indigo-950 flex items-center gap-1.5">
+                  Créer une entité
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1 leading-snug">
+                  Ouvre l'atelier de dessin vectoriel pour concevoir votre premier objet et ses états.
+                </div>
+              </div>
+            </button>
+
+            {/* Option 2: Ouvrir la Scène Démo */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                restoreDefaultScene();
+              }}
+              className="p-5 bg-white hover:bg-emerald-50/40 border-2 border-slate-200 hover:border-emerald-500 rounded-3xl shadow-xs hover:shadow-md transition-all text-left flex flex-col justify-between gap-3 group cursor-pointer active:scale-[0.98]"
+            >
+              <div className="flex items-center justify-between">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                  <PlayCircle className="w-5 h-5" />
+                </div>
+                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                  Démo
+                </span>
+              </div>
+              <div>
+                <div className="text-sm font-bold text-slate-800 group-hover:text-emerald-950">
+                  Ouvrir la scène d'exemple
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1 leading-snug">
+                  Charge la scène interactive d'exemple (Plante magique, Pomme, règles Storyboard).
+                </div>
+              </div>
             </button>
           </div>
         </div>

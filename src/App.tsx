@@ -118,13 +118,16 @@ export default function App() {
 
             {/* Button 2: Play Mode */}
             <button
-              onClick={() => setAppMode('play')}
+              onClick={() => {
+                setAppMode('play');
+                setActiveView('canvas');
+              }}
               className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer ${
                 appMode === 'play'
                   ? 'bg-emerald-500 text-white shadow-sm ring-2 ring-emerald-400/40'
                   : 'text-slate-400 hover:text-white hover:bg-white/10'
               }`}
-              title="Mode Play (Interactif)"
+              title="Mode Play (Interactif - bascule sur le canvas)"
             >
               <Play className="w-3.5 h-3.5 fill-current" strokeWidth={2} />
             </button>

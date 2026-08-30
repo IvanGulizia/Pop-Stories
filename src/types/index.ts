@@ -38,12 +38,25 @@ export interface VectorPath {
   rect?: VectorRect;
 }
 
+export type ColliderType = 'box' | 'circle' | 'polygon';
+
+export interface ColliderBounds {
+  shape: ColliderType;
+  x?: number;      // offset or center in 0-200 canvas
+  y?: number;
+  width?: number;  // for box
+  height?: number;
+  radius?: number; // for circle
+}
+
 export interface EntityState {
   id: StateId;
   name: string;
   color: string;
   scale: number;
   rotation: number;
+  colliderType?: ColliderType;
+  colliderBounds?: ColliderBounds;
   // Vector drawing overrides per state
   vectorPaths?: VectorPath[];
   drawingDataUrl?: string;
@@ -62,27 +75,33 @@ export interface Entity {
   size: Size;
   currentStateId: StateId;
   isDraggable: boolean;
+  colliderType?: ColliderType;
+  colliderBounds?: ColliderBounds;
   states: Record<StateId, EntityState>;
   icon?: string;
   drawingDataUrl?: string;
   vectorPaths?: VectorPath[];
 }
 
-export type TriggerType = 'collision' | 'click';
+export type TriggerType = 'collision' | 'click' | 'drag';
 
 export type TriggerPhase =
-  | 'click'        // Clic complet (sans drag)
-  | 'mouse_down'   // Appui (MouseDown / PointerDown)
-  | 'mouse_up'     // Relâchement (MouseUp / PointerUp)
-  | 'enter'        // Entrée en collision (Premier contact)
-  | 'stay'         // Pendant la collision (Contact continu)
-  | 'release';     // Sortie de collision (Fin de contact / Séparation)
+  | 'click'             // Clic complet (sans drag)
+  | 'mouse_down'        // Appui (MouseDown / PointerDown)
+  | 'mouse_up'          // Relâchement souris (MouseUp / PointerUp)
+  | 'drag_release'      // Relâchement du glissement (On Release / Drop)
+  | 'drag_start'        // Début du glissement
+  | 'enter'             // Entrée en collision (Premier contact)
+  | 'stay'              // Pendant la collision (Contact continu)
+  | 'release'           // Sortie de collision (Fin de contact / Séparation)
+  | 'collision_release'; // Relâchement d'un objet pendant une collision avec la cible
 
 export type SelectionMode = 'type' | 'tag' | 'instance';
 
 export interface RuleTrigger {
   type: TriggerType;
   phase?: TriggerPhase; // Phase optionnelle (défaut: 'click' pour clic, 'enter' pour collision)
+  revertOnExit?: boolean; // Pour 'stay' : revenir à l'état précédent quand le contact cesse (Toggle)
   
   // Sujet (Qui déclenche)
   subjectMode?: SelectionMode; // 'type', 'tag' ou 'instance'
@@ -103,6 +122,8 @@ export type ActionTargetMode = 'subject' | 'target' | 'type' | 'tag' | 'instance
 
 export type ActionType = 'change_state' | 'toggle_draggable' | 'delete_entity' | 'spawn_entity' | 'play_sound';
 
+export type SpawnLocationMode = 'at_subject' | 'at_target' | 'random' | 'absolute';
+
 export interface RuleAction {
   id: string;
   type: ActionType;
@@ -116,6 +137,9 @@ export interface RuleAction {
   // Champs pour 'spawn_entity'
   spawnEntityType?: EntityType;
   spawnInitialStateId?: StateId;
+  spawnLocation?: SpawnLocationMode; // 'at_subject', 'at_target', 'random', 'absolute'
+  spawnLocationMode?: SpawnLocationMode;
+  spawnPosition?: Position;
 
   // Champs pour 'play_sound'
   soundType?: 'pop' | 'bell' | 'laser' | 'bounce' | 'magic' | 'win';

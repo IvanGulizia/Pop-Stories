@@ -1,6 +1,7 @@
 import { useSceneStore } from '../store/useSceneStore';
-import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2 } from 'lucide-react';
+import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, CheckCircle2, AlertCircle } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
+import { useRef, useState } from 'react';
 
 interface SettingsPanelProps {
   onOpenClearModal?: () => void;
@@ -10,7 +11,55 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
   const settings = useSceneStore((state) => state.settings);
   const updateSettings = useSceneStore((state) => state.updateSettings);
   const restoreDefaultScene = useSceneStore((state) => state.restoreDefaultScene);
-  const clearAllEntities = useSceneStore((state) => state.clearAllEntities);
+  const exportProject = useSceneStore((state) => state.exportProject);
+  const importProject = useSceneStore((state) => state.importProject);
+
+  const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExport = () => {
+    try {
+      const data = exportProject();
+      const jsonStr = JSON.stringify(data, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `atelier-vivant-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setImportStatus({ type: 'success', message: 'Projet exporté avec succès !' });
+      setTimeout(() => setImportStatus(null), 3500);
+    } catch (err: any) {
+      setImportStatus({ type: 'error', message: 'Erreur lors de l’exportation.' });
+    }
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const parsed = JSON.parse(text);
+        const result = importProject(parsed);
+        if (result.success) {
+          setImportStatus({ type: 'success', message: result.message || 'Projet importé avec succès !' });
+        } else {
+          setImportStatus({ type: 'error', message: result.message || 'Fichier de projet invalide.' });
+        }
+      } catch (err: any) {
+        setImportStatus({ type: 'error', message: 'Fichier JSON corrompu ou illisible.' });
+      }
+      setTimeout(() => setImportStatus(null), 4000);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+    reader.readAsText(file);
+  };
 
   return (
     <div className="space-y-4 text-slate-800">
@@ -20,6 +69,24 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
           Paramètres du Studio
         </h3>
       </div>
+
+      {/* Import / Export Feedback */}
+      {importStatus && (
+        <div
+          className={`p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 ${
+            importStatus.type === 'success'
+              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              : 'bg-rose-50 text-rose-800 border-rose-200'
+          }`}
+        >
+          {importStatus.type === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          ) : (
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+          )}
+          <span>{importStatus.message}</span>
+        </div>
+      )}
 
       {/* Toggle Labels */}
       <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200/80">
@@ -88,7 +155,7 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
       {/* Toggle Tags System */}
       <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200/80">
         <div className="flex items-center gap-2.5">
-          <Tag className="w-4 h-4 text-purple-600" />
+          <Tag className="w-3.5 h-3.5 text-purple-600" />
           <div>
             <label className="text-xs font-bold text-slate-800 block">Système de #Tags</label>
             <span className="text-[10px] text-slate-500">Filtrage & règles par tags</span>
@@ -130,11 +197,37 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
         </div>
       </div>
 
-      {/* Scene Maintenance Actions */}
-      <div className="pt-2 space-y-2">
+      {/* Scene Maintenance & Import / Export */}
+      <div className="pt-2 space-y-2.5">
         <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block px-1">
-          Gestion du Projet
+          Import / Export & Sauvegarde
         </span>
+
+        {/* Export & Import Buttons */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={handleExport}
+            className="p-2.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+            title="Exporter tout le projet au format JSON"
+          >
+            <Download className="w-3.5 h-3.5" /> Exporter JSON
+          </button>
+
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="p-2.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+            title="Importer un fichier de projet JSON"
+          >
+            <Upload className="w-3.5 h-3.5" /> Importer JSON
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            onChange={handleImportFile}
+            className="hidden"
+          />
+        </div>
 
         <button
           onClick={restoreDefaultScene}

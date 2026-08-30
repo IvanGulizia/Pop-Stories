@@ -1,7 +1,7 @@
 import React from 'react';
 import { useSceneStore } from '../store/useSceneStore';
 import { EntityMiniPreview } from './EntityMiniPreview';
-import { Plus, GripVertical, Trash2 } from 'lucide-react';
+import { Plus, GripVertical, Trash2, Sparkles, PlayCircle } from 'lucide-react';
 import { EntityType, Entity } from '../types';
 
 interface EntityGalleryProps {
@@ -22,6 +22,10 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
   const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
   const spawnEntity = useSceneStore((state) => state.spawnEntity);
   const deleteCustomArchetype = useSceneStore((state) => state.deleteCustomArchetype);
+  const restoreDefaultScene = useSceneStore((state) => state.restoreDefaultScene);
+
+  const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
+  const selectEntity = useSceneStore((state) => state.selectEntity);
 
   const entityList = Object.values(entities);
 
@@ -38,22 +42,6 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
         statesCount: Object.keys(arch.states || {}).length || 1,
         isCustom: !isBase,
         archetypeData: arch,
-      });
-    }
-  });
-
-  // Ensure standard fallbacks if archetypes store was empty
-  const defaultFallbacks = [
-    { type: 'plant', name: 'Plante', statesCount: 2 },
-    { type: 'apple', name: 'Pomme', statesCount: 2 },
-    { type: 'custom', name: 'Étoile', statesCount: 2 },
-  ];
-  defaultFallbacks.forEach((fb) => {
-    if (!catalog.some((item) => item.type === fb.type)) {
-      catalog.push({
-        type: fb.type,
-        name: fb.name,
-        statesCount: fb.statesCount,
       });
     }
   });
@@ -82,11 +70,22 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
     e.dataTransfer.effectAllowed = 'copy';
   };
 
-  const handleSpawn = (item: ArchetypeItem) => {
-    spawnEntity({
-      type: item.type,
-      position: { x: 200 + Math.floor(Math.random() * 80), y: 180 + Math.floor(Math.random() * 80) },
-    });
+  const handleItemClick = (item: ArchetypeItem) => {
+    // Si une instance existe déjà sur la scène, la sélectionner
+    const instance = entityList.find((e) => e.type === item.type);
+    if (instance) {
+      selectEntity(instance.id);
+    } else {
+      // Si aucune instance n'est encore sur le canvas, instancier ou sélectionner
+      const newId = `${item.type}-${Date.now().toString(36)}`;
+      const archetype = customArchetypes[item.type] || item.archetypeData;
+      if (archetype) {
+        spawnEntity({
+          type: item.type,
+          position: { x: 250, y: 200 },
+        });
+      }
+    }
   };
 
   return (
@@ -112,65 +111,92 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
           <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
             Catalogue d'Objets ({catalog.length})
           </span>
-          <span className="text-[10px] text-slate-400">Glisser ou placer</span>
+          <span className="text-[10px] text-slate-400">Glisser sur la scène</span>
         </div>
 
         <div className="space-y-2 overflow-y-auto flex-1 pr-1">
-          {catalog.map((item) => {
-            const representativeEntity =
-              entityList.find((e) => e.type === item.type) ||
-              item.archetypeData ||
-              customArchetypes[item.type];
-
-            return (
-              <div
-                key={item.type}
-                draggable
-                onDragStart={(e) => handleDragStart(e, item)}
-                className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 hover:border-slate-300 rounded-2xl flex items-center justify-between shadow-2xs gap-2.5 transition-all cursor-grab active:cursor-grabbing group"
-                title="Glissez cet objet sur le Canvas ou sur une case de règle Storyboard"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="text-slate-300 group-hover:text-slate-500 transition-colors">
-                    <GripVertical className="w-3.5 h-3.5" />
-                  </div>
-                  <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center p-1 overflow-hidden shrink-0 border border-slate-200/70">
-                    <EntityMiniPreview entity={representativeEntity} type={item.type} size={32} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-slate-800 truncate">{item.name}</p>
-                    <p className="text-[10px] text-slate-400 font-medium">
-                      {item.statesCount} {item.statesCount > 1 ? 'états' : 'état'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {item.isCustom && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteCustomArchetype(item.type);
-                      }}
-                      className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                      title="Supprimer du catalogue"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => handleSpawn(item)}
-                    className="px-2.5 py-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-900 hover:text-white text-slate-700 rounded-xl transition-all cursor-pointer shadow-2xs"
-                    title="Placer sur le canvas"
-                  >
-                    + Placer
-                  </button>
-                </div>
+          {catalog.length === 0 ? (
+            <div className="p-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-center space-y-3">
+              <div className="text-2xl">✨</div>
+              <div>
+                <p className="text-xs font-bold text-slate-700">Catalogue vide</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Aucun objet dans votre projet.
+                </p>
               </div>
-            );
-          })}
+              <div className="flex flex-col gap-1.5 pt-1">
+                <button
+                  type="button"
+                  onClick={onOpenCreateModal}
+                  className="w-full py-1.5 text-[11px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" /> Dessiner un objet
+                </button>
+                <button
+                  type="button"
+                  onClick={restoreDefaultScene}
+                  className="w-full py-1.5 text-[11px] font-medium text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <PlayCircle className="w-3.5 h-3.5 text-emerald-600" /> Scène d'exemple
+                </button>
+              </div>
+            </div>
+          ) : (
+            catalog.map((item) => {
+              const representativeEntity =
+                entityList.find((e) => e.type === item.type) ||
+                item.archetypeData ||
+                customArchetypes[item.type];
+
+              const isSelected = representativeEntity && selectedEntityId === representativeEntity.id;
+
+              return (
+                <div
+                  key={item.type}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, item)}
+                  onClick={() => handleItemClick(item)}
+                  className={`p-3 bg-white hover:bg-slate-50 border rounded-2xl flex items-center justify-between shadow-2xs gap-2.5 transition-all cursor-pointer group ${
+                    isSelected
+                      ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/30'
+                      : 'border-slate-200/90 hover:border-slate-300'
+                  }`}
+                  title="Cliquez pour inspecter, ou glissez sur le Canvas / Storyboard"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="text-slate-300 group-hover:text-slate-500 transition-colors cursor-grab active:cursor-grabbing">
+                      <GripVertical className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center p-1 overflow-hidden shrink-0 border border-slate-200/70">
+                      <EntityMiniPreview entity={representativeEntity} type={item.type} size={32} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-800 truncate">{item.name}</p>
+                      <p className="text-[10px] text-slate-400 font-medium">
+                        {item.statesCount} {item.statesCount > 1 ? 'états' : 'état'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {item.isCustom && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteCustomArchetype(item.type);
+                        }}
+                        className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                        title="Supprimer du catalogue"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>

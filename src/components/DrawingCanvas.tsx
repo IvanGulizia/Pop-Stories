@@ -14,6 +14,8 @@ import {
   Trash2,
   Copy,
   Check,
+  Grid,
+  Magnet,
 } from 'lucide-react';
 import { VectorPath, VectorPoint, VectorRect } from '../types';
 
@@ -131,6 +133,11 @@ export function DrawingCanvas({
   // Active polyline in progress
   const [activePolylinePoints, setActivePolylinePoints] = useState<VectorPoint[]>([]);
 
+  // Grille & Magnétisme (Snap to grid) - Désactivés par défaut
+  const [showGrid, setShowGrid] = useState(false);
+  const [snapToGrid, setSnapToGrid] = useState(false);
+  const [gridSnapSize, setGridSnapSize] = useState(10);
+
   // Onion skinning state
   const availableOnionStates = onionStates.filter((s) => s.vectorPaths && s.vectorPaths.length > 0);
   const [onionSkinEnabled, setOnionSkinEnabled] = useState(availableOnionStates.length > 0);
@@ -193,8 +200,15 @@ export function DrawingCanvas({
     const scaleX = 200 / rect.width;
     const scaleY = 200 / rect.height;
 
-    const x = Math.max(0, Math.min(200, Math.round((clientX - rect.left) * scaleX)));
-    const y = Math.max(0, Math.min(200, Math.round((clientY - rect.top) * scaleY)));
+    let x = Math.max(0, Math.min(200, Math.round((clientX - rect.left) * scaleX)));
+    let y = Math.max(0, Math.min(200, Math.round((clientY - rect.top) * scaleY)));
+
+    if (snapToGrid) {
+      x = Math.round(x / gridSnapSize) * gridSnapSize;
+      y = Math.round(y / gridSnapSize) * gridSnapSize;
+      x = Math.max(0, Math.min(200, x));
+      y = Math.max(0, Math.min(200, y));
+    }
 
     return { x, y };
   };
@@ -582,7 +596,7 @@ export function DrawingCanvas({
       {/* Zone de dessin Vectorielle SVG principale */}
       <div className="flex-1 bg-slate-100 border-2 border-slate-200 rounded-3xl p-3 sm:p-4 flex flex-col items-center justify-center relative shadow-inner min-h-[360px] overflow-hidden">
         {/* Top Info Bar */}
-        <div className="w-full flex items-center justify-between px-3 py-1 mb-2 text-xs text-slate-500 font-medium select-none">
+        <div className="w-full flex items-center justify-between px-3 py-1 mb-2 text-xs text-slate-500 font-medium select-none flex-wrap gap-2">
           <div className="flex items-center gap-2">
             {currentEditingStateName && (
               <span className="font-bold text-slate-700 bg-white px-2.5 py-0.5 rounded-lg border border-slate-200 shadow-2xs">
@@ -591,24 +605,55 @@ export function DrawingCanvas({
             )}
             {tool === 'polyline' && activePolylinePoints.length > 0 && (
               <span className="bg-amber-100 text-amber-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px] animate-pulse">
-                Polyligne : {activePolylinePoints.length} points — double-cliquez pour terminer
+                Polyligne : {activePolylinePoints.length} pts
               </span>
             )}
             {tool === 'select' && selectedPath && (
               <span className="bg-indigo-100 text-indigo-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px]">
-                Forme sélectionnée : manipulez les poignées ou modifiez les propriétés
+                Forme sélectionnée
               </span>
             )}
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Grille & Magnétisme Toggles (Désactivés par défaut) */}
+            <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setShowGrid(!showGrid)}
+                className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                  showGrid
+                    ? 'bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                }`}
+                title="Afficher/Masquer la grille de repère (Désactivée par défaut)"
+              >
+                <Grid className="w-3 h-3" />
+                <span>Grille {showGrid ? 'On' : 'Off'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSnapToGrid(!snapToGrid)}
+                className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                  snapToGrid
+                    ? 'bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                }`}
+                title="Activer/Désactiver l'aimant Snap to Grid (Désactivé par défaut)"
+              >
+                <Magnet className="w-3 h-3" />
+                <span>Snap {snapToGrid ? 'On' : 'Off'}</span>
+              </button>
+            </div>
+
             {tool === 'polyline' && activePolylinePoints.length >= 2 && (
               <button
                 type="button"
                 onClick={() => finishPolyline(false)}
                 className="px-2 py-0.5 bg-indigo-600 text-white rounded-lg font-bold text-[11px] hover:bg-indigo-700 flex items-center gap-1 cursor-pointer"
               >
-                <Check className="w-3 h-3" /> Valider tracé
+                <Check className="w-3 h-3" /> Valider
               </button>
             )}
             <span className="bg-white text-slate-600 font-bold px-2.5 py-0.5 rounded-full font-mono border border-slate-200 shadow-2xs text-[11px]">
@@ -642,13 +687,14 @@ export function DrawingCanvas({
               }
             }}
           >
-            {/* Grille de repère Figma-style */}
+            {/* Grille de repère (Optionnelle) */}
             <defs>
-              <pattern id="grid-dots-light" width="20" height="20" patternUnits="userSpaceOnUse">
-                <circle cx="10" cy="10" r="1" fill="rgba(100,116,139,0.2)" />
+              <pattern id="grid-dots-light" width={gridSnapSize * 2} height={gridSnapSize * 2} patternUnits="userSpaceOnUse">
+                <circle cx={gridSnapSize} cy={gridSnapSize} r="1" fill="rgba(100,116,139,0.25)" />
+                <path d={`M ${gridSnapSize * 2} 0 L 0 0 0 ${gridSnapSize * 2}`} fill="none" stroke="rgba(148,163,184,0.18)" strokeWidth="0.5" />
               </pattern>
             </defs>
-            <rect width="200" height="200" fill="url(#grid-dots-light)" />
+            {showGrid && <rect width="200" height="200" fill="url(#grid-dots-light)" />}
 
             {/* Calque Pelure d'Oignon (Onion Skinning) */}
             {onionSkinEnabled && activeOnionReference?.vectorPaths && activeOnionReference.vectorPaths.length > 0 && (

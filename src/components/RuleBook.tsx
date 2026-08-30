@@ -62,7 +62,7 @@ export function RuleBook() {
     return entityList.find((e) => e.type === type) || customArchetypes[type];
   };
 
-  // Available entity options (archetypes & custom drawn)
+  // Available entity options (archetypes & custom drawn only - no unsolicited demo objects)
   const availableEntityOptions: { type: EntityType; label: string }[] = [];
 
   // 1. Add all from customArchetypes
@@ -70,24 +70,12 @@ export function RuleBook() {
     if (!availableEntityOptions.some((opt) => opt.type === archetypeType)) {
       availableEntityOptions.push({
         type: archetypeType,
-        label: arch.name || (archetypeType === 'plant' ? 'Plante' : archetypeType === 'apple' ? 'Pomme' : 'Étoile'),
+        label: arch.name || archetypeType,
       });
     }
   });
 
-  // 2. Base fallbacks
-  const baseDefaults = [
-    { type: 'apple', label: 'Pomme' },
-    { type: 'plant', label: 'Plante' },
-    { type: 'custom', label: 'Étoile' },
-  ];
-  baseDefaults.forEach((b) => {
-    if (!availableEntityOptions.some((opt) => opt.type === b.type)) {
-      availableEntityOptions.push(b);
-    }
-  });
-
-  // 3. Include any custom created entities from the active canvas
+  // 2. Include any custom created entities from the active canvas
   entityList.forEach((e) => {
     if (!availableEntityOptions.some((opt) => opt.type === e.type)) {
       availableEntityOptions.push({
@@ -339,8 +327,16 @@ export function RuleBook() {
                 eventIcon = '👋';
                 eventSub = 'Relâché';
               }
+            } else if (rule.trigger.type === 'drag' || rule.trigger.phase === 'drag_release') {
+              eventName = 'Relâcher';
+              eventIcon = '🫳';
+              eventSub = 'On Release';
             } else if (rule.trigger.type === 'collision') {
-              if (rule.trigger.phase === 'release') {
+              if (rule.trigger.phase === 'collision_release') {
+                eventName = 'Relâcher sur cible';
+                eventIcon = '🎯';
+                eventSub = 'On Release';
+              } else if (rule.trigger.phase === 'release') {
                 eventName = 'Séparation';
                 eventIcon = '💨';
                 eventSub = 'Fin contact';
@@ -550,6 +546,17 @@ export function RuleBook() {
                       } else if (act.type === 'delete_entity') {
                         actionBadge = 'Détruire';
                         actionDetail = 'Faire disparaître';
+                      } else if (act.type === 'spawn_entity') {
+                        actionBadge = 'Créer Entité';
+                        const locLabel =
+                          act.spawnLocationMode === 'at_subject'
+                            ? 'Sur Sujet'
+                            : act.spawnLocationMode === 'at_target'
+                            ? 'Sur Cible'
+                            : act.spawnLocationMode === 'random'
+                            ? 'Aléatoire'
+                            : 'Centre';
+                        actionDetail = `+ ${act.spawnEntityType || 'Objet'} (${locLabel})`;
                       } else if (act.type === 'play_sound') {
                         actionBadge = 'Jouer Son';
                         actionDetail = act.soundType ? `Son ${act.soundType}` : 'Effet sonore';
@@ -611,6 +618,17 @@ export function RuleBook() {
                               <div className="w-11 h-11 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-xl shadow-2xs">
                                 🔊
                               </div>
+                            ) : act.type === 'spawn_entity' ? (
+                              <div className="relative">
+                                <EntityMiniPreview
+                                  entity={getEntityObj(act.spawnEntityType || 'custom')}
+                                  type={act.spawnEntityType || 'custom'}
+                                  size={44}
+                                />
+                                <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white rounded-full p-0.5 shadow-xs text-[10px]">
+                                  ✨
+                                </div>
+                              </div>
                             ) : (
                               <EntityMiniPreview
                                 entity={actEntity}
@@ -622,7 +640,9 @@ export function RuleBook() {
 
                             <div className="w-full">
                               <div className="text-[11px] font-bold text-slate-800 truncate">
-                                {act.targetMode === 'subject'
+                                {act.type === 'spawn_entity'
+                                  ? `Créer ${act.spawnEntityType || 'Objet'}`
+                                  : act.targetMode === 'subject'
                                   ? `Sujet (${subjectOpt?.label || 'Objet'})`
                                   : act.targetMode === 'target'
                                   ? `Cible (${targetOpt?.label || 'Objet'})`
@@ -855,7 +875,7 @@ export function RuleBook() {
                     </button>
                   </div>
 
-                  <div className="space-y-2.5">
+                  <div className="space-y-2.5 max-h-[60vh] overflow-y-auto pr-1">
                     <button
                       type="button"
                       onClick={() => {
@@ -864,19 +884,114 @@ export function RuleBook() {
                             ...rule.trigger,
                             type: 'collision',
                             phase: 'enter',
-                            targetType: rule.trigger.targetType || 'plant',
+                            targetType: rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant',
                           },
                         });
                         setActiveModal(null);
                       }}
-                      className="w-full p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                      className="w-full p-3.5 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
                     >
-                      <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                      <div className="w-11 h-11 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
                         💥
                       </div>
                       <div>
-                        <div className="text-sm font-bold text-slate-900">Contact / Collision (Début)</div>
-                        <div className="text-xs text-slate-500">Quand l'objet entre en contact avec une cible</div>
+                        <div className="text-sm font-bold text-slate-900">Collision : Premier Contact (On Enter)</div>
+                        <div className="text-xs text-slate-500">Quand l'objet touche une autre entité (Symétrique)</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateRule(rule.id, {
+                          trigger: {
+                            ...rule.trigger,
+                            type: 'collision',
+                            phase: 'collision_release',
+                            targetType: rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant',
+                          },
+                        });
+                        setActiveModal(null);
+                      }}
+                      className="w-full p-3.5 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                        🎯
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-slate-900">Collision : Au Relâchement (On Release)</div>
+                        <div className="text-xs text-slate-500">Quand l'utilisateur relâche le sujet sur la cible touchée</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateRule(rule.id, {
+                          trigger: {
+                            ...rule.trigger,
+                            type: 'collision',
+                            phase: 'stay',
+                            targetType: rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant',
+                          },
+                        });
+                        setActiveModal(null);
+                      }}
+                      className="w-full p-3.5 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                        ⏳
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-slate-900">Collision : Contact Continu (Stay)</div>
+                        <div className="text-xs text-slate-500">Tant que les deux entités restent en contact</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateRule(rule.id, {
+                          trigger: {
+                            ...rule.trigger,
+                            type: 'collision',
+                            phase: 'release',
+                            targetType: rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant',
+                          },
+                        });
+                        setActiveModal(null);
+                      }}
+                      className="w-full p-3.5 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                        💨
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-slate-900">Collision : Séparation / Sortie (Exit)</div>
+                        <div className="text-xs text-slate-500">Quand l'objet cesse de toucher la cible</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateRule(rule.id, {
+                          trigger: {
+                            ...rule.trigger,
+                            type: 'drag',
+                            phase: 'drag_release',
+                          },
+                        });
+                        setActiveModal(null);
+                      }}
+                      className="w-full p-3.5 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                        🫳
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-slate-900">Glisser : Au Relâchement Libre (Drop)</div>
+                        <div className="text-xs text-slate-500">Quand l'utilisateur relâche l'objet n'importe où</div>
                       </div>
                     </button>
 
@@ -892,38 +1007,14 @@ export function RuleBook() {
                         });
                         setActiveModal(null);
                       }}
-                      className="w-full p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                      className="w-full p-3.5 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
                     >
-                      <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                      <div className="w-11 h-11 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
                         👆
                       </div>
                       <div>
                         <div className="text-sm font-bold text-slate-900">Clic Souris / Pointeur</div>
                         <div className="text-xs text-slate-500">Quand l'utilisateur clique sur le sujet</div>
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        updateRule(rule.id, {
-                          trigger: {
-                            ...rule.trigger,
-                            type: 'collision',
-                            phase: 'release',
-                            targetType: rule.trigger.targetType || 'plant',
-                          },
-                        });
-                        setActiveModal(null);
-                      }}
-                      className="w-full p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
-                    >
-                      <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
-                        💨
-                      </div>
-                      <div>
-                        <div className="text-sm font-bold text-slate-900">Fin de Contact / Séparation</div>
-                        <div className="text-xs text-slate-500">Quand l'objet cesse de toucher la cible</div>
                       </div>
                     </button>
                   </div>
@@ -940,8 +1031,8 @@ export function RuleBook() {
               const actionType = activeModal.actionType || 'change_state';
               const targetMode = activeModal.targetMode || (isCollision ? 'target' : 'subject');
 
-              const subjectType = rule.trigger.subjectType || 'apple';
-              const targetType = rule.trigger.targetType || 'plant';
+              const subjectType = rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
+              const targetType = rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
               const chosenType = activeModal.selectedTargetType || (targetMode === 'subject' ? subjectType : targetType);
 
               const subjectEntity = getEntityObj(subjectType);
@@ -1050,6 +1141,28 @@ export function RuleBook() {
                           setActiveModal({
                             ...activeModal,
                             step: 2,
+                            actionType: 'spawn_entity',
+                          });
+                        }}
+                        className="w-full p-4 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                      >
+                        <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                          ✨
+                        </div>
+                        <div>
+                          <div className="text-sm font-bold text-slate-900">Créer une entité (Instancier)</div>
+                          <div className="text-xs text-slate-500">
+                            Faire apparaître un nouvel objet sur la scène (relatif au sujet, à la cible, etc.)
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveModal({
+                            ...activeModal,
+                            step: 2,
                             actionType: 'delete_entity',
                           });
                         }}
@@ -1086,108 +1199,218 @@ export function RuleBook() {
                     </div>
                   )}
 
-                  {/* STEP 2: CHOOSE TARGET OBJECT */}
+                  {/* STEP 2: CHOOSE TARGET OBJECT OR SPAWN OBJECT */}
                   {activeModal.step === 2 && (
                     <div className="space-y-3">
-                      <div className="grid grid-cols-2 gap-3">
-                        {/* Option: Subject */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (actionType === 'delete_entity') {
-                              applyActionChange({
-                                type: 'delete_entity',
-                                targetMode: 'subject',
-                                targetType: subjectType,
-                              });
-                            } else {
-                              setActiveModal({
-                                ...activeModal,
-                                step: 3,
-                                targetMode: 'subject',
-                                selectedTargetType: subjectType,
-                              });
-                            }
-                          }}
-                          className="p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
-                        >
-                          <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
-                            <EntityMiniPreview entity={subjectEntity} type={subjectType} size={40} />
-                          </div>
-                          <div>
-                            <div className="text-xs font-bold text-slate-900">Sujet (Déclencheur)</div>
-                            <div className="text-[10px] text-slate-500 capitalize">{subjectType}</div>
-                          </div>
-                        </button>
-
-                        {/* Option: Target (if collision) */}
-                        {isCollision && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (actionType === 'delete_entity') {
-                                applyActionChange({
-                                  type: 'delete_entity',
-                                  targetMode: 'target',
-                                  targetType: targetType,
-                                });
-                              } else {
-                                setActiveModal({
-                                  ...activeModal,
-                                  step: 3,
-                                  targetMode: 'target',
-                                  selectedTargetType: targetType,
-                                });
-                              }
-                            }}
-                            className="p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
-                          >
-                            <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
-                              <EntityMiniPreview entity={targetEntity} type={targetType} size={40} />
-                            </div>
-                            <div>
-                              <div className="text-xs font-bold text-slate-900">Cible (Touchée)</div>
-                              <div className="text-[10px] text-slate-500 capitalize">{targetType}</div>
-                            </div>
-                          </button>
-                        )}
-
-                        {/* Option: Other entity archetype on delete */}
-                        {actionType === 'delete_entity' &&
-                          availableEntityOptions
-                            .filter((opt) => opt.type !== subjectType && (!isCollision || opt.type !== targetType))
-                            .map((opt) => {
+                      {actionType === 'spawn_entity' ? (
+                        <div className="space-y-3">
+                          <p className="text-xs font-medium text-slate-600">Choisissez quel objet faire apparaître :</p>
+                          <div className="grid grid-cols-3 gap-3">
+                            {availableEntityOptions.map((opt) => {
                               const ent = getEntityObj(opt.type);
                               return (
                                 <button
                                   key={opt.type}
                                   type="button"
                                   onClick={() => {
-                                    applyActionChange({
-                                      type: 'delete_entity',
-                                      targetMode: 'type',
-                                      targetType: opt.type,
+                                    setActiveModal({
+                                      ...activeModal,
+                                      step: 3,
+                                      actionType: 'spawn_entity',
+                                      selectedTargetType: opt.type,
                                     });
                                   }}
-                                  className="p-4 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
+                                  className="p-3.5 bg-slate-50 hover:bg-emerald-50/70 border border-slate-200 hover:border-emerald-300 rounded-2xl flex flex-col items-center gap-2 cursor-pointer transition-all shadow-2xs group"
                                 >
-                                  <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
+                                  <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
                                     <EntityMiniPreview entity={ent} type={opt.type} size={40} />
                                   </div>
-                                  <div>
-                                    <div className="text-xs font-bold text-slate-900">{opt.label}</div>
-                                    <div className="text-[10px] text-rose-600 font-semibold">Détruire cet objet</div>
-                                  </div>
+                                  <span className="text-xs font-bold text-slate-800 truncate w-full text-center">
+                                    {opt.label}
+                                  </span>
                                 </button>
                               );
                             })}
-                      </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-3">
+                          {/* Option: Subject */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (actionType === 'delete_entity') {
+                                applyActionChange({
+                                  type: 'delete_entity',
+                                  targetMode: 'subject',
+                                  targetType: subjectType,
+                                });
+                              } else {
+                                setActiveModal({
+                                  ...activeModal,
+                                  step: 3,
+                                  targetMode: 'subject',
+                                  selectedTargetType: subjectType,
+                                });
+                              }
+                            }}
+                            className="p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
+                          >
+                            <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
+                              <EntityMiniPreview entity={subjectEntity} type={subjectType} size={40} />
+                            </div>
+                            <div>
+                              <div className="text-xs font-bold text-slate-900">Sujet (Déclencheur)</div>
+                              <div className="text-[10px] text-slate-500 capitalize">{subjectType}</div>
+                            </div>
+                          </button>
+
+                          {/* Option: Target (if collision) */}
+                          {isCollision && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (actionType === 'delete_entity') {
+                                  applyActionChange({
+                                    type: 'delete_entity',
+                                    targetMode: 'target',
+                                    targetType: targetType,
+                                  });
+                                } else {
+                                  setActiveModal({
+                                    ...activeModal,
+                                    step: 3,
+                                    targetMode: 'target',
+                                    selectedTargetType: targetType,
+                                  });
+                                }
+                              }}
+                              className="p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
+                            >
+                              <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
+                                <EntityMiniPreview entity={targetEntity} type={targetType} size={40} />
+                              </div>
+                              <div>
+                                <div className="text-xs font-bold text-slate-900">Cible (Touchée)</div>
+                                <div className="text-[10px] text-slate-500 capitalize">{targetType}</div>
+                              </div>
+                            </button>
+                          )}
+
+                          {/* Option: Other entity archetype on delete */}
+                          {actionType === 'delete_entity' &&
+                            availableEntityOptions
+                              .filter((opt) => opt.type !== subjectType && (!isCollision || opt.type !== targetType))
+                              .map((opt) => {
+                                const ent = getEntityObj(opt.type);
+                                return (
+                                  <button
+                                    key={opt.type}
+                                    type="button"
+                                    onClick={() => {
+                                      applyActionChange({
+                                        type: 'delete_entity',
+                                        targetMode: 'type',
+                                        targetType: opt.type,
+                                      });
+                                    }}
+                                    className="p-4 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
+                                  >
+                                    <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
+                                      <EntityMiniPreview entity={ent} type={opt.type} size={40} />
+                                    </div>
+                                    <div>
+                                      <div className="text-xs font-bold text-slate-900">{opt.label}</div>
+                                      <div className="text-[10px] text-rose-600 font-semibold">Détruire cet objet</div>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  {/* STEP 3: CHOOSE VALUE (STATE OR SOUND) */}
+                  {/* STEP 3: CHOOSE VALUE (STATE, SOUND, OR SPAWN LOCATION) */}
                   {activeModal.step === 3 && (
                     <div className="space-y-3">
+                      {actionType === 'spawn_entity' && (
+                        <div className="space-y-2.5">
+                          <p className="text-xs font-medium text-slate-600">Où faire apparaître l'objet ?</p>
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                applyActionChange({
+                                  type: 'spawn_entity',
+                                  spawnEntityType: chosenType,
+                                  spawnLocationMode: 'at_subject',
+                                });
+                              }}
+                              className="p-3.5 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-2xl flex flex-col items-start gap-1 cursor-pointer transition-all text-left group shadow-2xs"
+                            >
+                              <div className="text-xs font-bold text-slate-900">📍 Sur le Sujet</div>
+                              <div className="text-[10px] text-slate-500">
+                                Position relative à l'objet qui déclenche l'événement
+                              </div>
+                            </button>
+
+                            {isCollision && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  applyActionChange({
+                                    type: 'spawn_entity',
+                                    spawnEntityType: chosenType,
+                                    spawnLocationMode: 'at_target',
+                                  });
+                                }}
+                                className="p-3.5 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-2xl flex flex-col items-start gap-1 cursor-pointer transition-all text-left group shadow-2xs"
+                              >
+                                <div className="text-xs font-bold text-slate-900">🎯 Sur la Cible</div>
+                                <div className="text-[10px] text-slate-500">
+                                  À l'emplacement précis de la cible touchée
+                                </div>
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                applyActionChange({
+                                  type: 'spawn_entity',
+                                  spawnEntityType: chosenType,
+                                  spawnLocationMode: 'random',
+                                });
+                              }}
+                              className="p-3.5 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-2xl flex flex-col items-start gap-1 cursor-pointer transition-all text-left group shadow-2xs"
+                            >
+                              <div className="text-xs font-bold text-slate-900">🎲 Aléatoire</div>
+                              <div className="text-[10px] text-slate-500">
+                                N'importe où sur l'espace visible du canevas
+                              </div>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                applyActionChange({
+                                  type: 'spawn_entity',
+                                  spawnEntityType: chosenType,
+                                  spawnLocationMode: 'absolute',
+                                });
+                              }}
+                              className="p-3.5 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-2xl flex flex-col items-start gap-1 cursor-pointer transition-all text-left group shadow-2xs"
+                            >
+                              <div className="text-xs font-bold text-slate-900">🎯 Centre de l'écran</div>
+                              <div className="text-[10px] text-slate-500">
+                                À la position centrale de l'espace de jeu
+                              </div>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
                       {actionType === 'change_state' && (
                         <div className="grid grid-cols-2 gap-3">
                           {relevantEntity &&

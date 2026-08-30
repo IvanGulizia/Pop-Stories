@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 import {
   Entity,
   EntityId,
@@ -19,6 +18,14 @@ import {
   ProjectExportData,
 } from '../types';
 import { soundSynth } from '../utils/sound';
+
+// Nettoyage proactif de tout cache local précédent
+if (typeof window !== 'undefined' && window.localStorage) {
+  try {
+    window.localStorage.removeItem('atelier-vivant-project-v1');
+    window.localStorage.removeItem('atelier-vivant-state');
+  } catch (_) {}
+}
 
 interface SceneState {
   entities: Record<EntityId, Entity>;
@@ -281,32 +288,89 @@ const initialRules: DynamicRule[] = [
   },
 ];
 
-// Vérification de la collision AABB
+// Anti-Infinite Loop & Rapid Bounce Protections
+const ruleCooldowns: Record<string, number> = {};
+const entityStateTimestamps: Record<string, number> = {};
+const preCollisionStates: Record<string, { subjectState?: string; targetState?: string }> = {};
+const RULE_COOLDOWN_MS = 350; // Minimum interval between identical rule trigger on same entities
+const ENTITY_STATE_COOLDOWN_MS = 250; // Prevents oscillating state ping-pong
+
+// Vérification de la collision avec support des Colliders (Boîte / Cercle / Polygone)
 const checkCollision = (ent1: Entity, ent2: Entity) => {
+  const currentState1 = ent1.states[ent1.currentStateId];
+  const currentState2 = ent2.states[ent2.currentStateId];
+
+  const collider1 = currentState1?.colliderType || ent1.colliderType || (ent1.type === 'apple' ? 'circle' : 'box');
+  const collider2 = currentState2?.colliderType || ent2.colliderType || (ent2.type === 'apple' ? 'circle' : 'box');
+
+  const s1 = currentState1?.scale ?? 1;
+  const s2 = currentState2?.scale ?? 1;
+
+  const w1 = ent1.size.width * s1;
+  const h1 = ent1.size.height * s1;
+  const cx1 = ent1.position.x + ent1.size.width / 2;
+  const cy1 = ent1.position.y + ent1.size.height / 2;
+  const x1 = cx1 - w1 / 2;
+  const y1 = cy1 - h1 / 2;
+
+  const w2 = ent2.size.width * s2;
+  const h2 = ent2.size.height * s2;
+  const cx2 = ent2.position.x + ent2.size.width / 2;
+  const cy2 = ent2.position.y + ent2.size.height / 2;
+  const x2 = cx2 - w2 / 2;
+  const y2 = cy2 - h2 / 2;
+
+  // Cercle vs Cercle
+  if (collider1 === 'circle' && collider2 === 'circle') {
+    const r1 = Math.min(w1, h1) / 2;
+    const r2 = Math.min(w2, h2) / 2;
+    const dx = cx1 - cx2;
+    const dy = cy1 - cy2;
+    return dx * dx + dy * dy <= (r1 + r2) * (r1 + r2);
+  }
+
+  // Cercle vs Boîte / Polygone
+  if (collider1 === 'circle' && (collider2 === 'box' || collider2 === 'polygon')) {
+    const r1 = Math.min(w1, h1) / 2;
+    const closestX = Math.max(x2, Math.min(cx1, x2 + w2));
+    const closestY = Math.max(y2, Math.min(cy1, y2 + h2));
+    const dx = cx1 - closestX;
+    const dy = cy1 - closestY;
+    return dx * dx + dy * dy <= r1 * r1;
+  }
+
+  if ((collider1 === 'box' || collider1 === 'polygon') && collider2 === 'circle') {
+    const r2 = Math.min(w2, h2) / 2;
+    const closestX = Math.max(x1, Math.min(cx2, x1 + w1));
+    const closestY = Math.max(y1, Math.min(cy1, y1 + h1));
+    const dx = cx2 - closestX;
+    const dy = cy2 - closestY;
+    return dx * dx + dy * dy <= r2 * r2;
+  }
+
+  // Boîte AABB vs Boîte AABB
   return (
-    ent1.position.x < ent2.position.x + ent2.size.width &&
-    ent1.position.x + ent1.size.width > ent2.position.x &&
-    ent1.position.y < ent2.position.y + ent2.size.height &&
-    ent1.position.y + ent1.size.height > ent2.position.y
+    x1 < x2 + w2 &&
+    x1 + w1 > x2 &&
+    y1 < y2 + h2 &&
+    y1 + h1 > y2
   );
 };
 
-export const useSceneStore = create<SceneState>()(
-  persist(
-    (set, get) => ({
-      entities: {},
-      customArchetypes: { ...defaultCustomArchetypes },
-      rules: [],
-      activeCollisions: {},
-      selectedEntityId: null,
-      appMode: 'edit',
-      snapshotEntities: null,
-      settings: {
-        showCanvasLabels: false,
-        showGrid: true,
-        gridStyle: 'dots',
-        showTagsSystem: false,
-      },
+export const useSceneStore = create<SceneState>()((set, get) => ({
+  entities: {},
+  customArchetypes: {},
+  rules: [],
+  activeCollisions: {},
+  selectedEntityId: null,
+  appMode: 'edit',
+  snapshotEntities: null,
+  settings: {
+    showCanvasLabels: false,
+    showGrid: false,
+    gridStyle: 'dots',
+    showTagsSystem: false,
+  },
 
   updateSettings: (partial) => {
     set((state) => ({
@@ -320,6 +384,8 @@ export const useSceneStore = create<SceneState>()(
       const snapshot = JSON.parse(JSON.stringify(get().entities));
       set({ appMode: 'play', snapshotEntities: snapshot });
     } else {
+      // Quand on repasse en mode édition, reset automatique de la scène
+      get().resetScene();
       set({ appMode: 'edit' });
     }
   },
@@ -392,11 +458,30 @@ export const useSceneStore = create<SceneState>()(
     set((state) => {
       const entity = state.entities[id];
       if (!entity) return state;
+
+      const updatedEntities = {
+        ...state.entities,
+        [id]: { ...entity, ...partial },
+      };
+
+      // Si le nom ou l'archétype est renommé, synchroniser le customArchetypes et les entités du même type
+      let updatedArchetypes = state.customArchetypes;
+      if (partial.name && partial.name.trim()) {
+        const newName = partial.name.trim();
+        if (updatedArchetypes[entity.type]) {
+          updatedArchetypes = {
+            ...updatedArchetypes,
+            [entity.type]: {
+              ...updatedArchetypes[entity.type],
+              name: newName,
+            },
+          };
+        }
+      }
+
       return {
-        entities: {
-          ...state.entities,
-          [id]: { ...entity, ...partial },
-        },
+        entities: updatedEntities,
+        customArchetypes: updatedArchetypes,
       };
     });
   },
@@ -672,20 +757,12 @@ export const useSceneStore = create<SceneState>()(
       tags: tags && tags.length > 0 ? tags : [slug, 'custom'],
       position: { x: 180 + ((count * 35) % 220), y: 140 + ((count * 30) % 180) },
       size: { width: 80, height: 80 },
-      currentStateId: 'state_a',
+      currentStateId: 'state_1',
       isDraggable: true,
       states: {
-        state_a: {
-          id: 'state_a',
-          name: 'A',
-          color: mainColor,
-          scale: 1,
-          rotation: 0,
-          vectorPaths: vectorPaths ? JSON.parse(JSON.stringify(vectorPaths)) : [],
-        },
-        state_b: {
-          id: 'state_b',
-          name: 'B',
+        state_1: {
+          id: 'state_1',
+          name: 'Normal',
           color: mainColor,
           scale: 1,
           rotation: 0,
@@ -918,9 +995,14 @@ export const useSceneStore = create<SceneState>()(
   },
 
   triggerPointerEvent: (entityId, phase) => {
+    // Les règles ne s'exécutent QU'EN mode PLAY
+    if (get().appMode !== 'play') return;
+
     const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
     const subject = entities[entityId];
     if (!subject) return;
+
+    const now = Date.now();
 
     const activeClickRules = rules.filter((r) => {
       if (!r.enabled || r.trigger.type !== 'click') return false;
@@ -951,6 +1033,12 @@ export const useSceneStore = create<SceneState>()(
     });
 
     activeClickRules.forEach((rule) => {
+      const cooldownKey = `click_${rule.id}_${subject.id}_${phase}`;
+      if (now - (ruleCooldowns[cooldownKey] || 0) < RULE_COOLDOWN_MS) {
+        return;
+      }
+      ruleCooldowns[cooldownKey] = now;
+
       rule.actions.forEach((act) => {
         executeAction(act, {
           subject,
@@ -965,19 +1053,24 @@ export const useSceneStore = create<SceneState>()(
   },
 
   triggerDragRelease: (subjectId) => {
+    // Les règles ne s'exécutent QU'EN mode PLAY
+    if (get().appMode !== 'play') return;
+
     const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
     const subject = entities[subjectId];
     if (!subject) return;
 
-    // Trouver les règles de collision avec phase 'release'
-    const releaseRules = rules.filter(
-      (r) => r.enabled && r.trigger.type === 'collision' && r.trigger.phase === 'release'
-    );
-
+    const now = Date.now();
     const allEntitiesList = Object.values(entities);
 
-    releaseRules.forEach((rule) => {
-      // Le sujet correspond-il à la règle ?
+    // 1. Règles spécifiques au Drag / Relâchement (type 'drag' ou phase 'drag_release')
+    const dragReleaseRules = rules.filter(
+      (r) =>
+        r.enabled &&
+        (r.trigger.type === 'drag' || r.trigger.phase === 'drag_release')
+    );
+
+    dragReleaseRules.forEach((rule) => {
       if (
         !matchesEntityFilter(
           subject,
@@ -990,7 +1083,6 @@ export const useSceneStore = create<SceneState>()(
         return;
       }
 
-      // État du sujet
       if (
         rule.trigger.subjectStateId &&
         rule.trigger.subjectStateId !== '' &&
@@ -999,42 +1091,100 @@ export const useSceneStore = create<SceneState>()(
         return;
       }
 
-      // Trouver toutes les cibles potentielles en collision au moment du release
-      const candidateTargets = allEntitiesList.filter(
-        (target) =>
-          target.id !== subject.id &&
-          matchesEntityFilter(
-            target,
-            rule.trigger.targetMode,
-            rule.trigger.targetId,
-            rule.trigger.targetType,
-            rule.trigger.targetTag
-          )
+      const cooldownKey = `drag_release_${rule.id}_${subject.id}`;
+      if (now - (ruleCooldowns[cooldownKey] || 0) < RULE_COOLDOWN_MS) {
+        return;
+      }
+      ruleCooldowns[cooldownKey] = now;
+
+      rule.actions.forEach((act) => {
+        executeAction(act, {
+          subject,
+          allEntities: entities,
+          updateEntityState,
+          updateEntityDetails,
+          deleteEntity,
+          spawnEntity,
+        });
+      });
+    });
+
+// Stockage temporaire des états avant collision pour le mode Contact Continu (Toggle)
+const preCollisionStates: Record<string, { subjectState?: StateId; targetState?: StateId }> = {};
+
+    // 2. Règles de collision avec phase 'collision_release' ou 'release' (Relâchement au-dessus d'une cible)
+    const collisionReleaseRules = rules.filter(
+      (r) =>
+        r.enabled &&
+        r.trigger.type === 'collision' &&
+        (r.trigger.phase === 'collision_release' || r.trigger.phase === 'release' || r.trigger.phase === 'enter')
+    );
+
+    collisionReleaseRules.forEach((rule) => {
+      // Vérifier si le sujet correspond (Sens 1)
+      const isSub1 = matchesEntityFilter(
+        subject,
+        rule.trigger.subjectMode,
+        rule.trigger.subjectId,
+        rule.trigger.subjectType,
+        rule.trigger.subjectTag
       );
 
-      candidateTargets.forEach((target) => {
-        // État de la cible
-        if (
-          rule.trigger.targetStateId &&
-          rule.trigger.targetStateId !== '' &&
-          target.currentStateId !== rule.trigger.targetStateId
-        ) {
-          return;
+      // Vérifier si le sujet correspond comme cible (Sens 2 - Bidirectionnel)
+      const isSub2 = matchesEntityFilter(
+        subject,
+        rule.trigger.targetMode,
+        rule.trigger.targetId,
+        rule.trigger.targetType,
+        rule.trigger.targetTag
+      );
+
+      allEntitiesList.forEach((other) => {
+        if (other.id === subject.id) return;
+        if (!checkCollision(subject, other)) return;
+
+        // Cas 1: subject = Sujet, other = Cible
+        if (isSub1 && matchesEntityFilter(other, rule.trigger.targetMode, rule.trigger.targetId, rule.trigger.targetType, rule.trigger.targetTag)) {
+          if ((!rule.trigger.subjectStateId || subject.currentStateId === rule.trigger.subjectStateId) &&
+              (!rule.trigger.targetStateId || other.currentStateId === rule.trigger.targetStateId)) {
+            const cooldownKey = `coll_rel_${rule.id}_${subject.id}_${other.id}`;
+            if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
+              ruleCooldowns[cooldownKey] = now;
+              rule.actions.forEach((act) => {
+                executeAction(act, {
+                  subject,
+                  target: other,
+                  allEntities: entities,
+                  updateEntityState,
+                  updateEntityDetails,
+                  deleteEntity,
+                  spawnEntity,
+                });
+              });
+            }
+          }
         }
 
-        // Vérifier si collision au moment précis du release
-        if (checkCollision(subject, target)) {
-          rule.actions.forEach((act) => {
-            executeAction(act, {
-              subject,
-              target,
-              allEntities: entities,
-              updateEntityState,
-              updateEntityDetails,
-              deleteEntity,
-              spawnEntity,
-            });
-          });
+        // Cas 2: other = Sujet, subject = Cible (Bidirectionnel)
+        if (isSub2 && matchesEntityFilter(other, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)) {
+          if ((!rule.trigger.subjectStateId || other.currentStateId === rule.trigger.subjectStateId) &&
+              (!rule.trigger.targetStateId || subject.currentStateId === rule.trigger.targetStateId)) {
+            const cooldownKey = `coll_rel_${rule.id}_${other.id}_${subject.id}`;
+            if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
+              ruleCooldowns[cooldownKey] = now;
+              rule.actions.forEach((act) => {
+                executeAction(act, {
+                  subject: other,
+                  target: subject,
+                  allEntities: entities,
+                  updateEntityState,
+                  updateEntityDetails,
+                  deleteEntity,
+                  spawnEntity,
+                });
+              });
+            }
+          }
         }
       });
     });
@@ -1045,131 +1195,221 @@ export const useSceneStore = create<SceneState>()(
   },
 
   evaluateRulesWithTemp: (tempPositions) => {
-    const { entities, rules, activeCollisions, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
+    // Les règles de collision et d'animation ne s'exécutent QU'EN mode PLAY
+    if (get().appMode !== 'play') return;
 
+    const { entities, rules, activeCollisions, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
     const collisionRules = rules.filter((r) => r.enabled && r.trigger.type === 'collision');
+    if (collisionRules.length === 0) return;
+
     const nextCollisions: Record<string, boolean> = { ...activeCollisions };
     const allEntitiesList = Object.values(entities);
+    const now = Date.now();
 
     collisionRules.forEach((rule) => {
-      // Trouver tous les sujets potentiels
-      const candidateSubjects = allEntitiesList.filter((e) =>
-        matchesEntityFilter(
-          e,
-          rule.trigger.subjectMode,
-          rule.trigger.subjectId,
-          rule.trigger.subjectType,
-          rule.trigger.subjectTag
-        )
-      );
+      // Chercher toutes les paires d'entités distinctes
+      for (let i = 0; i < allEntitiesList.length; i++) {
+        for (let j = i + 1; j < allEntitiesList.length; j++) {
+          const entA = allEntitiesList[i];
+          const entB = allEntitiesList[j];
 
-      // Trouver toutes les cibles potentielles
-      const candidateTargets = allEntitiesList.filter((e) =>
-        matchesEntityFilter(
-          e,
-          rule.trigger.targetMode,
-          rule.trigger.targetId,
-          rule.trigger.targetType,
-          rule.trigger.targetTag
-        )
-      );
-
-      candidateSubjects.forEach((subject) => {
-        candidateTargets.forEach((target) => {
-          if (subject.id === target.id) return; // Ne se résout pas sur lui-même
-
-          const collisionKey = `${rule.id}_${subject.id}_${target.id}`;
-
-          // Filtrer par état spécifique du sujet
-          if (
-            rule.trigger.subjectStateId &&
-            rule.trigger.subjectStateId !== '' &&
-            subject.currentStateId !== rule.trigger.subjectStateId
-          ) {
-            nextCollisions[collisionKey] = false;
-            return;
+          let posA = entA.position;
+          if (tempPositions && tempPositions[entA.id]) {
+            posA = tempPositions[entA.id];
           }
 
-          // Filtrer par état spécifique de la cible
-          if (
-            rule.trigger.targetStateId &&
-            rule.trigger.targetStateId !== '' &&
-            target.currentStateId !== rule.trigger.targetStateId
-          ) {
-            nextCollisions[collisionKey] = false;
-            return;
+          let posB = entB.position;
+          if (tempPositions && tempPositions[entB.id]) {
+            posB = tempPositions[entB.id];
           }
 
-          let subPos = subject.position;
-          if (tempPositions && tempPositions[subject.id]) {
-            subPos = tempPositions[subject.id];
-          }
+          const tempA = { ...entA, position: posA };
+          const tempB = { ...entB, position: posB };
 
-          let tarPos = target.position;
-          if (tempPositions && tempPositions[target.id]) {
-            tarPos = tempPositions[target.id];
-          }
+          const isColliding = checkCollision(tempA, tempB);
 
-          const tempSubject = { ...subject, position: subPos };
-          const tempTarget = { ...target, position: tarPos };
+          // Vérifier dans le Sens 1 : entA = Sujet, entB = Cible
+          const matchAAsSubject = matchesEntityFilter(
+            entA,
+            rule.trigger.subjectMode,
+            rule.trigger.subjectId,
+            rule.trigger.subjectType,
+            rule.trigger.subjectTag
+          );
+          const matchBAsTarget = matchesEntityFilter(
+            entB,
+            rule.trigger.targetMode,
+            rule.trigger.targetId,
+            rule.trigger.targetType,
+            rule.trigger.targetTag
+          );
 
-          const isColliding = checkCollision(tempSubject, tempTarget);
-          const wasColliding = !!activeCollisions[collisionKey];
-
-          const rulePhase = rule.trigger.phase || 'enter';
-          let shouldExecute = false;
-
-          if (isColliding && !wasColliding) {
-            // Premier contact
-            if (rulePhase === 'enter' || rulePhase === 'stay') {
-              shouldExecute = true;
-            }
-            nextCollisions[collisionKey] = true;
-          } else if (isColliding && wasColliding) {
-            // Contact continu
-            if (rulePhase === 'stay') {
-              shouldExecute = true;
-            }
-            nextCollisions[collisionKey] = true;
-          } else if (!isColliding && wasColliding) {
-            // Séparation / Relâchement physique (Release)
-            if (rulePhase === 'release') {
-              shouldExecute = true;
-            }
-            nextCollisions[collisionKey] = false;
-          }
-
-          if (shouldExecute) {
-            rule.actions.forEach((act) => {
-              executeAction(act, {
-                subject,
-                target,
-                allEntities: entities,
+          if (matchAAsSubject && matchBAsTarget) {
+            handleCollisionPair(
+              rule,
+              entA,
+              entB,
+              isColliding,
+              nextCollisions,
+              activeCollisions,
+              now,
+              {
+                entities,
                 updateEntityState,
                 updateEntityDetails,
                 deleteEntity,
                 spawnEntity,
-              });
-            });
+              }
+            );
           }
-        });
-      });
+
+          // Vérifier dans le Sens 2 (Bidirectionnel) : entB = Sujet, entA = Cible
+          const matchBAsSubject = matchesEntityFilter(
+            entB,
+            rule.trigger.subjectMode,
+            rule.trigger.subjectId,
+            rule.trigger.subjectType,
+            rule.trigger.subjectTag
+          );
+          const matchAAsTarget = matchesEntityFilter(
+            entA,
+            rule.trigger.targetMode,
+            rule.trigger.targetId,
+            rule.trigger.targetType,
+            rule.trigger.targetTag
+          );
+
+          if (matchBAsSubject && matchAAsTarget && entA.id !== entB.id) {
+            handleCollisionPair(
+              rule,
+              entB,
+              entA,
+              isColliding,
+              nextCollisions,
+              activeCollisions,
+              now,
+              {
+                entities,
+                updateEntityState,
+                updateEntityDetails,
+                deleteEntity,
+                spawnEntity,
+              }
+            );
+          }
+        }
+      }
     });
 
     set({ activeCollisions: nextCollisions });
   },
-}),
-    {
-      name: 'atelier-vivant-project-v1',
-      partialize: (state) => ({
-        entities: state.entities,
-        customArchetypes: state.customArchetypes,
-        rules: state.rules,
-        settings: state.settings,
-      }),
+}));
+
+// Helper pour traiter les paires de collision avec anti-boucle
+function handleCollisionPair(
+  rule: DynamicRule,
+  subject: Entity,
+  target: Entity,
+  isColliding: boolean,
+  nextCollisions: Record<string, boolean>,
+  activeCollisions: Record<string, boolean>,
+  now: number,
+  helpers: {
+    entities: Record<EntityId, Entity>;
+    updateEntityState: (id: EntityId, stateId: StateId) => void;
+    updateEntityDetails: (id: EntityId, partial: Partial<Entity>) => void;
+    deleteEntity: (id: EntityId) => void;
+    spawnEntity: (params: { type: EntityType; position: Position; initialStateId?: StateId }) => void;
+  }
+) {
+  const collisionKey = `${rule.id}_${subject.id}_${target.id}`;
+
+  // Filtrer par état spécifique du sujet
+  if (
+    rule.trigger.subjectStateId &&
+    rule.trigger.subjectStateId !== '' &&
+    subject.currentStateId !== rule.trigger.subjectStateId
+  ) {
+    nextCollisions[collisionKey] = false;
+    return;
+  }
+
+  // Filtrer par état spécifique de la cible
+  if (
+    rule.trigger.targetStateId &&
+    rule.trigger.targetStateId !== '' &&
+    target.currentStateId !== rule.trigger.targetStateId
+  ) {
+    nextCollisions[collisionKey] = false;
+    return;
+  }
+
+  const wasColliding = !!activeCollisions[collisionKey];
+  const rulePhase = rule.trigger.phase || 'enter';
+  let shouldExecute = false;
+
+  if (isColliding && !wasColliding) {
+    // Enregistrer les états précédents pour le mode stay / revertOnExit
+    preCollisionStates[collisionKey] = {
+      subjectState: subject.currentStateId,
+      targetState: target.currentStateId,
+    };
+
+    // Premier contact (On Enter)
+    if (rulePhase === 'enter' || rulePhase === 'stay') {
+      shouldExecute = true;
     }
-  )
-);
+    nextCollisions[collisionKey] = true;
+  } else if (isColliding && wasColliding) {
+    // Contact continu (Stay)
+    if (rulePhase === 'stay') {
+      shouldExecute = true;
+    }
+    nextCollisions[collisionKey] = true;
+  } else if (!isColliding && wasColliding) {
+    // Sortie / Séparation (Release / Exit)
+    if (rulePhase === 'release') {
+      shouldExecute = true;
+    }
+
+    // Toggle / Revert pour le contact continu (stay)
+    if (rulePhase === 'stay' && rule.trigger.revertOnExit !== false) {
+      const pre = preCollisionStates[collisionKey];
+      if (pre) {
+        if (pre.subjectState && subject.states[pre.subjectState] && subject.currentStateId !== pre.subjectState) {
+          helpers.updateEntityState(subject.id, pre.subjectState);
+        }
+        if (pre.targetState && target.states[pre.targetState] && target.currentStateId !== pre.targetState) {
+          helpers.updateEntityState(target.id, pre.targetState);
+        }
+      }
+    }
+
+    delete preCollisionStates[collisionKey];
+    nextCollisions[collisionKey] = false;
+  }
+
+  if (shouldExecute) {
+    // Anti-loop cooldown debounce
+    const cooldownKey = `collision_${rule.id}_${subject.id}_${target.id}`;
+    if (now - (ruleCooldowns[cooldownKey] || 0) < RULE_COOLDOWN_MS) {
+      return;
+    }
+    ruleCooldowns[cooldownKey] = now;
+
+    rule.actions.forEach((act) => {
+      executeAction(act, {
+        subject,
+        target,
+        allEntities: helpers.entities,
+        updateEntityState: helpers.updateEntityState,
+        updateEntityDetails: helpers.updateEntityDetails,
+        deleteEntity: helpers.deleteEntity,
+        spawnEntity: helpers.spawnEntity,
+      });
+    });
+  }
+}
 
 // Helper pour exécuter une action ciblée
 function executeAction(
@@ -1190,10 +1430,28 @@ function executeAction(
   }
 
   if (act.type === 'spawn_entity') {
-    const spawnType = act.spawnEntityType || 'apple';
-    const basePos = helpers.subject?.position || helpers.target?.position || { x: 250, y: 200 };
-    const spawnX = basePos.x + Math.floor(Math.random() * 50 - 25);
-    const spawnY = basePos.y + Math.floor(Math.random() * 50 - 25);
+    const spawnType = act.spawnEntityType || 'custom';
+    let basePos = { x: 250, y: 200 };
+
+    if (act.spawnLocation === 'at_target' && helpers.target) {
+      basePos = { ...helpers.target.position };
+    } else if (act.spawnLocation === 'at_subject' && helpers.subject) {
+      basePos = { ...helpers.subject.position };
+    } else if (act.spawnLocation === 'random') {
+      basePos = {
+        x: Math.floor(Math.random() * 400 + 80),
+        y: Math.floor(Math.random() * 250 + 80),
+      };
+    } else if (act.spawnLocation === 'absolute' && act.spawnPosition) {
+      basePos = { ...act.spawnPosition };
+    } else if (helpers.subject) {
+      basePos = { ...helpers.subject.position };
+    } else if (helpers.target) {
+      basePos = { ...helpers.target.position };
+    }
+
+    const spawnX = basePos.x + Math.floor(Math.random() * 40 - 20);
+    const spawnY = basePos.y + Math.floor(Math.random() * 40 - 20);
 
     helpers.spawnEntity({
       type: spawnType,
@@ -1241,7 +1499,12 @@ function executeAction(
     }
 
     if (act.type === 'change_state' && act.targetStateId) {
+      const now = Date.now();
+      if (now - (entityStateTimestamps[entity.id] || 0) < ENTITY_STATE_COOLDOWN_MS) {
+        return; // Évite les oscillations d'état infinies immédiates
+      }
       if (entity.currentStateId !== act.targetStateId && entity.states[act.targetStateId]) {
+        entityStateTimestamps[entity.id] = now;
         helpers.updateEntityState(entity.id, act.targetStateId);
       }
     } else if (act.type === 'toggle_draggable') {
