@@ -1,5 +1,5 @@
 import { useSceneStore } from '../store/useSceneStore';
-import { X, Sliders, Eye, Grid, Tag } from 'lucide-react';
+import { X, Sliders, Eye, Grid, Tag, Filter } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -99,6 +99,29 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               onClick={() => updateSettings({ showTagsSystem: !settings.showTagsSystem })}
               className={`w-11 h-6 rounded-full transition-colors p-1 cursor-pointer flex items-center ${
                 settings.showTagsSystem ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'
+              }`}
+            >
+              <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
+            </button>
+          </div>
+
+          {/* Toggle RuleBook Filters */}
+          <div className="flex items-center justify-between p-3.5 bg-slate-50 rounded-xl border border-slate-200/80">
+            <div className="flex items-center gap-3">
+              <Filter className="w-4 h-4 text-indigo-600" />
+              <div>
+                <label className="text-xs font-bold text-slate-800 block">
+                  Filtres du Livre de Règles
+                </label>
+                <span className="text-[11px] text-slate-500">
+                  Afficher les filtres par type d'événement et par objet dans le livre de règles
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => updateSettings({ showRuleFilters: !settings.showRuleFilters })}
+              className={`w-11 h-6 rounded-full transition-colors p-1 cursor-pointer flex items-center ${
+                settings.showRuleFilters ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'
               }`}
             >
               <div className="w-4 h-4 bg-white rounded-full shadow-xs" />

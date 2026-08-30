@@ -1401,15 +1401,15 @@ export function DrawingCanvas({
           <div className="bg-white p-3 rounded-2xl border border-emerald-100 shadow-2xs space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5 text-emerald-600" /> Collider (Collision)
+                <Shield className="w-3.5 h-3.5 text-emerald-600" /> Forme du Collider
               </span>
               <button
                 type="button"
                 onClick={handleAutoDetectCollider}
                 className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200 flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                title="Détecter automatiquement la forme de collision d'après le tracé"
+                title="Détecter automatiquement d'après le tracé de votre dessin"
               >
-                <Sparkles className="w-3 h-3 text-emerald-600" /> Auto-détecter
+                <Sparkles className="w-3 h-3 text-emerald-600" /> Tracé auto
               </button>
             </div>
 
@@ -1419,20 +1419,22 @@ export function DrawingCanvas({
                 onClick={() => handleColliderTypeSelect('box')}
                 className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
                   colliderType === 'box'
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200 shadow-2xs'
                     : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                 }`}
+                title="Collider Rectangle"
               >
-                <Square className="w-3 h-3" /> Boîte
+                <Square className="w-3 h-3" /> Rectangle
               </button>
               <button
                 type="button"
                 onClick={() => handleColliderTypeSelect('circle')}
                 className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
                   colliderType === 'circle'
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200 shadow-2xs'
                     : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                 }`}
+                title="Collider Cercle"
               >
                 <Circle className="w-3 h-3" /> Cercle
               </button>
@@ -1441,11 +1443,12 @@ export function DrawingCanvas({
                 onClick={() => handleColliderTypeSelect('polygon')}
                 className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
                   colliderType === 'polygon'
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200 shadow-2xs'
                     : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                 }`}
+                title="Collider Polyligne / Polygone"
               >
-                <Shapes className="w-3 h-3" /> Polygone
+                <Shapes className="w-3 h-3" /> Polyligne
               </button>
             </div>
           </div>

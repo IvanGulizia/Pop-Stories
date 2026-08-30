@@ -4,13 +4,13 @@ import { DrawingCanvas, OnionStateOption } from './DrawingCanvas';
 import { VectorPath, ColliderType } from '../types';
 
 interface FullScreenDrawingModalProps {
-  title: string;
+  title?: string;
   subtitle?: string;
   initialPaths?: VectorPath[];
   initialColliderType?: ColliderType;
   onionStates?: OnionStateOption[];
   currentEditingStateName?: string;
-  onSave: (paths: VectorPath[], dataUrl?: string, colliderType?: ColliderType) => void;
+  onSave: (paths: VectorPath[], dataUrl?: string, colliderType?: ColliderType, stateName?: string) => void;
   onClose: () => void;
 }
 
@@ -27,6 +27,8 @@ export function FullScreenDrawingModal({
   const [currentPaths, setCurrentPaths] = useState<VectorPath[]>(initialPaths);
   const [currentDataUrl, setCurrentDataUrl] = useState<string | undefined>(undefined);
   const [currentColliderType, setCurrentColliderType] = useState<ColliderType>(initialColliderType);
+  const [stateName, setStateName] = useState<string>(currentEditingStateName || 'Normal');
+  const [isEditingName, setIsEditingName] = useState(false);
 
   const handleVectorChange = (paths: VectorPath[], dataUrl?: string) => {
     setCurrentPaths(paths);
@@ -43,8 +45,38 @@ export function FullScreenDrawingModal({
               <Paintbrush className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="font-bold text-slate-800 text-lg tracking-tight">{title}</h2>
-              {subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-500">Atelier de Dessin •</span>
+                {isEditingName ? (
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-bold text-slate-700">État :</span>
+                    <input
+                      type="text"
+                      value={stateName}
+                      onChange={(e) => setStateName(e.target.value)}
+                      onBlur={() => setIsEditingName(false)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === 'Escape') setIsEditingName(false);
+                      }}
+                      autoFocus
+                      className="px-2 py-0.5 text-sm font-bold text-slate-900 bg-white border border-indigo-500 rounded-lg shadow-2xs outline-none"
+                    />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingName(true)}
+                    className="flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-indigo-50 hover:bg-indigo-100/80 border border-indigo-200 text-indigo-900 text-sm font-bold transition-all cursor-pointer group"
+                    title="Cliquer pour renommer cet état"
+                  >
+                    <span>État : {stateName}</span>
+                    <span className="text-[10px] text-indigo-500 opacity-60 group-hover:opacity-100 underline decoration-dotted">
+                      (renommer)
+                    </span>
+                  </button>
+                )}
+              </div>
+              {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
             </div>
           </div>
 
@@ -58,7 +90,7 @@ export function FullScreenDrawingModal({
             </button>
             <button
               type="button"
-              onClick={() => onSave(currentPaths, currentDataUrl, currentColliderType)}
+              onClick={() => onSave(currentPaths, currentDataUrl, currentColliderType, stateName.trim() || undefined)}
               className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer active:scale-95"
             >
               <Check className="w-4 h-4" /> Enregistrer le dessin

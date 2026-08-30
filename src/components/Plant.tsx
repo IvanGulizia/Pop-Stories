@@ -124,6 +124,8 @@ export function Plant({ entity }: PlantProps) {
 
   const petalAngles = Array.from({ length: petals }, (_, i) => (360 / Math.max(1, petals)) * i);
 
+  const colliderType = currentState.colliderType || entity.colliderType || 'box';
+
   return (
     <motion.div
       className={`absolute flex flex-col items-center justify-end group ${
@@ -136,6 +138,7 @@ export function Plant({ entity }: PlantProps) {
         y,
         width: entity.size.width,
         height: entity.size.height,
+        borderRadius: colliderType === 'circle' ? '50%' : '16px',
       }}
       drag={!isResizing && entity.isDraggable}
       dragMomentum={false}
@@ -168,7 +171,9 @@ export function Plant({ entity }: PlantProps) {
       {isSelected && appMode !== 'play' && (
         <>
           <motion.div
-            className="absolute -inset-2 rounded-2xl border-2 border-indigo-500 border-dashed pointer-events-none"
+            className={`absolute -inset-2 ${
+              colliderType === 'circle' ? 'rounded-full' : 'rounded-2xl'
+            } border-2 border-indigo-500 border-dashed pointer-events-none`}
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
           />

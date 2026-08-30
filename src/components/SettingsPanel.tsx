@@ -1,5 +1,5 @@
 import { useSceneStore } from '../store/useSceneStore';
-import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, CheckCircle2, AlertCircle, Filter } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
 import { useRef, useState } from 'react';
 
@@ -165,6 +165,25 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
           onClick={() => updateSettings({ showTagsSystem: !settings.showTagsSystem })}
           className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
             settings.showTagsSystem ? 'bg-slate-900 justify-end' : 'bg-slate-300 justify-start'
+          }`}
+        >
+          <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
+        </button>
+      </div>
+
+      {/* Toggle RuleBook Filters */}
+      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+        <div className="flex items-center gap-2.5">
+          <Filter className="w-3.5 h-3.5 text-indigo-600" />
+          <div>
+            <label className="text-xs font-bold text-slate-800 block">Filtres du Livre de Règles</label>
+            <span className="text-[10px] text-slate-500">Filtrer par objet et par type d'événement</span>
+          </div>
+        </div>
+        <button
+          onClick={() => updateSettings({ showRuleFilters: !settings.showRuleFilters })}
+          className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+            settings.showRuleFilters ? 'bg-slate-900 justify-end' : 'bg-slate-300 justify-start'
           }`}
         >
           <div className="w-4 h-4 bg-white rounded-full shadow-xs" />

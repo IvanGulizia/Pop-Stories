@@ -50,7 +50,7 @@ interface SceneState {
   addTagToEntity: (id: EntityId, tag: string) => void;
   removeTagFromEntity: (id: EntityId, tag: string) => void;
   updateStateProperties: (entityId: EntityId, stateId: StateId, partial: Partial<EntityState>) => void;
-  addStateToEntity: (entityId: EntityId, name: string) => void;
+  addStateToEntity: (entityId: EntityId, name?: string) => string;
   removeStateFromEntity: (entityId: EntityId, stateId: StateId) => void;
   addEntity: (type: EntityType) => void;
   addCustomEntity: (customData: {
@@ -67,6 +67,7 @@ interface SceneState {
     type: EntityType;
     position: Position;
     initialStateId?: StateId;
+    size?: Size;
   }) => void;
   deleteEntity: (id: EntityId) => void;
   clearAllEntities: () => void;
@@ -371,6 +372,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     showGrid: false,
     gridStyle: 'dots',
     showTagsSystem: false,
+    showRuleFilters: false,
   },
 
   updateSettings: (partial) => {
@@ -392,10 +394,41 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   resetScene: () => {
-    const { snapshotEntities } = get();
+    const { snapshotEntities, customArchetypes, entities } = get();
     if (snapshotEntities) {
+      const restoredEntities: Record<EntityId, Entity> = {};
+
+      Object.entries(snapshotEntities).forEach(([id, snapEnt]) => {
+        const currentEnt = entities[id];
+        const currentArch = customArchetypes[snapEnt.type];
+
+        const latestStates = currentEnt?.states || currentArch?.states || snapEnt.states;
+        const latestName = currentEnt?.name || currentArch?.name || snapEnt.name;
+        const latestTags = currentEnt?.tags || currentArch?.tags || snapEnt.tags;
+        const latestVectorPaths = currentEnt?.vectorPaths || currentArch?.vectorPaths || snapEnt.vectorPaths;
+        const latestColliderType = currentEnt?.colliderType || currentArch?.colliderType || snapEnt.colliderType;
+
+        restoredEntities[id] = {
+          ...snapEnt,
+          name: latestName,
+          tags: latestTags,
+          states: JSON.parse(JSON.stringify(latestStates)),
+          vectorPaths: latestVectorPaths ? JSON.parse(JSON.stringify(latestVectorPaths)) : snapEnt.vectorPaths,
+          colliderType: latestColliderType,
+          position: snapEnt.position,
+          currentStateId: snapEnt.currentStateId in latestStates ? snapEnt.currentStateId : Object.keys(latestStates)[0],
+        };
+      });
+
+      // Preserve newly user-created entities that were not in initial snapshot and not spawned by rules
+      Object.entries(entities).forEach(([id, currEnt]) => {
+        if (!snapshotEntities[id] && !id.startsWith('spawn-')) {
+          restoredEntities[id] = currEnt;
+        }
+      });
+
       set({
-        entities: JSON.parse(JSON.stringify(snapshotEntities)),
+        entities: restoredEntities,
         activeCollisions: {},
       });
     } else {
@@ -457,27 +490,36 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   updateEntityDetails: (id, partial) => {
     set((state) => {
-      const entity = state.entities[id];
+      const entity =
+        state.entities[id] ||
+        state.customArchetypes[id] ||
+        Object.values(state.entities).find((e) => e.type === id) ||
+        Object.values(state.customArchetypes).find((a) => a.type === id);
+
       if (!entity) return state;
+      const targetType = entity.type;
 
-      const updatedEntities = {
-        ...state.entities,
-        [id]: { ...entity, ...partial },
-      };
-
-      // Si le nom ou l'archétype est renommé, synchroniser le customArchetypes et les entités du même type
-      let updatedArchetypes = state.customArchetypes;
-      if (partial.name && partial.name.trim()) {
-        const newName = partial.name.trim();
-        if (updatedArchetypes[entity.type]) {
-          updatedArchetypes = {
-            ...updatedArchetypes,
-            [entity.type]: {
-              ...updatedArchetypes[entity.type],
-              name: newName,
-            },
+      const updatedEntities = { ...state.entities };
+      Object.values(updatedEntities).forEach((e) => {
+        if (e.type === targetType) {
+          updatedEntities[e.id] = {
+            ...e,
+            ...partial,
+            // Keep instance-specific position intact unless specifically modifying position
+            position: partial.position !== undefined && e.id === id ? partial.position : e.position,
           };
+        } else if (e.id === id) {
+          updatedEntities[e.id] = { ...e, ...partial };
         }
+      });
+
+      let updatedArchetypes = { ...state.customArchetypes };
+      if (updatedArchetypes[targetType]) {
+        updatedArchetypes[targetType] = {
+          ...updatedArchetypes[targetType],
+          ...partial,
+          position: { x: 0, y: 0 },
+        };
       }
 
       return {
@@ -491,7 +533,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     const cleanTag = rawTag.toLowerCase().trim().replace(/^#/, '');
     if (!cleanTag) return;
     set((state) => {
-      const targetEntity = state.entities[id];
+      const targetEntity = state.entities[id] || state.customArchetypes[id];
       if (!targetEntity) return state;
       const targetType = targetEntity.type;
 
@@ -505,13 +547,24 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         }
       });
 
-      return { entities: updatedEntities };
+      const updatedArchetypes = { ...state.customArchetypes };
+      if (updatedArchetypes[targetType]) {
+        const currentTags = updatedArchetypes[targetType].tags || [];
+        if (!currentTags.includes(cleanTag)) {
+          updatedArchetypes[targetType] = {
+            ...updatedArchetypes[targetType],
+            tags: [...currentTags, cleanTag],
+          };
+        }
+      }
+
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
     });
   },
 
   removeTagFromEntity: (id, tagToRemove) => {
     set((state) => {
-      const targetEntity = state.entities[id];
+      const targetEntity = state.entities[id] || state.customArchetypes[id];
       if (!targetEntity) return state;
       const targetType = targetEntity.type;
 
@@ -525,26 +578,50 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         }
       });
 
-      return { entities: updatedEntities };
+      const updatedArchetypes = { ...state.customArchetypes };
+      if (updatedArchetypes[targetType] && updatedArchetypes[targetType].tags) {
+        updatedArchetypes[targetType] = {
+          ...updatedArchetypes[targetType],
+          tags: updatedArchetypes[targetType].tags.filter((t) => t !== tagToRemove),
+        };
+      }
+
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
     });
   },
 
   updateStateProperties: (entityId, stateId, partial) => {
     set((state) => {
-      const targetEntity = state.entities[entityId];
+      const targetEntity =
+        state.entities[entityId] ||
+        state.customArchetypes[entityId] ||
+        Object.values(state.entities).find((e) => e.type === entityId) ||
+        Object.values(state.customArchetypes).find((a) => a.type === entityId);
+
       if (!targetEntity) return state;
       const targetType = targetEntity.type;
 
       const updatedEntities = { ...state.entities };
       Object.values(updatedEntities).forEach((e) => {
-        if (e.type === targetType && e.states[stateId]) {
-          const updatedState = { ...e.states[stateId], ...partial };
+        if (e.type === targetType) {
+          const existingState = e.states[stateId] || { id: stateId, name: stateId, color: '#3b82f6', scale: 1, rotation: 0 };
+          const updatedState: EntityState = {
+            id: stateId,
+            name: partial.name ?? existingState.name ?? stateId,
+            color: partial.color ?? existingState.color ?? '#3b82f6',
+            scale: partial.scale ?? existingState.scale ?? 1,
+            rotation: partial.rotation ?? existingState.rotation ?? 0,
+            ...existingState,
+            ...partial,
+          };
           const isCurrentState = e.currentStateId === stateId;
           const newVectorPaths = partial.vectorPaths !== undefined ? partial.vectorPaths : e.vectorPaths;
+          const newColliderType = partial.colliderType !== undefined ? partial.colliderType : e.colliderType;
 
           updatedEntities[e.id] = {
             ...e,
             vectorPaths: isCurrentState ? newVectorPaths : e.vectorPaths,
+            colliderType: isCurrentState ? newColliderType : e.colliderType,
             states: {
               ...e.states,
               [stateId]: updatedState,
@@ -554,14 +631,30 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       });
 
       const updatedArchetypes = { ...state.customArchetypes };
-      if (updatedArchetypes[targetType] && updatedArchetypes[targetType].states[stateId]) {
+      if (updatedArchetypes[targetType]) {
+        const existingArchState = updatedArchetypes[targetType].states[stateId] || { id: stateId, name: stateId, color: '#3b82f6', scale: 1, rotation: 0 };
+        const updatedArchState: EntityState = {
+          id: stateId,
+          name: partial.name ?? existingArchState.name ?? stateId,
+          color: partial.color ?? existingArchState.color ?? '#3b82f6',
+          scale: partial.scale ?? existingArchState.scale ?? 1,
+          rotation: partial.rotation ?? existingArchState.rotation ?? 0,
+          ...existingArchState,
+          ...partial,
+        };
         updatedArchetypes[targetType] = {
           ...updatedArchetypes[targetType],
           states: {
             ...updatedArchetypes[targetType].states,
-            [stateId]: { ...updatedArchetypes[targetType].states[stateId], ...partial },
+            [stateId]: updatedArchState,
           },
         };
+        if (partial.vectorPaths) {
+          updatedArchetypes[targetType].vectorPaths = partial.vectorPaths;
+        }
+        if (partial.colliderType) {
+          updatedArchetypes[targetType].colliderType = partial.colliderType;
+        }
       }
 
       return { entities: updatedEntities, customArchetypes: updatedArchetypes };
@@ -569,29 +662,34 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   addStateToEntity: (entityId, name) => {
+    const targetEntity =
+      get().entities[entityId] ||
+      get().customArchetypes[entityId] ||
+      Object.values(get().entities).find((e) => e.type === entityId) ||
+      Object.values(get().customArchetypes).find((a) => a.type === entityId);
+
+    if (!targetEntity) return '';
+    const targetType = targetEntity.type;
+
+    const existingStateKeys = Object.keys(targetEntity.states);
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const nextLetter = alphabet[existingStateKeys.length] || `État ${existingStateKeys.length + 1}`;
+    const stateName = name && name.trim() ? name.trim() : nextLetter;
+    const newId = `state_${stateName.toLowerCase().replace(/[^a-z0-9]/gi, '_')}_${Date.now().toString(36)}`;
+
+    const newState: EntityState = {
+      id: newId,
+      name: stateName,
+      color: targetEntity.states[targetEntity.currentStateId]?.color || '#3b82f6',
+      scale: 1,
+      rotation: 0,
+      stemHeight: 50,
+      flowerColor: '#a855f7',
+      flowerPetals: 6,
+      vectorPaths: [], // Canvas vide pour le nouvel état
+    };
+
     set((state) => {
-      const targetEntity = state.entities[entityId];
-      if (!targetEntity) return state;
-      const targetType = targetEntity.type;
-
-      const existingStateKeys = Object.keys(targetEntity.states);
-      const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-      const nextLetter = alphabet[existingStateKeys.length] || `État ${existingStateKeys.length + 1}`;
-      const stateName = name && name.trim() ? name.trim() : nextLetter;
-      const newId = `state_${stateName.toLowerCase().replace(/[^a-z0-9]/gi, '_')}_${Date.now().toString(36)}`;
-
-      const newState: EntityState = {
-        id: newId,
-        name: stateName,
-        color: targetEntity.states[targetEntity.currentStateId]?.color || '#3b82f6',
-        scale: 1,
-        rotation: 0,
-        stemHeight: 50,
-        flowerColor: '#a855f7',
-        flowerPetals: 6,
-        vectorPaths: [], // Canvas vide pour le nouvel état
-      };
-
       const updatedEntities = { ...state.entities };
       Object.values(updatedEntities).forEach((e) => {
         if (e.type === targetType) {
@@ -605,13 +703,31 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         }
       });
 
-      return { entities: updatedEntities };
+      const updatedArchetypes = { ...state.customArchetypes };
+      if (updatedArchetypes[targetType]) {
+        updatedArchetypes[targetType] = {
+          ...updatedArchetypes[targetType],
+          states: {
+            ...updatedArchetypes[targetType].states,
+            [newId]: newState,
+          },
+        };
+      }
+
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
     });
+
+    return newId;
   },
 
   removeStateFromEntity: (entityId, stateId) => {
     set((state) => {
-      const targetEntity = state.entities[entityId];
+      const targetEntity =
+        state.entities[entityId] ||
+        state.customArchetypes[entityId] ||
+        Object.values(state.entities).find((e) => e.type === entityId) ||
+        Object.values(state.customArchetypes).find((a) => a.type === entityId);
+
       if (!targetEntity) return state;
       const targetType = targetEntity.type;
 
@@ -632,7 +748,16 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         }
       });
 
-      return { entities: updatedEntities };
+      const updatedArchetypes = { ...state.customArchetypes };
+      if (updatedArchetypes[targetType]) {
+        const { [stateId]: _, ...remainingArchStates } = updatedArchetypes[targetType].states;
+        updatedArchetypes[targetType] = {
+          ...updatedArchetypes[targetType],
+          states: remainingArchStates,
+        };
+      }
+
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
     });
   },
 
@@ -804,12 +929,12 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     });
   },
 
-  spawnEntity: ({ type, position, initialStateId }) => {
+  spawnEntity: ({ type, position, initialStateId, size }) => {
     const currentEntities = Object.values(get().entities);
     const archetype = get().customArchetypes[type] || currentEntities.find((e) => e.type === type);
 
     const count = currentEntities.length + 1;
-    const id = `${type}-${Date.now().toString(36)}`;
+    const id = `spawn-${type}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
     let newEntity: Entity;
 
@@ -822,6 +947,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         name: `${archetype.name.replace(/#\d+/, '').trim()} #${count}`,
         position,
         currentStateId: targetState,
+        size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : archetype.size,
       };
     } else if (type === 'apple') {
       newEntity = {
@@ -830,7 +956,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         type: 'apple',
         tags: ['nourriture', 'fruit'],
         position,
-        size: { width: 64, height: 64 },
+        size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : { width: 64, height: 64 },
         currentStateId: initialStateId || 'default',
         isDraggable: true,
         states: {
@@ -845,7 +971,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         type: 'plant',
         tags: ['plante', 'nature'],
         position,
-        size: { width: 120, height: 160 },
+        size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : { width: 120, height: 160 },
         currentStateId: initialStateId || 'pousse',
         isDraggable: true,
         states: {
@@ -860,7 +986,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         type,
         tags: [type],
         position,
-        size: { width: 80, height: 80 },
+        size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : { width: 80, height: 80 },
         currentStateId: initialStateId || 'default',
         isDraggable: true,
         states: {
@@ -1462,7 +1588,7 @@ function executeAction(
     updateEntityState: (id: EntityId, stateId: StateId) => void;
     updateEntityDetails: (id: EntityId, partial: Partial<Entity>) => void;
     deleteEntity: (id: EntityId) => void;
-    spawnEntity: (params: { type: EntityType; position: Position; initialStateId?: StateId }) => void;
+    spawnEntity: (params: { type: EntityType; position: Position; initialStateId?: StateId; size?: Size }) => void;
   }
 ) {
   if (act.type === 'play_sound') {
@@ -1473,31 +1599,53 @@ function executeAction(
   if (act.type === 'spawn_entity') {
     const spawnType = act.spawnEntityType || 'custom';
     let basePos = { x: 250, y: 200 };
+    const locMode = act.spawnLocationMode || act.spawnLocation || (helpers.target ? 'at_target' : 'at_subject');
 
-    if (act.spawnLocation === 'at_target' && helpers.target) {
+    if (locMode === 'at_target' && helpers.target) {
       basePos = { ...helpers.target.position };
-    } else if (act.spawnLocation === 'at_subject' && helpers.subject) {
+    } else if (locMode === 'at_subject' && helpers.subject) {
       basePos = { ...helpers.subject.position };
-    } else if (act.spawnLocation === 'random') {
+    } else if (locMode === 'offset_subject' && helpers.subject) {
+      basePos = {
+        x: helpers.subject.position.x + (act.spawnOffset?.x || 0),
+        y: helpers.subject.position.y + (act.spawnOffset?.y || 0),
+      };
+    } else if (locMode === 'offset_target' && helpers.target) {
+      basePos = {
+        x: helpers.target.position.x + (act.spawnOffset?.x || 0),
+        y: helpers.target.position.y + (act.spawnOffset?.y || 0),
+      };
+    } else if (locMode === 'random') {
       basePos = {
         x: Math.floor(Math.random() * 400 + 80),
         y: Math.floor(Math.random() * 250 + 80),
       };
-    } else if (act.spawnLocation === 'absolute' && act.spawnPosition) {
+    } else if (locMode === 'absolute' && act.spawnPosition) {
       basePos = { ...act.spawnPosition };
-    } else if (helpers.subject) {
-      basePos = { ...helpers.subject.position };
     } else if (helpers.target) {
       basePos = { ...helpers.target.position };
+    } else if (helpers.subject) {
+      basePos = { ...helpers.subject.position };
     }
 
-    const spawnX = basePos.x + Math.floor(Math.random() * 40 - 20);
-    const spawnY = basePos.y + Math.floor(Math.random() * 40 - 20);
+    const isPreciseMode = locMode === 'absolute' || locMode === 'offset_subject' || locMode === 'offset_target';
+    const spawnX = isPreciseMode ? basePos.x : basePos.x + Math.floor(Math.random() * 30 - 15);
+    const spawnY = isPreciseMode ? basePos.y : basePos.y + Math.floor(Math.random() * 30 - 15);
+
+    let spawnSize: Size | undefined = undefined;
+    if (act.spawnSizeMode === 'match_target' && helpers.target) {
+      spawnSize = { ...helpers.target.size };
+    } else if (act.spawnSizeMode === 'match_subject' && helpers.subject) {
+      spawnSize = { ...helpers.subject.size };
+    } else if (act.spawnSizeMode === 'custom' && act.spawnCustomSize) {
+      spawnSize = { ...act.spawnCustomSize };
+    }
 
     helpers.spawnEntity({
       type: spawnType,
-      position: { x: Math.max(20, spawnX), y: Math.max(20, spawnY) },
+      position: { x: Math.max(10, spawnX), y: Math.max(10, spawnY) },
       initialStateId: act.spawnInitialStateId,
+      size: spawnSize,
     });
     return;
   }
@@ -1511,6 +1659,10 @@ function executeAction(
   } else if (targetMode === 'target') {
     if (helpers.target) {
       targetEntities.push(helpers.target);
+    } else if (act.targetType) {
+      Object.values(helpers.allEntities).forEach((e) => {
+        if (e.type === act.targetType) targetEntities.push(e);
+      });
     } else if (helpers.subject) {
       // Pour les événements au clic (pas de collision/cible), fallback vers le sujet cliqué
       targetEntities.push(helpers.subject);
@@ -1526,6 +1678,11 @@ function executeAction(
     const cleanTag = act.targetTag.toLowerCase().trim().replace(/^#/, '');
     Object.values(helpers.allEntities).forEach((e) => {
       if (e.tags?.includes(cleanTag)) targetEntities.push(e);
+    });
+  } else if (act.targetType && act.targetType !== helpers.subject?.type) {
+    // Si l'action cible explicitement un type d'entité distinct
+    Object.values(helpers.allEntities).forEach((e) => {
+      if (e.type === act.targetType) targetEntities.push(e);
     });
   } else if (act.targetId) {
     // Fallback
@@ -1547,6 +1704,38 @@ function executeAction(
       if (entity.currentStateId !== act.targetStateId && entity.states[act.targetStateId]) {
         entityStateTimestamps[entity.id] = now;
         helpers.updateEntityState(entity.id, act.targetStateId);
+      }
+    } else if (act.type === 'toggle_state') {
+      const now = Date.now();
+      if (now - (entityStateTimestamps[entity.id] || 0) < ENTITY_STATE_COOLDOWN_MS) {
+        return;
+      }
+
+      const stateKeys = Object.keys(entity.states);
+      let nextStateId: StateId | null = null;
+
+      if (act.toggleStateAId && act.toggleStateBId) {
+        if (entity.currentStateId === act.toggleStateAId) {
+          nextStateId = act.toggleStateBId;
+        } else {
+          nextStateId = act.toggleStateAId;
+        }
+      } else if (act.targetStateId) {
+        if (entity.currentStateId === act.targetStateId) {
+          const otherStates = stateKeys.filter((s) => s !== act.targetStateId);
+          nextStateId = otherStates[0] || stateKeys[0];
+        } else {
+          nextStateId = act.targetStateId;
+        }
+      } else if (stateKeys.length > 1) {
+        const currentIndex = stateKeys.indexOf(entity.currentStateId);
+        const nextIndex = (currentIndex + 1) % stateKeys.length;
+        nextStateId = stateKeys[nextIndex];
+      }
+
+      if (nextStateId && entity.states[nextStateId]) {
+        entityStateTimestamps[entity.id] = now;
+        helpers.updateEntityState(entity.id, nextStateId);
       }
     } else if (act.type === 'toggle_draggable') {
       helpers.updateEntityDetails(entity.id, { isDraggable: !entity.isDraggable });

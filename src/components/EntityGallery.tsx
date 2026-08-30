@@ -156,12 +156,16 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
                   draggable
                   onDragStart={(e) => handleDragStart(e, item)}
                   onClick={() => handleItemClick(item)}
+                  onDoubleClick={() => {
+                    handleItemClick(item);
+                    onOpenCreateModal();
+                  }}
                   className={`p-3 bg-white hover:bg-slate-50 border rounded-2xl flex items-center justify-between shadow-2xs gap-2.5 transition-all cursor-pointer group ${
                     isSelected
                       ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/30'
                       : 'border-slate-200/90 hover:border-slate-300'
                   }`}
-                  title="Cliquez pour inspecter, ou glissez sur le Canvas / Storyboard"
+                  title="Cliquez pour inspecter • Double-cliquez pour dessiner • Glissez sur la scène"
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div className="text-slate-300 group-hover:text-slate-500 transition-colors cursor-grab active:cursor-grabbing">

@@ -120,9 +120,9 @@ export interface RuleTrigger {
 
 export type ActionTargetMode = 'subject' | 'target' | 'type' | 'tag' | 'instance';
 
-export type ActionType = 'change_state' | 'toggle_draggable' | 'delete_entity' | 'spawn_entity' | 'play_sound';
+export type ActionType = 'change_state' | 'toggle_state' | 'toggle_draggable' | 'delete_entity' | 'spawn_entity' | 'play_sound';
 
-export type SpawnLocationMode = 'at_subject' | 'at_target' | 'random' | 'absolute';
+export type SpawnLocationMode = 'at_subject' | 'at_target' | 'offset_subject' | 'offset_target' | 'random' | 'absolute';
 
 export type SoundType = 'pop' | 'bell' | 'laser' | 'bounce' | 'magic' | 'win';
 
@@ -134,14 +134,19 @@ export interface RuleAction {
   targetType?: EntityType;
   targetTag?: string;
   targetStateId?: StateId;
+  toggleStateAId?: StateId;
+  toggleStateBId?: StateId;
   onlyInStateId?: StateId; // Condition optionnelle sur l'état actuel pour appliquer l'action
 
   // Champs pour 'spawn_entity'
   spawnEntityType?: EntityType;
   spawnInitialStateId?: StateId;
-  spawnLocation?: SpawnLocationMode; // 'at_subject', 'at_target', 'random', 'absolute'
+  spawnLocation?: SpawnLocationMode; // 'at_subject', 'at_target', 'offset_subject', 'offset_target', 'random', 'absolute'
   spawnLocationMode?: SpawnLocationMode;
   spawnPosition?: Position;
+  spawnOffset?: Position;
+  spawnSizeMode?: 'default' | 'match_target' | 'match_subject' | 'custom';
+  spawnCustomSize?: Size;
 
   // Champs pour 'play_sound'
   soundType?: 'pop' | 'bell' | 'laser' | 'bounce' | 'magic' | 'win';
@@ -162,6 +167,7 @@ export interface AppSettings {
   showGrid: boolean;
   gridStyle: 'dots' | 'lines' | 'clean';
   showTagsSystem: boolean;
+  showRuleFilters?: boolean;
 }
 
 export interface ProjectExportData {

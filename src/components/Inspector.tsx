@@ -52,15 +52,20 @@ export function Inspector() {
   }
 
   const handleQuickAddState = () => {
-    addStateToEntity(selectedEntity.id, '');
+    const newId = addStateToEntity(selectedEntity.id, '');
+    if (newId) {
+      updateEntityState(selectedEntity.id, newId);
+      setEditingStateDrawingId(newId);
+    }
   };
 
   const handleAddState = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStateName.trim()) {
-      handleQuickAddState();
-    } else {
-      addStateToEntity(selectedEntity.id, newStateName.trim());
+    const nameToUse = newStateName.trim();
+    const newId = addStateToEntity(selectedEntity.id, nameToUse);
+    if (newId) {
+      updateEntityState(selectedEntity.id, newId);
+      setEditingStateDrawingId(newId);
     }
     setNewStateName('');
     setShowAddStateInput(false);
@@ -103,10 +108,11 @@ export function Inspector() {
                 []
             )
           )}
-          onSave={(paths, _dataUrl, colliderType) => {
+          onSave={(paths, _dataUrl, colliderType, stateName) => {
             updateStateProperties(selectedEntity.id, editingStateDrawingId, {
               vectorPaths: paths,
               colliderType: colliderType || 'box',
+              ...(stateName ? { name: stateName } : {}),
             });
             if (selectedEntity.currentStateId === editingStateDrawingId) {
               updateEntityDetails(selectedEntity.id, {
@@ -135,7 +141,9 @@ export function Inspector() {
           </button>
         </div>
 
-        <div className="flex items-center gap-2 bg-slate-50 hover:bg-white focus-within:bg-white border border-slate-200 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 rounded-2xl p-2 transition-all">
+        <div
+          className="flex items-center gap-2 bg-slate-50 hover:bg-white focus-within:bg-white border border-slate-200 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 rounded-2xl p-2 transition-all"
+        >
           <div className="w-9 h-9 rounded-xl bg-white border border-slate-200/80 flex items-center justify-center text-lg shrink-0 shadow-2xs">
             {selectedEntity.type === 'plant' ? '🌱' : selectedEntity.type === 'apple' ? '🍎' : '🎨'}
           </div>
@@ -277,12 +285,16 @@ export function Inspector() {
                 draggable
                 onDragStart={handleStateDragStart}
                 onClick={() => updateEntityState(selectedEntity.id, st.id)}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  setEditingStateDrawingId(st.id);
+                }}
                 className={`p-3 rounded-2xl border transition-all cursor-grab active:cursor-grabbing flex flex-col items-center justify-between gap-2 relative group ${
                   isActive
                     ? 'bg-indigo-50/90 border-indigo-500 shadow-xs ring-2 ring-indigo-500/20'
                     : 'bg-slate-50/80 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
                 }`}
-                title="Glissez cet état directement sur une case de règle Storyboard"
+                title="Double-clic pour dessiner cet état • Glissez sur une case de règle"
               >
                 {/* Bouton supprimer état (si plus d'un état) */}
                 {canDelete && (
@@ -346,26 +358,22 @@ export function Inspector() {
                     </button>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-1 max-w-full">
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRenamingStateId(st.id);
+                      setTempStateName(st.name);
+                    }}
+                    className="flex items-center gap-1 max-w-full cursor-pointer hover:text-indigo-600 group/name"
+                    title="Cliquer pour renommer cet état"
+                  >
                     <span
                       className={`text-xs font-black tracking-tight truncate ${
                         isActive ? 'text-indigo-900' : 'text-slate-700'
-                      }`}
+                      } group-hover/name:text-indigo-600 underline decoration-dotted decoration-slate-300 underline-offset-2`}
                     >
                       État {st.name}
                     </span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRenamingStateId(st.id);
-                        setTempStateName(st.name);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-opacity cursor-pointer"
-                      title="Renommer cet état"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                    </button>
                     {isActive && (
                       <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse shrink-0 ml-0.5" title="État actif sur la scène" />
                     )}

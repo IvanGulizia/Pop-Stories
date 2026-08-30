@@ -1,5 +1,24 @@
 # Journal des Modifications (CHANGELOG)
 
+## [Prototype 3] - 2026-08-30
+### Ajouté
+- **Actions Toggle Bi-directionnelles & Cycliques** (`toggle_state`) :
+  - Possibilité d'alterner entre deux états spécifiques (A ⇄ B) ou de cycler séquentiellement entre tous les états d'une entité.
+- **Instanciation d'Objets avec Placement Précis** (`spawn_entity`) :
+  - Support des modes `offset_subject` (décalage relatif au sujet, ex: sortie d'arme / projectile).
+  - Support des modes `offset_target` (décalage relatif à la cible).
+  - Support du placement absolu (`absolute`) avec coordonnées précises (X, Y).
+- **Actions sur Entités Tierces** :
+  - Modification d'état ou destruction d'une tierce entité C lors d'un événement entre A et B.
+- **Réinitialisation Automatique Scène (Mode Play ⇄ Edit)** :
+  - Système de snapshot préservant l'état originel des entités lors du passage en mode lecture.
+  - Nettoyage automatique des objets instanciés en mode play (`spawn-*`) et restauration des états/objets lors du retour au mode édition.
+- **Gestion Avancée des Colliders** :
+  - Prise en compte du collider circulaire ou rectangulaire pour les interactions pointeur (clic, drag, hover).
+- **Amélioration UX Éditeur** :
+  - Ouverture automatique de l'atelier de dessin lors de la création d'un nouvel état.
+  - Double-clic sur le nom de l'entité réservé au renommage textuel.
+
 ## [Prototype 2] - 2026-08-08
 ### Ajouté
 - **Conditions d'État sur les Déclencheurs** :

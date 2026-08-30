@@ -116,6 +116,8 @@ export function CustomShape({ entity }: CustomShapeProps) {
     window.addEventListener('pointercancel', handlePointerUp);
   };
 
+  const colliderType = currentState.colliderType || entity.colliderType || 'box';
+
   return (
     <motion.div
       className={`absolute flex items-center justify-center ${
@@ -126,6 +128,7 @@ export function CustomShape({ entity }: CustomShapeProps) {
         top: 0,
         width: entity.size.width,
         height: entity.size.height,
+        borderRadius: colliderType === 'circle' ? '50%' : '16px',
         x,
         y,
       }}
@@ -159,7 +162,9 @@ export function CustomShape({ entity }: CustomShapeProps) {
       {isSelected && appMode !== 'play' && (
         <>
           <motion.div
-            className="absolute -inset-2 rounded-2xl border-2 border-indigo-500 border-dashed pointer-events-none"
+            className={`absolute -inset-2 ${
+              colliderType === 'circle' ? 'rounded-full' : 'rounded-2xl'
+            } border-2 border-indigo-500 border-dashed pointer-events-none`}
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
           />
