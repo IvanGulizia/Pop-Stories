@@ -109,7 +109,7 @@ export function CreateEntityModal({ isOpen, onClose }: CreateEntityModalProps) {
                 setVectorPaths(paths);
                 setDrawingDataUrl(dataUrl);
               }}
-              initialColor="#6366f1"
+              initialStrokeColor="#6366f1"
             />
           </div>
         </form>

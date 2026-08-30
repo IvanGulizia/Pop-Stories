@@ -124,6 +124,8 @@ export type ActionType = 'change_state' | 'toggle_draggable' | 'delete_entity' |
 
 export type SpawnLocationMode = 'at_subject' | 'at_target' | 'random' | 'absolute';
 
+export type SoundType = 'pop' | 'bell' | 'laser' | 'bounce' | 'magic' | 'win';
+
 export interface RuleAction {
   id: string;
   type: ActionType;

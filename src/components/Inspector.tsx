@@ -9,7 +9,8 @@ import {
   Paintbrush,
   Hand,
   Layers,
-  Copy,
+  Edit3,
+  Check,
 } from 'lucide-react';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { OnionStateOption } from './DrawingCanvas';
@@ -31,6 +32,8 @@ export function Inspector() {
   const [showAddStateInput, setShowAddStateInput] = useState(false);
   const [newStateName, setNewStateName] = useState('');
   const [editingStateDrawingId, setEditingStateDrawingId] = useState<string | null>(null);
+  const [renamingStateId, setRenamingStateId] = useState<string | null>(null);
+  const [tempStateName, setTempStateName] = useState('');
 
   const selectedEntity = selectedEntityId ? entities[selectedEntityId] : null;
 
@@ -92,6 +95,7 @@ export function Inspector() {
           subtitle={`Objet : ${selectedEntity.name}`}
           currentEditingStateName={editingState?.name || editingStateDrawingId}
           onionStates={onionStates}
+          initialColliderType={editingState?.colliderType || selectedEntity.colliderType || 'box'}
           initialPaths={JSON.parse(
             JSON.stringify(
               selectedEntity.states[editingStateDrawingId]?.vectorPaths ||
@@ -99,12 +103,16 @@ export function Inspector() {
                 []
             )
           )}
-          onSave={(paths) => {
+          onSave={(paths, _dataUrl, colliderType) => {
             updateStateProperties(selectedEntity.id, editingStateDrawingId, {
               vectorPaths: paths,
+              colliderType: colliderType || 'box',
             });
             if (selectedEntity.currentStateId === editingStateDrawingId) {
-              updateEntityDetails(selectedEntity.id, { vectorPaths: paths });
+              updateEntityDetails(selectedEntity.id, {
+                vectorPaths: paths,
+                colliderType: colliderType || 'box',
+              });
             }
             setEditingStateDrawingId(null);
           }}
@@ -291,15 +299,78 @@ export function Inspector() {
                   </button>
                 )}
 
-                {/* Nom de l'état */}
-                <div className="flex items-center gap-1.5">
-                  <span className={`text-sm font-black tracking-tight ${isActive ? 'text-indigo-900' : 'text-slate-700'}`}>
-                    État {st.name}
-                  </span>
-                  {isActive && (
-                    <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse" title="État actif sur la scène" />
-                  )}
-                </div>
+                {/* Nom de l'état (avec possibilité de renommage) */}
+                {renamingStateId === st.id ? (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex items-center gap-1 w-full"
+                  >
+                    <input
+                      type="text"
+                      value={tempStateName}
+                      onChange={(e) => setTempStateName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (tempStateName.trim()) {
+                            updateStateProperties(selectedEntity.id, st.id, { name: tempStateName.trim() });
+                          }
+                          setRenamingStateId(null);
+                        } else if (e.key === 'Escape') {
+                          setRenamingStateId(null);
+                        }
+                      }}
+                      autoFocus
+                      className="text-xs font-bold bg-white text-slate-800 border border-indigo-300 rounded-lg px-1.5 py-0.5 w-full outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (tempStateName.trim()) {
+                          updateStateProperties(selectedEntity.id, st.id, { name: tempStateName.trim() });
+                        }
+                        setRenamingStateId(null);
+                      }}
+                      className="p-1 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 cursor-pointer shrink-0"
+                      title="Valider le nom"
+                    >
+                      <Check className="w-3 h-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRenamingStateId(null)}
+                      className="p-1 text-slate-400 hover:bg-slate-200 rounded-md cursor-pointer shrink-0"
+                      title="Annuler"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 max-w-full">
+                    <span
+                      className={`text-xs font-black tracking-tight truncate ${
+                        isActive ? 'text-indigo-900' : 'text-slate-700'
+                      }`}
+                    >
+                      État {st.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRenamingStateId(st.id);
+                        setTempStateName(st.name);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-opacity cursor-pointer"
+                      title="Renommer cet état"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                    </button>
+                    {isActive && (
+                      <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse shrink-0 ml-0.5" title="État actif sur la scène" />
+                    )}
+                  </div>
+                )}
 
                 {/* Visual Thumbnail */}
                 <div className="w-14 h-14 bg-white rounded-xl border border-slate-200 flex items-center justify-center p-1.5 relative overflow-hidden shadow-2xs">

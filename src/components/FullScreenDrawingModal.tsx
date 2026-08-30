@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { Check, Paintbrush, X } from 'lucide-react';
 import { DrawingCanvas, OnionStateOption } from './DrawingCanvas';
-import { VectorPath } from '../types';
+import { VectorPath, ColliderType } from '../types';
 
 interface FullScreenDrawingModalProps {
   title: string;
   subtitle?: string;
   initialPaths?: VectorPath[];
+  initialColliderType?: ColliderType;
   onionStates?: OnionStateOption[];
   currentEditingStateName?: string;
-  onSave: (paths: VectorPath[], dataUrl?: string) => void;
+  onSave: (paths: VectorPath[], dataUrl?: string, colliderType?: ColliderType) => void;
   onClose: () => void;
 }
 
@@ -17,6 +18,7 @@ export function FullScreenDrawingModal({
   title,
   subtitle = 'Dessinez votre forme vectorielle en plein écran',
   initialPaths = [],
+  initialColliderType = 'box',
   onionStates = [],
   currentEditingStateName,
   onSave,
@@ -24,6 +26,7 @@ export function FullScreenDrawingModal({
 }: FullScreenDrawingModalProps) {
   const [currentPaths, setCurrentPaths] = useState<VectorPath[]>(initialPaths);
   const [currentDataUrl, setCurrentDataUrl] = useState<string | undefined>(undefined);
+  const [currentColliderType, setCurrentColliderType] = useState<ColliderType>(initialColliderType);
 
   const handleVectorChange = (paths: VectorPath[], dataUrl?: string) => {
     setCurrentPaths(paths);
@@ -55,7 +58,7 @@ export function FullScreenDrawingModal({
             </button>
             <button
               type="button"
-              onClick={() => onSave(currentPaths, currentDataUrl)}
+              onClick={() => onSave(currentPaths, currentDataUrl, currentColliderType)}
               className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer active:scale-95"
             >
               <Check className="w-4 h-4" /> Enregistrer le dessin
@@ -74,9 +77,11 @@ export function FullScreenDrawingModal({
         <div className="flex-1 p-4 sm:p-6 overflow-hidden bg-slate-100/60 flex items-center justify-center">
           <DrawingCanvas
             initialPaths={initialPaths}
+            initialColliderType={initialColliderType}
             onionStates={onionStates}
             currentEditingStateName={currentEditingStateName}
             onVectorChange={handleVectorChange}
+            onColliderChange={(type) => setCurrentColliderType(type)}
           />
         </div>
       </div>

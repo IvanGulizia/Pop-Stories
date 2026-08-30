@@ -8,19 +8,23 @@ import {
   EntityType,
   DynamicRule,
   ActionTargetMode,
+  SoundType,
 } from '../types';
 import { EntityMiniPreview } from './EntityMiniPreview';
 import {
   Plus,
   Trash2,
+  Copy,
   Zap,
   ArrowRight,
   X,
   Sparkles,
   MousePointer,
   ChevronLeft,
+  ChevronRight,
   Filter,
   Check,
+  Volume2,
 } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
 
@@ -40,6 +44,24 @@ type ActiveModal =
     }
   | null;
 
+interface WizardData {
+  step: 1 | 2 | 3 | 4 | 5; // 1: Sujet, 2: Event, 3: Cible, 4: Choix Action, 5: Détail Action
+  name: string;
+  subjectType: EntityType;
+  subjectStateId?: string;
+  triggerType: TriggerType;
+  triggerPhase?: TriggerPhase;
+  targetType: EntityType;
+  targetStateId?: string;
+  actionType?: ActionType;
+  actionTargetMode?: ActionTargetMode;
+  actionTargetType?: EntityType;
+  actionTargetStateId?: string;
+  actionSpawnEntityType?: EntityType;
+  actionSpawnLocationMode?: 'at_subject' | 'at_target' | 'random' | 'absolute';
+  actionSoundType?: SoundType;
+}
+
 export function RuleBook() {
   const entities = useSceneStore((state) => state.entities);
   const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
@@ -48,10 +70,12 @@ export function RuleBook() {
   const updateRule = useSceneStore((state) => state.updateRule);
   const deleteRule = useSceneStore((state) => state.deleteRule);
   const toggleRule = useSceneStore((state) => state.toggleRule);
+  const duplicateRule = useSceneStore((state) => state.duplicateRule);
 
   const [filterType, setFilterType] = useState<'all' | 'collision' | 'click'>('all');
   const [filterObject, setFilterObject] = useState<string>('all');
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
+  const [activeWizard, setActiveWizard] = useState<WizardData | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
 
   const entityList = Object.values(entities);
@@ -62,10 +86,9 @@ export function RuleBook() {
     return entityList.find((e) => e.type === type) || customArchetypes[type];
   };
 
-  // Available entity options (archetypes & custom drawn only - no unsolicited demo objects)
+  // Available entity options (archetypes & custom drawn only)
   const availableEntityOptions: { type: EntityType; label: string }[] = [];
 
-  // 1. Add all from customArchetypes
   Object.entries(customArchetypes).forEach(([archetypeType, arch]) => {
     if (!availableEntityOptions.some((opt) => opt.type === archetypeType)) {
       availableEntityOptions.push({
@@ -75,7 +98,6 @@ export function RuleBook() {
     }
   });
 
-  // 2. Include any custom created entities from the active canvas
   entityList.forEach((e) => {
     if (!availableEntityOptions.some((opt) => opt.type === e.type)) {
       availableEntityOptions.push({
@@ -85,39 +107,62 @@ export function RuleBook() {
     }
   });
 
-  // Helper to create a new blank interactive rule directly
-  const handleCreateNewRule = () => {
-    const newId = addRule({
-      name: `Règle #${rules.length + 1}`,
-      enabled: true,
-      trigger: {
-        type: 'collision',
-        phase: 'enter',
-        subjectMode: 'type',
-        subjectType: availableEntityOptions[0]?.type || 'apple',
-        targetMode: 'type',
-        targetType: availableEntityOptions[1]?.type || 'plant',
-      },
-      actions: [
-        {
-          id: `act-${Date.now()}`,
-          type: 'change_state',
-          targetMode: 'target',
-          targetType: availableEntityOptions[1]?.type || 'plant',
-          targetStateId: 'fleur',
-        },
-      ],
-    });
+  // Start guided sequential wizard (Sujet > Event > Cible > Action)
+  const startCreationWizard = () => {
+    const defaultSub = availableEntityOptions[0]?.type || 'apple';
+    const defaultTar = availableEntityOptions[1]?.type || availableEntityOptions[0]?.type || 'plant';
 
-    setActiveModal({
-      type: 'subject',
-      ruleId: newId,
+    setActiveWizard({
       step: 1,
-      selectedEntityType: availableEntityOptions[0]?.type || 'apple',
+      name: `Règle #${rules.length + 1}`,
+      subjectType: defaultSub,
+      subjectStateId: undefined,
+      triggerType: 'collision',
+      triggerPhase: 'enter',
+      targetType: defaultTar,
+      targetStateId: undefined,
     });
   };
 
-  // Drag and drop handlers onto slots
+  const handleFinishWizard = (withAction = false) => {
+    if (!activeWizard) return;
+
+    const isCollision = activeWizard.triggerType === 'collision';
+    const actions: RuleAction[] = [];
+
+    if (withAction && activeWizard.actionType) {
+      actions.push({
+        id: `act-${Date.now()}`,
+        type: activeWizard.actionType,
+        targetMode: activeWizard.actionTargetMode || (isCollision ? 'target' : 'subject'),
+        targetType: activeWizard.actionTargetType || (activeWizard.actionTargetMode === 'subject' ? activeWizard.subjectType : activeWizard.targetType),
+        targetStateId: activeWizard.actionTargetStateId,
+        spawnEntityType: activeWizard.actionSpawnEntityType,
+        spawnLocationMode: activeWizard.actionSpawnLocationMode,
+        soundType: activeWizard.actionSoundType,
+      });
+    }
+
+    addRule({
+      name: activeWizard.name,
+      enabled: true,
+      trigger: {
+        type: activeWizard.triggerType,
+        phase: activeWizard.triggerPhase,
+        subjectMode: 'type',
+        subjectType: activeWizard.subjectType,
+        subjectStateId: activeWizard.subjectStateId,
+        targetMode: isCollision ? 'type' : undefined,
+        targetType: isCollision ? activeWizard.targetType : undefined,
+        targetStateId: isCollision ? activeWizard.targetStateId : undefined,
+      },
+      actions,
+    });
+
+    setActiveWizard(null);
+  };
+
+  // Drag and drop handlers onto storyboard slots
   const handleDropOnSlot = (
     e: React.DragEvent,
     ruleId: string,
@@ -172,81 +217,83 @@ export function RuleBook() {
           });
         }
       } else if (slotType === 'action' && actionId) {
-        const updatedActions = targetRule.actions.map((act) => {
-          if (act.id !== actionId) return act;
-          if (data.kind === 'entity-state') {
-            return {
-              ...act,
-              type: 'change_state' as ActionType,
-              targetType: data.entityType,
-              targetStateId: data.stateId,
-            };
-          }
-          return act;
-        });
-        updateRule(ruleId, { actions: updatedActions });
+        if (data.kind === 'entity-state') {
+          const updatedActions = targetRule.actions.map((act) =>
+            act.id === actionId
+              ? {
+                  ...act,
+                  type: 'change_state' as ActionType,
+                  targetType: data.entityType,
+                  targetStateId: data.stateId,
+                }
+              : act
+          );
+          updateRule(ruleId, { actions: updatedActions });
+        }
       }
-    } catch (err) {
-      console.error('Error in handleDropOnSlot:', err);
+    } catch {
+      // ignore drop errors
     }
   };
 
-  // Filter rules by trigger type and by object
-  const filteredRules = rules.filter((r) => {
-    if (filterType !== 'all' && r.trigger.type !== filterType) return false;
+  // Filter rules
+  const filteredRules = rules.filter((rule) => {
+    if (filterType !== 'all') {
+      if (filterType === 'collision' && rule.trigger.type !== 'collision') return false;
+      if (filterType === 'click' && rule.trigger.type !== 'click' && rule.trigger.type !== 'drag') return false;
+    }
     if (filterObject !== 'all') {
-      const matchSubject = r.trigger.subjectType === filterObject;
-      const matchTarget = r.trigger.targetType === filterObject;
-      const matchAction = r.actions.some((a) => a.targetType === filterObject);
+      const matchSubject = rule.trigger.subjectType === filterObject;
+      const matchTarget = rule.trigger.targetType === filterObject;
+      const matchAction = rule.actions.some(
+        (a) => a.targetType === filterObject || a.spawnEntityType === filterObject
+      );
       if (!matchSubject && !matchTarget && !matchAction) return false;
     }
     return true;
   });
 
   return (
-    <div className="flex flex-col h-full space-y-4 overflow-hidden">
-      {/* Top Header & Filter Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200 shrink-0">
-        {/* Left: Filters */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Trigger Type Filter */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-2xs">
+    <div className="bg-slate-50/80 rounded-3xl border border-slate-200 p-4 sm:p-5 flex flex-col h-full overflow-hidden text-slate-800 space-y-4">
+      {/* Top Filter Bar */}
+      <div className="flex items-center justify-between gap-2 flex-wrap border-b border-slate-200/80 pb-3 shrink-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-2xs">
             <button
               type="button"
               onClick={() => setFilterType('all')}
               className={`px-3 py-1 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                 filterType === 'all'
-                  ? 'bg-white text-slate-900 shadow-2xs'
-                  : 'text-slate-500 hover:text-slate-900'
+                  ? 'bg-white text-indigo-700 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              Toutes
+              Toutes ({rules.length})
             </button>
             <button
               type="button"
               onClick={() => setFilterType('collision')}
               className={`px-3 py-1 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                 filterType === 'collision'
-                  ? 'bg-white text-slate-900 shadow-2xs'
-                  : 'text-slate-500 hover:text-slate-900'
+                  ? 'bg-white text-indigo-700 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              💥 Collisions
+              Collisions
             </button>
             <button
               type="button"
               onClick={() => setFilterType('click')}
               className={`px-3 py-1 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                 filterType === 'click'
-                  ? 'bg-white text-slate-900 shadow-2xs'
-                  : 'text-slate-500 hover:text-slate-900'
+                  ? 'bg-white text-indigo-700 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              👆 Clics
+              Clics & Drag
             </button>
           </div>
 
-          {/* Object Filter */}
           <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-2xs">
             <Filter className="w-3.5 h-3.5 text-slate-400 ml-1.5" />
             <select
@@ -267,7 +314,7 @@ export function RuleBook() {
         {/* Right: New Rule Button */}
         <button
           type="button"
-          onClick={handleCreateNewRule}
+          onClick={startCreationWizard}
           className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-2xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
         >
           <Plus className="w-4 h-4" strokeWidth={2.5} />
@@ -275,19 +322,19 @@ export function RuleBook() {
         </button>
       </div>
 
-      {/* Rules List (Horizontal Storyboard Rows) */}
+      {/* Rules List (Storyboard Rows) */}
       <div className="flex-1 overflow-y-auto space-y-4 pr-1">
         {filteredRules.length === 0 ? (
           <div
-            onClick={handleCreateNewRule}
+            onClick={startCreationWizard}
             className="border-2 border-dashed border-slate-300 hover:border-indigo-400 bg-slate-50/60 hover:bg-indigo-50/30 rounded-3xl p-8 text-center flex flex-col items-center justify-center cursor-pointer transition-all min-h-[220px] group"
           >
             <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 shadow-2xs flex items-center justify-center text-2xl group-hover:scale-110 transition-transform mb-3">
               ⚡
             </div>
-            <div className="text-sm font-bold text-slate-700">Créer une règle interactive</div>
+            <div className="text-sm font-bold text-slate-700">Créer une règle pas-à-pas</div>
             <p className="text-xs text-slate-400 max-w-xs mx-auto mt-0.5">
-              Cliquez pour ajouter une règle et touchez directement les cases pour configurer chaque étape.
+              Assistant guidé continu : Sujet → Événement → Cible → Action.
             </p>
           </div>
         ) : (
@@ -382,6 +429,17 @@ export function RuleBook() {
                       {rule.enabled ? 'Active' : 'Désactivée'}
                     </button>
 
+                    {/* Dupliquer la règle */}
+                    <button
+                      type="button"
+                      onClick={() => duplicateRule(rule.id)}
+                      className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                      title="Dupliquer cette règle"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+
+                    {/* Supprimer la règle */}
                     <button
                       type="button"
                       onClick={() => deleteRule(rule.id)}
@@ -442,7 +500,7 @@ export function RuleBook() {
                       </div>
                     </button>
 
-                    {/* CASE 2: ÉVÉNEMENT (Standard size w-28 h-32) */}
+                    {/* CASE 2: ÉVÉNEMENT */}
                     <button
                       type="button"
                       onClick={() =>
@@ -657,7 +715,7 @@ export function RuleBook() {
                       );
                     })}
 
-                    {/* Quick + Action Card Button */}
+                    {/* + Action Slot Button */}
                     <button
                       type="button"
                       onClick={() =>
@@ -670,11 +728,11 @@ export function RuleBook() {
                           targetMode: isCollision ? 'target' : 'subject',
                         })
                       }
-                      className="w-14 h-32 border-2 border-dashed border-slate-300 hover:border-slate-400 hover:bg-slate-50 rounded-2xl flex flex-col items-center justify-center gap-1.5 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer shrink-0"
-                      title="Ajouter une action à la séquence"
+                      className="w-20 h-32 border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/40 rounded-2xl flex flex-col items-center justify-center gap-1.5 text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer shrink-0"
+                      title="Ajouter une action à la règle"
                     >
                       <Plus className="w-5 h-5" strokeWidth={2.5} />
-                      <span className="text-[9px] font-bold uppercase">Action</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider">+ Action</span>
                     </button>
                   </div>
                 </div>
@@ -684,11 +742,782 @@ export function RuleBook() {
         )}
       </div>
 
-      {/* --- GUIDED STEP-BY-STEP MODAL / OVERLAY --- */}
+      {/* --- SEQUENTIAL CREATION WIZARD (Sujet > Event > Cible > Action) --- */}
+      {activeWizard && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 max-w-xl w-full shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            {/* Wizard Stepper Header */}
+            <div className="border-b border-slate-100 pb-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-amber-500" />
+                    <span>Créer une nouvelle règle</span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {activeWizard.step === 1 && 'Étape 1 sur 4 : Qui agit ? (Objet Sujet)'}
+                    {activeWizard.step === 2 && 'Étape 2 sur 4 : Quel événement déclencheur ?'}
+                    {activeWizard.step === 3 && 'Étape 3 sur 4 : Avec quel objet cible ?'}
+                    {activeWizard.step === 4 && 'Étape 4 sur 4 : Quelle action exécuter ?'}
+                    {activeWizard.step === 5 && 'Configuration de l’action choisie'}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveWizard(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Progress Steps Indicators */}
+              <div className="grid grid-cols-4 gap-2 pt-1">
+                {[
+                  { num: 1, label: '1. Sujet' },
+                  { num: 2, label: '2. Événement' },
+                  { num: 3, label: '3. Cible' },
+                  { num: 4, label: '4. Action' },
+                ].map((st) => {
+                  const isActive =
+                    st.num === activeWizard.step || (activeWizard.step === 5 && st.num === 4);
+                  const isDone = activeWizard.step > st.num;
+                  return (
+                    <div
+                      key={st.num}
+                      className={`py-1.5 px-2 rounded-xl text-[11px] font-bold text-center border transition-all ${
+                        isActive
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                          : isDone
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-slate-100 text-slate-400 border-slate-200'
+                      }`}
+                    >
+                      {st.label}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* --- STEP 1: SUJET --- */}
+            {activeWizard.step === 1 && (
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700">Nom de la règle</label>
+                  <input
+                    type="text"
+                    value={activeWizard.name}
+                    onChange={(e) => setActiveWizard({ ...activeWizard, name: e.target.value })}
+                    className="w-full text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    placeholder="Nom de la règle..."
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-700">Choisissez l'objet Sujet</label>
+                  <div className="grid grid-cols-3 gap-3 max-h-48 overflow-y-auto pr-1">
+                    {availableEntityOptions.map((opt) => {
+                      const ent = getEntityObj(opt.type);
+                      const isSelected = activeWizard.subjectType === opt.type;
+                      return (
+                        <button
+                          key={opt.type}
+                          type="button"
+                          onClick={() =>
+                            setActiveWizard({
+                              ...activeWizard,
+                              subjectType: opt.type,
+                              subjectStateId: undefined,
+                            })
+                          }
+                          className={`p-3 rounded-2xl border flex flex-col items-center gap-2 cursor-pointer transition-all ${
+                            isSelected
+                              ? 'bg-indigo-50 border-indigo-500 ring-2 ring-indigo-200 shadow-xs'
+                              : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
+                            <EntityMiniPreview entity={ent} type={opt.type} size={36} />
+                          </div>
+                          <span className="text-xs font-bold text-slate-800 truncate w-full text-center">
+                            {opt.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* State selector for subject */}
+                {(() => {
+                  const ent = getEntityObj(activeWizard.subjectType);
+                  if (!ent || Object.keys(ent.states).length <= 1) return null;
+                  return (
+                    <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                      <label className="text-xs font-bold text-slate-700">État requis du sujet (Optionnel)</label>
+                      <div className="flex gap-2 overflow-x-auto pb-1">
+                        <button
+                          type="button"
+                          onClick={() => setActiveWizard({ ...activeWizard, subjectStateId: undefined })}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                            activeWizard.subjectStateId === undefined
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-slate-100 text-slate-600 border-slate-200'
+                          }`}
+                        >
+                          Tous les états
+                        </button>
+                        {Object.values(ent.states).map((st) => (
+                          <button
+                            key={st.id}
+                            type="button"
+                            onClick={() => setActiveWizard({ ...activeWizard, subjectStateId: st.id })}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                              activeWizard.subjectStateId === st.id
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                            }`}
+                          >
+                            État {st.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Footer buttons */}
+                <div className="flex justify-end pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setActiveWizard({ ...activeWizard, step: 2 })}
+                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                  >
+                    <span>Étape suivante (Événement)</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* --- STEP 2: ÉVÉNEMENT --- */}
+            {activeWizard.step === 2 && (
+              <div className="space-y-4">
+                <div className="space-y-2.5 max-h-[55vh] overflow-y-auto pr-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveWizard({
+                        ...activeWizard,
+                        triggerType: 'collision',
+                        triggerPhase: 'enter',
+                        step: 3,
+                      })
+                    }
+                    className="w-full p-3.5 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                      💥
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-slate-900">Collision : Premier Contact (On Enter)</div>
+                      <div className="text-xs text-slate-500">Dès que le sujet touche une cible spécifique</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveWizard({
+                        ...activeWizard,
+                        triggerType: 'collision',
+                        triggerPhase: 'collision_release',
+                        step: 3,
+                      })
+                    }
+                    className="w-full p-3.5 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                      🎯
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-slate-900">Collision : Au Relâchement (On Release)</div>
+                      <div className="text-xs text-slate-500">Quand l'utilisateur glisse le sujet et le lâche sur la cible</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveWizard({
+                        ...activeWizard,
+                        triggerType: 'click',
+                        triggerPhase: 'click',
+                        step: 4,
+                      })
+                    }
+                    className="w-full p-3.5 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                      👆
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-slate-900">Clic Direct sur l'Objet</div>
+                      <div className="text-xs text-slate-500">Quand le joueur clique ou tape sur le sujet</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveWizard({
+                        ...activeWizard,
+                        triggerType: 'drag',
+                        triggerPhase: 'drag_release',
+                        step: 4,
+                      })
+                    }
+                    className="w-full p-3.5 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                      🫳
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-slate-900">Glisser-Relâcher Libre (Drop)</div>
+                      <div className="text-xs text-slate-500">Quand l'objet est relâché n'importe où</div>
+                    </div>
+                  </button>
+                </div>
+
+                <div className="flex justify-between pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setActiveWizard({ ...activeWizard, step: 1 })}
+                    className="px-4 py-2 text-slate-600 hover:bg-slate-100 font-bold text-xs rounded-xl flex items-center gap-1 cursor-pointer"
+                  >
+                    <ChevronLeft className="w-4 h-4" /> Précédent
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* --- STEP 3: CIBLE (Collision) --- */}
+            {activeWizard.step === 3 && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-700">Choisissez la Cible touchée</label>
+                  <div className="grid grid-cols-3 gap-3 max-h-48 overflow-y-auto pr-1">
+                    {availableEntityOptions.map((opt) => {
+                      const ent = getEntityObj(opt.type);
+                      const isSelected = activeWizard.targetType === opt.type;
+                      return (
+                        <button
+                          key={opt.type}
+                          type="button"
+                          onClick={() =>
+                            setActiveWizard({
+                              ...activeWizard,
+                              targetType: opt.type,
+                              targetStateId: undefined,
+                            })
+                          }
+                          className={`p-3 rounded-2xl border flex flex-col items-center gap-2 cursor-pointer transition-all ${
+                            isSelected
+                              ? 'bg-indigo-50 border-indigo-500 ring-2 ring-indigo-200 shadow-xs'
+                              : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
+                            <EntityMiniPreview entity={ent} type={opt.type} size={36} />
+                          </div>
+                          <span className="text-xs font-bold text-slate-800 truncate w-full text-center">
+                            {opt.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* State selector for target */}
+                {(() => {
+                  const ent = getEntityObj(activeWizard.targetType);
+                  if (!ent || Object.keys(ent.states).length <= 1) return null;
+                  return (
+                    <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                      <label className="text-xs font-bold text-slate-700">État requis de la cible (Optionnel)</label>
+                      <div className="flex gap-2 overflow-x-auto pb-1">
+                        <button
+                          type="button"
+                          onClick={() => setActiveWizard({ ...activeWizard, targetStateId: undefined })}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                            activeWizard.targetStateId === undefined
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-slate-100 text-slate-600 border-slate-200'
+                          }`}
+                        >
+                          Tous les états
+                        </button>
+                        {Object.values(ent.states).map((st) => (
+                          <button
+                            key={st.id}
+                            type="button"
+                            onClick={() => setActiveWizard({ ...activeWizard, targetStateId: st.id })}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                              activeWizard.targetStateId === st.id
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                            }`}
+                          >
+                            État {st.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="flex justify-between pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setActiveWizard({ ...activeWizard, step: 2 })}
+                    className="px-4 py-2 text-slate-600 hover:bg-slate-100 font-bold text-xs rounded-xl flex items-center gap-1 cursor-pointer"
+                  >
+                    <ChevronLeft className="w-4 h-4" /> Précédent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveWizard({ ...activeWizard, step: 4 })}
+                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                  >
+                    <span>Étape suivante (Action)</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* --- STEP 4: CHOIX DU TYPE D'ACTION (OU SANS ACTION) --- */}
+            {activeWizard.step === 4 && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Option 1: Changer d'état */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveWizard({
+                        ...activeWizard,
+                        actionType: 'change_state',
+                        step: 5,
+                      })
+                    }
+                    className="p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex flex-col items-center text-center gap-2 cursor-pointer transition-all shadow-2xs group"
+                  >
+                    <div className="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-xl group-hover:scale-105 transition-transform">
+                      🔄
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-900">Changer d'état</div>
+                      <div className="text-[10px] text-slate-500">Transformer l'objet ou sa cible</div>
+                    </div>
+                  </button>
+
+                  {/* Option 2: Créer une entité (Spawn) */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveWizard({
+                        ...activeWizard,
+                        actionType: 'spawn_entity',
+                        actionSpawnEntityType: availableEntityOptions[0]?.type || 'apple',
+                        actionSpawnLocationMode: 'at_target',
+                        step: 5,
+                      })
+                    }
+                    className="p-4 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-2xl flex flex-col items-center text-center gap-2 cursor-pointer transition-all shadow-2xs group"
+                  >
+                    <div className="w-12 h-12 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-xl group-hover:scale-105 transition-transform">
+                      ✨
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-900">Créer un objet</div>
+                      <div className="text-[10px] text-slate-500">Faire apparaître une entité</div>
+                    </div>
+                  </button>
+
+                  {/* Option 3: Détruire (Delete) */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveWizard({
+                        ...activeWizard,
+                        actionType: 'delete_entity',
+                        step: 5,
+                      })
+                    }
+                    className="p-4 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 rounded-2xl flex flex-col items-center text-center gap-2 cursor-pointer transition-all shadow-2xs group"
+                  >
+                    <div className="w-12 h-12 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center text-xl group-hover:scale-105 transition-transform">
+                      💥
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-900">Détruire un objet</div>
+                      <div className="text-[10px] text-slate-500">Faire disparaître l'objet</div>
+                    </div>
+                  </button>
+
+                  {/* Option 4: Jouer un son */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveWizard({
+                        ...activeWizard,
+                        actionType: 'play_sound',
+                        actionSoundType: 'magic',
+                        step: 5,
+                      })
+                    }
+                    className="p-4 bg-slate-50 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-2xl flex flex-col items-center text-center gap-2 cursor-pointer transition-all shadow-2xs group"
+                  >
+                    <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-xl group-hover:scale-105 transition-transform">
+                      🔊
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-900">Jouer un son</div>
+                      <div className="text-[10px] text-slate-500">Déclencher un effet audio</div>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Option "Sans action pour l'instant" */}
+                <div className="flex justify-between items-center pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveWizard({
+                        ...activeWizard,
+                        step: activeWizard.triggerType === 'collision' ? 3 : 2,
+                      })
+                    }
+                    className="px-4 py-2 text-slate-600 hover:bg-slate-100 font-bold text-xs rounded-xl flex items-center gap-1 cursor-pointer"
+                  >
+                    <ChevronLeft className="w-4 h-4" /> Précédent
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleFinishWizard(false)}
+                    className="px-4 py-2 text-indigo-600 hover:bg-indigo-50 border border-indigo-200 font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Créer sans action (+ Action plus tard)</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* --- STEP 5: CONFIGURATION DE L'ACTION CHOISIE --- */}
+            {activeWizard.step === 5 && (
+              <div className="space-y-4">
+                {/* 1. Change state configuration */}
+                {activeWizard.actionType === 'change_state' && (() => {
+                  const isCollision = activeWizard.triggerType === 'collision';
+                  const chosenTargetMode = activeWizard.actionTargetMode || (isCollision ? 'target' : 'subject');
+                  const relevantType = chosenTargetMode === 'subject' ? activeWizard.subjectType : activeWizard.targetType;
+                  const relevantEntity = getEntityObj(relevantType);
+
+                  return (
+                    <div className="space-y-3">
+                      {isCollision && (
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveWizard({
+                                ...activeWizard,
+                                actionTargetMode: 'target',
+                                actionTargetStateId: undefined,
+                              })
+                            }
+                            className={`flex-1 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
+                              chosenTargetMode === 'target'
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                            }`}
+                          >
+                            Modifier la Cible
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveWizard({
+                                ...activeWizard,
+                                actionTargetMode: 'subject',
+                                actionTargetStateId: undefined,
+                              })
+                            }
+                            className={`flex-1 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
+                              chosenTargetMode === 'subject'
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                            }`}
+                          >
+                            Modifier le Sujet
+                          </button>
+                        </div>
+                      )}
+
+                      <label className="text-xs font-bold text-slate-700 block">Choisissez l'état cible :</label>
+                      <div className="grid grid-cols-2 gap-3 max-h-48 overflow-y-auto pr-1">
+                        {relevantEntity &&
+                          Object.values(relevantEntity.states).map((st) => (
+                            <button
+                              key={st.id}
+                              type="button"
+                              onClick={() =>
+                                setActiveWizard({
+                                  ...activeWizard,
+                                  actionTargetStateId: st.id,
+                                })
+                              }
+                              className={`p-3 rounded-2xl border flex flex-col items-center gap-2 cursor-pointer transition-all ${
+                                activeWizard.actionTargetStateId === st.id
+                                  ? 'bg-indigo-50 border-indigo-500 ring-2 ring-indigo-200 shadow-xs'
+                                  : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
+                                <EntityMiniPreview entity={relevantEntity} type={relevantType} stateId={st.id} size={36} />
+                              </div>
+                              <span className="text-xs font-bold text-slate-800 truncate w-full text-center">
+                                Devenir "{st.name}"
+                              </span>
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 2. Spawn entity configuration */}
+                {activeWizard.actionType === 'spawn_entity' && (
+                  <div className="space-y-3">
+                    <label className="text-xs font-bold text-slate-700 block">Objet à créer :</label>
+                    <div className="grid grid-cols-3 gap-2 max-h-36 overflow-y-auto pr-1">
+                      {availableEntityOptions.map((opt) => {
+                        const ent = getEntityObj(opt.type);
+                        const isSelected = activeWizard.actionSpawnEntityType === opt.type;
+                        return (
+                          <button
+                            key={opt.type}
+                            type="button"
+                            onClick={() =>
+                              setActiveWizard({
+                                ...activeWizard,
+                                actionSpawnEntityType: opt.type,
+                              })
+                            }
+                            className={`p-2.5 rounded-2xl border flex flex-col items-center gap-1.5 cursor-pointer transition-all ${
+                              isSelected
+                                ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-200 shadow-xs'
+                                : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
+                              <EntityMiniPreview entity={ent} type={opt.type} size={28} />
+                            </div>
+                            <span className="text-[11px] font-bold text-slate-800 truncate w-full text-center">
+                              {opt.label}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <label className="text-xs font-bold text-slate-700 block pt-1">Où le faire apparaître :</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveWizard({
+                            ...activeWizard,
+                            actionSpawnLocationMode: 'at_subject',
+                          })
+                        }
+                        className={`p-2.5 rounded-xl border text-xs font-bold text-left transition-all cursor-pointer ${
+                          activeWizard.actionSpawnLocationMode === 'at_subject'
+                            ? 'bg-emerald-50 border-emerald-500 text-emerald-800 ring-2 ring-emerald-200'
+                            : 'bg-slate-50 border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        📍 Sur le Sujet
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveWizard({
+                            ...activeWizard,
+                            actionSpawnLocationMode: 'at_target',
+                          })
+                        }
+                        className={`p-2.5 rounded-xl border text-xs font-bold text-left transition-all cursor-pointer ${
+                          activeWizard.actionSpawnLocationMode === 'at_target'
+                            ? 'bg-emerald-50 border-emerald-500 text-emerald-800 ring-2 ring-emerald-200'
+                            : 'bg-slate-50 border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        🎯 Sur la Cible
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveWizard({
+                            ...activeWizard,
+                            actionSpawnLocationMode: 'random',
+                          })
+                        }
+                        className={`p-2.5 rounded-xl border text-xs font-bold text-left transition-all cursor-pointer ${
+                          activeWizard.actionSpawnLocationMode === 'random'
+                            ? 'bg-emerald-50 border-emerald-500 text-emerald-800 ring-2 ring-emerald-200'
+                            : 'bg-slate-50 border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        🎲 Aléatoire
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveWizard({
+                            ...activeWizard,
+                            actionSpawnLocationMode: 'absolute',
+                          })
+                        }
+                        className={`p-2.5 rounded-xl border text-xs font-bold text-left transition-all cursor-pointer ${
+                          activeWizard.actionSpawnLocationMode === 'absolute'
+                            ? 'bg-emerald-50 border-emerald-500 text-emerald-800 ring-2 ring-emerald-200'
+                            : 'bg-slate-50 border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        🎯 Centre de l'écran
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. Delete configuration */}
+                {activeWizard.actionType === 'delete_entity' && (
+                  <div className="space-y-3">
+                    <label className="text-xs font-bold text-slate-700 block">Quel objet détruire ?</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveWizard({
+                            ...activeWizard,
+                            actionTargetMode: 'subject',
+                          })
+                        }
+                        className={`p-3.5 rounded-2xl border text-center transition-all cursor-pointer ${
+                          activeWizard.actionTargetMode === 'subject'
+                            ? 'bg-rose-50 border-rose-500 ring-2 ring-rose-200'
+                            : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        <div className="text-xs font-bold text-slate-900">Détruire le Sujet</div>
+                        <div className="text-[10px] text-rose-600">L'objet qui déclenche</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveWizard({
+                            ...activeWizard,
+                            actionTargetMode: 'target',
+                          })
+                        }
+                        className={`p-3.5 rounded-2xl border text-center transition-all cursor-pointer ${
+                          activeWizard.actionTargetMode === 'target' || !activeWizard.actionTargetMode
+                            ? 'bg-rose-50 border-rose-500 ring-2 ring-rose-200'
+                            : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        <div className="text-xs font-bold text-slate-900">Détruire la Cible</div>
+                        <div className="text-[10px] text-rose-600">L'objet touché</div>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. Play sound configuration */}
+                {activeWizard.actionType === 'play_sound' && (
+                  <div className="space-y-3">
+                    <label className="text-xs font-bold text-slate-700 block">Effet sonore :</label>
+                    <div className="grid grid-cols-3 gap-2.5">
+                      {[
+                        { id: 'magic', label: '✨ Magie' },
+                        { id: 'pop', label: '🎈 Pop' },
+                        { id: 'bell', label: '🔔 Cloche' },
+                        { id: 'bounce', label: '🏀 Rebond' },
+                        { id: 'laser', label: '⚡ Laser' },
+                        { id: 'win', label: '🏆 Victoire' },
+                      ].map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => {
+                            soundSynth.play(s.id as any);
+                            setActiveWizard({
+                              ...activeWizard,
+                              actionSoundType: s.id as any,
+                            });
+                          }}
+                          className={`p-3 rounded-2xl border flex flex-col items-center justify-center gap-1 cursor-pointer transition-all shadow-2xs group ${
+                            activeWizard.actionSoundType === s.id
+                              ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-200'
+                              : 'bg-slate-50 border-slate-200 hover:bg-amber-50/50'
+                          }`}
+                        >
+                          <span className="text-xl group-hover:scale-110 transition-transform">
+                            {s.label.split(' ')[0]}
+                          </span>
+                          <span className="text-xs font-bold text-slate-800">{s.label.split(' ')[1]}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-between pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setActiveWizard({ ...activeWizard, step: 4 })}
+                    className="px-4 py-2 text-slate-600 hover:bg-slate-100 font-bold text-xs rounded-xl flex items-center gap-1 cursor-pointer"
+                  >
+                    <ChevronLeft className="w-4 h-4" /> Précédent
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleFinishWizard(true)}
+                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Créer la règle</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* --- DIRECT SLOT EDIT MODAL (Subject, Target, Event, Action) --- */}
       {activeModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl border border-slate-200 p-6 max-w-lg w-full shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
-            {/* 1. SUBJECT / TARGET SELECTOR (STEP 1 & 2) */}
+            {/* 1. SUBJECT / TARGET SELECTOR */}
             {(activeModal.type === 'subject' || activeModal.type === 'target') && (() => {
               const rule = rules.find((r) => r.id === activeModal.ruleId);
               if (!rule) return null;
@@ -703,7 +1532,6 @@ export function RuleBook() {
 
               return (
                 <div className="space-y-4">
-                  {/* Modal Header */}
                   <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                     <div className="flex items-center gap-2">
                       {activeModal.step === 2 && (
@@ -735,7 +1563,6 @@ export function RuleBook() {
                     </button>
                   </div>
 
-                  {/* STEP 1: CHOOSE OBJECT ARCHETYPE */}
                   {activeModal.step === 1 && (
                     <div className="space-y-3">
                       <div className="grid grid-cols-3 gap-3">
@@ -767,11 +1594,9 @@ export function RuleBook() {
                     </div>
                   )}
 
-                  {/* STEP 2: CHOOSE SPECIFIC STATE OR ANY */}
                   {activeModal.step === 2 && (
                     <div className="space-y-3">
                       <div className="grid grid-cols-2 gap-3">
-                        {/* Option 1: Any State */}
                         <button
                           type="button"
                           onClick={() => {
@@ -805,7 +1630,6 @@ export function RuleBook() {
                           </div>
                         </button>
 
-                        {/* Specific States */}
                         {targetEntity &&
                           Object.values(targetEntity.states).map((st) => (
                             <button
@@ -1022,7 +1846,7 @@ export function RuleBook() {
               );
             })()}
 
-            {/* 3. GUIDED ACTION BUILDER (STEP 1, 2, 3) */}
+            {/* 3. DIRECT ACTION MODAL */}
             {activeModal.type === 'action' && (() => {
               const rule = rules.find((r) => r.id === activeModal.ruleId);
               if (!rule) return null;
@@ -1038,6 +1862,8 @@ export function RuleBook() {
               const subjectEntity = getEntityObj(subjectType);
               const targetEntity = getEntityObj(targetType);
               const relevantEntity = getEntityObj(chosenType);
+              const subjectOpt = availableEntityOptions.find((o) => o.type === subjectType);
+              const targetOpt = availableEntityOptions.find((o) => o.type === targetType);
 
               const applyActionChange = (finalActionData: Partial<RuleAction>) => {
                 if (activeModal.actionIndex !== undefined) {
@@ -1062,7 +1888,6 @@ export function RuleBook() {
 
               return (
                 <div className="space-y-4">
-                  {/* Modal Header */}
                   <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                     <div className="flex items-center gap-2">
                       {activeModal.step > 1 && (
@@ -1099,143 +1924,152 @@ export function RuleBook() {
                     </button>
                   </div>
 
-                  {/* STEP 1: CHOOSE ACTION TYPE */}
                   {activeModal.step === 1 && (
-                    <div className="space-y-2.5">
+                    <div className="grid grid-cols-2 gap-3">
                       <button
                         type="button"
-                        onClick={() => {
-                          if (isCollision) {
-                            setActiveModal({
-                              ...activeModal,
-                              step: 2,
-                              actionType: 'change_state',
-                            });
-                          } else {
-                            // If Click: directly target the Subject
-                            setActiveModal({
-                              ...activeModal,
-                              step: 3,
-                              actionType: 'change_state',
-                              targetMode: 'subject',
-                              selectedTargetType: subjectType,
-                            });
-                          }
-                        }}
-                        className="w-full p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                        onClick={() =>
+                          setActiveModal({
+                            ...activeModal,
+                            actionType: 'change_state',
+                            step: isCollision ? 2 : 3,
+                          })
+                        }
+                        className="p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
                       >
-                        <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                        <div className="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-xl group-hover:scale-105 transition-transform">
                           🔄
                         </div>
                         <div>
-                          <div className="text-sm font-bold text-slate-900">Changer d'état</div>
-                          <div className="text-xs text-slate-500">
-                            Faire évoluer un objet vers une autre forme (ex: fleurie, croquée...)
-                          </div>
+                          <div className="text-xs font-bold text-slate-900">Changer d'état</div>
+                          <div className="text-[10px] text-slate-500">Modifier l'apparence</div>
                         </div>
                       </button>
 
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={() =>
                           setActiveModal({
                             ...activeModal,
-                            step: 2,
                             actionType: 'spawn_entity',
-                          });
-                        }}
-                        className="w-full p-4 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                            step: 2,
+                          })
+                        }
+                        className="p-4 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
                       >
-                        <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                        <div className="w-12 h-12 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-xl group-hover:scale-105 transition-transform">
                           ✨
                         </div>
                         <div>
-                          <div className="text-sm font-bold text-slate-900">Créer une entité (Instancier)</div>
-                          <div className="text-xs text-slate-500">
-                            Faire apparaître un nouvel objet sur la scène (relatif au sujet, à la cible, etc.)
-                          </div>
+                          <div className="text-xs font-bold text-slate-900">Créer un objet</div>
+                          <div className="text-[10px] text-slate-500">Faire apparaître une entité</div>
                         </div>
                       </button>
 
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={() =>
                           setActiveModal({
                             ...activeModal,
-                            step: 2,
                             actionType: 'delete_entity',
-                          });
-                        }}
-                        className="w-full p-4 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                            step: isCollision ? 2 : 3,
+                          })
+                        }
+                        className="p-4 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
                       >
-                        <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                        <div className="w-12 h-12 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center text-xl group-hover:scale-105 transition-transform">
                           💥
                         </div>
                         <div>
-                          <div className="text-sm font-bold text-slate-900">Faire disparaître / Détruire</div>
-                          <div className="text-xs text-slate-500">Supprimer un objet de la scène</div>
+                          <div className="text-xs font-bold text-slate-900">Détruire</div>
+                          <div className="text-[10px] text-slate-500">Faire disparaître un objet</div>
                         </div>
                       </button>
 
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={() =>
                           setActiveModal({
                             ...activeModal,
-                            step: 3,
                             actionType: 'play_sound',
-                          });
-                        }}
-                        className="w-full p-4 bg-slate-50 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-2xl flex items-center gap-3.5 text-left cursor-pointer transition-all group"
+                            step: 3,
+                          })
+                        }
+                        className="p-4 bg-slate-50 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
                       >
-                        <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                        <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-xl group-hover:scale-105 transition-transform">
                           🔊
                         </div>
                         <div>
-                          <div className="text-sm font-bold text-slate-900">Jouer un son</div>
-                          <div className="text-xs text-slate-500">Déclencher un effet sonore musical</div>
+                          <div className="text-xs font-bold text-slate-900">Jouer un son</div>
+                          <div className="text-[10px] text-slate-500">Effet audio / Synthèse</div>
                         </div>
                       </button>
                     </div>
                   )}
 
-                  {/* STEP 2: CHOOSE TARGET OBJECT OR SPAWN OBJECT */}
                   {activeModal.step === 2 && (
                     <div className="space-y-3">
                       {actionType === 'spawn_entity' ? (
-                        <div className="space-y-3">
-                          <p className="text-xs font-medium text-slate-600">Choisissez quel objet faire apparaître :</p>
-                          <div className="grid grid-cols-3 gap-3">
-                            {availableEntityOptions.map((opt) => {
-                              const ent = getEntityObj(opt.type);
-                              return (
-                                <button
-                                  key={opt.type}
-                                  type="button"
-                                  onClick={() => {
-                                    setActiveModal({
-                                      ...activeModal,
-                                      step: 3,
-                                      actionType: 'spawn_entity',
-                                      selectedTargetType: opt.type,
-                                    });
-                                  }}
-                                  className="p-3.5 bg-slate-50 hover:bg-emerald-50/70 border border-slate-200 hover:border-emerald-300 rounded-2xl flex flex-col items-center gap-2 cursor-pointer transition-all shadow-2xs group"
-                                >
-                                  <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
-                                    <EntityMiniPreview entity={ent} type={opt.type} size={40} />
-                                  </div>
-                                  <span className="text-xs font-bold text-slate-800 truncate w-full text-center">
-                                    {opt.label}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
+                        <div className="grid grid-cols-3 gap-3">
+                          {availableEntityOptions.map((opt) => {
+                            const ent = getEntityObj(opt.type);
+                            return (
+                              <button
+                                key={opt.type}
+                                type="button"
+                                onClick={() => {
+                                  setActiveModal({
+                                    ...activeModal,
+                                    selectedTargetType: opt.type,
+                                    step: 3,
+                                  });
+                                }}
+                                className="p-3.5 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
+                              >
+                                <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
+                                  <EntityMiniPreview entity={ent} type={opt.type} size={40} />
+                                </div>
+                                <span className="text-xs font-bold text-slate-800 truncate w-full text-center">
+                                  {opt.label}
+                                </span>
+                              </button>
+                            );
+                          })}
                         </div>
                       ) : (
                         <div className="grid grid-cols-2 gap-3">
-                          {/* Option: Subject */}
+                          {isCollision && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (actionType === 'delete_entity') {
+                                  applyActionChange({
+                                    type: 'delete_entity',
+                                    targetMode: 'target',
+                                    targetType,
+                                  });
+                                } else {
+                                  setActiveModal({
+                                    ...activeModal,
+                                    targetMode: 'target',
+                                    selectedTargetType: targetType,
+                                    step: 3,
+                                  });
+                                }
+                              }}
+                              className="p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
+                            >
+                              <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
+                                <EntityMiniPreview entity={targetEntity} type={targetType} size={40} />
+                              </div>
+                              <div>
+                                <div className="text-xs font-bold text-slate-900">La Cible touchée</div>
+                                <div className="text-[10px] text-indigo-600 font-semibold">{targetOpt?.label}</div>
+                              </div>
+                            </button>
+                          )}
+
                           <button
                             type="button"
                             onClick={() => {
@@ -1248,9 +2082,9 @@ export function RuleBook() {
                               } else {
                                 setActiveModal({
                                   ...activeModal,
-                                  step: 3,
                                   targetMode: 'subject',
                                   selectedTargetType: subjectType,
+                                  step: 3,
                                 });
                               }
                             }}
@@ -1260,78 +2094,15 @@ export function RuleBook() {
                               <EntityMiniPreview entity={subjectEntity} type={subjectType} size={40} />
                             </div>
                             <div>
-                              <div className="text-xs font-bold text-slate-900">Sujet (Déclencheur)</div>
-                              <div className="text-[10px] text-slate-500 capitalize">{subjectType}</div>
+                              <div className="text-xs font-bold text-slate-900">Le Sujet</div>
+                              <div className="text-[10px] text-indigo-600 font-semibold">{subjectOpt?.label}</div>
                             </div>
                           </button>
-
-                          {/* Option: Target (if collision) */}
-                          {isCollision && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (actionType === 'delete_entity') {
-                                  applyActionChange({
-                                    type: 'delete_entity',
-                                    targetMode: 'target',
-                                    targetType: targetType,
-                                  });
-                                } else {
-                                  setActiveModal({
-                                    ...activeModal,
-                                    step: 3,
-                                    targetMode: 'target',
-                                    selectedTargetType: targetType,
-                                  });
-                                }
-                              }}
-                              className="p-4 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
-                            >
-                              <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
-                                <EntityMiniPreview entity={targetEntity} type={targetType} size={40} />
-                              </div>
-                              <div>
-                                <div className="text-xs font-bold text-slate-900">Cible (Touchée)</div>
-                                <div className="text-[10px] text-slate-500 capitalize">{targetType}</div>
-                              </div>
-                            </button>
-                          )}
-
-                          {/* Option: Other entity archetype on delete */}
-                          {actionType === 'delete_entity' &&
-                            availableEntityOptions
-                              .filter((opt) => opt.type !== subjectType && (!isCollision || opt.type !== targetType))
-                              .map((opt) => {
-                                const ent = getEntityObj(opt.type);
-                                return (
-                                  <button
-                                    key={opt.type}
-                                    type="button"
-                                    onClick={() => {
-                                      applyActionChange({
-                                        type: 'delete_entity',
-                                        targetMode: 'type',
-                                        targetType: opt.type,
-                                      });
-                                    }}
-                                    className="p-4 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center group shadow-2xs"
-                                  >
-                                    <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs">
-                                      <EntityMiniPreview entity={ent} type={opt.type} size={40} />
-                                    </div>
-                                    <div>
-                                      <div className="text-xs font-bold text-slate-900">{opt.label}</div>
-                                      <div className="text-[10px] text-rose-600 font-semibold">Détruire cet objet</div>
-                                    </div>
-                                  </button>
-                                );
-                              })}
                         </div>
                       )}
                     </div>
                   )}
 
-                  {/* STEP 3: CHOOSE VALUE (STATE, SOUND, OR SPAWN LOCATION) */}
                   {activeModal.step === 3 && (
                     <div className="space-y-3">
                       {actionType === 'spawn_entity' && (
@@ -1351,7 +2122,7 @@ export function RuleBook() {
                             >
                               <div className="text-xs font-bold text-slate-900">📍 Sur le Sujet</div>
                               <div className="text-[10px] text-slate-500">
-                                Position relative à l'objet qui déclenche l'événement
+                                Position relative à l'objet qui déclenche
                               </div>
                             </button>
 
@@ -1387,7 +2158,7 @@ export function RuleBook() {
                             >
                               <div className="text-xs font-bold text-slate-900">🎲 Aléatoire</div>
                               <div className="text-[10px] text-slate-500">
-                                N'importe où sur l'espace visible du canevas
+                                N'importe où sur l'espace visible
                               </div>
                             </button>
 
@@ -1404,7 +2175,7 @@ export function RuleBook() {
                             >
                               <div className="text-xs font-bold text-slate-900">🎯 Centre de l'écran</div>
                               <div className="text-[10px] text-slate-500">
-                                À la position centrale de l'espace de jeu
+                                À la position centrale du canevas
                               </div>
                             </button>
                           </div>

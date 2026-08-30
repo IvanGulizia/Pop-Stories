@@ -1,10 +1,14 @@
 import React, { useRef, useState, useEffect } from 'react';
 import {
   MousePointer,
-  Spline,
+  Pencil,
   GitCommit,
   Square,
+  Circle,
+  Lasso,
+  PaintBucket,
   Eraser,
+  Scissors,
   RotateCcw,
   Undo2,
   Layers,
@@ -16,8 +20,11 @@ import {
   Check,
   Grid,
   Magnet,
+  Sparkles,
+  Shield,
+  Shapes,
 } from 'lucide-react';
-import { VectorPath, VectorPoint, VectorRect } from '../types';
+import { VectorPath, VectorPoint, VectorRect, ColliderType } from '../types';
 
 export interface OnionStateOption {
   id: string;
@@ -28,9 +35,12 @@ export interface OnionStateOption {
 interface DrawingCanvasProps {
   onVectorChange: (paths: VectorPath[], svgDataUrl?: string) => void;
   initialPaths?: VectorPath[];
-  initialColor?: string;
+  initialColliderType?: ColliderType;
+  initialStrokeColor?: string;
+  initialFillColor?: string;
   onionStates?: OnionStateOption[];
   currentEditingStateName?: string;
+  onColliderChange?: (colliderType: ColliderType) => void;
 }
 
 const COLOR_PALETTE = [
@@ -38,11 +48,18 @@ const COLOR_PALETTE = [
   '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#1e293b', '#64748b', '#ffffff',
 ];
 
-export type DrawTool = 'select' | 'brush' | 'polyline' | 'rectangle' | 'eraser';
+export type DrawTool =
+  | 'select'
+  | 'pencil'
+  | 'lasso_fill'
+  | 'polyline'
+  | 'rectangle'
+  | 'bucket'
+  | 'eraser_stroke'
+  | 'eraser_partial';
 
 /**
  * Generate standard SVG path data for a rounded rectangle.
- * When cornerRadius reaches width/2 (or height/2 on square), it becomes a perfect circle.
  */
 export function generateRoundedRectPath(rect: VectorRect): string {
   const { x, y, width, height } = rect;
@@ -72,7 +89,7 @@ export function generateRoundedRectPath(rect: VectorRect): string {
 /**
  * Convert point array to smooth bezier SVG path for freehand drawing
  */
-export function pointsToSmoothPath(points: VectorPoint[]): string {
+export function pointsToSmoothPath(points: VectorPoint[], isClosed = false): string {
   if (points.length === 0) return '';
   if (points.length === 1) {
     return `M ${points[0].x} ${points[0].y} L ${points[0].x + 0.1} ${points[0].y + 0.1}`;
@@ -84,6 +101,9 @@ export function pointsToSmoothPath(points: VectorPoint[]): string {
     path += ` Q ${points[i - 1].x} ${points[i - 1].y}, ${xc} ${yc}`;
   }
   path += ` L ${points[points.length - 1].x} ${points[points.length - 1].y}`;
+  if (isClosed) {
+    path += ' Z';
+  }
   return path;
 }
 
@@ -102,20 +122,43 @@ export function pointsToPolylinePath(points: VectorPoint[], isClosed = false): s
   return path;
 }
 
+/**
+ * Point in polygon test (ray-casting algorithm)
+ */
+function isPointInPolygon(point: VectorPoint, vs: VectorPoint[]): boolean {
+  const x = point.x, y = point.y;
+  let inside = false;
+  for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+    const xi = vs[i].x, yi = vs[i].y;
+    const xj = vs[j].x, yj = vs[j].y;
+    const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 export function DrawingCanvas({
   onVectorChange,
   initialPaths = [],
-  initialColor = '#6366f1',
+  initialColliderType = 'box',
+  initialStrokeColor = '#6366f1',
+  initialFillColor = 'none',
   onionStates = [],
   currentEditingStateName,
+  onColliderChange,
 }: DrawingCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [paths, setPaths] = useState<VectorPath[]>(initialPaths);
-  const [color, setColor] = useState(initialColor);
-  const [lineWidth, setLineWidth] = useState(6);
-  const [fillColor, setFillColor] = useState<string>('none');
+  const [strokeColor, setStrokeColor] = useState(initialStrokeColor);
+  const [strokeWidth, setStrokeWidth] = useState(6);
+  const [fillColor, setFillColor] = useState<string>(initialFillColor);
   const [cornerRadius, setCornerRadius] = useState<number>(0);
-  const [tool, setTool] = useState<DrawTool>('brush');
+  const [tool, setTool] = useState<DrawTool>('pencil');
+  const [colliderType, setColliderType] = useState<ColliderType>(initialColliderType);
+  const [showColliderPreview, setShowColliderPreview] = useState(true);
+
+  // Active color tab in toolbar ('stroke' | 'fill')
+  const [colorMode, setColorMode] = useState<'stroke' | 'fill'>('stroke');
 
   // Selection & Transform state
   const [selectedPathId, setSelectedPathId] = useState<string | null>(null);
@@ -123,6 +166,8 @@ export function DrawingCanvas({
 
   // Interaction dragging states
   const [isDrawing, setIsDrawing] = useState(false);
+  const [isErasingPartial, setIsErasingPartial] = useState(false);
+  const [cursorPos, setCursorPos] = useState<VectorPoint | null>(null);
   const [currentPoints, setCurrentPoints] = useState<VectorPoint[]>([]);
   const [startPoint, setStartPoint] = useState<VectorPoint | null>(null);
   const [currentRect, setCurrentRect] = useState<VectorRect | null>(null);
@@ -133,7 +178,7 @@ export function DrawingCanvas({
   // Active polyline in progress
   const [activePolylinePoints, setActivePolylinePoints] = useState<VectorPoint[]>([]);
 
-  // Grille & Magnétisme (Snap to grid) - Désactivés par défaut
+  // Grille & Magnétisme (Snap to grid)
   const [showGrid, setShowGrid] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [gridSnapSize, setGridSnapSize] = useState(10);
@@ -153,14 +198,13 @@ export function DrawingCanvas({
   }, [availableOnionStates, selectedOnionStateId]);
 
   const activeOnionReference = availableOnionStates.find((s) => s.id === selectedOnionStateId);
-
   const selectedPath = paths.find((p) => p.id === selectedPathId) || null;
 
   // Sync properties when selecting a shape
   useEffect(() => {
     if (selectedPath) {
-      setColor(selectedPath.stroke);
-      setLineWidth(selectedPath.strokeWidth);
+      setStrokeColor(selectedPath.stroke);
+      setStrokeWidth(selectedPath.strokeWidth);
       setFillColor(selectedPath.fill || 'none');
       if (selectedPath.rect) {
         setCornerRadius(selectedPath.rect.cornerRadius || 0);
@@ -177,6 +221,45 @@ export function DrawingCanvas({
     const encoded = encodeURIComponent(svgContent);
     const dataUrl = `data:image/svg+xml;charset=utf-8,${encoded}`;
     onVectorChange(updatedPaths, dataUrl);
+  };
+
+  const handleColliderTypeSelect = (type: ColliderType) => {
+    setColliderType(type);
+    if (onColliderChange) {
+      onColliderChange(type);
+    }
+  };
+
+  // Auto-detect collider from current paths bounds
+  const handleAutoDetectCollider = () => {
+    if (paths.length === 0) {
+      handleColliderTypeSelect('box');
+      return;
+    }
+
+    let minX = 200, maxX = 0, minY = 200, maxY = 0;
+    let hasPolyline = false;
+
+    paths.forEach((p) => {
+      if (p.type === 'polyline') hasPolyline = true;
+      const b = getPathBounds(p);
+      minX = Math.min(minX, b.x);
+      maxX = Math.max(maxX, b.x + b.width);
+      minY = Math.min(minY, b.y);
+      maxY = Math.max(maxY, b.y + b.height);
+    });
+
+    const w = Math.max(10, maxX - minX);
+    const h = Math.max(10, maxY - minY);
+    const ratio = w / h;
+
+    if (hasPolyline) {
+      handleColliderTypeSelect('polygon');
+    } else if (ratio >= 0.8 && ratio <= 1.25) {
+      handleColliderTypeSelect('circle');
+    } else {
+      handleColliderTypeSelect('box');
+    }
   };
 
   const getSVGCoordinates = (
@@ -242,22 +325,161 @@ export function DrawingCanvas({
     return { x: 0, y: 0, width: 200, height: 200 };
   };
 
+  // Overall drawing bounds for collider overlay
+  const getDrawingOverallBounds = () => {
+    if (paths.length === 0) return { x: 40, y: 40, width: 120, height: 120 };
+    let minX = 200, maxX = 0, minY = 200, maxY = 0;
+    paths.forEach((p) => {
+      const b = getPathBounds(p);
+      minX = Math.min(minX, b.x);
+      maxX = Math.max(maxX, b.x + b.width);
+      minY = Math.min(minY, b.y);
+      maxY = Math.max(maxY, b.y + b.height);
+    });
+    return {
+      x: Math.max(4, minX - 4),
+      y: Math.max(4, minY - 4),
+      width: Math.min(192, Math.max(16, maxX - minX + 8)),
+      height: Math.min(192, Math.max(16, maxY - minY + 8)),
+    };
+  };
+
+  // Partial eraser execution
+  const applyPartialEraser = (pt: VectorPoint, radius = Math.max(8, strokeWidth * 1.5)) => {
+    let hasChanged = false;
+    const newPaths: VectorPath[] = [];
+
+    paths.forEach((p) => {
+      if (p.rect) {
+        // If clicking/touching rect with eraser, check if pt is near boundary
+        const b = getPathBounds(p);
+        const nearEdge =
+          pt.x >= b.x - radius &&
+          pt.x <= b.x + b.width + radius &&
+          pt.y >= b.y - radius &&
+          pt.y <= b.y + b.height + radius;
+        if (nearEdge) {
+          hasChanged = true;
+          // erase rect
+          return;
+        }
+        newPaths.push(p);
+        return;
+      }
+
+      if (p.points && p.points.length > 0) {
+        const remainingChunks: VectorPoint[][] = [];
+        let currentChunk: VectorPoint[] = [];
+
+        p.points.forEach((pPoint) => {
+          const dist = Math.hypot(pPoint.x - pt.x, pPoint.y - pt.y);
+          if (dist <= radius) {
+            hasChanged = true;
+            if (currentChunk.length >= 2) {
+              remainingChunks.push(currentChunk);
+            }
+            currentChunk = [];
+          } else {
+            currentChunk.push(pPoint);
+          }
+        });
+
+        if (currentChunk.length >= 2) {
+          remainingChunks.push(currentChunk);
+        }
+
+        if (remainingChunks.length === 0) {
+          hasChanged = true;
+          // all points erased
+        } else {
+          remainingChunks.forEach((chunk, cIdx) => {
+            const isClosed = p.d.endsWith('Z') && remainingChunks.length === 1;
+            const newD =
+              p.type === 'polyline'
+                ? pointsToPolylinePath(chunk, isClosed)
+                : pointsToSmoothPath(chunk, isClosed);
+            newPaths.push({
+              ...p,
+              id: `${p.id}-sub-${cIdx}-${Date.now().toString(36)}`,
+              points: chunk,
+              d: newD,
+            });
+          });
+        }
+      } else {
+        newPaths.push(p);
+      }
+    });
+
+    if (hasChanged) {
+      setPaths(newPaths);
+      notifyChange(newPaths);
+    }
+  };
+
   // --- MOUSE / TOUCH HANDLERS ---
   const handlePointerDown = (e: React.MouseEvent<SVGSVGElement> | React.TouchEvent<SVGSVGElement>) => {
     const pt = getSVGCoordinates(e);
+    setCursorPos(pt);
 
     if (tool === 'select') {
-      // If clicking empty canvas in select mode
       setSelectedPathId(null);
       setSelectedVertexIndex(null);
       return;
     }
 
-    if (tool === 'eraser') {
+    if (tool === 'bucket') {
+      // Paint bucket: fill any clicked or enclosing shape
+      const activeColor = fillColor !== 'none' ? fillColor : strokeColor;
+      let filledOne = false;
+
+      // Check reverse order (top to bottom)
+      for (let i = paths.length - 1; i >= 0; i--) {
+        const p = paths[i];
+        if (p.rect) {
+          const b = getPathBounds(p);
+          if (pt.x >= b.x && pt.x <= b.x + b.width && pt.y >= b.y && pt.y <= b.y + b.height) {
+            const updated = paths.map((item, idx) => (idx === i ? { ...item, fill: activeColor } : item));
+            setPaths(updated);
+            notifyChange(updated);
+            filledOne = true;
+            break;
+          }
+        } else if (p.points && p.points.length >= 3) {
+          if (isPointInPolygon(pt, p.points)) {
+            const updated = paths.map((item, idx) =>
+              idx === i ? { ...item, fill: activeColor, d: item.d.endsWith('Z') ? item.d : `${item.d} Z` } : item
+            );
+            setPaths(updated);
+            notifyChange(updated);
+            filledOne = true;
+            break;
+          }
+        }
+      }
+
+      if (!filledOne && paths.length > 0) {
+        // If not strictly inside, fill the nearest path
+        const updated = paths.map((p, idx) =>
+          idx === paths.length - 1 ? { ...p, fill: activeColor } : p
+        );
+        setPaths(updated);
+        notifyChange(updated);
+      }
       return;
     }
 
-    if (tool === 'brush') {
+    if (tool === 'eraser_partial') {
+      setIsErasingPartial(true);
+      applyPartialEraser(pt);
+      return;
+    }
+
+    if (tool === 'eraser_stroke') {
+      return;
+    }
+
+    if (tool === 'pencil' || tool === 'lasso_fill') {
       setIsDrawing(true);
       setCurrentPoints([pt]);
       return;
@@ -271,11 +493,9 @@ export function DrawingCanvas({
     }
 
     if (tool === 'polyline') {
-      // Polyline clicking mode
       if (activePolylinePoints.length > 0) {
         const first = activePolylinePoints[0];
         const dist = Math.hypot(pt.x - first.x, pt.y - first.y);
-        // If clicking close to starting point -> close polyline
         if (dist < 8 && activePolylinePoints.length >= 3) {
           finishPolyline(true);
           return;
@@ -287,6 +507,12 @@ export function DrawingCanvas({
 
   const handlePointerMove = (e: React.MouseEvent<SVGSVGElement> | React.TouchEvent<SVGSVGElement>) => {
     const pt = getSVGCoordinates(e);
+    setCursorPos(pt);
+
+    if (isErasingPartial && tool === 'eraser_partial') {
+      applyPartialEraser(pt);
+      return;
+    }
 
     // Resizing or moving with selection handles
     if (tool === 'select' && selectedPath && dragStartMouse) {
@@ -294,7 +520,6 @@ export function DrawingCanvas({
       const dy = pt.y - dragStartMouse.y;
 
       if (isDraggingShape) {
-        // Move whole shape
         const updated = paths.map((p) => {
           if (p.id !== selectedPath.id) return p;
           if (p.rect) {
@@ -316,7 +541,7 @@ export function DrawingCanvas({
               d:
                 p.type === 'polyline'
                   ? pointsToPolylinePath(newPoints, p.d.endsWith('Z'))
-                  : pointsToSmoothPath(newPoints),
+                  : pointsToSmoothPath(newPoints, p.d.endsWith('Z')),
             };
           }
           return p;
@@ -327,7 +552,6 @@ export function DrawingCanvas({
       }
 
       if (activeHandle === 'vertex' && selectedVertexIndex !== null && selectedPath.points) {
-        // Move single vertex of polyline
         const updated = paths.map((p) => {
           if (p.id !== selectedPath.id || !p.points) return p;
           const newPoints = [...p.points];
@@ -338,7 +562,7 @@ export function DrawingCanvas({
             d:
               p.type === 'polyline'
                 ? pointsToPolylinePath(newPoints, p.d.endsWith('Z'))
-                : pointsToSmoothPath(newPoints),
+                : pointsToSmoothPath(newPoints, p.d.endsWith('Z')),
           };
         });
         setPaths(updated);
@@ -346,7 +570,6 @@ export function DrawingCanvas({
       }
 
       if (activeHandle && selectedPath.rect) {
-        // Scale rounded rect via corner handles
         const r = selectedPath.rect;
         let newX = r.x;
         let newY = r.y;
@@ -390,7 +613,7 @@ export function DrawingCanvas({
 
     if (!isDrawing) return;
 
-    if (tool === 'brush') {
+    if (tool === 'pencil' || tool === 'lasso_fill') {
       setCurrentPoints((prev) => [...prev, pt]);
     } else if (tool === 'rectangle' && startPoint) {
       const width = pt.x - startPoint.x;
@@ -406,6 +629,10 @@ export function DrawingCanvas({
   };
 
   const handlePointerUp = () => {
+    if (isErasingPartial) {
+      setIsErasingPartial(false);
+    }
+
     if (isDraggingShape || activeHandle) {
       setIsDraggingShape(false);
       setActiveHandle(null);
@@ -417,14 +644,29 @@ export function DrawingCanvas({
     if (!isDrawing) return;
     setIsDrawing(false);
 
-    if (tool === 'brush' && currentPoints.length > 0) {
+    if (tool === 'pencil' && currentPoints.length > 0) {
       const d = pointsToSmoothPath(currentPoints);
       const newPath: VectorPath = {
         id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         d,
-        stroke: color,
-        strokeWidth: lineWidth,
+        stroke: strokeColor === 'none' ? '#6366f1' : strokeColor,
+        strokeWidth,
         fill: fillColor === 'none' ? 'none' : fillColor,
+        type: 'freehand',
+        points: currentPoints,
+      };
+      const updated = [...paths, newPath];
+      setPaths(updated);
+      notifyChange(updated);
+    } else if (tool === 'lasso_fill' && currentPoints.length > 1) {
+      const d = pointsToSmoothPath(currentPoints, true);
+      const effectiveFill = fillColor !== 'none' ? fillColor : strokeColor;
+      const newPath: VectorPath = {
+        id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        d,
+        stroke: strokeColor,
+        strokeWidth: strokeColor === 'none' ? 0 : strokeWidth,
+        fill: effectiveFill,
         type: 'freehand',
         points: currentPoints,
       };
@@ -436,8 +678,8 @@ export function DrawingCanvas({
       const newPath: VectorPath = {
         id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         d,
-        stroke: color,
-        strokeWidth: lineWidth,
+        stroke: strokeColor === 'none' ? '#6366f1' : strokeColor,
+        strokeWidth,
         fill: fillColor === 'none' ? 'none' : fillColor,
         type: 'rectangle',
         rect: currentRect,
@@ -463,8 +705,8 @@ export function DrawingCanvas({
     const newPath: VectorPath = {
       id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       d,
-      stroke: color,
-      strokeWidth: lineWidth,
+      stroke: strokeColor === 'none' ? '#6366f1' : strokeColor,
+      strokeWidth,
       fill: closed && fillColor !== 'none' ? fillColor : 'none',
       type: 'polyline',
       points: activePolylinePoints,
@@ -479,7 +721,16 @@ export function DrawingCanvas({
 
   const handleShapeClick = (p: VectorPath, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (tool === 'eraser') {
+    if (tool === 'bucket') {
+      const activeColor = fillColor !== 'none' ? fillColor : strokeColor;
+      const updated = paths.map((item) =>
+        item.id === p.id ? { ...item, fill: activeColor } : item
+      );
+      setPaths(updated);
+      notifyChange(updated);
+      return;
+    }
+    if (tool === 'eraser_stroke') {
       const updated = paths.filter((item) => item.id !== p.id);
       setPaths(updated);
       if (selectedPathId === p.id) setSelectedPathId(null);
@@ -551,7 +802,7 @@ export function DrawingCanvas({
         d:
           selectedPath.type === 'polyline'
             ? pointsToPolylinePath(newPoints, selectedPath.d.endsWith('Z'))
-            : pointsToSmoothPath(newPoints),
+            : pointsToSmoothPath(newPoints, selectedPath.d.endsWith('Z')),
       };
     } else {
       duplicated = { ...selectedPath, id: newId };
@@ -590,6 +841,7 @@ export function DrawingCanvas({
   };
 
   const selectedBounds = selectedPath ? getPathBounds(selectedPath) : null;
+  const overallBounds = getDrawingOverallBounds();
 
   return (
     <div className="flex flex-col lg:flex-row gap-4 w-full h-full items-stretch overflow-hidden">
@@ -608,6 +860,26 @@ export function DrawingCanvas({
                 Polyligne : {activePolylinePoints.length} pts
               </span>
             )}
+            {tool === 'lasso_fill' && (
+              <span className="bg-purple-100 text-purple-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px]">
+                Lasso Plein (Fill)
+              </span>
+            )}
+            {tool === 'bucket' && (
+              <span className="bg-teal-100 text-teal-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px]">
+                Pot de Peinture : Cliquez sur une forme
+              </span>
+            )}
+            {tool === 'eraser_partial' && (
+              <span className="bg-rose-100 text-rose-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px]">
+                Gomme Précise (Efface les bouts de traits)
+              </span>
+            )}
+            {tool === 'eraser_stroke' && (
+              <span className="bg-rose-100 text-rose-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px]">
+                Gomme Trait (Efface la forme entière)
+              </span>
+            )}
             {tool === 'select' && selectedPath && (
               <span className="bg-indigo-100 text-indigo-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px]">
                 Forme sélectionnée
@@ -616,7 +888,7 @@ export function DrawingCanvas({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Grille & Magnétisme Toggles (Désactivés par défaut) */}
+            {/* Grille & Magnétisme Toggles */}
             <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200 shadow-2xs">
               <button
                 type="button"
@@ -626,7 +898,7 @@ export function DrawingCanvas({
                     ? 'bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs'
                     : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
                 }`}
-                title="Afficher/Masquer la grille de repère (Désactivée par défaut)"
+                title="Afficher/Masquer la grille de repère"
               >
                 <Grid className="w-3 h-3" />
                 <span>Grille {showGrid ? 'On' : 'Off'}</span>
@@ -640,7 +912,7 @@ export function DrawingCanvas({
                     ? 'bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs'
                     : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
                 }`}
-                title="Activer/Désactiver l'aimant Snap to Grid (Désactivé par défaut)"
+                title="Activer/Désactiver l'aimant Snap to Grid"
               >
                 <Magnet className="w-3 h-3" />
                 <span>Snap {snapToGrid ? 'On' : 'Off'}</span>
@@ -668,8 +940,10 @@ export function DrawingCanvas({
             ref={svgRef}
             viewBox="0 0 200 200"
             className={`w-full h-full max-w-[500px] max-h-[500px] aspect-square bg-white rounded-3xl touch-none select-none border border-slate-300 shadow-md ${
-              tool === 'eraser'
-                ? 'cursor-not-allowed'
+              tool === 'eraser_stroke' || tool === 'eraser_partial'
+                ? 'cursor-none'
+                : tool === 'bucket'
+                ? 'cursor-cell'
                 : tool === 'select'
                 ? 'cursor-default'
                 : 'cursor-crosshair'
@@ -677,7 +951,10 @@ export function DrawingCanvas({
             onMouseDown={handlePointerDown}
             onMouseMove={handlePointerMove}
             onMouseUp={handlePointerUp}
-            onMouseLeave={handlePointerUp}
+            onMouseLeave={() => {
+              handlePointerUp();
+              setCursorPos(null);
+            }}
             onTouchStart={handlePointerDown}
             onTouchMove={handlePointerMove}
             onTouchEnd={handlePointerUp}
@@ -687,7 +964,7 @@ export function DrawingCanvas({
               }
             }}
           >
-            {/* Grille de repère (Optionnelle) */}
+            {/* Grille de repère */}
             <defs>
               <pattern id="grid-dots-light" width={gridSnapSize * 2} height={gridSnapSize * 2} patternUnits="userSpaceOnUse">
                 <circle cx={gridSnapSize} cy={gridSnapSize} r="1" fill="rgba(100,116,139,0.25)" />
@@ -714,6 +991,48 @@ export function DrawingCanvas({
               </g>
             )}
 
+            {/* Aperçu du Collider actif */}
+            {showColliderPreview && (
+              <g className="pointer-events-none select-none opacity-80">
+                {colliderType === 'circle' && (
+                  <circle
+                    cx={overallBounds.x + overallBounds.width / 2}
+                    cy={overallBounds.y + overallBounds.height / 2}
+                    r={Math.max(overallBounds.width, overallBounds.height) / 2}
+                    fill="rgba(16, 185, 129, 0.05)"
+                    stroke="#10b981"
+                    strokeWidth="1.5"
+                    strokeDasharray="4 3"
+                  />
+                )}
+                {colliderType === 'box' && (
+                  <rect
+                    x={overallBounds.x}
+                    y={overallBounds.y}
+                    width={overallBounds.width}
+                    height={overallBounds.height}
+                    fill="rgba(16, 185, 129, 0.05)"
+                    stroke="#10b981"
+                    strokeWidth="1.5"
+                    strokeDasharray="4 3"
+                    rx="4"
+                  />
+                )}
+                {colliderType === 'polygon' && (
+                  <rect
+                    x={overallBounds.x}
+                    y={overallBounds.y}
+                    width={overallBounds.width}
+                    height={overallBounds.height}
+                    fill="rgba(16, 185, 129, 0.05)"
+                    stroke="#10b981"
+                    strokeWidth="1.5"
+                    strokeDasharray="3 3"
+                  />
+                )}
+              </g>
+            )}
+
             {/* Tracés existants */}
             {paths.map((p) => (
               <path
@@ -725,8 +1044,10 @@ export function DrawingCanvas({
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 className={`transition-all ${
-                  tool === 'eraser'
+                  tool === 'eraser_stroke'
                     ? 'hover:stroke-rose-500 hover:opacity-40 cursor-pointer'
+                    : tool === 'bucket'
+                    ? 'hover:opacity-80 cursor-cell'
                     : tool === 'select'
                     ? 'hover:opacity-90 cursor-pointer'
                     : ''
@@ -735,15 +1056,28 @@ export function DrawingCanvas({
               />
             ))}
 
-            {/* Tracé Freehand en cours */}
-            {isDrawing && tool === 'brush' && currentPoints.length > 0 && (
+            {/* Tracé Freehand / Pencil en cours */}
+            {isDrawing && tool === 'pencil' && currentPoints.length > 0 && (
               <path
                 d={pointsToSmoothPath(currentPoints)}
-                stroke={color}
-                strokeWidth={lineWidth}
+                stroke={strokeColor === 'none' ? '#6366f1' : strokeColor}
+                strokeWidth={strokeWidth}
                 fill={fillColor === 'none' ? 'none' : fillColor}
                 strokeLinecap="round"
                 strokeLinejoin="round"
+              />
+            )}
+
+            {/* Tracé Lasso Plein en cours */}
+            {isDrawing && tool === 'lasso_fill' && currentPoints.length > 1 && (
+              <path
+                d={pointsToSmoothPath(currentPoints, true)}
+                stroke={strokeColor === 'none' ? '#6366f1' : strokeColor}
+                strokeWidth={strokeWidth}
+                fill={fillColor !== 'none' ? fillColor : strokeColor}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity={0.8}
               />
             )}
 
@@ -751,8 +1085,8 @@ export function DrawingCanvas({
             {isDrawing && tool === 'rectangle' && currentRect && (
               <path
                 d={generateRoundedRectPath(currentRect)}
-                stroke={color}
-                strokeWidth={lineWidth}
+                stroke={strokeColor === 'none' ? '#6366f1' : strokeColor}
+                strokeWidth={strokeWidth}
                 fill={fillColor === 'none' ? 'rgba(99,102,241,0.1)' : fillColor}
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -764,8 +1098,8 @@ export function DrawingCanvas({
               <g>
                 <path
                   d={pointsToPolylinePath(activePolylinePoints, false)}
-                  stroke={color}
-                  strokeWidth={lineWidth}
+                  stroke={strokeColor === 'none' ? '#6366f1' : strokeColor}
+                  strokeWidth={strokeWidth}
                   fill="none"
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -786,10 +1120,23 @@ export function DrawingCanvas({
               </g>
             )}
 
+            {/* Curseur Gomme circulaire */}
+            {(tool === 'eraser_partial' || tool === 'eraser_stroke') && cursorPos && (
+              <g className="pointer-events-none">
+                <circle
+                  cx={cursorPos.x}
+                  cy={cursorPos.y}
+                  r={tool === 'eraser_partial' ? Math.max(6, strokeWidth * 1.5) : 8}
+                  fill="rgba(244, 63, 94, 0.2)"
+                  stroke="#f43f5e"
+                  strokeWidth="1.5"
+                />
+              </g>
+            )}
+
             {/* Figma-Style Bounding Box & Transformation Handles */}
             {tool === 'select' && selectedPath && selectedBounds && (
               <g className="select-none">
-                {/* Bounding Rectangle */}
                 <rect
                   x={selectedBounds.x}
                   y={selectedBounds.y}
@@ -807,10 +1154,8 @@ export function DrawingCanvas({
                   }}
                 />
 
-                {/* Corner Resize Handles for Rectangles */}
                 {selectedPath.rect && (
                   <>
-                    {/* NW */}
                     <rect
                       x={selectedBounds.x - 4}
                       y={selectedBounds.y - 4}
@@ -826,7 +1171,6 @@ export function DrawingCanvas({
                         setDragStartMouse(getSVGCoordinates(e));
                       }}
                     />
-                    {/* NE */}
                     <rect
                       x={selectedBounds.x + selectedBounds.width - 4}
                       y={selectedBounds.y - 4}
@@ -842,7 +1186,6 @@ export function DrawingCanvas({
                         setDragStartMouse(getSVGCoordinates(e));
                       }}
                     />
-                    {/* SE */}
                     <rect
                       x={selectedBounds.x + selectedBounds.width - 4}
                       y={selectedBounds.y + selectedBounds.height - 4}
@@ -858,7 +1201,6 @@ export function DrawingCanvas({
                         setDragStartMouse(getSVGCoordinates(e));
                       }}
                     />
-                    {/* SW */}
                     <rect
                       x={selectedBounds.x - 4}
                       y={selectedBounds.y + selectedBounds.height - 4}
@@ -877,7 +1219,6 @@ export function DrawingCanvas({
                   </>
                 )}
 
-                {/* Vertex Point Handles for Polylines & Freehand */}
                 {selectedPath.points &&
                   selectedPath.points.map((pt, idx) => (
                     <circle
@@ -903,42 +1244,85 @@ export function DrawingCanvas({
         </div>
       </div>
 
-      {/* Barre d'outils vectorielle latérale (Outils, Inspecteur de forme, Palette) */}
-      <div className="w-full lg:w-80 bg-slate-50 border border-slate-200 p-3.5 sm:p-4 rounded-3xl flex flex-col justify-between gap-3 shrink-0 shadow-2xs overflow-y-auto max-h-full">
+      {/* Barre d'outils vectorielle latérale (Outils, Colliders, Inspecteur, Palette Stroke & Fill) */}
+      <div className="w-full lg:w-84 bg-slate-50 border border-slate-200 p-3.5 sm:p-4 rounded-3xl flex flex-col justify-between gap-3 shrink-0 shadow-2xs overflow-y-auto max-h-full">
         <div className="space-y-3.5">
           {/* Choix d'outil */}
           <div className="space-y-1">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Outil de dessin & manipulation
+              Outils de dessin
             </span>
-            <div className="grid grid-cols-5 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-2xs">
+            <div className="grid grid-cols-4 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-2xs">
+              {/* Pointeur */}
               <button
                 type="button"
                 onClick={() => setTool('select')}
-                className={`p-2 rounded-xl transition-all flex justify-center items-center cursor-pointer ${
+                className={`p-2 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
                   tool === 'select'
                     ? 'bg-indigo-600 text-white font-bold shadow-2xs'
                     : 'text-slate-600 hover:bg-slate-100'
                 }`}
-                title="Pointeur / Sélection & Modification (Figma-style)"
+                title="Pointeur / Sélection & Déplacement"
               >
                 <MousePointer className="w-4 h-4" />
+                <span className="text-[9px]">Sélect</span>
               </button>
+
+              {/* Crayon / Pinceau (Dessin libre) */}
               <button
                 type="button"
                 onClick={() => {
-                  setTool('brush');
+                  setTool('pencil');
                   setSelectedPathId(null);
                 }}
-                className={`p-2 rounded-xl transition-all flex justify-center items-center cursor-pointer ${
-                  tool === 'brush'
+                className={`p-2 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
+                  tool === 'pencil'
                     ? 'bg-indigo-600 text-white font-bold shadow-2xs'
                     : 'text-slate-600 hover:bg-slate-100'
                 }`}
-                title="Dessin libre"
+                title="Crayon / Dessin libre"
               >
-                <Spline className="w-4 h-4" />
+                <Pencil className="w-4 h-4" />
+                <span className="text-[9px]">Crayon</span>
               </button>
+
+              {/* Lasso Fill (Forme pleine fermée) */}
+              <button
+                type="button"
+                onClick={() => {
+                  setTool('lasso_fill');
+                  setSelectedPathId(null);
+                }}
+                className={`p-2 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
+                  tool === 'lasso_fill'
+                    ? 'bg-indigo-600 text-white font-bold shadow-2xs'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+                title="Lasso / Pinceau en mode Remplissage (Fill)"
+              >
+                <Lasso className="w-4 h-4" />
+                <span className="text-[9px]">Lasso</span>
+              </button>
+
+              {/* Pot de peinture */}
+              <button
+                type="button"
+                onClick={() => {
+                  setTool('bucket');
+                  setSelectedPathId(null);
+                }}
+                className={`p-2 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
+                  tool === 'bucket'
+                    ? 'bg-teal-600 text-white font-bold shadow-2xs'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+                title="Pot de peinture (Remplir une forme)"
+              >
+                <PaintBucket className="w-4 h-4" />
+                <span className="text-[9px]">Pot</span>
+              </button>
+
+              {/* Polyligne */}
               <button
                 type="button"
                 onClick={() => {
@@ -946,7 +1330,7 @@ export function DrawingCanvas({
                   setSelectedPathId(null);
                   setActivePolylinePoints([]);
                 }}
-                className={`p-2 rounded-xl transition-all flex justify-center items-center cursor-pointer ${
+                className={`p-2 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
                   tool === 'polyline'
                     ? 'bg-indigo-600 text-white font-bold shadow-2xs'
                     : 'text-slate-600 hover:bg-slate-100'
@@ -954,36 +1338,114 @@ export function DrawingCanvas({
                 title="Polyligne (cliquez point par point)"
               >
                 <GitCommit className="w-4 h-4" />
+                <span className="text-[9px]">Ligne</span>
               </button>
+
+              {/* Rectangle arrondi */}
               <button
                 type="button"
                 onClick={() => {
                   setTool('rectangle');
                   setSelectedPathId(null);
                 }}
-                className={`p-2 rounded-xl transition-all flex justify-center items-center cursor-pointer ${
+                className={`p-2 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
                   tool === 'rectangle'
                     ? 'bg-indigo-600 text-white font-bold shadow-2xs'
                     : 'text-slate-600 hover:bg-slate-100'
                 }`}
-                title="Rectangle arrondi (peut devenir un cercle)"
+                title="Rectangle / Cercle"
               >
                 <Square className="w-4 h-4" />
+                <span className="text-[9px]">Rect</span>
               </button>
+
+              {/* Gomme Précise (Normal - segments de traits) */}
               <button
                 type="button"
                 onClick={() => {
-                  setTool('eraser');
+                  setTool('eraser_partial');
                   setSelectedPathId(null);
                 }}
-                className={`p-2 rounded-xl transition-all flex justify-center items-center cursor-pointer ${
-                  tool === 'eraser'
+                className={`p-2 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
+                  tool === 'eraser_partial'
                     ? 'bg-rose-600 text-white font-bold shadow-2xs'
                     : 'text-slate-600 hover:bg-slate-100'
                 }`}
-                title="Gomme"
+                title="Gomme Précise (Efface les bouts de traits)"
               >
                 <Eraser className="w-4 h-4" />
+                <span className="text-[9px]">Gomme</span>
+              </button>
+
+              {/* Gomme Trait entier */}
+              <button
+                type="button"
+                onClick={() => {
+                  setTool('eraser_stroke');
+                  setSelectedPathId(null);
+                }}
+                className={`p-2 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
+                  tool === 'eraser_stroke'
+                    ? 'bg-rose-600 text-white font-bold shadow-2xs'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+                title="Gomme Objet (Efface le trait ou la forme entière en 1 clic)"
+              >
+                <Scissors className="w-4 h-4" />
+                <span className="text-[9px]">Objet</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Section Définition des Colliders */}
+          <div className="bg-white p-3 rounded-2xl border border-emerald-100 shadow-2xs space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-emerald-600" /> Collider (Collision)
+              </span>
+              <button
+                type="button"
+                onClick={handleAutoDetectCollider}
+                className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200 flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                title="Détecter automatiquement la forme de collision d'après le tracé"
+              >
+                <Sparkles className="w-3 h-3 text-emerald-600" /> Auto-détecter
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5">
+              <button
+                type="button"
+                onClick={() => handleColliderTypeSelect('box')}
+                className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                  colliderType === 'box'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <Square className="w-3 h-3" /> Boîte
+              </button>
+              <button
+                type="button"
+                onClick={() => handleColliderTypeSelect('circle')}
+                className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                  colliderType === 'circle'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <Circle className="w-3 h-3" /> Cercle
+              </button>
+              <button
+                type="button"
+                onClick={() => handleColliderTypeSelect('polygon')}
+                className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                  colliderType === 'polygon'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <Shapes className="w-3 h-3" /> Polygone
               </button>
             </div>
           </div>
@@ -1015,7 +1477,6 @@ export function DrawingCanvas({
                 </div>
               </div>
 
-              {/* Si rectangle : Slider Arrondi / Cercle */}
               {selectedPath.rect && (
                 <div className="space-y-1">
                   <div className="flex justify-between text-[11px] font-bold text-indigo-950">
@@ -1036,99 +1497,180 @@ export function DrawingCanvas({
                   />
                 </div>
               )}
-
-              {/* Remplissage de la forme */}
-              <div className="flex items-center justify-between pt-1 border-t border-indigo-200/60 text-xs">
-                <span className="font-bold text-indigo-950 text-[11px]">Remplissage</span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const newFill = fillColor === 'none' ? color : 'none';
-                      setFillColor(newFill);
-                      updateSelectedShapeProperties({ fill: newFill });
-                    }}
-                    className={`px-2 py-0.5 text-[10px] font-bold rounded-md border transition-all cursor-pointer ${
-                      fillColor !== 'none'
-                        ? 'bg-indigo-600 text-white border-indigo-700'
-                        : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
-                    }`}
-                  >
-                    {fillColor !== 'none' ? 'Rempli' : 'Transparent'}
-                  </button>
-                </div>
-              </div>
             </div>
           )}
 
-          {/* Épaisseur du trait */}
-          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs space-y-1.5">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-              <span>Épaisseur</span>
-              <span className="font-mono text-indigo-600">{lineWidth}px</span>
-            </div>
-            <input
-              type="range"
-              min="2"
-              max="24"
-              value={lineWidth}
-              onChange={(e) => {
-                const val = Number(e.target.value);
-                setLineWidth(val);
-                if (selectedPathId) {
-                  updateSelectedShapeProperties({ strokeWidth: val });
-                }
-              }}
-              className="w-full accent-indigo-600 cursor-pointer h-2 bg-slate-100 rounded-lg"
-            />
-          </div>
-
-          {/* Palette de Couleurs */}
-          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-700 block">Couleur</span>
-              <label
-                className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 cursor-pointer transition-colors"
-                title="Choisir une couleur personnalisée"
+          {/* Double Sélecteur Couleur : Trait (Stroke) & Remplissage (Fill) */}
+          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs space-y-2.5">
+            {/* Tabs Stroke / Fill */}
+            <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-xl gap-1">
+              <button
+                type="button"
+                onClick={() => setColorMode('stroke')}
+                className={`py-1 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  colorMode === 'stroke'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
               >
-                <Pipette className="w-3 h-3" />
-                <span>Pipette</span>
-                <input
-                  type="color"
-                  value={color.startsWith('#') ? color : '#6366f1'}
-                  onChange={(e) => {
-                    const c = e.target.value;
-                    setColor(c);
-                    if (selectedPathId) {
-                      updateSelectedShapeProperties({ stroke: c });
-                    }
-                  }}
-                  className="sr-only"
+                <div
+                  className="w-3 h-3 rounded-full border border-slate-300"
+                  style={{ backgroundColor: strokeColor === 'none' ? 'transparent' : strokeColor }}
                 />
-              </label>
+                <span>Contour</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setColorMode('fill')}
+                className={`py-1 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  colorMode === 'fill'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <div
+                  className="w-3 h-3 rounded-full border border-slate-300"
+                  style={{ backgroundColor: fillColor === 'none' ? 'transparent' : fillColor }}
+                />
+                <span>Remplissage</span>
+              </button>
             </div>
 
-            <div className="grid grid-cols-6 gap-1.5">
-              {COLOR_PALETTE.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => {
-                    setColor(c);
-                    if (selectedPathId) {
-                      updateSelectedShapeProperties({ stroke: c });
-                    }
-                  }}
-                  className={`w-6 h-6 rounded-xl border transition-all cursor-pointer ${
-                    color === c
-                      ? 'scale-110 ring-2 ring-indigo-500 ring-offset-1 z-10 shadow-sm'
-                      : 'hover:scale-105 border-slate-300'
-                  }`}
-                  style={{ backgroundColor: c }}
-                  title={c}
-                />
-              ))}
-            </div>
+            {/* Stroke Controls */}
+            {colorMode === 'stroke' && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-700">Couleur du contour</span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStrokeColor('none');
+                        if (selectedPathId) updateSelectedShapeProperties({ stroke: 'none' });
+                      }}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md border cursor-pointer ${
+                        strokeColor === 'none'
+                          ? 'bg-rose-50 text-rose-700 border-rose-300'
+                          : 'bg-white text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      Sans trait
+                    </button>
+                    <label className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 cursor-pointer">
+                      <Pipette className="w-3 h-3" />
+                      <input
+                        type="color"
+                        value={strokeColor.startsWith('#') ? strokeColor : '#6366f1'}
+                        onChange={(e) => {
+                          const c = e.target.value;
+                          setStrokeColor(c);
+                          if (selectedPathId) updateSelectedShapeProperties({ stroke: c });
+                        }}
+                        className="sr-only"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-6 gap-1.5">
+                  {COLOR_PALETTE.map((c) => (
+                    <button
+                      key={`stroke-${c}`}
+                      type="button"
+                      onClick={() => {
+                        setStrokeColor(c);
+                        if (selectedPathId) updateSelectedShapeProperties({ stroke: c });
+                      }}
+                      className={`w-6 h-6 rounded-xl border transition-all cursor-pointer ${
+                        strokeColor === c
+                          ? 'scale-110 ring-2 ring-indigo-500 ring-offset-1 z-10 shadow-sm'
+                          : 'hover:scale-105 border-slate-300'
+                      }`}
+                      style={{ backgroundColor: c }}
+                      title={c}
+                    />
+                  ))}
+                </div>
+
+                {/* Épaisseur du trait */}
+                <div className="pt-2 border-t border-slate-100 space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                    <span>Épaisseur</span>
+                    <span className="font-mono text-indigo-600">{strokeWidth}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="2"
+                    max="24"
+                    value={strokeWidth}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setStrokeWidth(val);
+                      if (selectedPathId) updateSelectedShapeProperties({ strokeWidth: val });
+                    }}
+                    className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-100 rounded-lg"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Fill Controls */}
+            {colorMode === 'fill' && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-700">Couleur de remplissage</span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFillColor('none');
+                        if (selectedPathId) updateSelectedShapeProperties({ fill: 'none' });
+                      }}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md border cursor-pointer ${
+                        fillColor === 'none'
+                          ? 'bg-rose-50 text-rose-700 border-rose-300'
+                          : 'bg-white text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      Transparent
+                    </button>
+                    <label className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 cursor-pointer">
+                      <Pipette className="w-3 h-3" />
+                      <input
+                        type="color"
+                        value={fillColor.startsWith('#') ? fillColor : '#6366f1'}
+                        onChange={(e) => {
+                          const c = e.target.value;
+                          setFillColor(c);
+                          if (selectedPathId) updateSelectedShapeProperties({ fill: c });
+                        }}
+                        className="sr-only"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-6 gap-1.5">
+                  {COLOR_PALETTE.map((c) => (
+                    <button
+                      key={`fill-${c}`}
+                      type="button"
+                      onClick={() => {
+                        setFillColor(c);
+                        if (selectedPathId) updateSelectedShapeProperties({ fill: c });
+                      }}
+                      className={`w-6 h-6 rounded-xl border transition-all cursor-pointer ${
+                        fillColor === c
+                          ? 'scale-110 ring-2 ring-indigo-500 ring-offset-1 z-10 shadow-sm'
+                          : 'hover:scale-105 border-slate-300'
+                      }`}
+                      style={{ backgroundColor: c }}
+                      title={c}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Module Pelure d'Oignon (Onion Skinning) */}
@@ -1188,7 +1730,7 @@ export function DrawingCanvas({
             onClick={handleUndo}
             disabled={paths.length === 0}
             className="flex-1 py-1.5 px-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 disabled:opacity-40 rounded-xl border border-slate-200 transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-2xs active:scale-95"
-            title="Annuler"
+            title="Annuler le dernier tracé"
           >
             <Undo2 className="w-3.5 h-3.5" /> Annuler
           </button>

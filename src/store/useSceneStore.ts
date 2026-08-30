@@ -80,6 +80,7 @@ interface SceneState {
   // Rules management
   addRule: (rule: Omit<DynamicRule, 'id'>) => string;
   updateRule: (id: string, partial: Partial<DynamicRule>) => void;
+  duplicateRule: (id: string) => string;
   deleteRule: (id: string) => void;
   toggleRule: (id: string) => void;
   triggerClickEvent: (entityId: EntityId) => void;
@@ -552,7 +553,18 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         }
       });
 
-      return { entities: updatedEntities };
+      const updatedArchetypes = { ...state.customArchetypes };
+      if (updatedArchetypes[targetType] && updatedArchetypes[targetType].states[stateId]) {
+        updatedArchetypes[targetType] = {
+          ...updatedArchetypes[targetType],
+          states: {
+            ...updatedArchetypes[targetType].states,
+            [stateId]: { ...updatedArchetypes[targetType].states[stateId], ...partial },
+          },
+        };
+      }
+
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
     });
   },
 
@@ -975,6 +987,35 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       rules: state.rules.map((r) => (r.id === id ? { ...r, ...partial } : r)),
     }));
     get().evaluateRules();
+  },
+
+  duplicateRule: (id) => {
+    const existingRule = get().rules.find((r) => r.id === id);
+    if (!existingRule) return '';
+    const newId = `rule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const clonedRule: DynamicRule = {
+      ...JSON.parse(JSON.stringify(existingRule)),
+      id: newId,
+      name: `${existingRule.name} (Copie)`,
+      actions: (existingRule.actions || []).map((act: RuleAction) => ({
+        ...act,
+        id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      })),
+    };
+
+    set((state) => {
+      const idx = state.rules.findIndex((r) => r.id === id);
+      const newRules = [...state.rules];
+      if (idx !== -1) {
+        newRules.splice(idx + 1, 0, clonedRule);
+      } else {
+        newRules.push(clonedRule);
+      }
+      return { rules: newRules };
+    });
+
+    get().evaluateRules();
+    return newId;
   },
 
   deleteRule: (id) => {
