@@ -1,7 +1,8 @@
-import { motion, useMotionValue } from 'motion/react';
+import { motion, useMotionValue, useDragControls } from 'motion/react';
 import { Entity } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
 import { useEffect, useRef, useState } from 'react';
+import { isPointInsideEntityCollider, getColliderClipPath } from '../utils/collider';
 
 interface AppleProps {
   entity: Entity;
@@ -21,6 +22,7 @@ export function Apple({ entity }: AppleProps) {
 
   const [isResizing, setIsResizing] = useState(false);
   const isDraggingRef = useRef(false);
+  const dragControls = useDragControls();
 
   const isSelected = selectedEntityId === entity.id;
   const currentState = entity.states[entity.currentStateId] || {
@@ -30,6 +32,8 @@ export function Apple({ entity }: AppleProps) {
     scale: 1,
     rotation: 0,
   };
+
+  const canDrag = !isResizing && (appMode !== 'play' || entity.isDraggable);
 
   const x = useMotionValue(entity.position.x);
   const y = useMotionValue(entity.position.y);
@@ -123,7 +127,7 @@ export function Apple({ entity }: AppleProps) {
   return (
     <motion.div
       className={`absolute flex items-center justify-center ${
-        entity.isDraggable && !isResizing ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+        canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
       } ${isSelected ? 'z-30' : 'z-20'}`}
       style={{
         left: 0,
@@ -134,20 +138,54 @@ export function Apple({ entity }: AppleProps) {
         x,
         y,
       }}
-      drag={!isResizing && entity.isDraggable}
+      drag={canDrag}
+      dragControls={dragControls}
+      dragListener={false}
       dragMomentum={false}
       onDragStart={handleDragStart}
       onDrag={handleDrag}
       onDragEnd={handleDragEnd}
-      onPointerDown={() => {
+      onPointerDown={(e) => {
+        const isInside = isPointInsideEntityCollider(
+          e.clientX,
+          e.clientY,
+          e.currentTarget as HTMLElement,
+          entity,
+          currentState
+        );
+        if (!isInside) {
+          return;
+        }
+        if (canDrag) {
+          dragControls.start(e);
+        }
         triggerPointerEvent(entity.id, 'mouse_down');
       }}
-      onPointerUp={() => {
+      onPointerUp={(e) => {
         if (!isDraggingRef.current) {
-          triggerPointerEvent(entity.id, 'mouse_up');
+          const isInside = isPointInsideEntityCollider(
+            e.clientX,
+            e.clientY,
+            e.currentTarget as HTMLElement,
+            entity,
+            currentState
+          );
+          if (isInside) {
+            triggerPointerEvent(entity.id, 'mouse_up');
+          }
         }
       }}
       onClick={(e) => {
+        const isInside = isPointInsideEntityCollider(
+          e.clientX,
+          e.clientY,
+          e.currentTarget as HTMLElement,
+          entity,
+          currentState
+        );
+        if (!isInside) {
+          return;
+        }
         e.stopPropagation();
         selectEntity(entity.id);
         if (!isDraggingRef.current) {

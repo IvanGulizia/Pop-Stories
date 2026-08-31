@@ -11,6 +11,7 @@ import {
   SoundType,
 } from '../types';
 import { EntityMiniPreview } from './EntityMiniPreview';
+import { SpawnLocationPicker } from './SpawnLocationPicker';
 import {
   Plus,
   Trash2,
@@ -76,6 +77,9 @@ interface WizardData {
     | 'state_picker'
     | 'third_party_entity_picker'
     | 'third_party_state_picker'
+    | 'third_party_destroy_picker'
+    | 'toggle_entity_picker'
+    | 'toggle_states_picker'
     | 'spawn_entity_picker'
     | 'spawn_location_picker'
     | 'sound_picker';
@@ -92,8 +96,10 @@ interface WizardData {
   actionTargetStateId?: string;
   pendingSpawnType?: EntityType;
   actionSpawnEntityType?: EntityType;
-  actionSpawnLocationMode?: 'at_subject' | 'at_target' | 'random' | 'absolute';
+  actionSpawnLocationMode?: 'at_subject' | 'at_target' | 'offset_subject' | 'offset_target' | 'random' | 'absolute';
   actionSoundType?: SoundType;
+  toggleStateA?: string;
+  toggleStateB?: string;
 }
 
 export function RuleBook() {
@@ -178,12 +184,9 @@ export function RuleBook() {
         type: actionData.type,
         targetMode: actionData.targetMode || (isCollision ? 'target' : 'subject'),
         targetType: actionData.targetType || (actionData.targetMode === 'subject' ? activeWizard.subjectType : activeWizard.targetType),
-        targetStateId: actionData.targetStateId,
-        spawnEntityType: actionData.spawnEntityType,
         spawnLocationMode: actionData.spawnLocationMode || (isCollision ? 'at_target' : 'at_subject'),
         spawnSizeMode: actionData.spawnSizeMode || 'default',
-        spawnCustomSize: actionData.spawnCustomSize,
-        soundType: actionData.soundType,
+        ...actionData,
       });
     }
 
@@ -728,8 +731,22 @@ export function RuleBook() {
                             ? 'Sur Sujet'
                             : act.spawnLocationMode === 'random'
                             ? 'Aléatoire'
-                            : 'Centre';
-                        actionDetail = `+ ${act.spawnEntityType || 'Objet'} (${locLabel})`;
+                            : act.spawnLocationMode?.startsWith('offset')
+                            ? 'Décalé'
+                            : 'Fixe';
+
+                        let sizeLabel = '';
+                        if (act.spawnSizeMode === 'match_target') {
+                          sizeLabel = ` (${act.spawnScaleMultiplier && act.spawnScaleMultiplier !== 1 ? `${act.spawnScaleMultiplier}x ` : ''}Cible)`;
+                        } else if (act.spawnSizeMode === 'match_subject') {
+                          sizeLabel = ` (${act.spawnScaleMultiplier && act.spawnScaleMultiplier !== 1 ? `${act.spawnScaleMultiplier}x ` : ''}Sujet)`;
+                        } else if (act.spawnSizeMode === 'custom' && act.spawnCustomSize) {
+                          sizeLabel = ` (${act.spawnCustomSize.width}x${act.spawnCustomSize.height}px)`;
+                        } else if (act.spawnScaleMultiplier && act.spawnScaleMultiplier !== 1) {
+                          sizeLabel = ` (${act.spawnScaleMultiplier}x)`;
+                        }
+
+                        actionDetail = `+ ${act.spawnEntityType || 'Objet'}${sizeLabel} • ${locLabel}`;
                       } else if (act.type === 'play_sound') {
                         actionBadge = 'Jouer Son';
                         actionDetail = act.soundType ? `Son ${act.soundType}` : 'Effet sonore';
@@ -872,7 +889,13 @@ export function RuleBook() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (activeWizard.actionSubStep && activeWizard.actionSubStep !== 'main') {
+                      if (activeWizard.actionSubStep === 'toggle_states_picker') {
+                        setActiveWizard({ ...activeWizard, actionSubStep: 'toggle_entity_picker' });
+                      } else if (activeWizard.actionSubStep === 'spawn_location_picker') {
+                        setActiveWizard({ ...activeWizard, actionSubStep: 'spawn_entity_picker' });
+                      } else if (activeWizard.actionSubStep === 'third_party_state_picker') {
+                        setActiveWizard({ ...activeWizard, actionSubStep: 'third_party_entity_picker' });
+                      } else if (activeWizard.actionSubStep && activeWizard.actionSubStep !== 'main') {
                         setActiveWizard({ ...activeWizard, actionSubStep: 'main' });
                       } else if (activeWizard.step === 3 && activeWizard.targetSubStep === 'choose_state') {
                         setActiveWizard({ ...activeWizard, targetSubStep: 'choose_object' });
@@ -1401,7 +1424,31 @@ export function RuleBook() {
                           </div>
                         </button>
 
-                        {/* 4. Détruire la Cible (si collision) */}
+                        {/* 4. Basculer l'état (Toggle ⇄ / Cycle entre les états) */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              actionSubStep: 'toggle_entity_picker',
+                            });
+                          }}
+                          className="p-4 bg-slate-50 hover:bg-violet-50 border-2 border-slate-200 hover:border-violet-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
+                        >
+                          <div className="w-14 h-14 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
+                            🔀
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-violet-700">
+                              Basculer l'état (Toggle ⇄ / Cycle)
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              Alterner A ⇄ B ou cycler entre tous les états
+                            </div>
+                          </div>
+                        </button>
+
+                        {/* 5. Détruire la Cible (si collision) */}
                         {activeWizard.triggerType === 'collision' && (
                           <button
                             type="button"
@@ -1428,7 +1475,7 @@ export function RuleBook() {
                           </button>
                         )}
 
-                        {/* 5. Détruire le Sujet */}
+                        {/* 6. Détruire le Sujet */}
                         <button
                           type="button"
                           onClick={() => {
@@ -1453,7 +1500,31 @@ export function RuleBook() {
                           </div>
                         </button>
 
-                        {/* 6. Créer un Objet (Spawn) */}
+                        {/* 7. Détruire un Autre Objet (Tierce) */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              actionSubStep: 'third_party_destroy_picker',
+                            });
+                          }}
+                          className="p-4 bg-slate-50 hover:bg-rose-50 border-2 border-slate-200 hover:border-rose-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
+                        >
+                          <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
+                            💣
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-rose-700">
+                              Détruire un Autre Objet (Tierce)
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              Supprimer une entité C à distance
+                            </div>
+                          </div>
+                        </button>
+
+                        {/* 8. Créer un Objet (Spawn) */}
                         <button
                           type="button"
                           onClick={() => {
@@ -1472,12 +1543,12 @@ export function RuleBook() {
                               Créer un nouvel Objet (Spawn)
                             </div>
                             <div className="text-[11px] text-slate-500 mt-0.5">
-                              Faire apparaître à un endroit précis
+                              Faire apparaître (marquage scène / relatif / aléatoire)
                             </div>
                           </div>
                         </button>
 
-                        {/* 7. Jouer un son */}
+                        {/* 9. Jouer un son */}
                         <button
                           type="button"
                           onClick={() => {
@@ -1639,6 +1710,158 @@ export function RuleBook() {
                     );
                   })()}
 
+                  {/* Sous-étape : Choix de l'objet pour Détruire un Objet Tierce */}
+                  {activeWizard.actionSubStep === 'third_party_destroy_picker' && (
+                    <div className="space-y-4">
+                      <div className="text-xs font-bold text-slate-600">
+                        Choisissez quel autre objet vous souhaitez détruire :
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+                        {availableEntityOptions.map((opt) => {
+                          const ent = getEntityObj(opt.type);
+                          return (
+                            <button
+                              key={opt.type}
+                              type="button"
+                              onClick={() => {
+                                completeWizardWithAction({
+                                  type: 'delete_entity',
+                                  targetMode: 'type',
+                                  targetType: opt.type,
+                                });
+                              }}
+                              className="p-4 bg-slate-50 hover:bg-rose-50 border-2 border-slate-200 hover:border-rose-500 rounded-3xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-xs group active:scale-95"
+                            >
+                              <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs group-hover:scale-110 transition-transform">
+                                <EntityMiniPreview entity={ent} type={opt.type} size={52} />
+                              </div>
+                              <div className="text-xs font-black text-slate-800 group-hover:text-rose-700 truncate w-full text-center">
+                                {opt.label}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Sous-étape : Choix de l'objet pour Toggle / Cycle */}
+                  {activeWizard.actionSubStep === 'toggle_entity_picker' && (
+                    <div className="space-y-4">
+                      <div className="text-xs font-bold text-slate-600">
+                        Sur quel objet basculer l'état (Toggle / Cycle) ?
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+                        {availableEntityOptions.map((opt) => {
+                          const ent = getEntityObj(opt.type);
+                          const statesList = ent ? Object.values(ent.states) : [];
+                          return (
+                            <button
+                              key={opt.type}
+                              type="button"
+                              onClick={() => {
+                                if (statesList.length >= 2) {
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    actionTargetType: opt.type,
+                                    actionSubStep: 'toggle_states_picker',
+                                  });
+                                } else {
+                                  completeWizardWithAction({
+                                    type: 'toggle_state',
+                                    targetMode: 'type',
+                                    targetType: opt.type,
+                                  });
+                                }
+                              }}
+                              className="p-4 bg-slate-50 hover:bg-violet-50 border-2 border-slate-200 hover:border-violet-500 rounded-3xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-xs group active:scale-95"
+                            >
+                              <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs group-hover:scale-110 transition-transform">
+                                <EntityMiniPreview entity={ent} type={opt.type} size={52} />
+                              </div>
+                              <div className="text-xs font-black text-slate-800 group-hover:text-violet-700 truncate w-full text-center">
+                                {opt.label}
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                {statesList.length} états disponibles
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Sous-étape : Choix des états pour Toggle / Cycle */}
+                  {activeWizard.actionSubStep === 'toggle_states_picker' && (() => {
+                    const relevantType = activeWizard.actionTargetType || availableEntityOptions[0]?.type || 'apple';
+                    const ent = getEntityObj(relevantType);
+                    const states = ent ? Object.values(ent.states) : [];
+
+                    return (
+                      <div className="space-y-4">
+                        <div className="text-xs font-bold text-slate-600">
+                          Comment faire basculer {ent?.name || relevantType} ?
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                          {/* Option 1: Cycler tous les états */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              completeWizardWithAction({
+                                type: 'toggle_state',
+                                targetMode: 'type',
+                                targetType: relevantType,
+                              });
+                            }}
+                            className="p-4 bg-slate-50 hover:bg-violet-50 border-2 border-slate-200 hover:border-violet-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                          >
+                            <div className="w-14 h-14 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
+                              🔄
+                            </div>
+                            <div>
+                              <div className="text-xs font-black text-slate-900 group-hover:text-violet-700">
+                                Cycler entre tous les états ({states.length} états)
+                              </div>
+                              <div className="text-[11px] text-slate-500 mt-0.5">
+                                Passe au suivant séquentiellement à chaque événement
+                              </div>
+                            </div>
+                          </button>
+
+                          {/* Option 2: Basculer spécifiquement entre État 1 et État 2 */}
+                          {states.length >= 2 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                completeWizardWithAction({
+                                  type: 'toggle_state',
+                                  targetMode: 'type',
+                                  targetType: relevantType,
+                                  toggleStateAId: states[0].id,
+                                  toggleStateBId: states[1].id,
+                                });
+                              }}
+                              className="p-4 bg-slate-50 hover:bg-violet-50 border-2 border-slate-200 hover:border-violet-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                            >
+                              <div className="w-14 h-14 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
+                                ⇄
+                              </div>
+                              <div>
+                                <div className="text-xs font-black text-slate-900 group-hover:text-violet-700">
+                                  Basculer : {states[0].name} ⇄ {states[1].name}
+                                </div>
+                                <div className="text-[11px] text-slate-500 mt-0.5">
+                                  Aller-retour binaire entre ces 2 états
+                                </div>
+                              </div>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* Sous-étape : Choix de l'objet à faire apparaître (Spawn) */}
                   {activeWizard.actionSubStep === 'spawn_entity_picker' && (
                     <div className="space-y-4">
@@ -1674,115 +1897,35 @@ export function RuleBook() {
                     </div>
                   )}
 
-                  {/* Sous-étape : Choix de l'emplacement de spawn */}
+                  {/* Sous-étape : Choix de l'emplacement de spawn avec SpawnLocationPicker */}
                   {activeWizard.actionSubStep === 'spawn_location_picker' && (
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       <div className="text-xs font-bold text-slate-600">
                         Où faire apparaître {getEntityObj(activeWizard.pendingSpawnType)?.name || activeWizard.pendingSpawnType} ?
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                        {/* Sur la Cible (si collision) */}
-                        {activeWizard.triggerType === 'collision' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              completeWizardWithAction({
-                                type: 'spawn_entity',
-                                spawnEntityType: activeWizard.pendingSpawnType,
-                                spawnLocationMode: 'at_target',
-                              });
-                            }}
-                            className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                          >
-                            <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                              🎯
-                            </div>
-                            <div>
-                              <div className="text-xs font-black text-slate-900 group-hover:text-amber-700">
-                                Sur la Cible (à l'impact)
-                              </div>
-                              <div className="text-[11px] text-slate-500 mt-0.5">
-                                Emplacement précis de l'objet touché
-                              </div>
-                            </div>
-                          </button>
-                        )}
-
-                        {/* Sur le Sujet */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            completeWizardWithAction({
-                              type: 'spawn_entity',
-                              spawnEntityType: activeWizard.pendingSpawnType,
-                              spawnLocationMode: 'at_subject',
-                            });
-                          }}
-                          className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            📍
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-amber-700">
-                              Sur le Sujet
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">
-                              Emplacement de l'objet qui agit
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* Position Aléatoire */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            completeWizardWithAction({
-                              type: 'spawn_entity',
-                              spawnEntityType: activeWizard.pendingSpawnType,
-                              spawnLocationMode: 'random',
-                            });
-                          }}
-                          className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            🎲
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-amber-700">
-                              Position Aléatoire
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">
-                              N'importe où sur la scène
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* Au Centre de la scène */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            completeWizardWithAction({
-                              type: 'spawn_entity',
-                              spawnEntityType: activeWizard.pendingSpawnType,
-                              spawnLocationMode: 'absolute',
-                            });
-                          }}
-                          className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            📌
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-amber-700">
-                              Au Centre de la scène
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">
-                              Position centrale fixe
-                            </div>
-                          </div>
-                        </button>
-                      </div>
+                      <SpawnLocationPicker
+                        isCollision={activeWizard.triggerType === 'collision'}
+                        subjectEntity={getEntityObj(activeWizard.subjectType)}
+                        targetEntity={getEntityObj(activeWizard.targetType)}
+                        spawnEntity={getEntityObj(activeWizard.pendingSpawnType)}
+                        initialMode={activeWizard.triggerType === 'collision' ? 'at_target' : 'at_subject'}
+                        onConfirm={(data) => {
+                          completeWizardWithAction({
+                            type: 'spawn_entity',
+                            spawnEntityType: activeWizard.pendingSpawnType,
+                            spawnLocationMode: data.spawnLocationMode,
+                            spawnOffset: data.spawnOffset,
+                            spawnPosition: data.spawnPosition,
+                            spawnAbsoluteCoords: data.spawnAbsoluteCoords,
+                            spawnSizeMode: data.spawnSizeMode,
+                            spawnScaleMultiplier: data.spawnScaleMultiplier,
+                            spawnCustomSize: data.spawnCustomSize,
+                          });
+                        }}
+                        onCancel={() => {
+                          setActiveWizard({ ...activeWizard, actionSubStep: 'spawn_entity_picker' });
+                        }}
+                      />
                     </div>
                   )}
 
@@ -2643,8 +2786,8 @@ export function RuleBook() {
                                     type: 'toggle_state',
                                     targetMode: 'type',
                                     targetType: relevantType,
-                                    toggleStateA: states[0].id,
-                                    toggleStateB: states[1].id,
+                                    toggleStateAId: states[0].id,
+                                    toggleStateBId: states[1].id,
                                   });
                                 }}
                                 className="p-4 bg-slate-50 hover:bg-violet-50 border-2 border-slate-200 hover:border-violet-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
@@ -2697,140 +2840,35 @@ export function RuleBook() {
                       </div>
                     )}
 
-                    {/* Choix de l'emplacement de spawn */}
+                    {/* Choix de l'emplacement de spawn avec SpawnLocationPicker */}
                     {activeModal.subStep === 'choose_spawn_location' && (
-                      <div className="space-y-4">
+                      <div className="space-y-3">
                         <div className="text-xs font-bold text-slate-600">
                           Où faire apparaître {getEntityObj(activeModal.pendingSpawnType)?.name || activeModal.pendingSpawnType} ?
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                          {isCollision && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                applyAction({
-                                  type: 'spawn_entity',
-                                  spawnEntityType: activeModal.pendingSpawnType,
-                                  spawnLocationMode: 'at_target',
-                                });
-                              }}
-                              className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                            >
-                              <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                                🎯
-                              </div>
-                              <div>
-                                <div className="text-xs font-black text-slate-900 group-hover:text-amber-700">
-                                  Sur la Cible (à l'impact)
-                                </div>
-                                <div className="text-[11px] text-slate-500 mt-0.5">
-                                  Emplacement précis de l'objet touché
-                                </div>
-                              </div>
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              applyAction({
-                                type: 'spawn_entity',
-                                spawnEntityType: activeModal.pendingSpawnType,
-                                spawnLocationMode: 'at_subject',
-                              });
-                            }}
-                            className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                          >
-                            <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                              📍
-                            </div>
-                            <div>
-                              <div className="text-xs font-black text-slate-900 group-hover:text-amber-700">
-                                Sur le Sujet
-                              </div>
-                              <div className="text-[11px] text-slate-500 mt-0.5">
-                                Emplacement de l'objet qui agit
-                              </div>
-                            </div>
-                          </button>
-
-                          {/* Relative / Offset au sujet (ex: sortie d'arme) */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              applyAction({
-                                type: 'spawn_entity',
-                                spawnEntityType: activeModal.pendingSpawnType,
-                                spawnLocationMode: 'offset_subject',
-                                spawnOffset: { x: 50, y: 0 },
-                              });
-                            }}
-                            className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                          >
-                            <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                              🏹
-                            </div>
-                            <div>
-                              <div className="text-xs font-black text-slate-900 group-hover:text-amber-700">
-                                Relatif au Sujet (Sortie d'arme)
-                              </div>
-                              <div className="text-[11px] text-slate-500 mt-0.5">
-                                Décalé par rapport au sujet (+50px X)
-                              </div>
-                            </div>
-                          </button>
-
-                          {/* Position Aléatoire */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              applyAction({
-                                type: 'spawn_entity',
-                                spawnEntityType: activeModal.pendingSpawnType,
-                                spawnLocationMode: 'random',
-                              });
-                            }}
-                            className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                          >
-                            <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                              🎲
-                            </div>
-                            <div>
-                              <div className="text-xs font-black text-slate-900 group-hover:text-amber-700">
-                                Position Aléatoire
-                              </div>
-                              <div className="text-[11px] text-slate-500 mt-0.5">
-                                N'importe où sur la scène
-                              </div>
-                            </div>
-                          </button>
-
-                          {/* Coordonnées Précises sur la Scène */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              applyAction({
-                                type: 'spawn_entity',
-                                spawnEntityType: activeModal.pendingSpawnType,
-                                spawnLocationMode: 'absolute',
-                                spawnAbsoluteCoords: { x: 300, y: 200 },
-                              });
-                            }}
-                            className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                          >
-                            <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                              📌
-                            </div>
-                            <div>
-                              <div className="text-xs font-black text-slate-900 group-hover:text-amber-700">
-                                Coordonnées Précises Canvas
-                              </div>
-                              <div className="text-[11px] text-slate-500 mt-0.5">
-                                Point exact (X: 300, Y: 200)
-                              </div>
-                            </div>
-                          </button>
-                        </div>
+                        <SpawnLocationPicker
+                          isCollision={isCollision}
+                          subjectEntity={getEntityObj(subjectType)}
+                          targetEntity={getEntityObj(targetType)}
+                          spawnEntity={getEntityObj(activeModal.pendingSpawnType)}
+                          initialMode={isCollision ? 'at_target' : 'at_subject'}
+                          onConfirm={(data) => {
+                            applyAction({
+                              type: 'spawn_entity',
+                              spawnEntityType: activeModal.pendingSpawnType,
+                              spawnLocationMode: data.spawnLocationMode,
+                              spawnOffset: data.spawnOffset,
+                              spawnPosition: data.spawnPosition,
+                              spawnAbsoluteCoords: data.spawnAbsoluteCoords,
+                              spawnSizeMode: data.spawnSizeMode,
+                              spawnScaleMultiplier: data.spawnScaleMultiplier,
+                              spawnCustomSize: data.spawnCustomSize,
+                            });
+                          }}
+                          onCancel={() => {
+                            setActiveModal({ ...activeModal, subStep: 'choose_spawn_entity' });
+                          }}
+                        />
                       </div>
                     )}
 

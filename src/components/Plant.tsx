@@ -1,7 +1,8 @@
-import { motion, useMotionValue } from 'motion/react';
+import { motion, useMotionValue, useDragControls } from 'motion/react';
 import { Entity } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
 import { useEffect, useRef, useState } from 'react';
+import { isPointInsideEntityCollider } from '../utils/collider';
 
 interface PlantProps {
   entity: Entity;
@@ -20,6 +21,7 @@ export function Plant({ entity }: PlantProps) {
 
   const [isResizing, setIsResizing] = useState(false);
   const isDraggingRef = useRef(false);
+  const dragControls = useDragControls();
 
   const isSelected = selectedEntityId === entity.id;
   const currentState = entity.states[entity.currentStateId] || {
@@ -32,6 +34,8 @@ export function Plant({ entity }: PlantProps) {
     flowerColor: '#ec4899',
     flowerPetals: 6,
   };
+
+  const canDrag = !isResizing && (appMode !== 'play' || entity.isDraggable);
 
   const x = useMotionValue(entity.position.x);
   const y = useMotionValue(entity.position.y);
@@ -129,7 +133,7 @@ export function Plant({ entity }: PlantProps) {
   return (
     <motion.div
       className={`absolute flex flex-col items-center justify-end group ${
-        entity.isDraggable && !isResizing ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+        canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
       } ${isSelected ? 'z-30' : 'z-10'}`}
       style={{
         left: 0,
@@ -140,20 +144,54 @@ export function Plant({ entity }: PlantProps) {
         height: entity.size.height,
         borderRadius: colliderType === 'circle' ? '50%' : '16px',
       }}
-      drag={!isResizing && entity.isDraggable}
+      drag={canDrag}
+      dragControls={dragControls}
+      dragListener={false}
       dragMomentum={false}
       onDragStart={handleDragStart}
       onDrag={handleDrag}
       onDragEnd={handleDragEnd}
-      onPointerDown={() => {
+      onPointerDown={(e) => {
+        const isInside = isPointInsideEntityCollider(
+          e.clientX,
+          e.clientY,
+          e.currentTarget as HTMLElement,
+          entity,
+          currentState
+        );
+        if (!isInside) {
+          return;
+        }
+        if (canDrag) {
+          dragControls.start(e);
+        }
         triggerPointerEvent(entity.id, 'mouse_down');
       }}
-      onPointerUp={() => {
+      onPointerUp={(e) => {
         if (!isDraggingRef.current) {
-          triggerPointerEvent(entity.id, 'mouse_up');
+          const isInside = isPointInsideEntityCollider(
+            e.clientX,
+            e.clientY,
+            e.currentTarget as HTMLElement,
+            entity,
+            currentState
+          );
+          if (isInside) {
+            triggerPointerEvent(entity.id, 'mouse_up');
+          }
         }
       }}
       onClick={(e) => {
+        const isInside = isPointInsideEntityCollider(
+          e.clientX,
+          e.clientY,
+          e.currentTarget as HTMLElement,
+          entity,
+          currentState
+        );
+        if (!isInside) {
+          return;
+        }
         e.stopPropagation();
         selectEntity(entity.id);
         if (!isDraggingRef.current) {

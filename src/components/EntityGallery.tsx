@@ -71,20 +71,13 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
   };
 
   const handleItemClick = (item: ArchetypeItem) => {
-    // Si une instance existe déjà sur la scène, la sélectionner
+    // Si une instance existe déjà sur la scène, la sélectionner pour l'inspecter
     const instance = entityList.find((e) => e.type === item.type);
     if (instance) {
       selectEntity(instance.id);
     } else {
-      // Si aucune instance n'est encore sur le canvas, instancier ou sélectionner
-      const newId = `${item.type}-${Date.now().toString(36)}`;
-      const archetype = customArchetypes[item.type] || item.archetypeData;
-      if (archetype) {
-        spawnEntity({
-          type: item.type,
-          position: { x: 250, y: 200 },
-        });
-      }
+      // Ne pas auto-spawner sur le canvas : l'utilisateur glisse-dépose l'entité
+      selectEntity(null);
     }
   };
 

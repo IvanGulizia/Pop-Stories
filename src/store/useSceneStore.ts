@@ -1598,47 +1598,77 @@ function executeAction(
 
   if (act.type === 'spawn_entity') {
     const spawnType = act.spawnEntityType || 'custom';
-    let basePos = { x: 250, y: 200 };
     const locMode = act.spawnLocationMode || act.spawnLocation || (helpers.target ? 'at_target' : 'at_subject');
 
-    if (locMode === 'at_target' && helpers.target) {
-      basePos = { ...helpers.target.position };
-    } else if (locMode === 'at_subject' && helpers.subject) {
-      basePos = { ...helpers.subject.position };
-    } else if (locMode === 'offset_subject' && helpers.subject) {
-      basePos = {
-        x: helpers.subject.position.x + (act.spawnOffset?.x || 0),
-        y: helpers.subject.position.y + (act.spawnOffset?.y || 0),
-      };
-    } else if (locMode === 'offset_target' && helpers.target) {
-      basePos = {
-        x: helpers.target.position.x + (act.spawnOffset?.x || 0),
-        y: helpers.target.position.y + (act.spawnOffset?.y || 0),
-      };
-    } else if (locMode === 'random') {
-      basePos = {
-        x: Math.floor(Math.random() * 400 + 80),
-        y: Math.floor(Math.random() * 250 + 80),
-      };
-    } else if (locMode === 'absolute' && act.spawnPosition) {
-      basePos = { ...act.spawnPosition };
-    } else if (helpers.target) {
-      basePos = { ...helpers.target.position };
-    } else if (helpers.subject) {
-      basePos = { ...helpers.subject.position };
+    // Find default archetype dimensions
+    const sampleEntity = Object.values(helpers.allEntities).find((e) => e.type === spawnType);
+    const defaultW = sampleEntity?.size.width || (spawnType === 'apple' ? 64 : spawnType === 'plant' ? 120 : 64);
+    const defaultH = sampleEntity?.size.height || (spawnType === 'apple' ? 64 : spawnType === 'plant' ? 160 : 64);
+
+    // Compute dynamic sizing
+    const scaleMultiplier = act.spawnScaleMultiplier ?? 1;
+    let finalWidth = defaultW;
+    let finalHeight = defaultH;
+
+    if (act.spawnSizeMode === 'match_target' && helpers.target) {
+      finalWidth = Math.round(helpers.target.size.width * scaleMultiplier);
+      finalHeight = Math.round(helpers.target.size.height * scaleMultiplier);
+    } else if (act.spawnSizeMode === 'match_subject' && helpers.subject) {
+      finalWidth = Math.round(helpers.subject.size.width * scaleMultiplier);
+      finalHeight = Math.round(helpers.subject.size.height * scaleMultiplier);
+    } else if (act.spawnSizeMode === 'custom' && act.spawnCustomSize) {
+      finalWidth = act.spawnCustomSize.width;
+      finalHeight = act.spawnCustomSize.height;
+    } else if (scaleMultiplier !== 1) {
+      finalWidth = Math.round(defaultW * scaleMultiplier);
+      finalHeight = Math.round(defaultH * scaleMultiplier);
     }
 
-    const isPreciseMode = locMode === 'absolute' || locMode === 'offset_subject' || locMode === 'offset_target';
-    const spawnX = isPreciseMode ? basePos.x : basePos.x + Math.floor(Math.random() * 30 - 15);
-    const spawnY = isPreciseMode ? basePos.y : basePos.y + Math.floor(Math.random() * 30 - 15);
+    const spawnSize: Size = {
+      width: Math.max(16, finalWidth),
+      height: Math.max(16, finalHeight),
+    };
 
-    let spawnSize: Size | undefined = undefined;
-    if (act.spawnSizeMode === 'match_target' && helpers.target) {
-      spawnSize = { ...helpers.target.size };
-    } else if (act.spawnSizeMode === 'match_subject' && helpers.subject) {
-      spawnSize = { ...helpers.subject.size };
-    } else if (act.spawnSizeMode === 'custom' && act.spawnCustomSize) {
-      spawnSize = { ...act.spawnCustomSize };
+    // Determine emitter entity
+    const emitter =
+      locMode === 'at_target' || locMode === 'offset_target'
+        ? helpers.target || helpers.subject
+        : helpers.subject || helpers.target;
+
+    let spawnX = 250;
+    let spawnY = 200;
+
+    if (locMode === 'random') {
+      spawnX = Math.floor(Math.random() * Math.max(60, 680 - spawnSize.width) + 40);
+      spawnY = Math.floor(Math.random() * Math.max(60, 420 - spawnSize.height) + 40);
+    } else if (locMode === 'absolute') {
+      const targetCoord = act.spawnPosition || (act as any).spawnAbsoluteCoords || { x: 350, y: 220 };
+      spawnX = Math.round(targetCoord.x - spawnSize.width / 2);
+      spawnY = Math.round(targetCoord.y - spawnSize.height / 2);
+    } else if (emitter) {
+      const emitterCenterX = emitter.position.x + emitter.size.width / 2;
+      const emitterCenterY = emitter.position.y + emitter.size.height / 2;
+
+      if (locMode === 'offset_subject' || locMode === 'offset_target') {
+        const dx = act.spawnOffset?.x ?? 50;
+        const dy = act.spawnOffset?.y ?? 0;
+        const offsetLength = Math.hypot(dx, dy);
+
+        // Adaptive expansion: move the center further out proportionally when object is bigger
+        const extraDistance = Math.max(
+          0,
+          (Math.max(spawnSize.width, spawnSize.height) - Math.max(defaultW, defaultH)) / 2
+        );
+        const adjustedDx = offsetLength > 0 ? dx + (dx / offsetLength) * extraDistance : dx;
+        const adjustedDy = offsetLength > 0 ? dy + (dy / offsetLength) * extraDistance : dy;
+
+        spawnX = Math.round(emitterCenterX + adjustedDx - spawnSize.width / 2);
+        spawnY = Math.round(emitterCenterY + adjustedDy - spawnSize.height / 2);
+      } else {
+        // Direct center alignment on emitter
+        spawnX = Math.round(emitterCenterX - spawnSize.width / 2);
+        spawnY = Math.round(emitterCenterY - spawnSize.height / 2);
+      }
     }
 
     helpers.spawnEntity({
@@ -1712,25 +1742,27 @@ function executeAction(
       }
 
       const stateKeys = Object.keys(entity.states);
+      if (stateKeys.length === 0) return;
+
       let nextStateId: StateId | null = null;
 
-      if (act.toggleStateAId && act.toggleStateBId) {
-        if (entity.currentStateId === act.toggleStateAId) {
-          nextStateId = act.toggleStateBId;
+      const stateA = act.toggleStateAId || (act as any).toggleStateA;
+      const stateB = act.toggleStateBId || (act as any).toggleStateB;
+
+      // Mode 1 : Bascule binaire explicite entre A et B
+      if (stateA && stateB) {
+        if (entity.currentStateId === stateA) {
+          nextStateId = stateB;
         } else {
-          nextStateId = act.toggleStateAId;
-        }
-      } else if (act.targetStateId) {
-        if (entity.currentStateId === act.targetStateId) {
-          const otherStates = stateKeys.filter((s) => s !== act.targetStateId);
-          nextStateId = otherStates[0] || stateKeys[0];
-        } else {
-          nextStateId = act.targetStateId;
+          nextStateId = stateA;
         }
       } else if (stateKeys.length > 1) {
+        // Mode 2 : Cycle ordonné complet entre TOUS les états
         const currentIndex = stateKeys.indexOf(entity.currentStateId);
-        const nextIndex = (currentIndex + 1) % stateKeys.length;
+        const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % stateKeys.length : 0;
         nextStateId = stateKeys[nextIndex];
+      } else {
+        nextStateId = stateKeys[0];
       }
 
       if (nextStateId && entity.states[nextStateId]) {

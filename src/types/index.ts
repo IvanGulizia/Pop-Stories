@@ -144,8 +144,10 @@ export interface RuleAction {
   spawnLocation?: SpawnLocationMode; // 'at_subject', 'at_target', 'offset_subject', 'offset_target', 'random', 'absolute'
   spawnLocationMode?: SpawnLocationMode;
   spawnPosition?: Position;
+  spawnAbsoluteCoords?: Position;
   spawnOffset?: Position;
   spawnSizeMode?: 'default' | 'match_target' | 'match_subject' | 'custom';
+  spawnScaleMultiplier?: number;
   spawnCustomSize?: Size;
 
   // Champs pour 'play_sound'
