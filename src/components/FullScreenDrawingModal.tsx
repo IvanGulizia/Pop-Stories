@@ -10,7 +10,20 @@ interface FullScreenDrawingModalProps {
   initialColliderType?: ColliderType;
   onionStates?: OnionStateOption[];
   currentEditingStateName?: string;
-  onSave: (paths: VectorPath[], dataUrl?: string, colliderType?: ColliderType, stateName?: string) => void;
+  referenceGuide?: {
+    name: string;
+    paths?: Array<{ d: string; stroke?: string; fill?: string; strokeWidth?: number }>;
+    hotspot?: { x: number; y: number };
+  };
+  initialHotspot?: { x: number; y: number };
+  isCursorMode?: boolean;
+  onSave: (
+    paths: VectorPath[],
+    dataUrl?: string,
+    colliderType?: ColliderType,
+    stateName?: string,
+    hotspot?: { x: number; y: number }
+  ) => void;
   onClose: () => void;
 }
 
@@ -21,12 +34,18 @@ export function FullScreenDrawingModal({
   initialColliderType = 'box',
   onionStates = [],
   currentEditingStateName,
+  referenceGuide,
+  initialHotspot,
+  isCursorMode = false,
   onSave,
   onClose,
 }: FullScreenDrawingModalProps) {
   const [currentPaths, setCurrentPaths] = useState<VectorPath[]>(initialPaths);
   const [currentDataUrl, setCurrentDataUrl] = useState<string | undefined>(undefined);
   const [currentColliderType, setCurrentColliderType] = useState<ColliderType>(initialColliderType);
+  const [currentHotspot, setCurrentHotspot] = useState<{ x: number; y: number }>(
+    initialHotspot || referenceGuide?.hotspot || { x: 75, y: 25 }
+  );
   const [stateName, setStateName] = useState<string>(currentEditingStateName || 'Normal');
   const [isEditingName, setIsEditingName] = useState(false);
 
@@ -90,7 +109,15 @@ export function FullScreenDrawingModal({
             </button>
             <button
               type="button"
-              onClick={() => onSave(currentPaths, currentDataUrl, currentColliderType, stateName.trim() || undefined)}
+              onClick={() =>
+                onSave(
+                  currentPaths,
+                  currentDataUrl,
+                  currentColliderType,
+                  stateName.trim() || undefined,
+                  currentHotspot
+                )
+              }
               className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer active:scale-95"
             >
               <Check className="w-4 h-4" /> Enregistrer le dessin
@@ -114,6 +141,10 @@ export function FullScreenDrawingModal({
             currentEditingStateName={currentEditingStateName}
             onVectorChange={handleVectorChange}
             onColliderChange={(type) => setCurrentColliderType(type)}
+            referenceGuide={referenceGuide}
+            initialHotspot={currentHotspot}
+            onHotspotChange={(pos) => setCurrentHotspot(pos)}
+            isCursorMode={isCursorMode}
           />
         </div>
       </div>

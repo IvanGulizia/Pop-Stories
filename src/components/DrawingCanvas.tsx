@@ -23,6 +23,9 @@ import {
   Sparkles,
   Shield,
   Shapes,
+  Target,
+  Crosshair,
+  Download,
 } from 'lucide-react';
 import { VectorPath, VectorPoint, VectorRect, ColliderType } from '../types';
 
@@ -30,6 +33,14 @@ export interface OnionStateOption {
   id: string;
   name: string;
   vectorPaths?: VectorPath[];
+}
+
+export interface ReferenceGuideOption {
+  id: string;
+  name: string;
+  paths?: Array<{ d: string; stroke?: string; fill?: string; strokeWidth?: number }>;
+  hotspot?: { x: number; y: number };
+  isCustom?: boolean;
 }
 
 interface DrawingCanvasProps {
@@ -41,6 +52,11 @@ interface DrawingCanvasProps {
   onionStates?: OnionStateOption[];
   currentEditingStateName?: string;
   onColliderChange?: (colliderType: ColliderType) => void;
+  referenceGuide?: ReferenceGuideOption;
+  availableReferenceGuides?: ReferenceGuideOption[];
+  initialHotspot?: { x: number; y: number };
+  onHotspotChange?: (pos: { x: number; y: number }) => void;
+  isCursorMode?: boolean;
 }
 
 const COLOR_PALETTE = [
@@ -56,7 +72,8 @@ export type DrawTool =
   | 'rectangle'
   | 'bucket'
   | 'eraser_stroke'
-  | 'eraser_partial';
+  | 'eraser_partial'
+  | 'hotspot';
 
 /**
  * Generate standard SVG path data for a rounded rectangle.
@@ -146,6 +163,11 @@ export function DrawingCanvas({
   onionStates = [],
   currentEditingStateName,
   onColliderChange,
+  referenceGuide,
+  initialHotspot,
+  onHotspotChange,
+  isCursorMode = false,
+  availableReferenceGuides,
 }: DrawingCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [paths, setPaths] = useState<VectorPath[]>(initialPaths);
@@ -156,6 +178,23 @@ export function DrawingCanvas({
   const [tool, setTool] = useState<DrawTool>('pencil');
   const [colliderType, setColliderType] = useState<ColliderType>(initialColliderType);
   const [showColliderPreview, setShowColliderPreview] = useState(true);
+
+  // Reference Guide & Hotspot state (Repère de dessin & point d'impact)
+  const [selectedGuideId, setSelectedGuideId] = useState<string>(
+    referenceGuide?.id || availableReferenceGuides?.[0]?.id || ''
+  );
+  const activeReferenceGuide =
+    availableReferenceGuides?.find((g) => g.id === selectedGuideId) || referenceGuide;
+
+  const [guideOpacity, setGuideOpacity] = useState<number>(
+    activeReferenceGuide ? 0.45 : 0
+  );
+  const [hotspot, setHotspot] = useState<VectorPoint>(
+    initialHotspot || activeReferenceGuide?.hotspot || { x: 75, y: 25 }
+  );
+  // Hotspot est strictement réservé au mode curseur
+  const [showHotspot, setShowHotspot] = useState<boolean>(isCursorMode);
+  const [isDraggingHotspot, setIsDraggingHotspot] = useState(false);
 
   // Active color tab in toolbar ('stroke' | 'fill')
   const [colorMode, setColorMode] = useState<'stroke' | 'fill'>('stroke');
@@ -428,6 +467,12 @@ export function DrawingCanvas({
       return;
     }
 
+    if (tool === 'hotspot') {
+      setHotspot(pt);
+      if (onHotspotChange) onHotspotChange(pt);
+      return;
+    }
+
     if (tool === 'bucket') {
       // Paint bucket: fill any clicked or enclosing shape
       const activeColor = fillColor !== 'none' ? fillColor : strokeColor;
@@ -508,6 +553,12 @@ export function DrawingCanvas({
   const handlePointerMove = (e: React.MouseEvent<SVGSVGElement> | React.TouchEvent<SVGSVGElement>) => {
     const pt = getSVGCoordinates(e);
     setCursorPos(pt);
+
+    if (isDraggingHotspot) {
+      setHotspot(pt);
+      if (onHotspotChange) onHotspotChange(pt);
+      return;
+    }
 
     if (isErasingPartial && tool === 'eraser_partial') {
       applyPartialEraser(pt);
@@ -629,6 +680,11 @@ export function DrawingCanvas({
   };
 
   const handlePointerUp = () => {
+    if (isDraggingHotspot) {
+      setIsDraggingHotspot(false);
+      if (onHotspotChange) onHotspotChange(hotspot);
+    }
+
     if (isErasingPartial) {
       setIsErasingPartial(false);
     }
@@ -840,6 +896,31 @@ export function DrawingCanvas({
     notifyChange([]);
   };
 
+  const handleCopyGuideToCanvas = () => {
+    if (!activeReferenceGuide?.paths || activeReferenceGuide.paths.length === 0) return;
+    const isCustom = activeReferenceGuide.isCustom;
+    const newPaths: VectorPath[] = activeReferenceGuide.paths.map((p, idx) => ({
+      id: `guide-imported-${Date.now()}-${idx}`,
+      type: (p as VectorPath).type || 'freehand',
+      d: p.d,
+      transform: isCustom ? undefined : 'scale(8.333333333333334)',
+      stroke: strokeColor === 'none' ? (p.stroke || '#0f172a') : strokeColor,
+      strokeWidth: p.strokeWidth || (isCustom ? 4 : 1.8),
+      fill: p.fill && p.fill !== 'none' ? (fillColor === 'none' ? p.fill : fillColor) : 'none',
+      rect: (p as VectorPath).rect,
+      points: (p as VectorPath).points,
+    }));
+    const updated = [...paths, ...newPaths];
+    setPaths(updated);
+    notifyChange(updated);
+  };
+
+  const handleResetHotspot = () => {
+    const defaultPos = activeReferenceGuide?.hotspot || { x: 75, y: 25 };
+    setHotspot(defaultPos);
+    if (onHotspotChange) onHotspotChange(defaultPos);
+  };
+
   const selectedBounds = selectedPath ? getPathBounds(selectedPath) : null;
   const overallBounds = getDrawingOverallBounds();
 
@@ -888,6 +969,43 @@ export function DrawingCanvas({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Guide & Hotspot Quick Toggles */}
+            {(activeReferenceGuide || isCursorMode) && (
+              <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200 shadow-2xs">
+                {activeReferenceGuide && (
+                  <button
+                    type="button"
+                    onClick={() => setGuideOpacity(guideOpacity > 0 ? 0 : 0.45)}
+                    className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                      guideOpacity > 0
+                        ? 'bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                    }`}
+                    title="Afficher/Masquer le dessin repère (calque modèle)"
+                  >
+                    <Target className="w-3 h-3" />
+                    <span>Modèle {guideOpacity > 0 ? 'On' : 'Off'}</span>
+                  </button>
+                )}
+
+                {isCursorMode && (
+                  <button
+                    type="button"
+                    onClick={() => setShowHotspot(!showHotspot)}
+                    className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                      showHotspot
+                        ? 'bg-rose-100 text-rose-700 border border-rose-200 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                    }`}
+                    title="Afficher/Masquer le point d'impact réel du curseur"
+                  >
+                    <Crosshair className="w-3 h-3" />
+                    <span>Impact ({Math.round(hotspot.x)}, {Math.round(hotspot.y)})</span>
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Grille & Magnétisme Toggles */}
             <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200 shadow-2xs">
               <button
@@ -972,6 +1090,36 @@ export function DrawingCanvas({
               </pattern>
             </defs>
             {showGrid && <rect width="200" height="200" fill="url(#grid-dots-light)" />}
+
+            {/* Calque Modèle de Référence (Dessin repère Hugeicons / Guide) */}
+            {referenceGuide && referenceGuide.paths && guideOpacity > 0 && (
+              <g
+                className="pointer-events-none select-none"
+                opacity={guideOpacity}
+                transform="scale(8.333333333333334)"
+              >
+                {/* White outline backdrop for maximum contrast against any canvas background */}
+                <g stroke="#ffffff" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.95">
+                  {referenceGuide.paths.map((p, idx) => (
+                    <path key={`guide-bg-${idx}`} d={p.d} fill={p.fill ? '#ffffff' : 'none'} />
+                  ))}
+                </g>
+                {/* Main guide strokes in distinctive indigo/cobalt */}
+                <g stroke="#4f46e5" fill="none">
+                  {referenceGuide.paths.map((p, idx) => (
+                    <path
+                      key={`guide-fg-${idx}`}
+                      d={p.d}
+                      stroke="#4f46e5"
+                      fill={p.fill ? 'rgba(99, 102, 241, 0.25)' : 'none'}
+                      strokeWidth={p.strokeWidth || 1.8}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  ))}
+                </g>
+              </g>
+            )}
 
             {/* Calque Pelure d'Oignon (Onion Skinning) */}
             {onionSkinEnabled && activeOnionReference?.vectorPaths && activeOnionReference.vectorPaths.length > 0 && (
@@ -1240,6 +1388,45 @@ export function DrawingCanvas({
                   ))}
               </g>
             )}
+
+            {/* Repère de position réelle du curseur (Point d'impact Hotspot) */}
+            {showHotspot && (
+              <g
+                className="cursor-move select-none"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  setIsDraggingHotspot(true);
+                }}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                  setIsDraggingHotspot(true);
+                }}
+              >
+                {/* Target radar halo */}
+                <circle
+                  cx={hotspot.x}
+                  cy={hotspot.y}
+                  r="15"
+                  fill="rgba(239, 68, 68, 0.15)"
+                  stroke="#ef4444"
+                  strokeWidth="1.2"
+                  strokeDasharray="3 2"
+                />
+                {/* Crosshairs */}
+                <line x1={hotspot.x - 20} y1={hotspot.y} x2={hotspot.x + 20} y2={hotspot.y} stroke="#ef4444" strokeWidth="1.2" />
+                <line x1={hotspot.x} y1={hotspot.y - 20} x2={hotspot.x} y2={hotspot.y + 20} stroke="#ef4444" strokeWidth="1.2" />
+                {/* Bullseye center */}
+                <circle cx={hotspot.x} cy={hotspot.y} r="4.5" fill="#ef4444" stroke="#ffffff" strokeWidth="1.5" />
+                <circle cx={hotspot.x} cy={hotspot.y} r="1.5" fill="#ffffff" />
+                {/* Coordinate badge */}
+                <g transform={`translate(${hotspot.x + 8}, ${hotspot.y - 18})`}>
+                  <rect x="0" y="0" width="76" height="15" rx="3" fill="#0f172a" opacity="0.88" />
+                  <text x="38" y="11" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="bold" fontFamily="sans-serif">
+                    Impact: ({Math.round(hotspot.x)}, {Math.round(hotspot.y)})
+                  </text>
+                </g>
+              </g>
+            )}
           </svg>
         </div>
       </div>
@@ -1394,6 +1581,26 @@ export function DrawingCanvas({
                 <Scissors className="w-4 h-4" />
                 <span className="text-[9px]">Objet</span>
               </button>
+
+              {/* Point d'Impact Hotspot (Curseur) */}
+              {(isCursorMode || referenceGuide || initialHotspot) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTool('hotspot');
+                    setSelectedPathId(null);
+                  }}
+                  className={`p-2 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
+                    tool === 'hotspot'
+                      ? 'bg-rose-600 text-white font-bold shadow-2xs'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                  title="Définir le point d'impact réel du curseur (Hotspot)"
+                >
+                  <Crosshair className="w-4 h-4 text-rose-500" />
+                  <span className="text-[9px]">Impact</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -1675,6 +1882,91 @@ export function DrawingCanvas({
               </div>
             )}
           </div>
+
+          {/* Module Modèle Repère & Point de Contact Curseur (Hotspot) */}
+          {(referenceGuide || isCursorMode) && (
+            <div className="bg-indigo-50/80 p-3 rounded-2xl border border-indigo-200 shadow-2xs space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5 truncate max-w-[160px]">
+                  <Target className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span className="truncate">{referenceGuide ? `Repère : ${referenceGuide.name}` : "Point d'impact"}</span>
+                </span>
+                <div className="flex items-center gap-1 shrink-0">
+                  {referenceGuide && (
+                    <button
+                      type="button"
+                      onClick={() => setGuideOpacity(guideOpacity > 0 ? 0 : 0.45)}
+                      className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer ${
+                        guideOpacity > 0
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {guideOpacity > 0 ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                      Guide
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowHotspot(!showHotspot)}
+                    className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer ${
+                      showHotspot
+                        ? 'bg-rose-600 text-white shadow-2xs'
+                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Crosshair className="w-3 h-3" />
+                    Impact
+                  </button>
+                </div>
+              </div>
+
+              {referenceGuide && guideOpacity > 0 && (
+                <div className="space-y-1.5 pt-1 border-t border-indigo-200/60">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-indigo-900">
+                    <span>Opacité du dessin repère</span>
+                    <span className="font-mono">{Math.round(guideOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.05"
+                    max="0.9"
+                    step="0.05"
+                    value={guideOpacity}
+                    onChange={(e) => setGuideOpacity(parseFloat(e.target.value))}
+                    className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-indigo-200/70 rounded-lg"
+                  />
+                  {referenceGuide.paths && referenceGuide.paths.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleCopyGuideToCanvas}
+                      className="w-full py-1.5 px-2 bg-white hover:bg-indigo-100/80 text-indigo-700 text-[11px] font-bold rounded-xl border border-indigo-300 transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer active:scale-98"
+                      title="Copie le tracé du modèle officiel directement sur votre canevas pour le retoucher ou le colorer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Copier le modèle officiel dans le dessin
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {showHotspot && (
+                <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 bg-white p-2 rounded-xl border border-indigo-100 shadow-2xs">
+                  <span className="flex items-center gap-1.5 text-rose-700">
+                    <Crosshair className="w-3.5 h-3.5 text-rose-600" />
+                    Point : ({Math.round(hotspot.x)}, {Math.round(hotspot.y)})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleResetHotspot}
+                    className="text-[10px] text-slate-500 hover:text-slate-800 underline cursor-pointer"
+                  >
+                    Réinitialiser
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Module Pelure d'Oignon (Onion Skinning) */}
           {availableOnionStates.length > 0 && (

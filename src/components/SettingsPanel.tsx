@@ -1,7 +1,9 @@
 import { useSceneStore } from '../store/useSceneStore';
-import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, CheckCircle2, AlertCircle, Filter } from 'lucide-react';
+import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, CheckCircle2, AlertCircle, Filter, MousePointer2, Paintbrush, Undo2 } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
 import { useRef, useState } from 'react';
+import { CursorState, cursorMetadata, renderCursorSvg, getHugeIconGuidePaths, getDefaultCursorHotspot } from '../utils/cursorIcons';
+import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 
 interface SettingsPanelProps {
   onOpenClearModal?: () => void;
@@ -15,7 +17,9 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
   const importProject = useSceneStore((state) => state.importProject);
 
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [editingCursorState, setEditingCursorState] = useState<CursorState | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cursorFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExport = () => {
     try {
@@ -35,6 +39,75 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
     } catch (err: any) {
       setImportStatus({ type: 'error', message: 'Erreur lors de l’exportation.' });
     }
+  };
+
+  const handleExportCursorPack = () => {
+    try {
+      const packData = {
+        type: 'vector_cursor_pack' as const,
+        version: 1,
+        name: 'Pack Curseur Atelier',
+        exportedAt: new Date().toISOString(),
+        cursorSourceMode: settings.cursorSourceMode || 'custom_drawn',
+        cursorShadow: settings.cursorShadow !== false,
+        customCursorVectorPaths: settings.customCursorVectorPaths || {},
+        customCursorPaths: settings.customCursorPaths || {},
+        customCursorHotspots: settings.customCursorHotspots || {},
+      };
+      const jsonStr = JSON.stringify(packData, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `pack-curseurs-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setImportStatus({ type: 'success', message: 'Pack de curseurs exporté avec succès !' });
+      setTimeout(() => setImportStatus(null), 3500);
+    } catch (err: any) {
+      setImportStatus({ type: 'error', message: 'Erreur lors de l’exportation du pack de curseurs.' });
+    }
+  };
+
+  const handleImportCursorPackFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const parsed = JSON.parse(text);
+        if (parsed.type === 'vector_cursor_pack' || parsed.customCursorVectorPaths || parsed.customCursorPaths) {
+          updateSettings({
+            cursorSourceMode: parsed.cursorSourceMode || 'custom_drawn',
+            cursorShadow: parsed.cursorShadow !== undefined ? parsed.cursorShadow : true,
+            customCursorVectorPaths: {
+              ...(settings.customCursorVectorPaths || {}),
+              ...(parsed.customCursorVectorPaths || {}),
+            },
+            customCursorPaths: {
+              ...(settings.customCursorPaths || {}),
+              ...(parsed.customCursorPaths || {}),
+            },
+            customCursorHotspots: {
+              ...(settings.customCursorHotspots || {}),
+              ...(parsed.customCursorHotspots || {}),
+            },
+          });
+          setImportStatus({ type: 'success', message: 'Pack de curseurs importé avec succès !' });
+        } else {
+          setImportStatus({ type: 'error', message: 'Le fichier ne contient pas de pack de curseurs valide.' });
+        }
+      } catch (err: any) {
+        setImportStatus({ type: 'error', message: 'Fichier JSON corrompu ou invalide.' });
+      }
+      setTimeout(() => setImportStatus(null), 4000);
+      if (cursorFileInputRef.current) cursorFileInputRef.current.value = '';
+    };
+    reader.readAsText(file);
   };
 
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -61,8 +134,75 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
     reader.readAsText(file);
   };
 
+  const handleResetCursor = (st: CursorState) => {
+    const currentVectors = { ...(settings.customCursorVectorPaths || {}) };
+    delete currentVectors[st];
+    const currentCustom = { ...(settings.customCursorPaths || {}) };
+    delete currentCustom[st];
+    const currentHotspots = { ...(settings.customCursorHotspots || {}) };
+    delete currentHotspots[st];
+    updateSettings({
+      customCursorVectorPaths: currentVectors,
+      customCursorPaths: currentCustom,
+      customCursorHotspots: currentHotspots,
+    });
+  };
+
   return (
     <div className="space-y-4 text-slate-800">
+      {/* Hidden file input for cursor packs */}
+      <input
+        type="file"
+        ref={cursorFileInputRef}
+        onChange={handleImportCursorPackFile}
+        accept=".json"
+        className="hidden"
+      />
+
+      {/* Modal de personnalisation de dessin d'un état de curseur */}
+      {editingCursorState && (
+        <FullScreenDrawingModal
+          title={`Dessiner le Curseur : ${cursorMetadata[editingCursorState]?.label}`}
+          subtitle={`Référence Hugeicons : ${cursorMetadata[editingCursorState]?.refHugeIcon}`}
+          currentEditingStateName={cursorMetadata[editingCursorState]?.label}
+          initialPaths={settings.customCursorVectorPaths?.[editingCursorState] || []}
+          initialHotspot={
+            settings.customCursorHotspots?.[editingCursorState] ||
+            getDefaultCursorHotspot(editingCursorState)
+          }
+          referenceGuide={{
+            name: cursorMetadata[editingCursorState]?.refHugeIcon || 'Hugeicon Guide',
+            paths: getHugeIconGuidePaths(editingCursorState),
+            hotspot: getDefaultCursorHotspot(editingCursorState),
+          }}
+          isCursorMode={true}
+          onSave={(paths, _dataUrl, _colliderType, _stateName, hotspot) => {
+            if (paths && paths.length > 0) {
+              const combinedD = paths.map((p) => p.d).join(' ');
+              updateSettings({
+                cursorSourceMode: 'custom_drawn',
+                customCursorVectorPaths: {
+                  ...(settings.customCursorVectorPaths || {}),
+                  [editingCursorState]: paths,
+                },
+                customCursorPaths: {
+                  ...(settings.customCursorPaths || {}),
+                  [editingCursorState]: combinedD,
+                },
+                customCursorHotspots: hotspot
+                  ? {
+                      ...(settings.customCursorHotspots || {}),
+                      [editingCursorState]: hotspot,
+                    }
+                  : settings.customCursorHotspots,
+              });
+            }
+            setEditingCursorState(null);
+          }}
+          onClose={() => setEditingCursorState(null)}
+        />
+      )}
+
       <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
         <Sliders className="w-4 h-4 text-slate-600" />
         <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
@@ -188,6 +328,166 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
         >
           <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
         </button>
+      </div>
+
+      {/* CURSEURS PERSONNALISÉS & PACK HUGEICONS */}
+      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <MousePointer2 className="w-4 h-4 text-indigo-600" />
+            <div>
+              <label className="text-xs font-bold text-slate-800 block">Curseurs Dynamiques (Mode Jeu)</label>
+              <span className="text-[10px] text-slate-500">Pack Hugeicons & Personnalisation</span>
+            </div>
+          </div>
+          <button
+            onClick={() => updateSettings({ useCustomCursors: settings.useCustomCursors === false ? true : false })}
+            className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+              settings.useCustomCursors !== false ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'
+            }`}
+            title="Activer/Désactiver les curseurs vectoriels dynamiques en mode jeu"
+          >
+            <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
+          </button>
+        </div>
+
+        {settings.useCustomCursors !== false && (
+          <div className="space-y-3 pt-1">
+            {/* SWITCH / SELECTEUR DE SOURCE : HUGEICONS VS DESSINS PERSONNALISÉS */}
+            <div className="space-y-1.5 bg-white p-2 rounded-xl border border-slate-200 shadow-2xs">
+              <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block">
+                Style des icônes du curseur
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => updateSettings({ cursorSourceMode: 'hugeicons' })}
+                  className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    (settings.cursorSourceMode || 'hugeicons') === 'hugeicons'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  <span>⚡ Pack Hugeicons</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateSettings({ cursorSourceMode: 'custom_drawn' })}
+                  className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    settings.cursorSourceMode === 'custom_drawn'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  <span>🎨 Dessin Atelier</span>
+                </button>
+              </div>
+            </div>
+
+            {/* CURSOR SHADOW & PACK ACTIONS */}
+            <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block">Effet d'ombre portée</label>
+                  <span className="text-[10px] text-slate-400">Ajoute un relief immersif sous le curseur</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => updateSettings({ cursorShadow: settings.cursorShadow === false ? true : false })}
+                  className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+                    settings.cursorShadow !== false ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'
+                  }`}
+                  title="Activer ou désactiver l'ombre portée sous le curseur"
+                >
+                  <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+                </button>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportCursorPack}
+                  className="flex-1 py-1.5 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  title="Exporter les dessins et configurations de ce pack de curseurs"
+                >
+                  <Download className="w-3 h-3 text-slate-500" />
+                  <span>Exporter le Pack</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => cursorFileInputRef.current?.click()}
+                  className="flex-1 py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  title="Importer un pack de curseurs JSON"
+                >
+                  <Upload className="w-3 h-3 text-indigo-600" />
+                  <span>Importer un Pack</span>
+                </button>
+              </div>
+            </div>
+
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+              États du curseur ({Object.keys(cursorMetadata).length})
+            </span>
+            <div className="grid grid-cols-1 gap-2">
+              {(Object.keys(cursorMetadata) as CursorState[]).map((st) => {
+                const meta = cursorMetadata[st];
+                const customVecs = settings.customCursorVectorPaths?.[st];
+                const isCustom = !!customVecs && customVecs.length > 0;
+                const activeSourceMode = settings.cursorSourceMode || 'hugeicons';
+
+                return (
+                  <div
+                    key={st}
+                    className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2 shadow-2xs"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-9 h-9 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0 p-1.5">
+                        {renderCursorSvg(st, {
+                          customVectorPaths: customVecs,
+                          sourceMode: activeSourceMode,
+                        })}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-slate-800 truncate flex items-center gap-1.5">
+                          {meta.label}
+                          {isCustom && (
+                            <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                              Dessiné
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-400 truncate">
+                          Ref : <span className="font-semibold text-slate-600">{meta.refHugeIcon}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => setEditingCursorState(st)}
+                        className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Dessiner ce curseur dans l'atelier vectoriel"
+                      >
+                        <Paintbrush className="w-3 h-3" />
+                        <span className="text-[10px] font-bold">Dessiner</span>
+                      </button>
+
+                      {isCustom && (
+                        <button
+                          onClick={() => handleResetCursor(st)}
+                          className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                          title="Restaurer l'icône d'origine Hugeicon"
+                        >
+                          <Undo2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Audio Synth Preview (light test) */}

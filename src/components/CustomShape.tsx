@@ -2,7 +2,8 @@ import { motion, useMotionValue, useDragControls } from 'motion/react';
 import { Entity, EntityState } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
 import { useEffect, useRef, useState } from 'react';
-import { isPointInsideEntityCollider } from '../utils/collider';
+import { isPointInsideEntityCollider, getEntityColliderBounds } from '../utils/collider';
+import { useAppCursor } from '../context/CursorContext';
 
 interface CustomShapeProps {
   entity: Entity;
@@ -17,11 +18,15 @@ export function CustomShape({ entity }: CustomShapeProps) {
   const updateEntitySize = useSceneStore((state) => state.updateEntitySize);
   const evaluateRulesWithTemp = useSceneStore((state) => state.evaluateRulesWithTemp);
   const showCanvasLabels = useSceneStore((state) => state.settings.showCanvasLabels);
+  const showColliderDebugGizmos = useSceneStore((state) => state.settings.showColliderDebugGizmos);
   const appMode = useSceneStore((state) => state.appMode);
 
   const [isResizing, setIsResizing] = useState(false);
   const isDraggingRef = useRef(false);
+  const hasMovedBeyondDragThresholdRef = useRef(false);
+  const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
   const dragControls = useDragControls();
+  const { setCursorState, setIsDragging } = useAppCursor();
 
   const isSelected = selectedEntityId === entity.id;
   const currentState: EntityState = entity.states[entity.currentStateId] || {
@@ -34,6 +39,33 @@ export function CustomShape({ entity }: CustomShapeProps) {
   };
 
   const canDrag = !isResizing && (appMode !== 'play' || entity.isDraggable);
+  const rules = useSceneStore((state) => state.rules);
+
+  const hasClickRules = rules.some(
+    (r) =>
+      r.enabled &&
+      r.trigger.type === 'click' &&
+      ((r.trigger.subjectMode === 'instance' && r.trigger.subjectId === entity.id) ||
+        (r.trigger.subjectMode === 'type' && r.trigger.subjectType === entity.type) ||
+        (r.trigger.subjectMode === 'tag' && r.trigger.subjectTag && entity.tags?.includes(r.trigger.subjectTag)) ||
+        (!r.trigger.subjectMode && (r.trigger.subjectId === entity.id || r.trigger.subjectType === entity.type)))
+  );
+
+  const isClickable = hasClickRules || appMode !== 'play';
+  const isDraggable = canDrag;
+
+  const getHoverState = (): import('../utils/cursorIcons').CursorState => {
+    if (isDraggable && hasClickRules) {
+      return 'hover_drag_click';
+    }
+    if (isDraggable) {
+      return 'hover_drag';
+    }
+    if (isClickable) {
+      return 'hover_click';
+    }
+    return 'idle';
+  };
 
   const x = useMotionValue(entity.position.x);
   const y = useMotionValue(entity.position.y);
@@ -44,11 +76,16 @@ export function CustomShape({ entity }: CustomShapeProps) {
   }, [entity.position.x, entity.position.y, x, y]);
 
   const handleDragStart = () => {
+    hasMovedBeyondDragThresholdRef.current = true;
     isDraggingRef.current = true;
+    setIsDragging(true);
+    setCursorState('drag');
   };
 
   const handleDrag = () => {
+    hasMovedBeyondDragThresholdRef.current = true;
     isDraggingRef.current = true;
+    setCursorState('drag');
     const currentX = x.get();
     const currentY = y.get();
     const numX = typeof currentX === 'string' ? parseFloat(currentX) : currentX;
@@ -76,9 +113,13 @@ export function CustomShape({ entity }: CustomShapeProps) {
       triggerDragRelease(entity.id);
     }
 
+    setIsDragging(false);
+    setCursorState('release');
     setTimeout(() => {
       isDraggingRef.current = false;
-    }, 50);
+      hasMovedBeyondDragThresholdRef.current = false;
+      setCursorState(getHoverState());
+    }, 120);
   };
 
   const handleResizePointerDown = (e: React.PointerEvent) => {
@@ -120,7 +161,8 @@ export function CustomShape({ entity }: CustomShapeProps) {
     window.addEventListener('pointercancel', handlePointerUp);
   };
 
-  const colliderType = currentState.colliderType || entity.colliderType || 'box';
+  const colliderGeometry = getEntityColliderBounds(entity, currentState);
+  const colliderType = colliderGeometry.colliderType;
 
   return (
     <motion.div
@@ -143,6 +185,41 @@ export function CustomShape({ entity }: CustomShapeProps) {
       onDragStart={handleDragStart}
       onDrag={handleDrag}
       onDragEnd={handleDragEnd}
+      onPointerEnter={(e) => {
+        if (isDraggingRef.current || appMode !== 'play') return;
+        const isInside = isPointInsideEntityCollider(
+          e.clientX,
+          e.clientY,
+          e.currentTarget as HTMLElement,
+          entity,
+          currentState
+        );
+        if (isInside) {
+          setCursorState(getHoverState());
+        } else {
+          setCursorState('idle');
+        }
+      }}
+      onPointerMove={(e) => {
+        if (isDraggingRef.current || appMode !== 'play') return;
+        const isInside = isPointInsideEntityCollider(
+          e.clientX,
+          e.clientY,
+          e.currentTarget as HTMLElement,
+          entity,
+          currentState
+        );
+        if (isInside) {
+          setCursorState(getHoverState());
+        } else {
+          setCursorState('idle');
+        }
+      }}
+      onPointerLeave={() => {
+        if (!isDraggingRef.current && appMode === 'play') {
+          setCursorState('idle');
+        }
+      }}
       onPointerDown={(e) => {
         const isInside = isPointInsideEntityCollider(
           e.clientX,
@@ -154,22 +231,37 @@ export function CustomShape({ entity }: CustomShapeProps) {
         if (!isInside) {
           return;
         }
+
+        pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
+        hasMovedBeyondDragThresholdRef.current = false;
+        isDraggingRef.current = false;
+
         if (canDrag) {
           dragControls.start(e);
+          setCursorState('drag');
+        } else {
+          setCursorState('click');
         }
         triggerPointerEvent(entity.id, 'mouse_down');
       }}
       onPointerUp={(e) => {
-        if (!isDraggingRef.current) {
-          const isInside = isPointInsideEntityCollider(
-            e.clientX,
-            e.clientY,
-            e.currentTarget as HTMLElement,
-            entity,
-            currentState
-          );
+        const isInside = isPointInsideEntityCollider(
+          e.clientX,
+          e.clientY,
+          e.currentTarget as HTMLElement,
+          entity,
+          currentState
+        );
+
+        if (!hasMovedBeyondDragThresholdRef.current) {
+          // Pure click / pointer release (no actual dragging)
+          isDraggingRef.current = false;
+          setIsDragging(false);
           if (isInside) {
+            setCursorState(getHoverState());
             triggerPointerEvent(entity.id, 'mouse_up');
+          } else {
+            setCursorState('idle');
           }
         }
       }}
@@ -186,7 +278,8 @@ export function CustomShape({ entity }: CustomShapeProps) {
         }
         e.stopPropagation();
         selectEntity(entity.id);
-        if (!isDraggingRef.current) {
+        if (!hasMovedBeyondDragThresholdRef.current) {
+          setCursorState(getHoverState());
           triggerPointerEvent(entity.id, 'click');
         }
       }}
@@ -196,6 +289,41 @@ export function CustomShape({ entity }: CustomShapeProps) {
       }}
       whileHover={{ scale: currentState.scale * (isSelected ? 1.0 : 1.03) }}
     >
+      {/* Gizmo Debug des Colliders (si activé dans les réglages) */}
+      {showColliderDebugGizmos && (
+        <div className="absolute inset-0 pointer-events-none z-50">
+          <svg viewBox="0 0 200 200" className="w-full h-full overflow-visible">
+            {colliderGeometry.colliderType === 'circle' ? (
+              <circle
+                cx={colliderGeometry.centerX}
+                cy={colliderGeometry.centerY}
+                r={colliderGeometry.radius}
+                fill="rgba(16, 185, 129, 0.15)"
+                stroke="#10b981"
+                strokeWidth="2"
+                strokeDasharray="4 3"
+              />
+            ) : (
+              <rect
+                x={colliderGeometry.x}
+                y={colliderGeometry.y}
+                width={colliderGeometry.width}
+                height={colliderGeometry.height}
+                fill="rgba(16, 185, 129, 0.15)"
+                stroke="#10b981"
+                strokeWidth="2"
+                strokeDasharray="4 3"
+                rx="4"
+              />
+            )}
+          </svg>
+          <div className="absolute -top-3.5 -left-3.5 bg-emerald-700 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs flex items-center gap-1 whitespace-nowrap">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-ping" />
+            <span>Zone : {colliderGeometry.colliderType}</span>
+          </div>
+        </div>
+      )}
+
       {/* Anneau de sélection et poignée de redimensionnement */}
       {isSelected && appMode !== 'play' && (
         <>

@@ -373,6 +373,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     gridStyle: 'dots',
     showTagsSystem: false,
     showRuleFilters: false,
+    useCustomCursors: true,
+    cursorSourceMode: 'hugeicons',
   },
 
   updateSettings: (partial) => {
@@ -1001,7 +1003,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         ...state.entities,
         [id]: newEntity,
       },
-      selectedEntityId: id,
+      selectedEntityId: state.appMode === 'play' ? state.selectedEntityId : id,
     }));
     get().evaluateRules();
   },
@@ -1072,10 +1074,21 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       }
 
       const importedEntities = data.entities && typeof data.entities === 'object' ? data.entities : {};
-      const importedArchetypes =
-        data.customArchetypes && typeof data.customArchetypes === 'object'
-          ? { ...defaultCustomArchetypes, ...data.customArchetypes }
-          : { ...defaultCustomArchetypes };
+      // Respect exact project archetypes : do not inject the 3 default items (plant, apple, custom) if not present
+      let importedArchetypes: Record<string, Entity> = {};
+      if (data.customArchetypes && typeof data.customArchetypes === 'object') {
+        importedArchetypes = { ...data.customArchetypes };
+      } else {
+        // Deduce archetypes strictly from the imported entities
+        Object.values(importedEntities).forEach((ent: any) => {
+          if (ent && ent.type && !importedArchetypes[ent.type]) {
+            importedArchetypes[ent.type] = {
+              ...ent,
+              position: { x: 0, y: 0 },
+            };
+          }
+        });
+      }
       const importedRules = Array.isArray(data.rules) ? data.rules : [];
       const importedSettings = data.settings && typeof data.settings === 'object' ? data.settings : undefined;
 

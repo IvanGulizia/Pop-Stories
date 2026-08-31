@@ -15,6 +15,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const spawnEntity = useSceneStore((state) => state.spawnEntity);
   const restoreDefaultScene = useSceneStore((state) => state.restoreDefaultScene);
   const settings = useSceneStore((state) => state.settings);
+  const appMode = useSceneStore((state) => state.appMode);
 
   const hasEntitiesOnCanvas = Object.keys(entities).length > 0;
   const hasArchetypesInCatalog = Object.keys(customArchetypes).length > 0;
@@ -64,11 +65,17 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
     };
   };
 
+  const isPlayMode = appMode === 'play';
+  const isCustomCursorActive = isPlayMode && settings.useCustomCursors !== false;
+
   return (
     <div
+      id="scene-canvas-container"
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className="relative w-full h-full min-h-[500px] bg-white overflow-hidden cursor-crosshair select-none flex flex-col"
+      className={`relative w-full h-full min-h-[500px] bg-white overflow-hidden select-none flex flex-col ${
+        isCustomCursorActive ? 'cursor-none [&_*]:cursor-none!' : 'cursor-crosshair'
+      }`}
       onClick={() => selectEntity(null)}
     >
       {/* Canvas Grid Background */}

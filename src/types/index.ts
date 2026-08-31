@@ -32,6 +32,7 @@ export interface VectorPath {
   stroke: string;
   strokeWidth: number;
   fill?: string;
+  transform?: string;
   // Metadata for geometric manipulation & interpolation
   type?: 'freehand' | 'polyline' | 'rectangle';
   points?: VectorPoint[];
@@ -170,6 +171,25 @@ export interface AppSettings {
   gridStyle: 'dots' | 'lines' | 'clean';
   showTagsSystem: boolean;
   showRuleFilters?: boolean;
+  showColliderDebugGizmos?: boolean;
+  useCustomCursors?: boolean;
+  cursorShadow?: boolean;
+  cursorSourceMode?: 'hugeicons' | 'custom_drawn';
+  customCursorVectorPaths?: Record<string, VectorPath[]>;
+  customCursorPaths?: Record<string, string>;
+  customCursorHotspots?: Record<string, { x: number; y: number }>;
+}
+
+export interface CursorPackExportData {
+  type: 'vector_cursor_pack';
+  version: number;
+  name?: string;
+  exportedAt: string;
+  cursorSourceMode?: 'hugeicons' | 'custom_drawn';
+  cursorShadow?: boolean;
+  customCursorVectorPaths?: Record<string, VectorPath[]>;
+  customCursorPaths?: Record<string, string>;
+  customCursorHotspots?: Record<string, { x: number; y: number }>;
 }
 
 export interface ProjectExportData {

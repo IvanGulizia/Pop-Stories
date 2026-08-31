@@ -3,6 +3,7 @@ import { Entity } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
 import { useEffect, useRef, useState } from 'react';
 import { isPointInsideEntityCollider, getColliderClipPath } from '../utils/collider';
+import { useAppCursor } from '../context/CursorContext';
 
 interface AppleProps {
   entity: Entity;
@@ -23,6 +24,7 @@ export function Apple({ entity }: AppleProps) {
   const [isResizing, setIsResizing] = useState(false);
   const isDraggingRef = useRef(false);
   const dragControls = useDragControls();
+  const { setCursorState, setIsDragging } = useAppCursor();
 
   const isSelected = selectedEntityId === entity.id;
   const currentState = entity.states[entity.currentStateId] || {
@@ -46,10 +48,13 @@ export function Apple({ entity }: AppleProps) {
 
   const handleDragStart = () => {
     isDraggingRef.current = true;
+    setIsDragging(true);
+    setCursorState('drag');
   };
 
   const handleDrag = () => {
     isDraggingRef.current = true;
+    setCursorState('drag');
     const currentX = x.get();
     const currentY = y.get();
 
@@ -79,9 +84,12 @@ export function Apple({ entity }: AppleProps) {
       triggerDragRelease(entity.id);
     }
 
+    setIsDragging(false);
+    setCursorState('release');
     setTimeout(() => {
       isDraggingRef.current = false;
-    }, 50);
+      setCursorState(canDrag ? 'hover_drag' : 'hover_click');
+    }, 120);
   };
 
   const handleResizePointerDown = (e: React.PointerEvent) => {
@@ -145,6 +153,41 @@ export function Apple({ entity }: AppleProps) {
       onDragStart={handleDragStart}
       onDrag={handleDrag}
       onDragEnd={handleDragEnd}
+      onPointerEnter={(e) => {
+        if (isDraggingRef.current || appMode !== 'play') return;
+        const isInside = isPointInsideEntityCollider(
+          e.clientX,
+          e.clientY,
+          e.currentTarget as HTMLElement,
+          entity,
+          currentState
+        );
+        if (isInside) {
+          setCursorState(canDrag ? 'hover_drag' : 'hover_click');
+        } else {
+          setCursorState('idle');
+        }
+      }}
+      onPointerMove={(e) => {
+        if (isDraggingRef.current || appMode !== 'play') return;
+        const isInside = isPointInsideEntityCollider(
+          e.clientX,
+          e.clientY,
+          e.currentTarget as HTMLElement,
+          entity,
+          currentState
+        );
+        if (isInside) {
+          setCursorState(canDrag ? 'hover_drag' : 'hover_click');
+        } else {
+          setCursorState('idle');
+        }
+      }}
+      onPointerLeave={() => {
+        if (!isDraggingRef.current && appMode === 'play') {
+          setCursorState('idle');
+        }
+      }}
       onPointerDown={(e) => {
         const isInside = isPointInsideEntityCollider(
           e.clientX,
@@ -156,6 +199,7 @@ export function Apple({ entity }: AppleProps) {
         if (!isInside) {
           return;
         }
+        setCursorState('click');
         if (canDrag) {
           dragControls.start(e);
         }
@@ -171,7 +215,10 @@ export function Apple({ entity }: AppleProps) {
             currentState
           );
           if (isInside) {
+            setCursorState(canDrag ? 'hover_drag' : 'hover_click');
             triggerPointerEvent(entity.id, 'mouse_up');
+          } else {
+            setCursorState('idle');
           }
         }
       }}
@@ -189,6 +236,7 @@ export function Apple({ entity }: AppleProps) {
         e.stopPropagation();
         selectEntity(entity.id);
         if (!isDraggingRef.current) {
+          setCursorState(canDrag ? 'hover_drag' : 'hover_click');
           triggerPointerEvent(entity.id, 'click');
         }
       }}

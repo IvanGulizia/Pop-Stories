@@ -71,13 +71,13 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
   };
 
   const handleItemClick = (item: ArchetypeItem) => {
-    // Si une instance existe déjà sur la scène, la sélectionner pour l'inspecter
+    // Si une instance existe déjà sur la scène, la sélectionner
     const instance = entityList.find((e) => e.type === item.type);
     if (instance) {
       selectEntity(instance.id);
     } else {
-      // Ne pas auto-spawner sur le canvas : l'utilisateur glisse-dépose l'entité
-      selectEntity(null);
+      // Sélectionner l'archétype directement pour ouvrir son inspecteur sans le poser sur la scène
+      selectEntity(item.type);
     }
   };
 

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useSceneStore } from '../store/useSceneStore';
+import { Entity, EntityState } from '../types';
 import {
   Sparkles,
   Plus,
@@ -26,6 +27,7 @@ export function Inspector() {
   const deleteEntity = useSceneStore((state) => state.deleteEntity);
   const addTagToEntity = useSceneStore((state) => state.addTagToEntity);
   const removeTagFromEntity = useSceneStore((state) => state.removeTagFromEntity);
+  const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
   const showTagsSystem = useSceneStore((state) => state.settings.showTagsSystem);
 
   const [newTagInput, setNewTagInput] = useState('');
@@ -35,7 +37,13 @@ export function Inspector() {
   const [renamingStateId, setRenamingStateId] = useState<string | null>(null);
   const [tempStateName, setTempStateName] = useState('');
 
-  const selectedEntity = selectedEntityId ? entities[selectedEntityId] : null;
+  const selectedEntity: Entity | null = selectedEntityId
+    ? entities[selectedEntityId] ||
+      customArchetypes[selectedEntityId] ||
+      Object.values(entities).find((e) => e.type === selectedEntityId) ||
+      Object.values(customArchetypes).find((a) => a.type === selectedEntityId) ||
+      null
+    : null;
 
   if (!selectedEntity) {
     return (
@@ -45,7 +53,7 @@ export function Inspector() {
         </div>
         <h3 className="text-sm font-bold text-slate-800 tracking-tight">Aucun objet sélectionné</h3>
         <p className="text-xs text-slate-500 mt-1 max-w-[220px]">
-          Cliquez sur un élément de la scène pour modifier ses états, ses dessins et ses interactions.
+          Cliquez sur un objet dans le catalogue ou sur la scène pour modifier ses états, ses dessins et ses interactions.
         </p>
       </div>
     );
