@@ -18,6 +18,7 @@ import {
   ProjectExportData,
 } from '../types';
 import { soundSynth } from '../utils/sound';
+import { getEntityColliderBounds } from '../utils/collider';
 
 // Nettoyage proactif de tout cache local précédent
 if (typeof window !== 'undefined' && window.localStorage) {
@@ -297,35 +298,36 @@ const preCollisionStates: Record<string, { subjectState?: string; targetState?: 
 const RULE_COOLDOWN_MS = 350; // Minimum interval between identical rule trigger on same entities
 const ENTITY_STATE_COOLDOWN_MS = 250; // Prevents oscillating state ping-pong
 
-// Vérification de la collision avec support des Colliders (Boîte / Cercle / Polygone)
+// Vérification de la collision avec support précis des Colliders (Boîte / Cercle / Polygone)
 const checkCollision = (ent1: Entity, ent2: Entity) => {
   const currentState1 = ent1.states[ent1.currentStateId];
   const currentState2 = ent2.states[ent2.currentStateId];
 
-  const collider1 = currentState1?.colliderType || ent1.colliderType || (ent1.type === 'apple' ? 'circle' : 'box');
-  const collider2 = currentState2?.colliderType || ent2.colliderType || (ent2.type === 'apple' ? 'circle' : 'box');
-
   const s1 = currentState1?.scale ?? 1;
   const s2 = currentState2?.scale ?? 1;
 
-  const w1 = ent1.size.width * s1;
-  const h1 = ent1.size.height * s1;
-  const cx1 = ent1.position.x + ent1.size.width / 2;
-  const cy1 = ent1.position.y + ent1.size.height / 2;
-  const x1 = cx1 - w1 / 2;
-  const y1 = cy1 - h1 / 2;
+  // Calcul des géométries de colliders verts réelles (en espace de coordonnées canevas 200x200)
+  const geom1 = getEntityColliderBounds(ent1, currentState1);
+  const geom2 = getEntityColliderBounds(ent2, currentState2);
 
-  const w2 = ent2.size.width * s2;
-  const h2 = ent2.size.height * s2;
-  const cx2 = ent2.position.x + ent2.size.width / 2;
-  const cy2 = ent2.position.y + ent2.size.height / 2;
-  const x2 = cx2 - w2 / 2;
-  const y2 = cy2 - h2 / 2;
+  const scaleX1 = (ent1.size.width * s1) / 200;
+  const scaleY1 = (ent1.size.height * s1) / 200;
+  const scaleX2 = (ent2.size.width * s2) / 200;
+  const scaleY2 = (ent2.size.height * s2) / 200;
+
+  const collider1 = geom1.colliderType;
+  const collider2 = geom2.colliderType;
 
   // Cercle vs Cercle
   if (collider1 === 'circle' && collider2 === 'circle') {
-    const r1 = Math.min(w1, h1) / 2;
-    const r2 = Math.min(w2, h2) / 2;
+    const cx1 = ent1.position.x + geom1.centerX * scaleX1;
+    const cy1 = ent1.position.y + geom1.centerY * scaleY1;
+    const r1 = geom1.radius * Math.max(scaleX1, scaleY1);
+
+    const cx2 = ent2.position.x + geom2.centerX * scaleX2;
+    const cy2 = ent2.position.y + geom2.centerY * scaleY2;
+    const r2 = geom2.radius * Math.max(scaleX2, scaleY2);
+
     const dx = cx1 - cx2;
     const dy = cy1 - cy2;
     return dx * dx + dy * dy <= (r1 + r2) * (r1 + r2);
@@ -333,29 +335,55 @@ const checkCollision = (ent1: Entity, ent2: Entity) => {
 
   // Cercle vs Boîte / Polygone
   if (collider1 === 'circle' && (collider2 === 'box' || collider2 === 'polygon')) {
-    const r1 = Math.min(w1, h1) / 2;
-    const closestX = Math.max(x2, Math.min(cx1, x2 + w2));
-    const closestY = Math.max(y2, Math.min(cy1, y2 + h2));
+    const cx1 = ent1.position.x + geom1.centerX * scaleX1;
+    const cy1 = ent1.position.y + geom1.centerY * scaleY1;
+    const r1 = geom1.radius * Math.max(scaleX1, scaleY1);
+
+    const bx2 = ent2.position.x + geom2.x * scaleX2;
+    const by2 = ent2.position.y + geom2.y * scaleY2;
+    const bw2 = geom2.width * scaleX2;
+    const bh2 = geom2.height * scaleY2;
+
+    const closestX = Math.max(bx2, Math.min(cx1, bx2 + bw2));
+    const closestY = Math.max(by2, Math.min(cy1, by2 + bh2));
     const dx = cx1 - closestX;
     const dy = cy1 - closestY;
     return dx * dx + dy * dy <= r1 * r1;
   }
 
   if ((collider1 === 'box' || collider1 === 'polygon') && collider2 === 'circle') {
-    const r2 = Math.min(w2, h2) / 2;
-    const closestX = Math.max(x1, Math.min(cx2, x1 + w1));
-    const closestY = Math.max(y1, Math.min(cy1, y1 + h1));
+    const cx2 = ent2.position.x + geom2.centerX * scaleX2;
+    const cy2 = ent2.position.y + geom2.centerY * scaleY2;
+    const r2 = geom2.radius * Math.max(scaleX2, scaleY2);
+
+    const bx1 = ent1.position.x + geom1.x * scaleX1;
+    const by1 = ent1.position.y + geom1.y * scaleY1;
+    const bw1 = geom1.width * scaleX1;
+    const bh1 = geom1.height * scaleY1;
+
+    const closestX = Math.max(bx1, Math.min(cx2, bx1 + bw1));
+    const closestY = Math.max(by1, Math.min(cy2, by1 + bh1));
     const dx = cx2 - closestX;
     const dy = cy2 - closestY;
     return dx * dx + dy * dy <= r2 * r2;
   }
 
   // Boîte AABB vs Boîte AABB
+  const bx1 = ent1.position.x + geom1.x * scaleX1;
+  const by1 = ent1.position.y + geom1.y * scaleY1;
+  const bw1 = geom1.width * scaleX1;
+  const bh1 = geom1.height * scaleY1;
+
+  const bx2 = ent2.position.x + geom2.x * scaleX2;
+  const by2 = ent2.position.y + geom2.y * scaleY2;
+  const bw2 = geom2.width * scaleX2;
+  const bh2 = geom2.height * scaleY2;
+
   return (
-    x1 < x2 + w2 &&
-    x1 + w1 > x2 &&
-    y1 < y2 + h2 &&
-    y1 + h1 > y2
+    bx1 < bx2 + bw2 &&
+    bx1 + bw1 > bx2 &&
+    by1 < by2 + bh2 &&
+    by1 + bh1 > by2
   );
 };
 

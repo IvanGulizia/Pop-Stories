@@ -25,6 +25,8 @@ export function CustomShape({ entity }: CustomShapeProps) {
   const isDraggingRef = useRef(false);
   const hasMovedBeyondDragThresholdRef = useRef(false);
   const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  const pointerDownTimeRef = useRef<number>(0);
+  const lastHandledClickTimeRef = useRef<number>(0);
   const dragControls = useDragControls();
   const { setCursorState, setIsDragging } = useAppCursor();
 
@@ -76,20 +78,29 @@ export function CustomShape({ entity }: CustomShapeProps) {
   }, [entity.position.x, entity.position.y, x, y]);
 
   const handleDragStart = () => {
-    hasMovedBeyondDragThresholdRef.current = true;
     isDraggingRef.current = true;
     setIsDragging(true);
     setCursorState('drag');
   };
 
   const handleDrag = () => {
-    hasMovedBeyondDragThresholdRef.current = true;
-    isDraggingRef.current = true;
-    setCursorState('drag');
     const currentX = x.get();
     const currentY = y.get();
     const numX = typeof currentX === 'string' ? parseFloat(currentX) : currentX;
     const numY = typeof currentY === 'string' ? parseFloat(currentY) : currentY;
+
+    if (pointerDownPosRef.current) {
+      const dx = numX - entity.position.x;
+      const dy = numY - entity.position.y;
+      if (Math.hypot(dx, dy) > 4) {
+        hasMovedBeyondDragThresholdRef.current = true;
+      }
+    } else {
+      hasMovedBeyondDragThresholdRef.current = true;
+    }
+
+    isDraggingRef.current = true;
+    setCursorState('drag');
 
     if (!isNaN(numX) && !isNaN(numY)) {
       evaluateRulesWithTemp({
@@ -110,7 +121,9 @@ export function CustomShape({ entity }: CustomShapeProps) {
         y: numY,
       });
       evaluateRulesWithTemp();
-      triggerDragRelease(entity.id);
+      if (hasMovedBeyondDragThresholdRef.current) {
+        triggerDragRelease(entity.id);
+      }
     }
 
     setIsDragging(false);
@@ -233,6 +246,7 @@ export function CustomShape({ entity }: CustomShapeProps) {
         }
 
         pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
+        pointerDownTimeRef.current = Date.now();
         hasMovedBeyondDragThresholdRef.current = false;
         isDraggingRef.current = false;
 
@@ -253,8 +267,20 @@ export function CustomShape({ entity }: CustomShapeProps) {
           currentState
         );
 
-        if (!hasMovedBeyondDragThresholdRef.current) {
-          // Pure click / pointer release (no actual dragging)
+        const duration = Date.now() - (pointerDownTimeRef.current || 0);
+        const dist = pointerDownPosRef.current
+          ? Math.hypot(e.clientX - pointerDownPosRef.current.x, e.clientY - pointerDownPosRef.current.y)
+          : 0;
+
+        const isPureClick = !hasMovedBeyondDragThresholdRef.current && dist < 6 && duration < 700;
+
+        if (isPureClick && isInside) {
+          lastHandledClickTimeRef.current = Date.now();
+          selectEntity(entity.id);
+          triggerPointerEvent(entity.id, 'click');
+          triggerPointerEvent(entity.id, 'mouse_up');
+          setCursorState(getHoverState());
+        } else if (!hasMovedBeyondDragThresholdRef.current) {
           isDraggingRef.current = false;
           setIsDragging(false);
           if (isInside) {
@@ -277,8 +303,15 @@ export function CustomShape({ entity }: CustomShapeProps) {
           return;
         }
         e.stopPropagation();
+
+        // If already triggered on pointerUp within the last 350ms, avoid double firing
+        if (Date.now() - (lastHandledClickTimeRef.current || 0) < 350) {
+          return;
+        }
+
         selectEntity(entity.id);
         if (!hasMovedBeyondDragThresholdRef.current) {
+          lastHandledClickTimeRef.current = Date.now();
           setCursorState(getHoverState());
           triggerPointerEvent(entity.id, 'click');
         }

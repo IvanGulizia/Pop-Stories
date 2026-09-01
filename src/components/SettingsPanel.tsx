@@ -1,9 +1,10 @@
 import { useSceneStore } from '../store/useSceneStore';
-import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, CheckCircle2, AlertCircle, Filter, MousePointer2, Paintbrush, Undo2 } from 'lucide-react';
+import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, CheckCircle2, AlertCircle, Filter, MousePointer2, Paintbrush, Undo2, Scan } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
 import { useRef, useState } from 'react';
 import { CursorState, cursorMetadata, renderCursorSvg, getHugeIconGuidePaths, getDefaultCursorHotspot } from '../utils/cursorIcons';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
+import { ReferenceGuideOption } from './DrawingCanvas';
 
 interface SettingsPanelProps {
   onOpenClearModal?: () => void;
@@ -160,48 +161,87 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
       />
 
       {/* Modal de personnalisation de dessin d'un état de curseur */}
-      {editingCursorState && (
-        <FullScreenDrawingModal
-          title={`Dessiner le Curseur : ${cursorMetadata[editingCursorState]?.label}`}
-          subtitle={`Référence Hugeicons : ${cursorMetadata[editingCursorState]?.refHugeIcon}`}
-          currentEditingStateName={cursorMetadata[editingCursorState]?.label}
-          initialPaths={settings.customCursorVectorPaths?.[editingCursorState] || []}
-          initialHotspot={
-            settings.customCursorHotspots?.[editingCursorState] ||
-            getDefaultCursorHotspot(editingCursorState)
+      {editingCursorState && (() => {
+        const availableGuides: ReferenceGuideOption[] = [];
+
+        // 1. Modèle Hugeicon officiel pour l'état en cours
+        availableGuides.push({
+          id: `hugeicon-${editingCursorState}`,
+          name: `Modèle Hugeicons (${cursorMetadata[editingCursorState]?.label})`,
+          paths: getHugeIconGuidePaths(editingCursorState),
+          hotspot: getDefaultCursorHotspot(editingCursorState),
+          isCustom: false,
+        });
+
+        // 2. Autres états de curseur personnalisés déjà dessinés par l'utilisateur
+        (Object.keys(cursorMetadata) as CursorState[]).forEach((st) => {
+          const customVecs = settings.customCursorVectorPaths?.[st];
+          if (customVecs && customVecs.length > 0 && st !== editingCursorState) {
+            availableGuides.push({
+              id: `custom-${st}`,
+              name: `Dessin perso : ${cursorMetadata[st]?.label}`,
+              paths: customVecs,
+              hotspot: settings.customCursorHotspots?.[st] || getDefaultCursorHotspot(st),
+              isCustom: true,
+            });
           }
-          referenceGuide={{
-            name: cursorMetadata[editingCursorState]?.refHugeIcon || 'Hugeicon Guide',
-            paths: getHugeIconGuidePaths(editingCursorState),
-            hotspot: getDefaultCursorHotspot(editingCursorState),
-          }}
-          isCursorMode={true}
-          onSave={(paths, _dataUrl, _colliderType, _stateName, hotspot) => {
-            if (paths && paths.length > 0) {
-              const combinedD = paths.map((p) => p.d).join(' ');
-              updateSettings({
-                cursorSourceMode: 'custom_drawn',
-                customCursorVectorPaths: {
-                  ...(settings.customCursorVectorPaths || {}),
-                  [editingCursorState]: paths,
-                },
-                customCursorPaths: {
-                  ...(settings.customCursorPaths || {}),
-                  [editingCursorState]: combinedD,
-                },
-                customCursorHotspots: hotspot
-                  ? {
-                      ...(settings.customCursorHotspots || {}),
-                      [editingCursorState]: hotspot,
-                    }
-                  : settings.customCursorHotspots,
-              });
+        });
+
+        // 3. Autres modèles Hugeicons
+        (Object.keys(cursorMetadata) as CursorState[]).forEach((st) => {
+          if (st !== editingCursorState) {
+            availableGuides.push({
+              id: `hugeicon-${st}`,
+              name: `Modèle Hugeicons : ${cursorMetadata[st]?.label}`,
+              paths: getHugeIconGuidePaths(st),
+              hotspot: getDefaultCursorHotspot(st),
+              isCustom: false,
+            });
+          }
+        });
+
+        const activeGuide = availableGuides[0];
+
+        return (
+          <FullScreenDrawingModal
+            title={`Dessiner le Curseur : ${cursorMetadata[editingCursorState]?.label}`}
+            subtitle={`Référence Hugeicons : ${cursorMetadata[editingCursorState]?.refHugeIcon}`}
+            currentEditingStateName={cursorMetadata[editingCursorState]?.label}
+            initialPaths={settings.customCursorVectorPaths?.[editingCursorState] || []}
+            initialHotspot={
+              settings.customCursorHotspots?.[editingCursorState] ||
+              getDefaultCursorHotspot(editingCursorState)
             }
-            setEditingCursorState(null);
-          }}
-          onClose={() => setEditingCursorState(null)}
-        />
-      )}
+            referenceGuide={activeGuide}
+            availableReferenceGuides={availableGuides}
+            isCursorMode={true}
+            onSave={(paths, _dataUrl, _colliderType, _stateName, hotspot) => {
+              if (paths && paths.length > 0) {
+                const combinedD = paths.map((p) => p.d).join(' ');
+                updateSettings({
+                  cursorSourceMode: 'custom_drawn',
+                  customCursorVectorPaths: {
+                    ...(settings.customCursorVectorPaths || {}),
+                    [editingCursorState]: paths,
+                  },
+                  customCursorPaths: {
+                    ...(settings.customCursorPaths || {}),
+                    [editingCursorState]: combinedD,
+                  },
+                  customCursorHotspots: hotspot
+                    ? {
+                        ...(settings.customCursorHotspots || {}),
+                        [editingCursorState]: hotspot,
+                      }
+                    : settings.customCursorHotspots,
+                });
+              }
+              setEditingCursorState(null);
+            }}
+            onClose={() => setEditingCursorState(null)}
+          />
+        );
+      })()}
 
       <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
         <Sliders className="w-4 h-4 text-slate-600" />
@@ -325,6 +365,27 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
           className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
             settings.showRuleFilters ? 'bg-slate-900 justify-end' : 'bg-slate-300 justify-start'
           }`}
+        >
+          <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
+        </button>
+      </div>
+
+      {/* Toggle Gizmo Debug des Colliders */}
+      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+        <div className="flex items-center gap-2.5">
+          <Scan className="w-3.5 h-3.5 text-emerald-600" />
+          <div>
+            <label className="text-xs font-bold text-slate-800 block">Gizmo Debug des Colliders</label>
+            <span className="text-[10px] text-slate-500">Affiche la zone verte de collision en direct</span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => updateSettings({ showColliderDebugGizmos: !settings.showColliderDebugGizmos })}
+          className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+            settings.showColliderDebugGizmos ? 'bg-emerald-600 justify-end' : 'bg-slate-300 justify-start'
+          }`}
+          title="Afficher/Masquer le contour vert de hitbox des entités en jeu et en édition"
         >
           <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
         </button>

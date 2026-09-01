@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Check, Paintbrush, X } from 'lucide-react';
-import { DrawingCanvas, OnionStateOption } from './DrawingCanvas';
+import { DrawingCanvas, OnionStateOption, ReferenceGuideOption } from './DrawingCanvas';
 import { VectorPath, ColliderType } from '../types';
 
 interface FullScreenDrawingModalProps {
@@ -10,11 +10,8 @@ interface FullScreenDrawingModalProps {
   initialColliderType?: ColliderType;
   onionStates?: OnionStateOption[];
   currentEditingStateName?: string;
-  referenceGuide?: {
-    name: string;
-    paths?: Array<{ d: string; stroke?: string; fill?: string; strokeWidth?: number }>;
-    hotspot?: { x: number; y: number };
-  };
+  referenceGuide?: ReferenceGuideOption;
+  availableReferenceGuides?: ReferenceGuideOption[];
   initialHotspot?: { x: number; y: number };
   isCursorMode?: boolean;
   onSave: (
@@ -35,6 +32,7 @@ export function FullScreenDrawingModal({
   onionStates = [],
   currentEditingStateName,
   referenceGuide,
+  availableReferenceGuides,
   initialHotspot,
   isCursorMode = false,
   onSave,
@@ -142,6 +140,7 @@ export function FullScreenDrawingModal({
             onVectorChange={handleVectorChange}
             onColliderChange={(type) => setCurrentColliderType(type)}
             referenceGuide={referenceGuide}
+            availableReferenceGuides={availableReferenceGuides}
             initialHotspot={currentHotspot}
             onHotspotChange={(pos) => setCurrentHotspot(pos)}
             isCursorMode={isCursorMode}

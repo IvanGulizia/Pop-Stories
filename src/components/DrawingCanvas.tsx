@@ -1091,30 +1091,42 @@ export function DrawingCanvas({
             </defs>
             {showGrid && <rect width="200" height="200" fill="url(#grid-dots-light)" />}
 
-            {/* Calque Modèle de Référence (Dessin repère Hugeicons / Guide) */}
-            {referenceGuide && referenceGuide.paths && guideOpacity > 0 && (
+            {/* Calque Modèle de Référence (Dessin repère Hugeicons / Guide d'un autre état de curseur) */}
+            {activeReferenceGuide && activeReferenceGuide.paths && guideOpacity > 0 && (
               <g
                 className="pointer-events-none select-none"
                 opacity={guideOpacity}
-                transform="scale(8.333333333333334)"
+                transform={activeReferenceGuide.isCustom ? undefined : 'scale(8.333333333333334)'}
               >
                 {/* White outline backdrop for maximum contrast against any canvas background */}
-                <g stroke="#ffffff" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.95">
-                  {referenceGuide.paths.map((p, idx) => (
-                    <path key={`guide-bg-${idx}`} d={p.d} fill={p.fill ? '#ffffff' : 'none'} />
+                <g
+                  stroke="#ffffff"
+                  strokeWidth={activeReferenceGuide.isCustom ? 5 : 3.2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                  opacity="0.95"
+                >
+                  {activeReferenceGuide.paths.map((p, idx) => (
+                    <path
+                      key={`guide-bg-${idx}`}
+                      d={p.d}
+                      fill={p.fill && p.fill !== 'none' ? '#ffffff' : 'none'}
+                    />
                   ))}
                 </g>
                 {/* Main guide strokes in distinctive indigo/cobalt */}
                 <g stroke="#4f46e5" fill="none">
-                  {referenceGuide.paths.map((p, idx) => (
+                  {activeReferenceGuide.paths.map((p, idx) => (
                     <path
                       key={`guide-fg-${idx}`}
                       d={p.d}
                       stroke="#4f46e5"
-                      fill={p.fill ? 'rgba(99, 102, 241, 0.25)' : 'none'}
-                      strokeWidth={p.strokeWidth || 1.8}
+                      fill={p.fill && p.fill !== 'none' ? 'rgba(99, 102, 241, 0.25)' : 'none'}
+                      strokeWidth={p.strokeWidth || (activeReferenceGuide.isCustom ? 3.5 : 1.8)}
                       strokeLinecap="round"
                       strokeLinejoin="round"
+                      strokeDasharray={activeReferenceGuide.isCustom ? '4 2' : undefined}
                     />
                   ))}
                 </g>
@@ -1884,15 +1896,17 @@ export function DrawingCanvas({
           </div>
 
           {/* Module Modèle Repère & Point de Contact Curseur (Hotspot) */}
-          {(referenceGuide || isCursorMode) && (
+          {(activeReferenceGuide || isCursorMode) && (
             <div className="bg-indigo-50/80 p-3 rounded-2xl border border-indigo-200 shadow-2xs space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5 truncate max-w-[160px]">
                   <Target className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  <span className="truncate">{referenceGuide ? `Repère : ${referenceGuide.name}` : "Point d'impact"}</span>
+                  <span className="truncate">
+                    {activeReferenceGuide ? `Repère : ${activeReferenceGuide.name}` : "Point d'impact"}
+                  </span>
                 </span>
                 <div className="flex items-center gap-1 shrink-0">
-                  {referenceGuide && (
+                  {activeReferenceGuide && (
                     <button
                       type="button"
                       onClick={() => setGuideOpacity(guideOpacity > 0 ? 0 : 0.45)}
@@ -1906,22 +1920,47 @@ export function DrawingCanvas({
                       Guide
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => setShowHotspot(!showHotspot)}
-                    className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer ${
-                      showHotspot
-                        ? 'bg-rose-600 text-white shadow-2xs'
-                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Crosshair className="w-3 h-3" />
-                    Impact
-                  </button>
+                  {isCursorMode && (
+                    <button
+                      type="button"
+                      onClick={() => setShowHotspot(!showHotspot)}
+                      className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer ${
+                        showHotspot
+                          ? 'bg-rose-600 text-white shadow-2xs'
+                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Crosshair className="w-3 h-3" />
+                      Impact
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {referenceGuide && guideOpacity > 0 && (
+              {/* Sélecteur de repère si plusieurs sont disponibles */}
+              {availableReferenceGuides && availableReferenceGuides.length > 1 && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-indigo-900 block">
+                    Choisir le repère de calque :
+                  </label>
+                  <select
+                    value={selectedGuideId}
+                    onChange={(e) => {
+                      setSelectedGuideId(e.target.value);
+                      if (guideOpacity === 0) setGuideOpacity(0.45);
+                    }}
+                    className="w-full text-xs font-bold text-slate-800 bg-white border border-indigo-200 rounded-xl px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 shadow-2xs cursor-pointer"
+                  >
+                    {availableReferenceGuides.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.isCustom ? `🎨 ${g.name}` : `⚡ ${g.name}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {activeReferenceGuide && guideOpacity > 0 && (
                 <div className="space-y-1.5 pt-1 border-t border-indigo-200/60">
                   <div className="flex items-center justify-between text-[11px] font-bold text-indigo-900">
                     <span>Opacité du dessin repère</span>
@@ -1936,21 +1975,21 @@ export function DrawingCanvas({
                     onChange={(e) => setGuideOpacity(parseFloat(e.target.value))}
                     className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-indigo-200/70 rounded-lg"
                   />
-                  {referenceGuide.paths && referenceGuide.paths.length > 0 && (
+                  {activeReferenceGuide.paths && activeReferenceGuide.paths.length > 0 && (
                     <button
                       type="button"
                       onClick={handleCopyGuideToCanvas}
                       className="w-full py-1.5 px-2 bg-white hover:bg-indigo-100/80 text-indigo-700 text-[11px] font-bold rounded-xl border border-indigo-300 transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer active:scale-98"
-                      title="Copie le tracé du modèle officiel directement sur votre canevas pour le retoucher ou le colorer"
+                      title="Copie le tracé du repère directement sur votre canevas pour le retoucher ou le colorer"
                     >
                       <Download className="w-3.5 h-3.5" />
-                      Copier le modèle officiel dans le dessin
+                      Copier le tracé du repère dans le dessin
                     </button>
                   )}
                 </div>
               )}
 
-              {showHotspot && (
+              {isCursorMode && showHotspot && (
                 <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 bg-white p-2 rounded-xl border border-indigo-100 shadow-2xs">
                   <span className="flex items-center gap-1.5 text-rose-700">
                     <Crosshair className="w-3.5 h-3.5 text-rose-600" />
