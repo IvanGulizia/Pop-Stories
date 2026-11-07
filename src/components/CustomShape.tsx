@@ -2,14 +2,15 @@ import { motion, useMotionValue, useDragControls } from 'motion/react';
 import { Entity, EntityState } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
 import { useEffect, useRef, useState } from 'react';
-import { isPointInsideEntityCollider, getEntityColliderBounds } from '../utils/collider';
+import { isPointInsideEntityCollider, getEntityColliderBounds, getEntityColliderClipPath } from '../utils/collider';
 import { useAppCursor } from '../context/CursorContext';
 
 interface CustomShapeProps {
   entity: Entity;
+  style?: React.CSSProperties;
 }
 
-export function CustomShape({ entity }: CustomShapeProps) {
+export function CustomShape({ entity, style }: CustomShapeProps) {
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
   const selectEntity = useSceneStore((state) => state.selectEntity);
   const triggerPointerEvent = useSceneStore((state) => state.triggerPointerEvent);
@@ -19,6 +20,7 @@ export function CustomShape({ entity }: CustomShapeProps) {
   const evaluateRulesWithTemp = useSceneStore((state) => state.evaluateRulesWithTemp);
   const showCanvasLabels = useSceneStore((state) => state.settings.showCanvasLabels);
   const showColliderDebugGizmos = useSceneStore((state) => state.settings.showColliderDebugGizmos);
+  const enableHoverScaleAnimation = useSceneStore((state) => state.settings.enableHoverScaleAnimation);
   const appMode = useSceneStore((state) => state.appMode);
 
   const [isResizing, setIsResizing] = useState(false);
@@ -176,20 +178,21 @@ export function CustomShape({ entity }: CustomShapeProps) {
 
   const colliderGeometry = getEntityColliderBounds(entity, currentState);
   const colliderType = colliderGeometry.colliderType;
+  const colliderClipPath = getEntityColliderClipPath(entity, currentState);
 
   return (
     <motion.div
-      className={`absolute flex items-center justify-center ${
-        canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
-      } ${isSelected ? 'z-30' : 'z-20'}`}
+      className="absolute flex items-center justify-center select-none"
       style={{
         left: 0,
         top: 0,
         width: entity.size.width,
         height: entity.size.height,
-        borderRadius: colliderType === 'circle' ? '50%' : '16px',
         x,
         y,
+        zIndex: isSelected && appMode !== 'play' ? 30 : undefined,
+        pointerEvents: 'none',
+        ...style,
       }}
       drag={canDrag}
       dragControls={dragControls}
@@ -198,130 +201,158 @@ export function CustomShape({ entity }: CustomShapeProps) {
       onDragStart={handleDragStart}
       onDrag={handleDrag}
       onDragEnd={handleDragEnd}
-      onPointerEnter={(e) => {
-        if (isDraggingRef.current || appMode !== 'play') return;
-        const isInside = isPointInsideEntityCollider(
-          e.clientX,
-          e.clientY,
-          e.currentTarget as HTMLElement,
-          entity,
-          currentState
-        );
-        if (isInside) {
-          setCursorState(getHoverState());
-        } else {
-          setCursorState('idle');
-        }
-      }}
-      onPointerMove={(e) => {
-        if (isDraggingRef.current || appMode !== 'play') return;
-        const isInside = isPointInsideEntityCollider(
-          e.clientX,
-          e.clientY,
-          e.currentTarget as HTMLElement,
-          entity,
-          currentState
-        );
-        if (isInside) {
-          setCursorState(getHoverState());
-        } else {
-          setCursorState('idle');
-        }
-      }}
-      onPointerLeave={() => {
-        if (!isDraggingRef.current && appMode === 'play') {
-          setCursorState('idle');
-        }
-      }}
-      onPointerDown={(e) => {
-        const isInside = isPointInsideEntityCollider(
-          e.clientX,
-          e.clientY,
-          e.currentTarget as HTMLElement,
-          entity,
-          currentState
-        );
-        if (!isInside) {
-          return;
-        }
-
-        pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
-        pointerDownTimeRef.current = Date.now();
-        hasMovedBeyondDragThresholdRef.current = false;
-        isDraggingRef.current = false;
-
-        if (canDrag) {
-          dragControls.start(e);
-          setCursorState('drag');
-        } else {
-          setCursorState('click');
-        }
-        triggerPointerEvent(entity.id, 'mouse_down');
-      }}
-      onPointerUp={(e) => {
-        const isInside = isPointInsideEntityCollider(
-          e.clientX,
-          e.clientY,
-          e.currentTarget as HTMLElement,
-          entity,
-          currentState
-        );
-
-        const duration = Date.now() - (pointerDownTimeRef.current || 0);
-        const dist = pointerDownPosRef.current
-          ? Math.hypot(e.clientX - pointerDownPosRef.current.x, e.clientY - pointerDownPosRef.current.y)
-          : 0;
-
-        const isPureClick = !hasMovedBeyondDragThresholdRef.current && dist < 6 && duration < 700;
-
-        if (isPureClick && isInside) {
-          lastHandledClickTimeRef.current = Date.now();
-          selectEntity(entity.id);
-          triggerPointerEvent(entity.id, 'click');
-          triggerPointerEvent(entity.id, 'mouse_up');
-          setCursorState(getHoverState());
-        } else if (!hasMovedBeyondDragThresholdRef.current) {
-          isDraggingRef.current = false;
-          setIsDragging(false);
-          if (isInside) {
-            setCursorState(getHoverState());
-            triggerPointerEvent(entity.id, 'mouse_up');
-          } else {
-            setCursorState('idle');
-          }
-        }
-      }}
-      onClick={(e) => {
-        const isInside = isPointInsideEntityCollider(
-          e.clientX,
-          e.clientY,
-          e.currentTarget as HTMLElement,
-          entity,
-          currentState
-        );
-        if (!isInside) {
-          return;
-        }
-        e.stopPropagation();
-
-        // If already triggered on pointerUp within the last 350ms, avoid double firing
-        if (Date.now() - (lastHandledClickTimeRef.current || 0) < 350) {
-          return;
-        }
-
-        selectEntity(entity.id);
-        if (!hasMovedBeyondDragThresholdRef.current) {
-          lastHandledClickTimeRef.current = Date.now();
-          setCursorState(getHoverState());
-          triggerPointerEvent(entity.id, 'click');
-        }
-      }}
       animate={{
         scale: currentState.scale,
         rotate: currentState.rotation,
       }}
-      whileHover={{ scale: currentState.scale * (isSelected ? 1.0 : 1.03) }}
+      whileHover={enableHoverScaleAnimation ? { scale: currentState.scale * (isSelected ? 1.0 : 1.03) } : undefined}
     >
+      {/* Hitbox interactive délimitée strictement par le collider vert */}
+      <div
+        className={`absolute inset-0 pointer-events-auto flex items-center justify-center z-10 ${
+          canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+        }`}
+        style={{
+          clipPath: colliderClipPath,
+        }}
+        onPointerEnter={(e) => {
+          if (isDraggingRef.current || appMode !== 'play') return;
+          const isInside = isPointInsideEntityCollider(
+            e.clientX,
+            e.clientY,
+            e.currentTarget as HTMLElement,
+            entity,
+            currentState
+          );
+          if (isInside) {
+            setCursorState(getHoverState());
+          } else {
+            setCursorState('idle');
+          }
+        }}
+        onPointerMove={(e) => {
+          if (isDraggingRef.current || appMode !== 'play') return;
+          const isInside = isPointInsideEntityCollider(
+            e.clientX,
+            e.clientY,
+            e.currentTarget as HTMLElement,
+            entity,
+            currentState
+          );
+          if (isInside) {
+            setCursorState(getHoverState());
+          } else {
+            setCursorState('idle');
+          }
+        }}
+        onPointerLeave={() => {
+          if (!isDraggingRef.current && appMode === 'play') {
+            setCursorState('idle');
+          }
+        }}
+        onPointerDown={(e) => {
+          const isInside = isPointInsideEntityCollider(
+            e.clientX,
+            e.clientY,
+            e.currentTarget as HTMLElement,
+            entity,
+            currentState
+          );
+
+          if (!isInside) {
+            return;
+          }
+
+          e.stopPropagation();
+          if (appMode !== 'play') {
+            selectEntity(entity.id);
+          }
+
+          pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
+          pointerDownTimeRef.current = Date.now();
+          hasMovedBeyondDragThresholdRef.current = false;
+          isDraggingRef.current = false;
+
+          if (canDrag) {
+            dragControls.start(e);
+            if (appMode === 'play') setCursorState('drag');
+          } else {
+            if (appMode === 'play') setCursorState('click');
+          }
+          if (appMode === 'play') {
+            triggerPointerEvent(entity.id, 'mouse_down');
+          }
+        }}
+        onPointerUp={(e) => {
+          const isInside = isPointInsideEntityCollider(
+            e.clientX,
+            e.clientY,
+            e.currentTarget as HTMLElement,
+            entity,
+            currentState
+          );
+
+          if (appMode !== 'play') {
+            if (!hasMovedBeyondDragThresholdRef.current && isInside) {
+              selectEntity(entity.id);
+            }
+            isDraggingRef.current = false;
+            setIsDragging(false);
+            return;
+          }
+
+          const duration = Date.now() - (pointerDownTimeRef.current || 0);
+          const dist = pointerDownPosRef.current
+            ? Math.hypot(e.clientX - pointerDownPosRef.current.x, e.clientY - pointerDownPosRef.current.y)
+            : 0;
+
+          const isPureClick = !hasMovedBeyondDragThresholdRef.current && dist < 6 && duration < 700;
+
+          if (isPureClick && isInside) {
+            lastHandledClickTimeRef.current = Date.now();
+            selectEntity(entity.id);
+            triggerPointerEvent(entity.id, 'click');
+            triggerPointerEvent(entity.id, 'mouse_up');
+            setCursorState(getHoverState());
+          } else if (!hasMovedBeyondDragThresholdRef.current) {
+            isDraggingRef.current = false;
+            setIsDragging(false);
+            if (isInside) {
+              setCursorState(getHoverState());
+              triggerPointerEvent(entity.id, 'mouse_up');
+            } else {
+              setCursorState('idle');
+            }
+          }
+        }}
+        onClick={(e) => {
+          const isInside = isPointInsideEntityCollider(
+            e.clientX,
+            e.clientY,
+            e.currentTarget as HTMLElement,
+            entity,
+            currentState
+          );
+          if (!isInside) return;
+
+          e.stopPropagation();
+          if (appMode !== 'play') {
+            selectEntity(entity.id);
+            return;
+          }
+
+          if (Date.now() - (lastHandledClickTimeRef.current || 0) < 350) {
+            return;
+          }
+
+          selectEntity(entity.id);
+          if (!hasMovedBeyondDragThresholdRef.current) {
+            lastHandledClickTimeRef.current = Date.now();
+            setCursorState(getHoverState());
+            triggerPointerEvent(entity.id, 'click');
+          }
+        }}
+      />
       {/* Gizmo Debug des Colliders (si activé dans les réglages) */}
       {showColliderDebugGizmos && (
         <div className="absolute inset-0 pointer-events-none z-50">

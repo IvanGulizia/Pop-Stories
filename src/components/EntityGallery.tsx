@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useSceneStore } from '../store/useSceneStore';
 import { EntityMiniPreview } from './EntityMiniPreview';
 import { Plus, GripVertical, Trash2, Sparkles, PlayCircle } from 'lucide-react';
@@ -26,6 +26,10 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
 
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
   const selectEntity = useSceneStore((state) => state.selectEntity);
+  const updateEntityDetails = useSceneStore((state) => state.updateEntityDetails);
+
+  const [renamingType, setRenamingType] = useState<string | null>(null);
+  const [tempName, setTempName] = useState<string>('');
 
   const entityList = Object.values(entities);
 
@@ -143,52 +147,83 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
 
               const isSelected = representativeEntity && selectedEntityId === representativeEntity.id;
 
+              const isRenaming = renamingType === item.type;
+
               return (
                 <div
                   key={item.type}
-                  draggable
+                  draggable={!isRenaming}
                   onDragStart={(e) => handleDragStart(e, item)}
                   onClick={() => handleItemClick(item)}
-                  onDoubleClick={() => {
-                    handleItemClick(item);
-                    onOpenCreateModal();
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setRenamingType(item.type);
+                    setTempName(item.name);
                   }}
                   className={`p-3 bg-white hover:bg-slate-50 border rounded-2xl flex items-center justify-between shadow-2xs gap-2.5 transition-all cursor-pointer group ${
                     isSelected
                       ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/30'
                       : 'border-slate-200/90 hover:border-slate-300'
                   }`}
-                  title="Cliquez pour inspecter • Double-cliquez pour dessiner • Glissez sur la scène"
+                  title="Cliquez pour inspecter • Double-cliquez pour renommer • Glissez sur la scène"
                 >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="text-slate-300 group-hover:text-slate-500 transition-colors cursor-grab active:cursor-grabbing">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <div className="text-slate-300 group-hover:text-slate-500 transition-colors cursor-grab active:cursor-grabbing shrink-0">
                       <GripVertical className="w-3.5 h-3.5" />
                     </div>
                     <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center p-1 overflow-hidden shrink-0 border border-slate-200/70">
                       <EntityMiniPreview entity={representativeEntity} type={item.type} size={32} />
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-slate-800 truncate">{item.name}</p>
-                      <p className="text-[10px] text-slate-400 font-medium">
-                        {item.statesCount} {item.statesCount > 1 ? 'états' : 'état'}
-                      </p>
+                    <div className="min-w-0 flex-1">
+                      {isRenaming ? (
+                        <input
+                          type="text"
+                          value={tempName}
+                          onChange={(e) => setTempName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (tempName.trim()) {
+                                updateEntityDetails(item.type, { name: tempName.trim() });
+                              }
+                              setRenamingType(null);
+                            } else if (e.key === 'Escape') {
+                              setRenamingType(null);
+                            }
+                          }}
+                          onBlur={() => {
+                            if (tempName.trim()) {
+                              updateEntityDetails(item.type, { name: tempName.trim() });
+                            }
+                            setRenamingType(null);
+                          }}
+                          autoFocus
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-xs font-bold text-slate-800 bg-white border border-indigo-400 rounded-lg px-2 py-0.5 outline-none w-full shadow-2xs ring-1 ring-indigo-500/30"
+                        />
+                      ) : (
+                        <>
+                          <p className="text-xs font-bold text-slate-800 truncate" title="Double-cliquez pour renommer">{item.name}</p>
+                          <p className="text-[10px] text-slate-400 font-medium">
+                            {item.statesCount} {item.statesCount > 1 ? 'états' : 'état'}
+                          </p>
+                        </>
+                      )}
                     </div>
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {item.isCustom && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteCustomArchetype(item.type);
-                        }}
-                        className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                        title="Supprimer du catalogue"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteCustomArchetype(item.type);
+                      }}
+                      className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                      title="Supprimer ce modèle et toutes ses instances sur la scène"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
               );

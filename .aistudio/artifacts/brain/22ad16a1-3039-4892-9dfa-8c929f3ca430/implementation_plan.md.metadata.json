@@ -1,0 +1,6 @@
+{
+  "summary": "Plan d'action et d'architecture complet pour la mise à jour majeure du moteur :\n- Résolution des soucis de drag & drop en mode Édition, réinitialisation fidèle de la scène (snapshot Play/Edit) et suppression en cascade des entités.\n- Nouvel onglet Scène (hiérarchie d'instances, ordre z-index avant/arrière, verrouillage).\n- Refonte de l'atelier de dessin (sélection multiple de traits, système de calques, pot de peinture SVG à remplissage propre, correction du tracé tactile/Apple Pencil sur iPad).\n- Ergonomie iPad 100dvh sans défilement de page.\n- Taille par défaut des entités à 256px.\n- Restructuration du Rulebook (colonne gauche Sujet / colonne droite Cible, miniatures visuelles des entités dans les actions, dossiers thématiques repliables et recherche).\n- Système audio enrichi (import de fichiers sons et enregistreur micro intégré).\n- Formats de scène configurables (16:9, 4:3, 1:1, 9:16 et libre).\n- Mode Play plein écran / borne d'arcade dédié sans interface.\n- Arrière-plans multi-calques dessinables (préparés pour le parallax).\n- Gestionnaire de sauvegardes locales par slots dans le navigateur, avec feuille de route vers la galerie Firebase gratuite.",
+  "updatedAt": "2026-11-06T23:03:34.802346179Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

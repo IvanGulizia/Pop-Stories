@@ -1209,10 +1209,18 @@ export function DrawingCanvas({
                     : tool === 'bucket'
                     ? 'hover:opacity-80 cursor-cell'
                     : tool === 'select'
-                    ? 'hover:opacity-90 cursor-pointer'
+                    ? 'hover:opacity-90 cursor-move'
                     : ''
                 }`}
                 onClick={(e) => handleShapeClick(p, e)}
+                onMouseDown={(e) => {
+                  if (tool === 'select') {
+                    e.stopPropagation();
+                    setSelectedPathId(p.id);
+                    setIsDraggingShape(true);
+                    setDragStartMouse(getSVGCoordinates(e));
+                  }
+                }}
               />
             ))}
 
@@ -1378,26 +1386,6 @@ export function DrawingCanvas({
                     />
                   </>
                 )}
-
-                {selectedPath.points &&
-                  selectedPath.points.map((pt, idx) => (
-                    <circle
-                      key={`handle-vertex-${idx}`}
-                      cx={pt.x}
-                      cy={pt.y}
-                      r={selectedVertexIndex === idx ? 5 : 4}
-                      fill={selectedVertexIndex === idx ? '#4f46e5' : '#ffffff'}
-                      stroke="#6366f1"
-                      strokeWidth="2"
-                      className="cursor-grab active:cursor-grabbing hover:scale-125 transition-transform"
-                      onMouseDown={(e) => {
-                        e.stopPropagation();
-                        setSelectedVertexIndex(idx);
-                        setActiveHandle('vertex');
-                        setDragStartMouse(getSVGCoordinates(e));
-                      }}
-                    />
-                  ))}
               </g>
             )}
 

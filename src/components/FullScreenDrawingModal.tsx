@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, Paintbrush, X } from 'lucide-react';
 import { DrawingCanvas, OnionStateOption, ReferenceGuideOption } from './DrawingCanvas';
 import { VectorPath, ColliderType } from '../types';
@@ -52,11 +53,14 @@ export function FullScreenDrawingModal({
     if (dataUrl) setCurrentDataUrl(dataUrl);
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex flex-col p-3 sm:p-6 overflow-hidden animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full h-full flex flex-col overflow-hidden max-w-6xl mx-auto">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[9999] bg-[#f8fafc] flex flex-col overflow-hidden select-none"
+      style={{ isolation: 'isolate' }}
+    >
+      <div className="bg-[#f8fafc] w-full h-full flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
+        <div className="flex items-center justify-between px-6 py-3.5 border-b border-slate-200 bg-slate-50 shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-indigo-100 text-indigo-700 rounded-2xl">
               <Paintbrush className="w-6 h-6" />
@@ -147,6 +151,7 @@ export function FullScreenDrawingModal({
           />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

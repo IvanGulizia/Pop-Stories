@@ -10,6 +10,8 @@ interface SceneProps {
 
 export function Scene({ onOpenCreateModal }: SceneProps) {
   const entities = useSceneStore((state) => state.entities);
+  const entityOrder = useSceneStore((state) => state.entityOrder);
+  const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
   const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
   const selectEntity = useSceneStore((state) => state.selectEntity);
   const spawnEntity = useSceneStore((state) => state.spawnEntity);
@@ -156,16 +158,25 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         </div>
       )}
 
-      {/* Rendering Entities */}
-      {Object.values(entities).map((entity) => {
-        if (entity.type === 'plant') {
-          return <Plant key={entity.id} entity={entity} />;
-        }
-        if (entity.type === 'apple') {
-          return <Apple key={entity.id} entity={entity} />;
-        }
-        return <CustomShape key={entity.id} entity={entity} />;
-      })}
+      {/* Rendering Entities according to entityOrder (z-index layering) */}
+      {(() => {
+        const order = entityOrder && entityOrder.length > 0 ? entityOrder : Object.keys(entities);
+        const allKeys = Array.from(new Set([...order, ...Object.keys(entities)]));
+        return allKeys
+          .map((id) => entities[id])
+          .filter(Boolean)
+          .map((entity, index) => {
+            const isSelected = selectedEntityId === entity.id;
+            const zIndexStyle = { zIndex: isSelected && appMode !== 'play' ? 60 : index + 1 };
+            if (entity.type === 'plant') {
+              return <Plant key={entity.id} entity={entity} style={zIndexStyle} />;
+            }
+            if (entity.type === 'apple') {
+              return <Apple key={entity.id} entity={entity} style={zIndexStyle} />;
+            }
+            return <CustomShape key={entity.id} entity={entity} style={zIndexStyle} />;
+          });
+      })()}
     </div>
   );
 }

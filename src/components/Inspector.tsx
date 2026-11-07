@@ -293,16 +293,12 @@ export function Inspector() {
                 draggable
                 onDragStart={handleStateDragStart}
                 onClick={() => updateEntityState(selectedEntity.id, st.id)}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  setEditingStateDrawingId(st.id);
-                }}
                 className={`p-3 rounded-2xl border transition-all cursor-grab active:cursor-grabbing flex flex-col items-center justify-between gap-2 relative group ${
                   isActive
                     ? 'bg-indigo-50/90 border-indigo-500 shadow-xs ring-2 ring-indigo-500/20'
                     : 'bg-slate-50/80 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
                 }`}
-                title="Double-clic pour dessiner cet état • Glissez sur une case de règle"
+                title="Cliquer pour activer cet état • Glissez sur une case de règle"
               >
                 {/* Bouton supprimer état (si plus d'un état) */}
                 {canDelete && (
@@ -341,7 +337,8 @@ export function Inspector() {
                         }
                       }}
                       autoFocus
-                      className="text-xs font-bold bg-white text-slate-800 border border-indigo-300 rounded-lg px-1.5 py-0.5 w-full outline-none focus:ring-1 focus:ring-indigo-500"
+                      onFocus={(e) => e.target.select()}
+                      className="text-xs font-bold bg-white text-slate-800 border border-indigo-300 rounded-lg px-1.5 py-0.5 w-full outline-none focus:ring-1 focus:ring-indigo-500 shadow-2xs"
                     />
                     <button
                       type="button"
@@ -367,13 +364,14 @@ export function Inspector() {
                   </div>
                 ) : (
                   <div
-                    onClick={(e) => {
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => {
                       e.stopPropagation();
                       setRenamingStateId(st.id);
                       setTempStateName(st.name);
                     }}
-                    className="flex items-center gap-1 max-w-full cursor-pointer hover:text-indigo-600 group/name"
-                    title="Cliquer pour renommer cet état"
+                    className="flex items-center gap-1 max-w-full cursor-text hover:text-indigo-600 group/name select-text"
+                    title="Double-cliquez pour renommer cet état"
                   >
                     <span
                       className={`text-xs font-black tracking-tight truncate ${
@@ -389,7 +387,14 @@ export function Inspector() {
                 )}
 
                 {/* Visual Thumbnail */}
-                <div className="w-14 h-14 bg-white rounded-xl border border-slate-200 flex items-center justify-center p-1.5 relative overflow-hidden shadow-2xs">
+                <div
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setEditingStateDrawingId(st.id);
+                  }}
+                  className="w-14 h-14 bg-white rounded-xl border border-slate-200 flex items-center justify-center p-1.5 relative overflow-hidden shadow-2xs hover:border-indigo-400 cursor-pointer"
+                  title="Double-cliquez sur le dessin pour modifier"
+                >
                   {statePaths.length > 0 ? (
                     <svg viewBox="0 0 200 200" className="w-full h-full pointer-events-none">
                       {statePaths.map((p) => (

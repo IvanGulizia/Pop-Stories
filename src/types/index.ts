@@ -82,6 +82,7 @@ export interface Entity {
   icon?: string;
   drawingDataUrl?: string;
   vectorPaths?: VectorPath[];
+  zIndex?: number;
 }
 
 export type TriggerType = 'collision' | 'click' | 'drag';
@@ -178,6 +179,7 @@ export interface AppSettings {
   customCursorVectorPaths?: Record<string, VectorPath[]>;
   customCursorPaths?: Record<string, string>;
   customCursorHotspots?: Record<string, { x: number; y: number }>;
+  enableHoverScaleAnimation?: boolean;
 }
 
 export interface CursorPackExportData {

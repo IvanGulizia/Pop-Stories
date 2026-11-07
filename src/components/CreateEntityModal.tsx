@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useSceneStore } from '../store/useSceneStore';
 import { X, Sparkles, Tag, Paintbrush } from 'lucide-react';
 import { DrawingCanvas } from './DrawingCanvas';
@@ -44,9 +45,12 @@ export function CreateEntityModal({ isOpen, onClose }: CreateEntityModalProps) {
     onClose();
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex flex-col p-3 sm:p-6 overflow-hidden animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full h-full flex flex-col overflow-hidden max-w-6xl mx-auto">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[9999] bg-[#f8fafc] flex flex-col overflow-hidden select-none"
+      style={{ isolation: 'isolate' }}
+    >
+      <div className="bg-[#f8fafc] w-full h-full flex flex-col overflow-hidden">
         
         {/* Top Header with Compact Inline Name Input */}
         <div className="flex items-center justify-between px-6 py-3.5 border-b border-slate-200 bg-slate-50 shrink-0 gap-4">
@@ -115,6 +119,7 @@ export function CreateEntityModal({ isOpen, onClose }: CreateEntityModalProps) {
         </form>
 
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

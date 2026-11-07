@@ -1,5 +1,5 @@
 import { useSceneStore } from '../store/useSceneStore';
-import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, CheckCircle2, AlertCircle, Filter, MousePointer2, Paintbrush, Undo2, Scan } from 'lucide-react';
+import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, CheckCircle2, AlertCircle, Filter, MousePointer2, Paintbrush, Undo2, Scan, Sparkles } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
 import { useRef, useState } from 'react';
 import { CursorState, cursorMetadata, renderCursorSvg, getHugeIconGuidePaths, getDefaultCursorHotspot } from '../utils/cursorIcons';
@@ -386,6 +386,27 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
             settings.showColliderDebugGizmos ? 'bg-emerald-600 justify-end' : 'bg-slate-300 justify-start'
           }`}
           title="Afficher/Masquer le contour vert de hitbox des entités en jeu et en édition"
+        >
+          <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
+        </button>
+      </div>
+
+      {/* Toggle Surélévation / Grossissement au survol en mode Play */}
+      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+        <div className="flex items-center gap-2.5">
+          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+          <div>
+            <label className="text-xs font-bold text-slate-800 block">Animation de survol (Play)</label>
+            <span className="text-[10px] text-slate-500">Léger agrandissement et surélévation</span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => updateSettings({ enableHoverScaleAnimation: !settings.enableHoverScaleAnimation })}
+          className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+            settings.enableHoverScaleAnimation ? 'bg-amber-500 justify-end' : 'bg-slate-300 justify-start'
+          }`}
+          title="Activer/Désactiver l'effet de surélévation et d'agrandissement au survol en mode play"
         >
           <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
         </button>

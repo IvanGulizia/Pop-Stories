@@ -182,3 +182,24 @@ export function getColliderClipPath(colliderType?: ColliderType): string | undef
   }
   return undefined;
 }
+
+/**
+ * Computes exact CSS clip-path percentage string matching the green collider bounds.
+ * Allows clicks outside the collider to pass through to underlying elements natively.
+ */
+export function getEntityColliderClipPath(entity: Entity, currentState?: EntityState): string {
+  const geom = getEntityColliderBounds(entity, currentState);
+  if (geom.colliderType === 'circle') {
+    const cxPct = ((geom.centerX / 200) * 100).toFixed(2);
+    const cyPct = ((geom.centerY / 200) * 100).toFixed(2);
+    const rPct = ((geom.radius / 200) * 100).toFixed(2);
+    return `circle(${rPct}% at ${cxPct}% ${cyPct}%)`;
+  }
+
+  const topPct = Math.max(0, (geom.y / 200) * 100).toFixed(2);
+  const rightPct = Math.max(0, ((200 - (geom.x + geom.width)) / 200) * 100).toFixed(2);
+  const bottomPct = Math.max(0, ((200 - (geom.y + geom.height)) / 200) * 100).toFixed(2);
+  const leftPct = Math.max(0, (geom.x / 200) * 100).toFixed(2);
+
+  return `inset(${topPct}% ${rightPct}% ${bottomPct}% ${leftPct}% round 12px)`;
+}

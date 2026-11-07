@@ -4,6 +4,7 @@ import { Inspector } from './components/Inspector';
 import { RuleBook } from './components/RuleBook';
 import { CreateEntityModal } from './components/CreateEntityModal';
 import { EntityGallery } from './components/EntityGallery';
+import { SceneHierarchyList } from './components/SceneHierarchyList';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useSceneStore } from './store/useSceneStore';
 import {
@@ -12,6 +13,7 @@ import {
   RotateCcw,
   X,
   Shapes,
+  Layers,
   Image as ImageIcon,
   Zap,
   SlidersHorizontal,
@@ -29,15 +31,18 @@ export default function App() {
   const clearProject = useSceneStore((state) => state.clearProject);
   const restoreDefaultScene = useSceneStore((state) => state.restoreDefaultScene);
   const rules = useSceneStore((state) => state.rules);
+  const entities = useSceneStore((state) => state.entities);
 
   // Main UI View States
   const [activeView, setActiveView] = useState<'canvas' | 'rules'>('canvas');
   const [isEntitiesOpen, setIsEntitiesOpen] = useState(true);
+  const [leftTab, setLeftTab] = useState<'entities' | 'scene'>('entities');
   const [rightPanel, setRightPanel] = useState<'none' | 'inspector' | 'settings'>('inspector');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
 
   const activeRulesCount = rules.filter((r) => r.enabled).length;
+  const activeEntitiesCount = Object.keys(entities).length;
 
   const handleToggleRightPanel = (panel: 'inspector' | 'settings') => {
     if (rightPanel === panel) {
@@ -57,7 +62,7 @@ export default function App() {
 
       {/* --- TOP BAR (Ui 1.0 layout) --- */}
       <header className="h-16 px-4 sm:px-6 flex items-center justify-between shrink-0 z-30">
-        {/* LEFT SECTION: ENTITIES TOGGLE */}
+        {/* LEFT SECTION: ENTITIES / SCENE TOGGLE */}
         <div className="flex items-center gap-3">
           <button
             onClick={() => setIsEntitiesOpen(!isEntitiesOpen)}
@@ -67,8 +72,12 @@ export default function App() {
                 : 'bg-[#22273e] text-slate-300 hover:text-white hover:bg-[#1c2136] border border-[#2e3556]'
             }`}
           >
-            <Shapes className="w-4 h-4 text-indigo-400" strokeWidth={1.75} />
-            <span>Entities</span>
+            {leftTab === 'scene' ? (
+              <Layers className="w-4 h-4 text-indigo-400" strokeWidth={1.75} />
+            ) : (
+              <Shapes className="w-4 h-4 text-indigo-400" strokeWidth={1.75} />
+            )}
+            <span>{leftTab === 'scene' ? 'Scène' : 'Entités'}</span>
           </button>
         </div>
 
@@ -187,23 +196,58 @@ export default function App() {
 
       {/* --- MAIN WORKSPACE WITH 3 ROUNDED FRAMES --- */}
       <div className="flex-1 flex gap-3 px-3 sm:px-6 pb-4 overflow-hidden min-h-0">
-        {/* 1. LEFT DRAWER: ENTITIES LIST */}
+        {/* 1. LEFT DRAWER: ENTITIES & SCENE HIERARCHY */}
         {isEntitiesOpen && (
-          <aside className="w-64 sm:w-72 bg-white rounded-3xl border border-slate-300/80 shadow-xs flex flex-col overflow-hidden shrink-0 transition-all">
-            <div className="p-3.5 bg-slate-50/80 border-b border-slate-200/80 flex items-center justify-between shrink-0">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                <Shapes className="w-4 h-4 text-slate-700" strokeWidth={2} />
-                Entités
-              </span>
+          <aside className="w-64 sm:w-76 bg-white rounded-3xl border border-slate-300/80 shadow-xs flex flex-col overflow-hidden shrink-0 transition-all">
+            {/* Header with Segmented Switcher */}
+            <div className="p-2.5 bg-slate-50/90 border-b border-slate-200/80 flex items-center justify-between shrink-0 gap-2">
+              <div className="flex items-center bg-slate-200/80 p-0.5 rounded-2xl flex-1">
+                <button
+                  type="button"
+                  onClick={() => setLeftTab('entities')}
+                  className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    leftTab === 'entities'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  <Shapes className="w-3.5 h-3.5 text-indigo-600" strokeWidth={2} />
+                  <span>Entités</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setLeftTab('scene')}
+                  className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    leftTab === 'scene'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5 text-indigo-600" strokeWidth={2} />
+                  <span>Scène</span>
+                  <span className="text-[10px] px-1.5 py-0.2 bg-slate-100 text-slate-600 rounded-full font-bold">
+                    {activeEntitiesCount}
+                  </span>
+                </button>
+              </div>
+
               <button
+                type="button"
                 onClick={() => setIsEntitiesOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg cursor-pointer"
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-xl cursor-pointer shrink-0"
+                title="Masquer le panneau latéral"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
+
             <div className="p-3.5 flex-1 overflow-y-auto">
-              <EntityGallery onOpenCreateModal={() => setIsCreateModalOpen(true)} />
+              {leftTab === 'entities' ? (
+                <EntityGallery onOpenCreateModal={() => setIsCreateModalOpen(true)} />
+              ) : (
+                <SceneHierarchyList onOpenCreateModal={() => setIsCreateModalOpen(true)} />
+              )}
             </div>
           </aside>
         )}

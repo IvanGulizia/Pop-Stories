@@ -35,10 +35,20 @@ interface SceneState {
   activeCollisions: Record<string, boolean>; // Trace l'état de collision pour chaque pair (ruleId_subId_tarId)
   selectedEntityId: EntityId | null;
   appMode: AppMode;
+  entityOrder: EntityId[];
   snapshotEntities: Record<EntityId, Entity> | null;
+  snapshotEntityOrder: EntityId[] | null;
   settings: AppSettings;
 
   updateSettings: (partial: Partial<AppSettings>) => void;
+
+  // Z-Index and Layer Ordering
+  bringForward: (id: EntityId) => void;
+  sendBackward: (id: EntityId) => void;
+  bringToFront: (id: EntityId) => void;
+  sendToBack: (id: EntityId) => void;
+  duplicateEntity: (id: EntityId) => string;
+  reorderEntities: (sourceId: EntityId, targetId: EntityId) => void;
 
   // State actions
   setAppMode: (mode: AppMode) => void;
@@ -125,7 +135,7 @@ const initialEntities: Record<EntityId, Entity> = {
     type: 'plant',
     tags: ['plante', 'nature'],
     position: { x: 420, y: 260 },
-    size: { width: 120, height: 160 },
+    size: { width: 256, height: 256 },
     currentStateId: 'pousse',
     isDraggable: false,
     states: {
@@ -157,7 +167,7 @@ const initialEntities: Record<EntityId, Entity> = {
     type: 'apple',
     tags: ['nourriture', 'fruit'],
     position: { x: 140, y: 160 },
-    size: { width: 64, height: 64 },
+    size: { width: 256, height: 256 },
     currentStateId: 'default',
     isDraggable: true,
     states: {
@@ -186,7 +196,7 @@ const defaultCustomArchetypes: Record<string, Entity> = {
     type: 'plant',
     tags: ['plante', 'nature'],
     position: { x: 0, y: 0 },
-    size: { width: 120, height: 160 },
+    size: { width: 256, height: 256 },
     currentStateId: 'pousse',
     isDraggable: false,
     states: {
@@ -218,7 +228,7 @@ const defaultCustomArchetypes: Record<string, Entity> = {
     type: 'apple',
     tags: ['nourriture', 'fruit'],
     position: { x: 0, y: 0 },
-    size: { width: 64, height: 64 },
+    size: { width: 256, height: 256 },
     currentStateId: 'default',
     isDraggable: true,
     states: {
@@ -394,7 +404,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   activeCollisions: {},
   selectedEntityId: null,
   appMode: 'edit',
+  entityOrder: ['plant-1', 'apple-1'],
   snapshotEntities: null,
+  snapshotEntityOrder: null,
   settings: {
     showCanvasLabels: false,
     showGrid: false,
@@ -403,6 +415,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     showRuleFilters: false,
     useCustomCursors: true,
     cursorSourceMode: 'hugeicons',
+    enableHoverScaleAnimation: false,
   },
 
   updateSettings: (partial) => {
@@ -411,59 +424,137 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     }));
   },
 
+  bringForward: (id) => {
+    set((state) => {
+      const order = state.entityOrder && state.entityOrder.length > 0
+        ? [...state.entityOrder]
+        : Object.keys(state.entities);
+      const idx = order.indexOf(id);
+      if (idx === -1 || idx >= order.length - 1) return state;
+      const temp = order[idx];
+      order[idx] = order[idx + 1];
+      order[idx + 1] = temp;
+      return { entityOrder: order };
+    });
+  },
+
+  sendBackward: (id) => {
+    set((state) => {
+      const order = state.entityOrder && state.entityOrder.length > 0
+        ? [...state.entityOrder]
+        : Object.keys(state.entities);
+      const idx = order.indexOf(id);
+      if (idx <= 0) return state;
+      const temp = order[idx];
+      order[idx] = order[idx - 1];
+      order[idx - 1] = temp;
+      return { entityOrder: order };
+    });
+  },
+
+  bringToFront: (id) => {
+    set((state) => {
+      const order = (state.entityOrder && state.entityOrder.length > 0
+        ? state.entityOrder
+        : Object.keys(state.entities)
+      ).filter((item) => item !== id);
+      order.push(id);
+      return { entityOrder: order };
+    });
+  },
+
+  sendToBack: (id) => {
+    set((state) => {
+      const order = (state.entityOrder && state.entityOrder.length > 0
+        ? state.entityOrder
+        : Object.keys(state.entities)
+      ).filter((item) => item !== id);
+      order.unshift(id);
+      return { entityOrder: order };
+    });
+  },
+
+  duplicateEntity: (id) => {
+    const current = get().entities[id];
+    if (!current) return '';
+    const newId = `${current.type}-${Date.now().toString(36)}`;
+    const cloned: Entity = {
+      ...JSON.parse(JSON.stringify(current)),
+      id: newId,
+      name: `${current.name.replace(/\(Copie.*?\)/g, '').trim()} (Copie)`,
+      position: {
+        x: Math.min(800, current.position.x + 32),
+        y: Math.min(600, current.position.y + 32),
+      },
+    };
+    set((state) => {
+      const order = state.entityOrder && state.entityOrder.length > 0
+        ? [...state.entityOrder]
+        : Object.keys(state.entities);
+      return {
+        entities: {
+          ...state.entities,
+          [newId]: cloned,
+        },
+        entityOrder: [...order.filter((i) => i !== newId), newId],
+        selectedEntityId: newId,
+      };
+    });
+    get().evaluateRules();
+    return newId;
+  },
+
+  reorderEntities: (sourceId, targetId) => {
+    set((state) => {
+      const order = state.entityOrder && state.entityOrder.length > 0
+        ? [...state.entityOrder]
+        : Object.keys(state.entities);
+      const fromIdx = order.indexOf(sourceId);
+      const toIdx = order.indexOf(targetId);
+      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return state;
+      order.splice(fromIdx, 1);
+      order.splice(toIdx, 0, sourceId);
+      return { entityOrder: order };
+    });
+  },
+
   setAppMode: (mode) => {
     if (mode === 'play') {
-      // Sauvegarder un instantané propre pour le Reset
+      // Sauvegarder un instantané propre pour la restauration fidèle
       const snapshot = JSON.parse(JSON.stringify(get().entities));
-      set({ appMode: 'play', snapshotEntities: snapshot });
+      const orderSnapshot = [...(get().entityOrder || Object.keys(get().entities))];
+      set({
+        appMode: 'play',
+        snapshotEntities: snapshot,
+        snapshotEntityOrder: orderSnapshot,
+      });
     } else {
-      // Quand on repasse en mode édition, reset automatique de la scène
-      get().resetScene();
-      set({ appMode: 'edit' });
+      // Quand on repasse en mode édition, restaurer fidèlement la scène d'avant-jeu
+      const { snapshotEntities, snapshotEntityOrder } = get();
+      if (snapshotEntities) {
+        set({
+          entities: JSON.parse(JSON.stringify(snapshotEntities)),
+          entityOrder: snapshotEntityOrder ? [...snapshotEntityOrder] : Object.keys(snapshotEntities),
+          activeCollisions: {},
+          appMode: 'edit',
+        });
+      } else {
+        set({ appMode: 'edit', activeCollisions: {} });
+      }
     }
   },
 
   resetScene: () => {
-    const { snapshotEntities, customArchetypes, entities } = get();
+    const { snapshotEntities, snapshotEntityOrder, entities } = get();
     if (snapshotEntities) {
-      const restoredEntities: Record<EntityId, Entity> = {};
-
-      Object.entries(snapshotEntities).forEach(([id, snapEnt]) => {
-        const currentEnt = entities[id];
-        const currentArch = customArchetypes[snapEnt.type];
-
-        const latestStates = currentEnt?.states || currentArch?.states || snapEnt.states;
-        const latestName = currentEnt?.name || currentArch?.name || snapEnt.name;
-        const latestTags = currentEnt?.tags || currentArch?.tags || snapEnt.tags;
-        const latestVectorPaths = currentEnt?.vectorPaths || currentArch?.vectorPaths || snapEnt.vectorPaths;
-        const latestColliderType = currentEnt?.colliderType || currentArch?.colliderType || snapEnt.colliderType;
-
-        restoredEntities[id] = {
-          ...snapEnt,
-          name: latestName,
-          tags: latestTags,
-          states: JSON.parse(JSON.stringify(latestStates)),
-          vectorPaths: latestVectorPaths ? JSON.parse(JSON.stringify(latestVectorPaths)) : snapEnt.vectorPaths,
-          colliderType: latestColliderType,
-          position: snapEnt.position,
-          currentStateId: snapEnt.currentStateId in latestStates ? snapEnt.currentStateId : Object.keys(latestStates)[0],
-        };
-      });
-
-      // Preserve newly user-created entities that were not in initial snapshot and not spawned by rules
-      Object.entries(entities).forEach(([id, currEnt]) => {
-        if (!snapshotEntities[id] && !id.startsWith('spawn-')) {
-          restoredEntities[id] = currEnt;
-        }
-      });
-
       set({
-        entities: restoredEntities,
+        entities: JSON.parse(JSON.stringify(snapshotEntities)),
+        entityOrder: snapshotEntityOrder ? [...snapshotEntityOrder] : Object.keys(snapshotEntities),
         activeCollisions: {},
       });
     } else {
+      // Ne jamais vider la scène si aucun instantané n'a été créé
       set({
-        entities: {},
         activeCollisions: {},
       });
     }
@@ -808,7 +899,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         type: 'plant',
         tags: existingPeer ? [...(existingPeer.tags || [])] : ['plante', 'nature'],
         position: { x: 200 + ((count * 30) % 200), y: 250 },
-        size: { width: 120, height: 160 },
+        size: { width: 256, height: 256 },
         currentStateId: 'pousse',
         isDraggable: true,
         states: existingPeer
@@ -843,7 +934,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         type: 'apple',
         tags: existingPeer ? [...(existingPeer.tags || [])] : ['nourriture', 'fruit'],
         position: { x: 100 + ((count * 40) % 250), y: 100 },
-        size: { width: 64, height: 64 },
+        size: { width: 256, height: 256 },
         currentStateId: 'default',
         isDraggable: true,
         states: existingPeer
@@ -872,7 +963,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         type: 'custom',
         tags: existingPeer ? [...(existingPeer.tags || [])] : ['magique', 'etoile'],
         position: { x: 300, y: 150 },
-        size: { width: 70, height: 70 },
+        size: { width: 256, height: 256 },
         currentStateId: 'default',
         isDraggable: true,
         states: existingPeer
@@ -896,13 +987,19 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       };
     }
 
-    set((state) => ({
-      entities: {
-        ...state.entities,
-        [id]: newEntity,
-      },
-      selectedEntityId: id,
-    }));
+    set((state) => {
+      const order = state.entityOrder && state.entityOrder.length > 0
+        ? [...state.entityOrder]
+        : Object.keys(state.entities);
+      return {
+        entities: {
+          ...state.entities,
+          [id]: newEntity,
+        },
+        entityOrder: [...order.filter((i) => i !== id), id],
+        selectedEntityId: id,
+      };
+    });
   },
 
   addCustomEntity: ({ name, type, icon, drawingDataUrl, vectorPaths, color, tags }) => {
@@ -923,7 +1020,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       vectorPaths: vectorPaths ? JSON.parse(JSON.stringify(vectorPaths)) : [],
       tags: tags && tags.length > 0 ? tags : [slug, 'custom'],
       position: { x: 180 + ((count * 35) % 220), y: 140 + ((count * 30) % 180) },
-      size: { width: 80, height: 80 },
+      size: { width: 256, height: 256 },
       currentStateId: 'state_1',
       isDraggable: true,
       states: {
@@ -938,25 +1035,66 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       },
     };
 
-    set((state) => ({
-      entities: {
-        ...state.entities,
-        [id]: newEntity,
-      },
-      customArchetypes: {
-        ...state.customArchetypes,
-        [uniqueType]: JSON.parse(JSON.stringify(newEntity)),
-      },
-      selectedEntityId: id,
-    }));
+    set((state) => {
+      const order = state.entityOrder && state.entityOrder.length > 0
+        ? [...state.entityOrder]
+        : Object.keys(state.entities);
+      return {
+        entities: {
+          ...state.entities,
+          [id]: newEntity,
+        },
+        customArchetypes: {
+          ...state.customArchetypes,
+          [uniqueType]: JSON.parse(JSON.stringify(newEntity)),
+        },
+        entityOrder: [...order.filter((i) => i !== id), id],
+        selectedEntityId: id,
+      };
+    });
     get().evaluateRules();
   },
 
   deleteCustomArchetype: (type: string) => {
     set((state) => {
       const { [type]: _, ...remainingArchetypes } = state.customArchetypes;
-      return { customArchetypes: remainingArchetypes };
+      
+      // Suppression en cascade : supprimer l'entité supprime le catalogue ET toutes ses instances sur scène
+      const remainingEntities: Record<EntityId, Entity> = {};
+      const deletedIds = new Set<string>();
+
+      Object.entries(state.entities).forEach(([id, entity]) => {
+        if (entity.type === type) {
+          deletedIds.add(id);
+        } else {
+          remainingEntities[id] = entity;
+        }
+      });
+
+      const updatedOrder = (state.entityOrder || []).filter((id) => !deletedIds.has(id));
+
+      let nextSelected = state.selectedEntityId;
+      if (nextSelected && (nextSelected === type || deletedIds.has(nextSelected))) {
+        nextSelected = updatedOrder.length > 0 ? updatedOrder[updatedOrder.length - 1] : null;
+      }
+
+      // Nettoyer les règles faisant référence au type supprimé ou aux instances supprimées
+      const cleanedRules = state.rules.filter((rule) => {
+        if (rule.trigger.subjectType === type || rule.trigger.targetType === type) return false;
+        if (rule.trigger.subjectId && deletedIds.has(rule.trigger.subjectId)) return false;
+        if (rule.trigger.targetId && deletedIds.has(rule.trigger.targetId)) return false;
+        return true;
+      });
+
+      return {
+        customArchetypes: remainingArchetypes,
+        entities: remainingEntities,
+        entityOrder: updatedOrder,
+        selectedEntityId: nextSelected,
+        rules: cleanedRules,
+      };
     });
+    get().evaluateRules();
   },
 
   spawnEntity: ({ type, position, initialStateId, size }) => {
@@ -977,7 +1115,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         name: `${archetype.name.replace(/#\d+/, '').trim()} #${count}`,
         position,
         currentStateId: targetState,
-        size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : archetype.size,
+        size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : (archetype.size || { width: 256, height: 256 }),
       };
     } else if (type === 'apple') {
       newEntity = {
@@ -986,7 +1124,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         type: 'apple',
         tags: ['nourriture', 'fruit'],
         position,
-        size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : { width: 64, height: 64 },
+        size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : { width: 256, height: 256 },
         currentStateId: initialStateId || 'default',
         isDraggable: true,
         states: {
@@ -1001,7 +1139,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         type: 'plant',
         tags: ['plante', 'nature'],
         position,
-        size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : { width: 120, height: 160 },
+        size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : { width: 256, height: 256 },
         currentStateId: initialStateId || 'pousse',
         isDraggable: true,
         states: {
@@ -1016,7 +1154,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         type,
         tags: [type],
         position,
-        size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : { width: 80, height: 80 },
+        size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : { width: 256, height: 256 },
         currentStateId: initialStateId || 'default',
         isDraggable: true,
         states: {
@@ -1026,25 +1164,39 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       };
     }
 
-    set((state) => ({
-      entities: {
-        ...state.entities,
-        [id]: newEntity,
-      },
-      selectedEntityId: state.appMode === 'play' ? state.selectedEntityId : id,
-    }));
+    set((state) => {
+      const order = state.entityOrder && state.entityOrder.length > 0
+        ? [...state.entityOrder]
+        : Object.keys(state.entities);
+      return {
+        entities: {
+          ...state.entities,
+          [id]: newEntity,
+        },
+        entityOrder: [...order.filter((i) => i !== id), id],
+        selectedEntityId: state.appMode === 'play' ? state.selectedEntityId : id,
+      };
+    });
     get().evaluateRules();
   },
 
   deleteEntity: (id) => {
     set((state) => {
       const { [id]: _, ...remainingEntities } = state.entities;
+      const updatedOrder = (state.entityOrder || []).filter((item) => item !== id);
       const nextSelected =
-        state.selectedEntityId === id ? Object.keys(remainingEntities)[0] || null : state.selectedEntityId;
+        state.selectedEntityId === id ? (updatedOrder[updatedOrder.length - 1] || null) : state.selectedEntityId;
+
+      const cleanedRules = state.rules.filter((rule) => {
+        if (rule.trigger.subjectId === id || rule.trigger.targetId === id) return false;
+        return true;
+      });
 
       return {
         entities: remainingEntities,
+        entityOrder: updatedOrder,
         selectedEntityId: nextSelected,
+        rules: cleanedRules,
       };
     });
   },
@@ -1052,6 +1204,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   clearAllEntities: () => {
     set({
       entities: {},
+      entityOrder: [],
       selectedEntityId: null,
     });
   },
@@ -1059,19 +1212,23 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   clearProject: () => {
     set({
       entities: {},
+      entityOrder: [],
       rules: [],
       selectedEntityId: null,
       activeCollisions: {},
       snapshotEntities: null,
+      snapshotEntityOrder: null,
     });
   },
 
   restoreDefaultScene: () => {
     set({
       entities: JSON.parse(JSON.stringify(initialEntities)),
+      entityOrder: ['plant-1', 'apple-1'],
       customArchetypes: JSON.parse(JSON.stringify(defaultCustomArchetypes)),
       rules: JSON.parse(JSON.stringify(initialRules)),
       snapshotEntities: null,
+      snapshotEntityOrder: null,
       selectedEntityId: 'plant-1',
       activeCollisions: {},
       appMode: 'edit',
