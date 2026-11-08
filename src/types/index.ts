@@ -128,6 +128,22 @@ export type SpawnLocationMode = 'at_subject' | 'at_target' | 'offset_subject' | 
 
 export type SoundType = 'pop' | 'bell' | 'laser' | 'bounce' | 'magic' | 'win';
 
+export interface CustomSound {
+  id: string;
+  name: string;
+  dataUrl: string;
+  duration?: number;
+  source: 'mic' | 'upload';
+  createdAt: number;
+}
+
+export interface RuleFolder {
+  id: string;
+  name: string;
+  color?: string; // ex: 'indigo', 'emerald', 'amber', 'rose', 'purple', 'sky'
+  isCollapsed?: boolean;
+}
+
 export interface RuleAction {
   id: string;
   type: ActionType;
@@ -154,17 +170,31 @@ export interface RuleAction {
 
   // Champs pour 'play_sound'
   soundType?: 'pop' | 'bell' | 'laser' | 'bounce' | 'magic' | 'win';
+  customSoundId?: string;
 }
 
 export interface DynamicRule {
   id: string;
   name: string;
   enabled: boolean;
+  folderId?: string; // Dossier thématique de classement
   trigger: RuleTrigger;
   actions: RuleAction[];
 }
 
 export type AppMode = 'edit' | 'play';
+
+export type SceneAspectRatio = '16:9' | '4:3' | '1:1' | '9:16' | 'free';
+
+export interface ProjectSlot {
+  id: string;
+  name: string;
+  updatedAt: number;
+  entitiesCount: number;
+  rulesCount: number;
+  aspectRatio?: SceneAspectRatio;
+  data: ProjectExportData;
+}
 
 export interface AppSettings {
   showCanvasLabels: boolean;
@@ -180,6 +210,9 @@ export interface AppSettings {
   customCursorPaths?: Record<string, string>;
   customCursorHotspots?: Record<string, { x: number; y: number }>;
   enableHoverScaleAnimation?: boolean;
+  playModeOverlay?: boolean;
+  playModeDimOpacity?: 'light' | 'medium' | 'dark';
+  aspectRatio?: SceneAspectRatio;
 }
 
 export interface CursorPackExportData {
@@ -194,6 +227,26 @@ export interface CursorPackExportData {
   customCursorHotspots?: Record<string, { x: number; y: number }>;
 }
 
+export type SceneLayerKind = 'background' | 'foreground' | 'custom';
+
+export interface SceneLayer {
+  id: string;
+  name: string;
+  visible: boolean;
+  opacity: number;
+  locked?: boolean;
+  parallaxFactor?: number; // 0 = statique, 0.5 = demi-vitesse, 1 = normal
+  vectorPaths: VectorPath[];
+}
+
+export interface SceneLayerGroup {
+  id: string;
+  name: string;
+  kind: SceneLayerKind;
+  isCollapsed?: boolean;
+  layers: SceneLayer[];
+}
+
 export interface ProjectExportData {
   version: number;
   name?: string;
@@ -201,6 +254,9 @@ export interface ProjectExportData {
   entities: Record<EntityId, Entity>;
   customArchetypes?: Record<string, Entity>;
   rules: DynamicRule[];
+  folders?: RuleFolder[];
+  customSounds?: CustomSound[];
+  layerGroups?: SceneLayerGroup[];
   settings?: AppSettings;
 }
 

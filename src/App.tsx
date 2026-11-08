@@ -6,7 +6,10 @@ import { CreateEntityModal } from './components/CreateEntityModal';
 import { EntityGallery } from './components/EntityGallery';
 import { SceneHierarchyList } from './components/SceneHierarchyList';
 import { SettingsPanel } from './components/SettingsPanel';
+import { ProjectSlotsModal } from './components/ProjectSlotsModal';
+import { FullScreenDrawingModal } from './components/FullScreenDrawingModal';
 import { useSceneStore } from './store/useSceneStore';
+import { SceneLayer, SceneLayerGroup } from './types';
 import {
   Play,
   Pencil,
@@ -19,6 +22,8 @@ import {
   SlidersHorizontal,
   Settings,
   Trash2,
+  FolderArchive,
+  Save,
 } from 'lucide-react';
 
 export default function App() {
@@ -32,6 +37,8 @@ export default function App() {
   const restoreDefaultScene = useSceneStore((state) => state.restoreDefaultScene);
   const rules = useSceneStore((state) => state.rules);
   const entities = useSceneStore((state) => state.entities);
+  const settings = useSceneStore((state) => state.settings);
+  const setLayerVectorPaths = useSceneStore((state) => state.setLayerVectorPaths);
 
   // Main UI View States
   const [activeView, setActiveView] = useState<'canvas' | 'rules'>('canvas');
@@ -40,6 +47,10 @@ export default function App() {
   const [rightPanel, setRightPanel] = useState<'none' | 'inspector' | 'settings'>('inspector');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [isSlotsModalOpen, setIsSlotsModalOpen] = useState(false);
+
+  // Drawing Layer State
+  const [editingLayer, setEditingLayer] = useState<{ layer: SceneLayer; group: SceneLayerGroup } | null>(null);
 
   const activeRulesCount = rules.filter((r) => r.enabled).length;
   const activeEntitiesCount = Object.keys(entities).length;
@@ -53,12 +64,27 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen w-screen bg-[#edf0f5] text-slate-900 font-sans flex flex-col overflow-hidden select-none">
+    <div className={`h-screen w-screen text-slate-900 font-sans flex flex-col overflow-hidden select-none transition-colors duration-300 ${
+      appMode === 'play' && settings.playModeOverlay !== false ? 'bg-[#0b0e17]' : 'bg-[#edf0f5]'
+    }`}>
       {/* Modal de création de dessin vectoriel */}
       <CreateEntityModal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
       />
+
+      {/* Overlay d'assombrissement du mode Play */}
+      {appMode === 'play' && settings.playModeOverlay !== false && (
+        <div
+          className={`fixed inset-0 pointer-events-none z-20 transition-all duration-300 ${
+            settings.playModeDimOpacity === 'light'
+              ? 'bg-slate-950/45 backdrop-blur-[1px]'
+              : settings.playModeDimOpacity === 'dark'
+              ? 'bg-slate-950/85 backdrop-blur-xs'
+              : 'bg-slate-950/65 backdrop-blur-[1px]'
+          }`}
+        />
+      )}
 
       {/* --- TOP BAR (Ui 1.0 layout) --- */}
       <header className="h-16 px-4 sm:px-6 flex items-center justify-between shrink-0 z-30">
@@ -128,15 +154,19 @@ export default function App() {
             {/* Button 2: Play Mode */}
             <button
               onClick={() => {
-                setAppMode('play');
-                setActiveView('canvas');
+                if (appMode === 'play') {
+                  setAppMode('edit');
+                } else {
+                  setAppMode('play');
+                  setActiveView('canvas');
+                }
               }}
               className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer ${
                 appMode === 'play'
                   ? 'bg-emerald-500 text-white shadow-sm ring-2 ring-emerald-400/40'
                   : 'text-slate-400 hover:text-white hover:bg-white/10'
               }`}
-              title="Mode Play (Interactif - bascule sur le canvas)"
+              title={appMode === 'play' ? "Cliquer pour repasser en mode Édition" : "Mode Play (Interactif - bascule sur le canvas)"}
             >
               <Play className="w-3.5 h-3.5 fill-current" strokeWidth={2} />
             </button>
@@ -164,8 +194,17 @@ export default function App() {
           </div>
         </div>
 
-        {/* RIGHT SECTION: INSPECTOR & SETTINGS TABS */}
+        {/* RIGHT SECTION: SLOTS, INSPECTOR & SETTINGS TABS */}
         <div className="flex items-center gap-2">
+          {/* Slots / Mes Projets Button (Floppy Disk Icon Only) */}
+          <button
+            onClick={() => setIsSlotsModalOpen(true)}
+            className="w-9 h-9 rounded-2xl flex items-center justify-center transition-all cursor-pointer shadow-xs bg-[#22273e] text-indigo-300 hover:text-white hover:bg-[#1c2136] border border-indigo-500/40 active:scale-95"
+            title="Sauvegardes locales & Slots"
+          >
+            <Save className="w-4 h-4 text-indigo-400" strokeWidth={2} />
+          </button>
+
           {/* Inspector Tab */}
           <button
             onClick={() => handleToggleRightPanel('inspector')}
@@ -246,14 +285,21 @@ export default function App() {
               {leftTab === 'entities' ? (
                 <EntityGallery onOpenCreateModal={() => setIsCreateModalOpen(true)} />
               ) : (
-                <SceneHierarchyList onOpenCreateModal={() => setIsCreateModalOpen(true)} />
+                <SceneHierarchyList
+                  onOpenCreateModal={() => setIsCreateModalOpen(true)}
+                  onOpenDrawLayerModal={(layer, group) => setEditingLayer({ layer, group })}
+                />
               )}
             </div>
           </aside>
         )}
 
         {/* 2. CENTER FRAME: CANVAS OR RULES */}
-        <main className="flex-1 bg-white rounded-3xl border border-slate-300/80 shadow-xs flex flex-col overflow-hidden min-w-0">
+        <main className={`flex-1 bg-white rounded-3xl border shadow-xs flex flex-col overflow-hidden min-w-0 transition-all duration-300 ${
+          appMode === 'play'
+            ? 'z-30 border-emerald-500/60 ring-4 ring-emerald-500/30 shadow-2xl'
+            : 'border-slate-300/80 z-10'
+        }`}>
           {activeView === 'canvas' ? (
             <div className="flex-1 relative flex items-center justify-center min-h-0 overflow-hidden">
               <Scene onOpenCreateModal={() => setIsCreateModalOpen(true)} />
@@ -293,12 +339,36 @@ export default function App() {
               {rightPanel === 'inspector' ? (
                 <Inspector />
               ) : (
-                <SettingsPanel onOpenClearModal={() => setIsClearModalOpen(true)} />
+                <SettingsPanel
+                  onOpenClearModal={() => setIsClearModalOpen(true)}
+                  onOpenSlotsModal={() => setIsSlotsModalOpen(true)}
+                />
               )}
             </div>
           </aside>
         )}
       </div>
+
+      {/* Modal de Sauvegardes Locales (Slots) */}
+      <ProjectSlotsModal
+        isOpen={isSlotsModalOpen}
+        onClose={() => setIsSlotsModalOpen(false)}
+      />
+
+      {/* Modal de dessin pour calque de décor (Background / Foreground) */}
+      {editingLayer && (
+        <FullScreenDrawingModal
+          title={`Dessiner : ${editingLayer.layer.name}`}
+          subtitle={`Groupe : ${editingLayer.group.name} (${editingLayer.group.kind === 'background' ? 'Arrière-plan' : 'Premier-plan'})`}
+          currentEditingStateName={editingLayer.layer.name}
+          initialPaths={editingLayer.layer.vectorPaths || []}
+          onSave={(paths) => {
+            setLayerVectorPaths(editingLayer.layer.id, paths);
+            setEditingLayer(null);
+          }}
+          onClose={() => setEditingLayer(null)}
+        />
+      )}
 
       {/* Nettoyage Modal */}
       {isClearModalOpen && (

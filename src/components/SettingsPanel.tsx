@@ -1,16 +1,18 @@
-import { useSceneStore } from '../store/useSceneStore';
-import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, CheckCircle2, AlertCircle, Filter, MousePointer2, Paintbrush, Undo2, Scan, Sparkles } from 'lucide-react';
+import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, CheckCircle2, AlertCircle, Filter, MousePointer2, Paintbrush, Undo2, Scan, Sparkles, Moon, ChevronDown, ChevronRight, FolderArchive, Tv } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
 import { useRef, useState } from 'react';
 import { CursorState, cursorMetadata, renderCursorSvg, getHugeIconGuidePaths, getDefaultCursorHotspot } from '../utils/cursorIcons';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { ReferenceGuideOption } from './DrawingCanvas';
+import { useSceneStore } from '../store/useSceneStore';
+import { SceneAspectRatio } from '../types';
 
 interface SettingsPanelProps {
   onOpenClearModal?: () => void;
+  onOpenSlotsModal?: () => void;
 }
 
-export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
+export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPanelProps) {
   const settings = useSceneStore((state) => state.settings);
   const updateSettings = useSceneStore((state) => state.updateSettings);
   const restoreDefaultScene = useSceneStore((state) => state.restoreDefaultScene);
@@ -19,6 +21,7 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
 
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [editingCursorState, setEditingCursorState] = useState<CursorState | null>(null);
+  const [isCursorsExpanded, setIsCursorsExpanded] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cursorFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -250,23 +253,123 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
         </h3>
       </div>
 
-      {/* Import / Export Feedback */}
-      {importStatus && (
-        <div
-          className={`p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 ${
-            importStatus.type === 'success'
-              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-              : 'bg-rose-50 text-rose-800 border-rose-200'
-          }`}
-        >
-          {importStatus.type === 'success' ? (
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          ) : (
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+      {/* Import / Export & Sauvegarde (Tout en haut) */}
+      <div className="p-3 bg-indigo-50/60 rounded-2xl border border-indigo-100 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-bold text-indigo-900 uppercase tracking-wider block">
+            Import / Export & Sauvegarde
+          </span>
+          {onOpenSlotsModal && (
+            <button
+              onClick={onOpenSlotsModal}
+              className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shadow-xs active:scale-95"
+            >
+              <FolderArchive className="w-3 h-3" />
+              <span>Gérer les Slots</span>
+            </button>
           )}
-          <span>{importStatus.message}</span>
         </div>
-      )}
+
+        {/* Bouton Projets & Slots Principal */}
+        {onOpenSlotsModal && (
+          <button
+            onClick={onOpenSlotsModal}
+            className="w-full p-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-[0.99]"
+          >
+            <FolderArchive className="w-4 h-4 text-indigo-200" />
+            <span>Mes Projets & Sauvegardes Locales (Slots)</span>
+          </button>
+        )}
+
+        {/* Export & Import Buttons */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={handleExport}
+            className="p-2.5 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
+            title="Exporter tout le projet au format JSON"
+          >
+            <Download className="w-3.5 h-3.5 text-indigo-600" /> Exporter JSON
+          </button>
+
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="p-2.5 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
+            title="Importer un fichier de projet JSON"
+          >
+            <Upload className="w-3.5 h-3.5 text-slate-600" /> Importer JSON
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            onChange={handleImportFile}
+            className="hidden"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+          <button
+            onClick={restoreDefaultScene}
+            className="p-2 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl text-[11px] font-bold text-slate-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-slate-500" /> Restaurer Démo
+          </button>
+
+          {onOpenClearModal && (
+            <button
+              onClick={onOpenClearModal}
+              className="p-2 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl text-[11px] font-bold text-rose-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-600" /> Nettoyer Projet
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Format & Ratio de Scène */}
+      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Tv className="w-4 h-4 text-indigo-600" />
+            <div>
+              <label className="text-xs font-bold text-slate-800 block">Format & Ratio de Scène</label>
+              <span className="text-[10px] text-slate-500">Presets 16:9, 4:3, 1:1, 9:16 ou Libre</span>
+            </div>
+          </div>
+          <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-200 text-slate-700 rounded-md uppercase">
+            {settings.aspectRatio || 'free'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-5 gap-1 pt-1">
+          {[
+            { id: '16:9', label: '16:9', desc: 'Paysage' },
+            { id: '4:3', label: '4:3', desc: 'Rétro' },
+            { id: '1:1', label: '1:1', desc: 'Carré' },
+            { id: '9:16', label: '9:16', desc: 'Mobile' },
+            { id: 'free', label: 'Libre', desc: 'Plein' },
+          ].map((fmt) => {
+            const isSelected = (settings.aspectRatio || 'free') === fmt.id;
+            return (
+              <button
+                key={fmt.id}
+                type="button"
+                onClick={() => updateSettings({ aspectRatio: fmt.id as SceneAspectRatio })}
+                className={`py-1.5 px-1 rounded-xl text-center transition-all cursor-pointer ${
+                  isSelected
+                    ? 'bg-indigo-600 text-white shadow-xs font-bold'
+                    : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 font-semibold'
+                }`}
+              >
+                <div className="text-[11px] leading-none">{fmt.label}</div>
+                <div className={`text-[8px] mt-0.5 ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>
+                  {fmt.desc}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Toggle Labels */}
       <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200/80">
@@ -412,10 +515,69 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
         </button>
       </div>
 
+      {/* Assombrissement de l'interface en mode Play */}
+      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <Moon className="w-3.5 h-3.5 text-purple-600" />
+            <div>
+              <label className="text-xs font-bold text-slate-800 block">Assombrir en mode Play</label>
+              <span className="text-[10px] text-slate-500">Distinguer le mode Jeu du mode Édition</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => updateSettings({ playModeOverlay: settings.playModeOverlay === false ? true : false })}
+            className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+              settings.playModeOverlay !== false ? 'bg-purple-600 justify-end' : 'bg-slate-300 justify-start'
+            }`}
+            title="Assombrir l'interface pour distinguer et immerger en mode Play"
+          >
+            <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
+          </button>
+        </div>
+
+        {settings.playModeOverlay !== false && (
+          <div className="space-y-1.5 pt-1 border-t border-slate-200/60">
+            <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block">
+              Intensité du fond sombre :
+            </label>
+            <div className="grid grid-cols-3 gap-1.5 bg-slate-200/70 p-1 rounded-xl">
+              {[
+                { id: 'light', label: 'Léger' },
+                { id: 'medium', label: 'Moyen' },
+                { id: 'dark', label: 'Intense' },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => updateSettings({ playModeDimOpacity: opt.id as any })}
+                  className={`py-1 px-2 rounded-lg text-[10px] font-bold transition-all cursor-pointer text-center ${
+                    (settings.playModeDimOpacity || 'medium') === opt.id
+                      ? 'bg-purple-600 text-white shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* CURSEURS PERSONNALISÉS & PACK HUGEICONS */}
       <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsCursorsExpanded(!isCursorsExpanded)}
+              className="p-1 text-slate-500 hover:text-slate-800 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
+              title={isCursorsExpanded ? 'Replier la section curseurs' : 'Déplier la section curseurs'}
+            >
+              {isCursorsExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            </button>
             <MousePointer2 className="w-4 h-4 text-indigo-600" />
             <div>
               <label className="text-xs font-bold text-slate-800 block">Curseurs Dynamiques (Mode Jeu)</label>
@@ -433,7 +595,7 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
           </button>
         </div>
 
-        {settings.useCustomCursors !== false && (
+        {isCursorsExpanded && settings.useCustomCursors !== false && (
           <div className="space-y-3 pt-1">
             {/* SWITCH / SELECTEUR DE SOURCE : HUGEICONS VS DESSINS PERSONNALISÉS */}
             <div className="space-y-1.5 bg-white p-2 rounded-xl border border-slate-200 shadow-2xs">
@@ -596,55 +758,6 @@ export function SettingsPanel({ onOpenClearModal }: SettingsPanelProps) {
             </button>
           ))}
         </div>
-      </div>
-
-      {/* Scene Maintenance & Import / Export */}
-      <div className="pt-2 space-y-2.5">
-        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block px-1">
-          Import / Export & Sauvegarde
-        </span>
-
-        {/* Export & Import Buttons */}
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={handleExport}
-            className="p-2.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
-            title="Exporter tout le projet au format JSON"
-          >
-            <Download className="w-3.5 h-3.5" /> Exporter JSON
-          </button>
-
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="p-2.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
-            title="Importer un fichier de projet JSON"
-          >
-            <Upload className="w-3.5 h-3.5" /> Importer JSON
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            onChange={handleImportFile}
-            className="hidden"
-          />
-        </div>
-
-        <button
-          onClick={restoreDefaultScene}
-          className="w-full p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 transition-colors flex items-center justify-center gap-2 cursor-pointer"
-        >
-          <RotateCcw className="w-3.5 h-3.5" /> Restaurer Scène de Démo
-        </button>
-
-        {onOpenClearModal && (
-          <button
-            onClick={onOpenClearModal}
-            className="w-full p-2.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl text-xs font-bold text-rose-700 transition-colors flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <Trash2 className="w-3.5 h-3.5" /> Nettoyer Scène / Projet
-          </button>
-        )}
       </div>
     </div>
   );

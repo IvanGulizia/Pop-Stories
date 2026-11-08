@@ -1,32 +1,26 @@
 import { useState } from 'react';
 import { useSceneStore } from '../store/useSceneStore';
 import { EntityMiniPreview } from './EntityMiniPreview';
+import { SceneLayerManager } from './SceneLayerManager';
 import {
-  ArrowUp,
-  ArrowDown,
-  ChevronsUp,
-  ChevronsDown,
   Copy,
   Trash2,
   Layers,
   Sparkles,
   GripVertical,
 } from 'lucide-react';
-import { EntityId } from '../types';
+import { EntityId, SceneLayer, SceneLayerGroup } from '../types';
 
 interface SceneHierarchyListProps {
   onOpenCreateModal?: () => void;
+  onOpenDrawLayerModal?: (layer: SceneLayer, group: SceneLayerGroup) => void;
 }
 
-export function SceneHierarchyList({ onOpenCreateModal }: SceneHierarchyListProps) {
+export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: SceneHierarchyListProps) {
   const entities = useSceneStore((state) => state.entities);
   const entityOrder = useSceneStore((state) => state.entityOrder);
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
   const selectEntity = useSceneStore((state) => state.selectEntity);
-  const bringForward = useSceneStore((state) => state.bringForward);
-  const sendBackward = useSceneStore((state) => state.sendBackward);
-  const bringToFront = useSceneStore((state) => state.bringToFront);
-  const sendToBack = useSceneStore((state) => state.sendToBack);
   const duplicateEntity = useSceneStore((state) => state.duplicateEntity);
   const deleteEntity = useSceneStore((state) => state.deleteEntity);
   const reorderEntities = useSceneStore((state) => state.reorderEntities);
@@ -41,43 +35,45 @@ export function SceneHierarchyList({ onOpenCreateModal }: SceneHierarchyListProp
   // We display the hierarchy with topmost entity at the top of the UI list
   const displayList = [...activeEntities].reverse();
 
-  if (activeEntities.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-10 px-4 text-center text-slate-500 space-y-3">
-        <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400">
-          <Layers className="w-6 h-6" />
-        </div>
-        <div>
-          <p className="text-xs font-bold text-slate-700">Scène vide</p>
-          <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-            Aucun objet n'est présent sur la scène. Glissez une entité depuis l'onglet <strong>Entités</strong> ou créez-en une nouvelle.
-          </p>
-        </div>
-        {onOpenCreateModal && (
-          <button
-            type="button"
-            onClick={onOpenCreateModal}
-            className="mt-2 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            Créer un objet
-          </button>
-        )}
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col h-full space-y-2">
-      <div className="flex items-center justify-between px-1 text-[11px] font-bold text-slate-500">
-        <span className="flex items-center gap-1.5">
-          <Layers className="w-3.5 h-3.5 text-indigo-600" />
-          Hiérarchie ({activeEntities.length})
-        </span>
-        <span className="text-[10px] font-normal text-slate-400">
-          Haut = Premier plan
-        </span>
-      </div>
+    <div className="flex flex-col h-full space-y-4">
+      {/* 1. GESTION DES CALQUES DE DÉCOR (BACKGROUND / FOREGROUND) */}
+      {onOpenDrawLayerModal && (
+        <div className="pb-3 border-b border-slate-200">
+          <SceneLayerManager onOpenDrawLayerModal={onOpenDrawLayerModal} />
+        </div>
+      )}
+
+      {/* 2. HIÉRARCHIE DES ENTITÉS DE JEU */}
+      <div className="space-y-2 flex-1 flex flex-col min-h-0">
+        <div className="flex items-center justify-between px-1 text-[11px] font-bold text-slate-500">
+          <span className="flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+            Objets de jeu ({activeEntities.length})
+          </span>
+          <span className="text-[10px] font-normal text-slate-400">
+            Haut = Premier plan
+          </span>
+        </div>
+
+        {activeEntities.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-6 px-4 text-center text-slate-500 space-y-2 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+            <p className="text-xs font-bold text-slate-700">Aucun objet sur la scène</p>
+            <p className="text-[11px] text-slate-400">
+              Glissez une entité depuis l'onglet <strong>Entités</strong>.
+            </p>
+            {onOpenCreateModal && (
+              <button
+                type="button"
+                onClick={onOpenCreateModal}
+                className="mt-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Créer un objet
+              </button>
+            )}
+          </div>
+        ) : (
 
       <div className="space-y-1.5 flex-1 overflow-y-auto pr-0.5">
         {displayList.map((entity, index) => {
@@ -185,68 +181,12 @@ export function SceneHierarchyList({ onOpenCreateModal }: SceneHierarchyListProp
                   </button>
                 </div>
               </div>
-
-              {/* Barre de contrôle Z-Index (Premier plan, monter, descendre, arrière-plan) */}
-              <div className="flex items-center justify-between pt-1 border-t border-slate-100/90 text-slate-500">
-                <span className="text-[9px] text-slate-400 font-medium">
-                  Plan #{displayList.length - index}
-                </span>
-
-                <div className="flex items-center gap-1 bg-slate-50 p-0.5 rounded-lg border border-slate-200/60">
-                  <button
-                    type="button"
-                    disabled={isTop}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      bringToFront(entity.id);
-                    }}
-                    className="p-1 hover:text-indigo-600 hover:bg-white rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400 cursor-pointer"
-                    title="Mettre tout devant (Premier plan)"
-                  >
-                    <ChevronsUp className="w-3 h-3" />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isTop}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      bringForward(entity.id);
-                    }}
-                    className="p-1 hover:text-indigo-600 hover:bg-white rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400 cursor-pointer"
-                    title="Avancer d'un rang"
-                  >
-                    <ArrowUp className="w-3 h-3" />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isBottom}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      sendBackward(entity.id);
-                    }}
-                    className="p-1 hover:text-indigo-600 hover:bg-white rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400 cursor-pointer"
-                    title="Reculer d'un rang"
-                  >
-                    <ArrowDown className="w-3 h-3" />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isBottom}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      sendToBack(entity.id);
-                    }}
-                    className="p-1 hover:text-indigo-600 hover:bg-white rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400 cursor-pointer"
-                    title="Mettre tout derrière (Arrière-plan)"
-                  >
-                    <ChevronsDown className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
             </div>
           );
         })}
       </div>
-    </div>
+    )}
+  </div>
+</div>
   );
 }

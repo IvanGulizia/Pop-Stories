@@ -69,114 +69,221 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
 
   const isPlayMode = appMode === 'play';
   const isCustomCursorActive = isPlayMode && settings.useCustomCursors !== false;
+  const ratio = settings.aspectRatio || 'free';
+
+  // Calcul des styles d'aspect ratio pour ancrage en haut & centré horizontalement
+  const getAspectRatioStyle = (): React.CSSProperties => {
+    switch (ratio) {
+      case '16:9':
+        return {
+          aspectRatio: '16 / 9',
+          width: '100%',
+          maxWidth: '100%',
+          maxHeight: '100%',
+          minHeight: '260px',
+        };
+      case '4:3':
+        return {
+          aspectRatio: '4 / 3',
+          height: '100%',
+          maxHeight: '100%',
+          maxWidth: '100%',
+          minHeight: '260px',
+        };
+      case '1:1':
+        return {
+          aspectRatio: '1 / 1',
+          height: '100%',
+          maxHeight: '100%',
+          maxWidth: '100%',
+          minHeight: '260px',
+        };
+      case '9:16':
+        return {
+          aspectRatio: '9 / 16',
+          height: '100%',
+          maxHeight: '100%',
+          maxWidth: '100%',
+          minHeight: '260px',
+        };
+      default:
+        return {
+          width: '100%',
+          height: '100%',
+        };
+    }
+  };
+
+  const layerGroups = useSceneStore((state) => state.layerGroups || []);
+
+  const backgroundGroups = layerGroups.filter((g) => g.kind === 'background');
+  const foregroundGroups = layerGroups.filter((g) => g.kind === 'foreground');
+  const otherGroups = layerGroups.filter((g) => g.kind === 'custom');
+
+  const renderLayerSvg = (paths: any[], opacity: number = 1) => {
+    if (!paths || paths.length === 0) return null;
+    return (
+      <svg
+        viewBox="0 0 200 200"
+        className="w-full h-full pointer-events-none"
+        style={{ opacity }}
+        preserveAspectRatio="none"
+      >
+        {paths.map((p, idx) => (
+          <path
+            key={p.id || idx}
+            d={p.d}
+            stroke={p.stroke || '#6366f1'}
+            strokeWidth={p.strokeWidth || 4}
+            fill={p.fill && p.fill !== 'none' ? p.fill : 'none'}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            transform={p.transform}
+          />
+        ))}
+      </svg>
+    );
+  };
 
   return (
     <div
-      id="scene-canvas-container"
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-      className={`relative w-full h-full min-h-[500px] bg-white overflow-hidden select-none flex flex-col ${
-        isCustomCursorActive ? 'cursor-none [&_*]:cursor-none!' : 'cursor-crosshair'
+      className={`relative w-full h-full min-h-0 bg-slate-100/70 overflow-hidden select-none flex flex-col items-center justify-start p-3 sm:p-4 ${
+        isCustomCursorActive ? 'cursor-none [&_*]:cursor-none!' : ''
       }`}
       onClick={() => selectEntity(null)}
     >
-      {/* Canvas Grid Background */}
-      {settings.showGrid && settings.gridStyle !== 'clean' && (
-        <div
-          className="absolute inset-0 pointer-events-none transition-opacity duration-300"
-          style={getGridStyle()}
-        />
-      )}
+      {/* CADRE DE SCÈNE AVEC RESPECT DU FORMAT / RATIO */}
+      <div
+        id="scene-canvas-container"
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        className={`relative bg-white overflow-hidden select-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-all duration-300 ${
+          isCustomCursorActive ? 'cursor-none [&_*]:cursor-none!' : 'cursor-crosshair'
+        }`}
+        style={getAspectRatioStyle()}
+      >
+        {/* Canvas Grid Background */}
+        {settings.showGrid && settings.gridStyle !== 'clean' && (
+          <div
+            className="absolute inset-0 pointer-events-none transition-opacity duration-300 z-0"
+            style={getGridStyle()}
+          />
+        )}
 
-      {/* Empty State Overlay when no entities and no archetypes exist */}
-      {isCompletelyEmptyProject && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 pointer-events-auto bg-slate-50/50 backdrop-blur-2xs">
-          <div className="w-16 h-16 bg-white border border-slate-200 rounded-3xl flex items-center justify-center text-3xl shadow-sm mb-4 animate-in zoom-in-95 duration-200">
-            🎨
-          </div>
-          <h3 className="text-xl font-bold text-slate-800 tracking-tight">
-            Nouveau Projet Atelier Vivant
-          </h3>
-          <p className="text-xs text-slate-500 max-w-md mt-1.5 mb-6 leading-relaxed">
-            Le canvas et vos règles sont vides. Choisissez comment démarrer votre projet :
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg w-full">
-            {/* Option 1: Créer une Entité */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (onOpenCreateModal) onOpenCreateModal();
-              }}
-              className="p-5 bg-white hover:bg-indigo-50/40 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl shadow-xs hover:shadow-md transition-all text-left flex flex-col justify-between gap-3 group cursor-pointer active:scale-[0.98]"
-            >
-              <div className="flex items-center justify-between">
-                <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                  <Paintbrush className="w-5 h-5" />
-                </div>
-                <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
-                  Nouveau
-                </span>
+        {/* 1. ARRIÈRE-PLANS DESSINÉS (BACKGROUND LAYERS) */}
+        <div className="absolute inset-0 pointer-events-none z-1">
+          {backgroundGroups.flatMap((g) => g.layers).map((layer) => {
+            if (!layer.visible || !layer.vectorPaths || layer.vectorPaths.length === 0) return null;
+            return (
+              <div key={layer.id} className="absolute inset-0">
+                {renderLayerSvg(layer.vectorPaths, layer.opacity)}
               </div>
-              <div>
-                <div className="text-sm font-bold text-slate-800 group-hover:text-indigo-950 flex items-center gap-1.5">
-                  Créer une entité
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
-                </div>
-                <div className="text-[11px] text-slate-500 mt-1 leading-snug">
-                  Ouvre l'atelier de dessin vectoriel pour concevoir votre premier objet et ses états.
-                </div>
-              </div>
-            </button>
-
-            {/* Option 2: Ouvrir la Scène Démo */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                restoreDefaultScene();
-              }}
-              className="p-5 bg-white hover:bg-emerald-50/40 border-2 border-slate-200 hover:border-emerald-500 rounded-3xl shadow-xs hover:shadow-md transition-all text-left flex flex-col justify-between gap-3 group cursor-pointer active:scale-[0.98]"
-            >
-              <div className="flex items-center justify-between">
-                <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                  <PlayCircle className="w-5 h-5" />
-                </div>
-                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-                  Démo
-                </span>
-              </div>
-              <div>
-                <div className="text-sm font-bold text-slate-800 group-hover:text-emerald-950">
-                  Ouvrir la scène d'exemple
-                </div>
-                <div className="text-[11px] text-slate-500 mt-1 leading-snug">
-                  Charge la scène interactive d'exemple (Plante magique, Pomme, règles Storyboard).
-                </div>
-              </div>
-            </button>
-          </div>
+            );
+          })}
         </div>
-      )}
 
-      {/* Rendering Entities according to entityOrder (z-index layering) */}
-      {(() => {
-        const order = entityOrder && entityOrder.length > 0 ? entityOrder : Object.keys(entities);
-        const allKeys = Array.from(new Set([...order, ...Object.keys(entities)]));
-        return allKeys
-          .map((id) => entities[id])
-          .filter(Boolean)
-          .map((entity, index) => {
-            const isSelected = selectedEntityId === entity.id;
-            const zIndexStyle = { zIndex: isSelected && appMode !== 'play' ? 60 : index + 1 };
-            if (entity.type === 'plant') {
-              return <Plant key={entity.id} entity={entity} style={zIndexStyle} />;
-            }
-            if (entity.type === 'apple') {
-              return <Apple key={entity.id} entity={entity} style={zIndexStyle} />;
-            }
-            return <CustomShape key={entity.id} entity={entity} style={zIndexStyle} />;
-          });
-      })()}
+        {/* Empty State Overlay when no entities and no archetypes exist */}
+        {isCompletelyEmptyProject && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 pointer-events-auto bg-slate-50/50 backdrop-blur-2xs">
+            <div className="w-16 h-16 bg-white border border-slate-200 rounded-3xl flex items-center justify-center text-3xl shadow-sm mb-4 animate-in zoom-in-95 duration-200">
+              🎨
+            </div>
+            <h3 className="text-xl font-bold text-slate-800 tracking-tight">
+              Nouveau Projet Atelier Vivant
+            </h3>
+            <p className="text-xs text-slate-500 max-w-md mt-1.5 mb-6 leading-relaxed">
+              Le canvas et vos règles sont vides. Choisissez comment démarrer votre projet :
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg w-full">
+              {/* Option 1: Créer une Entité */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onOpenCreateModal) onOpenCreateModal();
+                }}
+                className="p-5 bg-white hover:bg-indigo-50/40 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl shadow-xs hover:shadow-md transition-all text-left flex flex-col justify-between gap-3 group cursor-pointer active:scale-[0.98]"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                    <Paintbrush className="w-5 h-5" />
+                  </div>
+                  <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                    Nouveau
+                  </span>
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-slate-800 group-hover:text-indigo-950 flex items-center gap-1.5">
+                    Créer une entité
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1 leading-snug">
+                    Ouvre l'atelier de dessin vectoriel pour concevoir votre premier objet et ses états.
+                  </div>
+                </div>
+              </button>
+
+              {/* Option 2: Ouvrir la Scène Démo */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  restoreDefaultScene();
+                }}
+                className="p-5 bg-white hover:bg-emerald-50/40 border-2 border-slate-200 hover:border-emerald-500 rounded-3xl shadow-xs hover:shadow-md transition-all text-left flex flex-col justify-between gap-3 group cursor-pointer active:scale-[0.98]"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                    <PlayCircle className="w-5 h-5" />
+                  </div>
+                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                    Démo
+                  </span>
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-slate-800 group-hover:text-emerald-950">
+                    Ouvrir la scène d'exemple
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1 leading-snug">
+                    Charge la scène interactive d'exemple (Plante magique, Pomme, règles Storyboard).
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 2. RENDU DES ENTITÉS SELON entityOrder (z-index layering: 10 à 30) */}
+        {(() => {
+          const order = entityOrder && entityOrder.length > 0 ? entityOrder : Object.keys(entities);
+          const allKeys = Array.from(new Set([...order, ...Object.keys(entities)]));
+          return allKeys
+            .map((id) => entities[id])
+            .filter(Boolean)
+            .map((entity, index) => {
+              const isSelected = selectedEntityId === entity.id;
+              const zIndexStyle = { zIndex: isSelected && appMode !== 'play' ? 35 : 10 + index };
+              if (entity.type === 'plant') {
+                return <Plant key={entity.id} entity={entity} style={zIndexStyle} />;
+              }
+              if (entity.type === 'apple') {
+                return <Apple key={entity.id} entity={entity} style={zIndexStyle} />;
+              }
+              return <CustomShape key={entity.id} entity={entity} style={zIndexStyle} />;
+            });
+        })()}
+
+        {/* 3. CALQUES DE PREMIER-PLAN DESSINÉS (FOREGROUND & AUTRES: z-40) */}
+        <div className="absolute inset-0 pointer-events-none z-40">
+          {[...otherGroups, ...foregroundGroups].flatMap((g) => g.layers).map((layer) => {
+            if (!layer.visible || !layer.vectorPaths || layer.vectorPaths.length === 0) return null;
+            return (
+              <div key={layer.id} className="absolute inset-0">
+                {renderLayerSvg(layer.vectorPaths, layer.opacity)}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

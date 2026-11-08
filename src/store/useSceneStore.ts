@@ -16,31 +16,77 @@ import {
   VectorPath,
   AppSettings,
   ProjectExportData,
+  RuleFolder,
+  CustomSound,
+  ProjectSlot,
+  SceneAspectRatio,
+  SceneLayer,
+  SceneLayerGroup,
+  SceneLayerKind,
 } from '../types';
 import { soundSynth } from '../utils/sound';
 import { getEntityColliderBounds } from '../utils/collider';
+import defaultCursorPack from '../data/defaultCursorPack.json';
 
-// Nettoyage proactif de tout cache local précédent
-if (typeof window !== 'undefined' && window.localStorage) {
-  try {
-    window.localStorage.removeItem('atelier-vivant-project-v1');
-    window.localStorage.removeItem('atelier-vivant-state');
-  } catch (_) {}
-}
+// Groupes de calques initiaux de la scène
+export const initialSceneLayerGroups: SceneLayerGroup[] = [
+  {
+    id: 'group-bg',
+    name: 'Arrière-plan (Background)',
+    kind: 'background',
+    isCollapsed: false,
+    layers: [
+      {
+        id: 'layer-bg-1',
+        name: 'Fond décoratif #1',
+        visible: true,
+        opacity: 1,
+        parallaxFactor: 0,
+        vectorPaths: [],
+      },
+    ],
+  },
+  {
+    id: 'group-fg',
+    name: 'Premier-plan (Foreground)',
+    kind: 'foreground',
+    isCollapsed: false,
+    layers: [],
+  },
+];
+
+// Clé de stockage des slots de projets locaux
+const SLOTS_STORAGE_KEY = 'atelier-vivant-project-slots-v1';
 
 interface SceneState {
   entities: Record<EntityId, Entity>;
   customArchetypes: Record<string, Entity>;
   rules: DynamicRule[];
+  folders: RuleFolder[];
+  customSounds: CustomSound[];
+  layerGroups: SceneLayerGroup[];
   activeCollisions: Record<string, boolean>; // Trace l'état de collision pour chaque pair (ruleId_subId_tarId)
   selectedEntityId: EntityId | null;
+  selectedLayerId: string | null;
   appMode: AppMode;
   entityOrder: EntityId[];
   snapshotEntities: Record<EntityId, Entity> | null;
   snapshotEntityOrder: EntityId[] | null;
   settings: AppSettings;
+  currentSlotId: string | null;
 
   updateSettings: (partial: Partial<AppSettings>) => void;
+  setAspectRatio: (ratio: SceneAspectRatio) => void;
+
+  // Scene Layers & Groups management
+  addLayerGroup: (name: string, kind?: SceneLayerKind) => string;
+  deleteLayerGroup: (groupId: string) => void;
+  toggleLayerGroupCollapse: (groupId: string) => void;
+  addLayerToGroup: (groupId: string, name?: string) => string;
+  deleteLayer: (layerId: string) => void;
+  updateLayer: (layerId: string, partial: Partial<SceneLayer>) => void;
+  setLayerVectorPaths: (layerId: string, vectorPaths: VectorPath[]) => void;
+  selectLayer: (layerId: string | null) => void;
 
   // Z-Index and Layer Ordering
   bringForward: (id: EntityId) => void;
@@ -89,12 +135,33 @@ interface SceneState {
   exportProject: () => ProjectExportData;
   importProject: (data: any) => { success: boolean; message?: string };
 
-  // Rules management
+  // Project Slots (Sauvegardes locales dans le navigateur)
+  getProjectSlots: () => ProjectSlot[];
+  saveProjectToSlot: (name: string, slotId?: string) => { success: boolean; slotId: string; message: string };
+  loadProjectFromSlot: (slotId: string) => { success: boolean; message: string };
+  deleteProjectSlot: (slotId: string) => { success: boolean; message: string };
+  duplicateProjectSlot: (slotId: string) => { success: boolean; newSlotId: string; message: string };
+  renameProjectSlot: (slotId: string, newName: string) => { success: boolean; message: string };
+
+  // Rules & Folders management
   addRule: (rule: Omit<DynamicRule, 'id'>) => string;
   updateRule: (id: string, partial: Partial<DynamicRule>) => void;
   duplicateRule: (id: string) => string;
   deleteRule: (id: string) => void;
   toggleRule: (id: string) => void;
+  setRuleFolder: (ruleId: string, folderId?: string) => void;
+
+  // Folder CRUD
+  addFolder: (name: string, color?: string) => string;
+  updateFolder: (id: string, partial: Partial<RuleFolder>) => void;
+  deleteFolder: (id: string) => void;
+  toggleFolderCollapse: (id: string) => void;
+
+  // Custom Audio management
+  addCustomSound: (sound: Omit<CustomSound, 'id' | 'createdAt'>) => string;
+  deleteCustomSound: (id: string) => void;
+  updateCustomSoundName: (id: string, name: string) => void;
+
   triggerClickEvent: (entityId: EntityId) => void;
   triggerPointerEvent: (entityId: EntityId, phase: TriggerPhase) => void;
   triggerDragRelease: (subjectId: EntityId) => void;
@@ -277,11 +344,18 @@ const defaultCustomArchetypes: Record<string, Entity> = {
   },
 };
 
+const initialFolders: RuleFolder[] = [
+  { id: 'folder-interactions', name: 'Interactions & Contacts', color: 'indigo', isCollapsed: false },
+  { id: 'folder-clicks', name: 'Contrôles & Clics', color: 'amber', isCollapsed: false },
+  { id: 'folder-effects', name: 'Effets & Sons', color: 'emerald', isCollapsed: false },
+];
+
 const initialRules: DynamicRule[] = [
   {
     id: 'rule-plant-bloom',
     name: 'Floraison de toutes les plantes au contact de la nourriture',
     enabled: true,
+    folderId: 'folder-interactions',
     trigger: {
       type: 'collision',
       phase: 'enter',
@@ -401,12 +475,17 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   entities: {},
   customArchetypes: {},
   rules: [],
+  folders: initialFolders,
+  customSounds: [],
   activeCollisions: {},
   selectedEntityId: null,
   appMode: 'edit',
   entityOrder: ['plant-1', 'apple-1'],
+  layerGroups: JSON.parse(JSON.stringify(initialSceneLayerGroups)),
+  selectedLayerId: 'layer-bg-1',
   snapshotEntities: null,
   snapshotEntityOrder: null,
+  currentSlotId: null,
   settings: {
     showCanvasLabels: false,
     showGrid: false,
@@ -414,14 +493,122 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     showTagsSystem: false,
     showRuleFilters: false,
     useCustomCursors: true,
-    cursorSourceMode: 'hugeicons',
+    cursorShadow: false,
+    cursorSourceMode: 'custom_drawn',
+    customCursorVectorPaths: (defaultCursorPack as any).customCursorVectorPaths,
+    customCursorPaths: (defaultCursorPack as any).customCursorPaths,
     enableHoverScaleAnimation: false,
+    playModeOverlay: true,
+    playModeDimOpacity: 'light',
+    aspectRatio: 'free',
   },
 
   updateSettings: (partial) => {
     set((state) => ({
       settings: { ...state.settings, ...partial },
     }));
+  },
+
+  setAspectRatio: (ratio) => {
+    set((state) => ({
+      settings: { ...state.settings, aspectRatio: ratio },
+    }));
+  },
+
+  // --- Gestion des Calques & Groupes de Scène (Background / Foreground) ---
+  addLayerGroup: (name, kind = 'custom') => {
+    const id = `group-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const newGroup: SceneLayerGroup = {
+      id,
+      name: name.trim() || 'Nouveau Groupe',
+      kind,
+      isCollapsed: false,
+      layers: [],
+    };
+    set((state) => ({
+      layerGroups: [...state.layerGroups, newGroup],
+    }));
+    return id;
+  },
+
+  deleteLayerGroup: (groupId) => {
+    set((state) => {
+      const remaining = state.layerGroups.filter((g) => g.id !== groupId);
+      const deletedLayerIds = new Set(
+        state.layerGroups.find((g) => g.id === groupId)?.layers.map((l) => l.id) || []
+      );
+      return {
+        layerGroups: remaining,
+        selectedLayerId: state.selectedLayerId && deletedLayerIds.has(state.selectedLayerId) ? null : state.selectedLayerId,
+      };
+    });
+  },
+
+  toggleLayerGroupCollapse: (groupId) => {
+    set((state) => ({
+      layerGroups: state.layerGroups.map((g) =>
+        g.id === groupId ? { ...g, isCollapsed: !g.isCollapsed } : g
+      ),
+    }));
+  },
+
+  addLayerToGroup: (groupId, name) => {
+    const layerId = `layer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    set((state) => {
+      const targetGroup = state.layerGroups.find((g) => g.id === groupId);
+      const count = (targetGroup?.layers.length || 0) + 1;
+      const newLayer: SceneLayer = {
+        id: layerId,
+        name: name?.trim() || `Calque #${count}`,
+        visible: true,
+        opacity: 1,
+        parallaxFactor: targetGroup?.kind === 'background' ? 0 : 1,
+        vectorPaths: [],
+      };
+      return {
+        layerGroups: state.layerGroups.map((g) =>
+          g.id === groupId ? { ...g, layers: [...g.layers, newLayer] } : g
+        ),
+        selectedLayerId: layerId,
+        selectedEntityId: null, // Dé-sélectionner l'entité lors de la sélection d'un calque
+      };
+    });
+    return layerId;
+  },
+
+  deleteLayer: (layerId) => {
+    set((state) => ({
+      layerGroups: state.layerGroups.map((g) => ({
+        ...g,
+        layers: g.layers.filter((l) => l.id !== layerId),
+      })),
+      selectedLayerId: state.selectedLayerId === layerId ? null : state.selectedLayerId,
+    }));
+  },
+
+  updateLayer: (layerId, partial) => {
+    set((state) => ({
+      layerGroups: state.layerGroups.map((g) => ({
+        ...g,
+        layers: g.layers.map((l) => (l.id === layerId ? { ...l, ...partial } : l)),
+      })),
+    }));
+  },
+
+  setLayerVectorPaths: (layerId, vectorPaths) => {
+    set((state) => ({
+      layerGroups: state.layerGroups.map((g) => ({
+        ...g,
+        layers: g.layers.map((l) => (l.id === layerId ? { ...l, vectorPaths } : l)),
+      })),
+    }));
+  },
+
+  selectLayer: (layerId) => {
+    set({
+      selectedLayerId: layerId,
+      selectedEntityId: layerId ? null : get().selectedEntityId,
+    });
   },
 
   bringForward: (id) => {
@@ -1214,7 +1401,11 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       entities: {},
       entityOrder: [],
       rules: [],
+      folders: initialFolders,
+      customSounds: [],
+      layerGroups: JSON.parse(JSON.stringify(initialSceneLayerGroups)),
       selectedEntityId: null,
+      selectedLayerId: 'layer-bg-1',
       activeCollisions: {},
       snapshotEntities: null,
       snapshotEntityOrder: null,
@@ -1227,9 +1418,13 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       entityOrder: ['plant-1', 'apple-1'],
       customArchetypes: JSON.parse(JSON.stringify(defaultCustomArchetypes)),
       rules: JSON.parse(JSON.stringify(initialRules)),
+      folders: JSON.parse(JSON.stringify(initialFolders)),
+      customSounds: [],
+      layerGroups: JSON.parse(JSON.stringify(initialSceneLayerGroups)),
       snapshotEntities: null,
       snapshotEntityOrder: null,
       selectedEntityId: 'plant-1',
+      selectedLayerId: null,
       activeCollisions: {},
       appMode: 'edit',
     });
@@ -1237,7 +1432,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   exportProject: () => {
-    const { entities, customArchetypes, rules, settings } = get();
+    const { entities, customArchetypes, rules, folders, customSounds, layerGroups, settings } = get();
     return {
       version: 1,
       name: 'Projet Atelier Vivant',
@@ -1245,6 +1440,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       entities,
       customArchetypes,
       rules,
+      folders,
+      customSounds,
+      layerGroups,
       settings,
     };
   },
@@ -1254,8 +1452,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       if (!data || typeof data !== 'object') {
         return { success: false, message: 'Format de fichier JSON invalide.' };
       }
-      if (!data.entities && !data.rules) {
-        return { success: false, message: 'Le fichier ne contient ni entités ni règles.' };
+      if (!data.entities && !data.rules && !data.layerGroups) {
+        return { success: false, message: 'Le fichier ne contient pas de données de projet valides.' };
       }
 
       const importedEntities = data.entities && typeof data.entities === 'object' ? data.entities : {};
@@ -1275,14 +1473,23 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         });
       }
       const importedRules = Array.isArray(data.rules) ? data.rules : [];
+      const importedFolders = Array.isArray(data.folders) ? data.folders : initialFolders;
+      const importedCustomSounds = Array.isArray(data.customSounds) ? data.customSounds : [];
+      const importedLayerGroups = Array.isArray(data.layerGroups) && data.layerGroups.length > 0
+        ? data.layerGroups
+        : JSON.parse(JSON.stringify(initialSceneLayerGroups));
       const importedSettings = data.settings && typeof data.settings === 'object' ? data.settings : undefined;
 
       set((state) => ({
         entities: importedEntities,
         customArchetypes: importedArchetypes,
         rules: importedRules,
+        folders: importedFolders,
+        customSounds: importedCustomSounds,
+        layerGroups: importedLayerGroups,
         settings: importedSettings ? { ...state.settings, ...importedSettings } : state.settings,
         selectedEntityId: Object.keys(importedEntities)[0] || null,
+        selectedLayerId: null,
         activeCollisions: {},
         appMode: 'edit',
         snapshotEntities: null,
@@ -1292,6 +1499,136 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       return { success: true, message: 'Projet importé avec succès !' };
     } catch (err: any) {
       return { success: false, message: err?.message || "Erreur lors de l'importation." };
+    }
+  },
+
+  // --- Gestion des Slots de Sauvegarde Locale ---
+  getProjectSlots: () => {
+    if (typeof window === 'undefined' || !window.localStorage) return [];
+    try {
+      const raw = window.localStorage.getItem(SLOTS_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      }
+      return [];
+    } catch (e) {
+      console.error('Failed to read project slots from localStorage:', e);
+      return [];
+    }
+  },
+
+  saveProjectToSlot: (name: string, targetSlotId?: string) => {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return { success: false, slotId: '', message: 'Stockage local non disponible dans cet environnement.' };
+    }
+    try {
+      const slots = get().getProjectSlots();
+      const currentData = get().exportProject();
+      const slotId = targetSlotId || `slot-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      const cleanName = name.trim() || `Projet ${new Date().toLocaleDateString('fr-FR')}`;
+
+      const existingIndex = slots.findIndex((s) => s.id === slotId);
+      const newSlot: ProjectSlot = {
+        id: slotId,
+        name: cleanName,
+        updatedAt: Date.now(),
+        entitiesCount: Object.keys(currentData.entities || {}).length,
+        rulesCount: (currentData.rules || []).length,
+        aspectRatio: currentData.settings?.aspectRatio || 'free',
+        data: currentData,
+      };
+
+      let updatedSlots: ProjectSlot[];
+      if (existingIndex >= 0) {
+        updatedSlots = [...slots];
+        updatedSlots[existingIndex] = newSlot;
+      } else {
+        updatedSlots = [newSlot, ...slots];
+      }
+
+      window.localStorage.setItem(SLOTS_STORAGE_KEY, JSON.stringify(updatedSlots));
+      set({ currentSlotId: slotId });
+      return { success: true, slotId, message: `Projet "${cleanName}" sauvegardé avec succès !` };
+    } catch (err: any) {
+      console.error('Save to slot error:', err);
+      return { success: false, slotId: '', message: err?.message || 'Erreur lors de la sauvegarde du slot.' };
+    }
+  },
+
+  loadProjectFromSlot: (slotId: string) => {
+    try {
+      const slots = get().getProjectSlots();
+      const slot = slots.find((s) => s.id === slotId);
+      if (!slot || !slot.data) {
+        return { success: false, message: 'Slot introuvable ou vide.' };
+      }
+      const res = get().importProject(slot.data);
+      if (res.success) {
+        set({ currentSlotId: slotId });
+        return { success: true, message: `Projet "${slot.name}" chargé avec succès !` };
+      }
+      return { success: false, message: res.message || 'Impossible de charger ce projet.' };
+    } catch (err: any) {
+      return { success: false, message: err?.message || 'Erreur lors du chargement du slot.' };
+    }
+  },
+
+  deleteProjectSlot: (slotId: string) => {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return { success: false, message: 'Stockage local non disponible.' };
+    }
+    try {
+      const slots = get().getProjectSlots();
+      const filtered = slots.filter((s) => s.id !== slotId);
+      window.localStorage.setItem(SLOTS_STORAGE_KEY, JSON.stringify(filtered));
+      if (get().currentSlotId === slotId) {
+        set({ currentSlotId: null });
+      }
+      return { success: true, message: 'Slot supprimé avec succès.' };
+    } catch (err: any) {
+      return { success: false, message: err?.message || 'Erreur lors de la suppression.' };
+    }
+  },
+
+  duplicateProjectSlot: (slotId: string) => {
+    try {
+      const slots = get().getProjectSlots();
+      const source = slots.find((s) => s.id === slotId);
+      if (!source) return { success: false, newSlotId: '', message: 'Slot source introuvable.' };
+
+      const newId = `slot-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      const newSlot: ProjectSlot = {
+        ...JSON.parse(JSON.stringify(source)),
+        id: newId,
+        name: `${source.name} (Copie)`,
+        updatedAt: Date.now(),
+      };
+
+      const updated = [newSlot, ...slots];
+      window.localStorage.setItem(SLOTS_STORAGE_KEY, JSON.stringify(updated));
+      return { success: true, newSlotId: newId, message: `Copie de "${source.name}" créée !` };
+    } catch (err: any) {
+      return { success: false, newSlotId: '', message: err?.message || 'Erreur lors de la duplication.' };
+    }
+  },
+
+  renameProjectSlot: (slotId: string, newName: string) => {
+    try {
+      const slots = get().getProjectSlots();
+      const target = slots.find((s) => s.id === slotId);
+      if (!target) return { success: false, message: 'Slot introuvable.' };
+
+      const clean = newName.trim();
+      if (!clean) return { success: false, message: 'Le nom ne peut pas être vide.' };
+
+      target.name = clean;
+      target.updatedAt = Date.now();
+      window.localStorage.setItem(SLOTS_STORAGE_KEY, JSON.stringify(slots));
+      return { success: true, message: 'Nom du slot modifié avec succès.' };
+    } catch (err: any) {
+      return { success: false, message: err?.message || 'Erreur lors du renommage.' };
     }
   },
 
@@ -1353,6 +1690,72 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       rules: state.rules.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r)),
     }));
     get().evaluateRules();
+  },
+
+  setRuleFolder: (ruleId, folderId) => {
+    set((state) => ({
+      rules: state.rules.map((r) => (r.id === ruleId ? { ...r, folderId } : r)),
+    }));
+  },
+
+  // Dossiers thématiques
+  addFolder: (name, color = 'indigo') => {
+    const id = `folder-${Date.now().toString(36)}`;
+    const newFolder: RuleFolder = {
+      id,
+      name: name.trim() || 'Nouveau dossier',
+      color,
+      isCollapsed: false,
+    };
+    set((state) => ({
+      folders: [...state.folders, newFolder],
+    }));
+    return id;
+  },
+
+  updateFolder: (id, partial) => {
+    set((state) => ({
+      folders: state.folders.map((f) => (f.id === id ? { ...f, ...partial } : f)),
+    }));
+  },
+
+  deleteFolder: (id) => {
+    set((state) => ({
+      folders: state.folders.filter((f) => f.id !== id),
+      rules: state.rules.map((r) => (r.folderId === id ? { ...r, folderId: undefined } : r)),
+    }));
+  },
+
+  toggleFolderCollapse: (id) => {
+    set((state) => ({
+      folders: state.folders.map((f) => (f.id === id ? { ...f, isCollapsed: !f.isCollapsed } : f)),
+    }));
+  },
+
+  // Sons personnalisés (Micro & Upload)
+  addCustomSound: (soundData) => {
+    const id = `sound-${Date.now().toString(36)}`;
+    const newSound: CustomSound = {
+      ...soundData,
+      id,
+      createdAt: Date.now(),
+    };
+    set((state) => ({
+      customSounds: [...state.customSounds, newSound],
+    }));
+    return id;
+  },
+
+  deleteCustomSound: (id) => {
+    set((state) => ({
+      customSounds: state.customSounds.filter((s) => s.id !== id),
+    }));
+  },
+
+  updateCustomSoundName: (id, name) => {
+    set((state) => ({
+      customSounds: state.customSounds.map((s) => (s.id === id ? { ...s, name } : s)),
+    }));
   },
 
   triggerClickEvent: (entityId) => {
@@ -1790,6 +2193,14 @@ function executeAction(
   }
 ) {
   if (act.type === 'play_sound') {
+    if (act.customSoundId) {
+      const sounds = useSceneStore.getState().customSounds;
+      const targetSound = sounds.find((s) => s.id === act.customSoundId);
+      if (targetSound?.dataUrl) {
+        soundSynth.playCustom(targetSound.dataUrl);
+        return;
+      }
+    }
     soundSynth.play(act.soundType || 'pop');
     return;
   }

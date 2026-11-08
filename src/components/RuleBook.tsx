@@ -9,9 +9,12 @@ import {
   DynamicRule,
   ActionTargetMode,
   SoundType,
+  RuleFolder,
+  CustomSound,
 } from '../types';
 import { EntityMiniPreview } from './EntityMiniPreview';
 import { SpawnLocationPicker } from './SpawnLocationPicker';
+import { SoundRecorderModal } from './SoundRecorderModal';
 import {
   Plus,
   Trash2,
@@ -22,8 +25,19 @@ import {
   Sparkles,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Filter,
   Volume2,
+  Search,
+  Folder,
+  FolderPlus,
+  FolderOpen,
+  Play,
+  Pause,
+  Mic,
+  Edit2,
+  Check,
 } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
 
@@ -106,11 +120,16 @@ export function RuleBook() {
   const entities = useSceneStore((state) => state.entities);
   const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
   const rules = useSceneStore((state) => state.rules);
+  const folders = useSceneStore((state) => state.folders || []);
+  const customSounds = useSceneStore((state) => state.customSounds || []);
   const addRule = useSceneStore((state) => state.addRule);
   const updateRule = useSceneStore((state) => state.updateRule);
   const deleteRule = useSceneStore((state) => state.deleteRule);
   const toggleRule = useSceneStore((state) => state.toggleRule);
   const duplicateRule = useSceneStore((state) => state.duplicateRule);
+  const setRuleFolder = useSceneStore((state) => state.setRuleFolder);
+  const addFolder = useSceneStore((state) => state.addFolder);
+  const deleteFolder = useSceneStore((state) => state.deleteFolder);
   const settings = useSceneStore((state) => state.settings);
 
   const [filterType, setFilterType] = useState<'all' | 'collision' | 'click'>('all');
@@ -119,6 +138,52 @@ export function RuleBook() {
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
   const [activeWizard, setActiveWizard] = useState<WizardData | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
+
+  // Folder & Search state
+  const [selectedFolderId, setSelectedFolderId] = useState<string | 'all'>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isCreatingFolder, setIsCreatingFolder] = useState<boolean>(false);
+  const [newFolderName, setNewFolderName] = useState<string>('');
+  const [isSoundModalOpen, setIsSoundModalOpen] = useState<boolean>(false);
+  const [playingSoundId, setPlayingSoundId] = useState<string | null>(null);
+  const [collapsedRuleIds, setCollapsedRuleIds] = useState<Record<string, boolean>>({});
+
+  const toggleCollapseRule = (id: string) => {
+    setCollapsedRuleIds((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
+  // Sound preview helper
+  const handlePlayPreview = (soundType?: SoundType, customSoundId?: string) => {
+    if (customSoundId) {
+      const snd = customSounds.find((s) => s.id === customSoundId);
+      if (snd?.dataUrl) {
+        soundSynth.playCustom(snd.dataUrl);
+        setPlayingSoundId(customSoundId);
+        setTimeout(() => setPlayingSoundId(null), 1200);
+      }
+    } else if (soundType) {
+      soundSynth.play(soundType);
+      setPlayingSoundId(soundType);
+      setTimeout(() => setPlayingSoundId(null), 800);
+    }
+  };
+
+  // Folder creation helper
+  const handleCreateFolder = () => {
+    if (!newFolderName.trim()) {
+      setIsCreatingFolder(false);
+      return;
+    }
+    const colors = ['indigo', 'emerald', 'amber', 'rose', 'purple', 'sky'];
+    const randomColor = colors[folders.length % colors.length];
+    const newId = addFolder(newFolderName.trim(), randomColor);
+    setSelectedFolderId(newId);
+    setNewFolderName('');
+    setIsCreatingFolder(false);
+  };
 
   const entityList = Object.values(entities);
 
@@ -285,6 +350,36 @@ export function RuleBook() {
 
   // Filter rules
   const filteredRules = rules.filter((rule) => {
+    // 1. Filtrage par Dossier
+    if (selectedFolderId !== 'all') {
+      if (selectedFolderId === 'unassigned') {
+        if (rule.folderId) return false;
+      } else {
+        if (rule.folderId !== selectedFolderId) return false;
+      }
+    }
+
+    // 2. Recherche textuelle instantanée
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const ruleNameMatch = rule.name.toLowerCase().includes(q);
+      const subjectOpt = availableEntityOptions.find((o) => o.type === rule.trigger.subjectType);
+      const targetOpt = availableEntityOptions.find((o) => o.type === rule.trigger.targetType);
+      const subjectMatch = (subjectOpt?.label || rule.trigger.subjectType || '').toLowerCase().includes(q);
+      const targetMatch = (targetOpt?.label || rule.trigger.targetType || '').toLowerCase().includes(q);
+      const actionMatch = rule.actions.some((a) => {
+        const customSound = a.customSoundId ? customSounds.find((s) => s.id === a.customSoundId) : null;
+        return (
+          (customSound?.name || '').toLowerCase().includes(q) ||
+          (a.soundType || '').toLowerCase().includes(q) ||
+          (a.spawnEntityType || '').toLowerCase().includes(q) ||
+          (a.type || '').toLowerCase().includes(q)
+        );
+      });
+      if (!ruleNameMatch && !subjectMatch && !targetMatch && !actionMatch) return false;
+    }
+
+    // 3. Filtres avancés optionnels (Collision / Clic / Objet)
     if (!areFiltersVisible) return true;
 
     if (filterType !== 'all') {
@@ -303,10 +398,10 @@ export function RuleBook() {
   });
 
   return (
-    <div className="bg-slate-50/80 rounded-3xl border border-slate-200 p-4 sm:p-5 flex flex-col h-full overflow-hidden text-slate-800 space-y-4">
-      {/* Top Bar with Filter and New Rule */}
+    <div className="bg-slate-50/80 rounded-3xl border border-slate-200 p-4 sm:p-5 flex flex-col h-full overflow-hidden text-slate-800 space-y-3.5">
+      {/* --- TOP BAR: Title, Search, Audio manager, New Rule --- */}
       <div className="flex items-center justify-between gap-3 flex-wrap border-b border-slate-200/80 pb-3 shrink-0">
-        <div className="flex items-center gap-2.5 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <span className="text-sm font-black text-slate-800 tracking-tight">
               Livre de Règles
@@ -316,7 +411,44 @@ export function RuleBook() {
             </span>
           </div>
 
-          {/* Bouton discret pour basculer les filtres si masqués par défaut */}
+          {/* Barre de Recherche instantanée */}
+          <div className="relative flex items-center">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Rechercher une règle, entité, son..."
+              className="pl-8 pr-7 py-1 text-xs font-medium bg-white rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-300 outline-none w-48 sm:w-60 transition-all"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Bouton pour ouvrir le gestionnaire de sons audio / micro */}
+          <button
+            type="button"
+            onClick={() => setIsSoundModalOpen(true)}
+            className="px-2.5 py-1 text-xs font-bold rounded-xl border border-purple-200 bg-purple-50 hover:bg-purple-100/80 text-purple-700 transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+            title="Enregistrer au micro ou importer des effets sonores"
+          >
+            <Mic className="w-3.5 h-3.5" />
+            <span>Sons & Voix</span>
+            {customSounds.length > 0 && (
+              <span className="text-[10px] bg-purple-200/80 text-purple-900 px-1.5 py-0.2 rounded-full font-black">
+                {customSounds.length}
+              </span>
+            )}
+          </button>
+
+          {/* Bouton discret pour basculer les filtres optionnels */}
           {!settings?.showRuleFilters && (
             <button
               type="button"
@@ -326,68 +458,11 @@ export function RuleBook() {
                   ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-2xs'
                   : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
               }`}
-              title="Afficher/masquer les filtres du livre de règles"
+              title="Afficher/masquer les filtres par type d'événement ou d'objet"
             >
               <Filter className="w-3.5 h-3.5" />
               <span>Filtres</span>
             </button>
-          )}
-
-          {/* Barre de filtres (Visible seulement si activée dans les settings ou dépliée manuellement) */}
-          {areFiltersVisible && (
-            <div className="flex items-center gap-2 flex-wrap animate-in fade-in duration-150">
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-2xs">
-                <button
-                  type="button"
-                  onClick={() => setFilterType('all')}
-                  className={`px-3 py-1 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-                    filterType === 'all'
-                      ? 'bg-white text-indigo-700 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  Toutes ({rules.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFilterType('collision')}
-                  className={`px-3 py-1 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-                    filterType === 'collision'
-                      ? 'bg-white text-indigo-700 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  Collisions
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFilterType('click')}
-                  className={`px-3 py-1 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-                    filterType === 'click'
-                      ? 'bg-white text-indigo-700 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  Clics & Relâché
-                </button>
-              </div>
-
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-2xs">
-                <Filter className="w-3.5 h-3.5 text-slate-400 ml-1.5" />
-                <select
-                  value={filterObject}
-                  onChange={(e) => setFilterObject(e.target.value)}
-                  className="text-xs font-bold text-slate-700 bg-transparent pr-2 py-0.5 outline-none cursor-pointer"
-                >
-                  <option value="all">Tous les objets</option>
-                  {availableEntityOptions.map((opt) => (
-                    <option key={opt.type} value={opt.type}>
-                      Objet : {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
           )}
         </div>
 
@@ -402,7 +477,204 @@ export function RuleBook() {
         </button>
       </div>
 
-      {/* Rules List (Storyboard Rows with Large Visual Cards) */}
+      {/* --- FOLDER TABS BAR (Dossiers Thématiques Pliables) --- */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 shrink-0 scrollbar-thin">
+        {/* Tab: Toutes */}
+        <button
+          type="button"
+          onClick={() => setSelectedFolderId('all')}
+          className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+            selectedFolderId === 'all'
+              ? 'bg-slate-900 text-white shadow-xs'
+              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <span>Toutes</span>
+          <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+            selectedFolderId === 'all' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-500'
+          }`}>
+            {rules.length}
+          </span>
+        </button>
+
+        {/* Dynamic folders */}
+        {folders.map((folder) => {
+          const count = rules.filter((r) => r.folderId === folder.id).length;
+          const isSelected = selectedFolderId === folder.id;
+
+          const colorClasses: Record<string, string> = {
+            indigo: isSelected ? 'bg-indigo-600 text-white' : 'hover:border-indigo-300 text-indigo-800',
+            emerald: isSelected ? 'bg-emerald-600 text-white' : 'hover:border-emerald-300 text-emerald-800',
+            amber: isSelected ? 'bg-amber-600 text-white' : 'hover:border-amber-300 text-amber-800',
+            rose: isSelected ? 'bg-rose-600 text-white' : 'hover:border-rose-300 text-rose-800',
+            purple: isSelected ? 'bg-purple-600 text-white' : 'hover:border-purple-300 text-purple-800',
+            sky: isSelected ? 'bg-sky-600 text-white' : 'hover:border-sky-300 text-sky-800',
+          };
+
+          return (
+            <div
+              key={folder.id}
+              className={`flex items-center rounded-xl border transition-all shrink-0 ${
+                isSelected
+                  ? 'border-transparent shadow-xs ' + (colorClasses[folder.color || 'indigo'] || 'bg-indigo-600 text-white')
+                  : 'bg-white border-slate-200 ' + (colorClasses[folder.color || 'indigo'] || 'text-slate-700')
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => setSelectedFolderId(folder.id)}
+                className="px-3 py-1.5 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Folder className="w-3.5 h-3.5 fill-current opacity-80" />
+                <span>{folder.name}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                  isSelected ? 'bg-black/20 text-white' : 'bg-slate-100 text-slate-500'
+                }`}>
+                  {count}
+                </span>
+              </button>
+              {isSelected && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (confirm(`Supprimer le dossier "${folder.name}" ? (Les règles seront conservées en Non Classées)`)) {
+                      deleteFolder(folder.id);
+                      setSelectedFolderId('all');
+                    }
+                  }}
+                  className="pr-2 pl-0.5 text-white/70 hover:text-white cursor-pointer"
+                  title="Supprimer ce dossier"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Tab: Non classées */}
+        {rules.some((r) => !r.folderId) && (
+          <button
+            type="button"
+            onClick={() => setSelectedFolderId('unassigned')}
+            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+              selectedFolderId === 'unassigned'
+                ? 'bg-slate-700 text-white shadow-xs'
+                : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-100'
+            }`}
+          >
+            <span>Non classées</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+              selectedFolderId === 'unassigned' ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-500'
+            }`}>
+              {rules.filter((r) => !r.folderId).length}
+            </span>
+          </button>
+        )}
+
+        {/* Add folder inline form / button */}
+        {isCreatingFolder ? (
+          <div className="flex items-center gap-1 bg-white border border-indigo-300 rounded-xl px-2 py-1 shrink-0">
+            <input
+              type="text"
+              autoFocus
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCreateFolder();
+                if (e.key === 'Escape') setIsCreatingFolder(false);
+              }}
+              placeholder="Nom du dossier..."
+              className="text-xs font-bold text-slate-800 outline-none w-28"
+            />
+            <button
+              type="button"
+              onClick={handleCreateFolder}
+              className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg cursor-pointer"
+              title="Créer"
+            >
+              <Check className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsCreatingFolder(false)}
+              className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              title="Annuler"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsCreatingFolder(true)}
+            className="px-2.5 py-1.5 text-xs font-bold rounded-xl border border-dashed border-slate-300 hover:border-indigo-400 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50/40 transition-all flex items-center gap-1 cursor-pointer shrink-0"
+          >
+            <FolderPlus className="w-3.5 h-3.5" />
+            <span>+ Dossier</span>
+          </button>
+        )}
+      </div>
+
+      {/* Barre de filtres avancés (Visible si togglée) */}
+      {areFiltersVisible && (
+        <div className="flex items-center gap-2 flex-wrap animate-in fade-in duration-150 border-b border-slate-200/60 pb-2">
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setFilterType('all')}
+              className={`px-3 py-1 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                filterType === 'all'
+                  ? 'bg-white text-indigo-700 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Tous types
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterType('collision')}
+              className={`px-3 py-1 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                filterType === 'collision'
+                  ? 'bg-white text-indigo-700 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Collisions
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterType('click')}
+              className={`px-3 py-1 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                filterType === 'click'
+                  ? 'bg-white text-indigo-700 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Clics & Relâché
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-2xs">
+            <Filter className="w-3.5 h-3.5 text-slate-400 ml-1.5" />
+            <select
+              value={filterObject}
+              onChange={(e) => setFilterObject(e.target.value)}
+              className="text-xs font-bold text-slate-700 bg-transparent pr-2 py-0.5 outline-none cursor-pointer"
+            >
+              <option value="all">Tous les objets</option>
+              {availableEntityOptions.map((opt) => (
+                <option key={opt.type} value={opt.type}>
+                  Objet : {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {/* --- RULES LIST (2-COLUMN SEMANTIC LAYOUT: SUJET À GAUCHE, CIBLE À DROITE) --- */}
       <div className="flex-1 overflow-y-auto space-y-4 pr-1">
         {filteredRules.length === 0 ? (
           <div
@@ -412,9 +684,11 @@ export function RuleBook() {
             <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 shadow-2xs flex items-center justify-center text-3xl group-hover:scale-110 transition-transform mb-3">
               ⚡
             </div>
-            <div className="text-sm font-bold text-slate-800">Créer une règle en quelques clics rapides</div>
+            <div className="text-sm font-bold text-slate-800">
+              {searchQuery || selectedFolderId !== 'all' ? 'Aucune règle ne correspond aux filtres' : 'Créer une règle en quelques clics rapides'}
+            </div>
             <p className="text-xs text-slate-400 max-w-xs mx-auto mt-1">
-              Grandes cartes illustrées : Sujet → Événement → Cible → Action.
+              Structure logique en 2 colonnes : Sujet à gauche, Cible et Sons à droite.
             </p>
           </div>
         ) : (
@@ -440,7 +714,7 @@ export function RuleBook() {
             // Event badge info
             let eventName = 'Contact';
             let eventIcon = '💥';
-            let eventSub = 'Collision';
+            let eventSub = 'Collision (Premier contact)';
             if (rule.trigger.type === 'click') {
               eventName = 'Clic';
               eventIcon = '👆';
@@ -448,11 +722,11 @@ export function RuleBook() {
               if (rule.trigger.phase === 'mouse_down') {
                 eventName = 'Appui';
                 eventIcon = '✋';
-                eventSub = 'Enfoncé';
+                eventSub = 'Bouton enfoncé';
               } else if (rule.trigger.phase === 'mouse_up') {
                 eventName = 'Relâcher';
                 eventIcon = '👋';
-                eventSub = 'Relâché';
+                eventSub = 'Bouton relâché';
               }
             } else if (rule.trigger.type === 'drag' || rule.trigger.phase === 'drag_release') {
               eventName = 'Relâcher';
@@ -466,35 +740,65 @@ export function RuleBook() {
               } else if (rule.trigger.phase === 'release') {
                 eventName = 'Séparation';
                 eventIcon = '💨';
-                eventSub = 'Fin contact';
+                eventSub = 'Fin de contact';
               } else if (rule.trigger.phase === 'stay') {
-                eventName = 'Pendant';
+                eventName = 'Pendant le contact';
                 eventIcon = '⏳';
-                eventSub = 'Continu';
+                eventSub = 'Contact continu';
               }
             }
 
             const subjectSlotKey = `${rule.id}-subject`;
             const targetSlotKey = `${rule.id}-target`;
+            const isCollapsed = !!collapsedRuleIds[rule.id];
 
             return (
               <div
                 key={rule.id}
-                className={`p-4 rounded-3xl border transition-all shadow-2xs ${
+                className={`p-3.5 sm:p-4 rounded-3xl border transition-all shadow-xs ${
                   rule.enabled
                     ? 'bg-white border-slate-200/90 hover:border-slate-300'
                     : 'bg-slate-50/70 border-slate-200/50 opacity-60'
                 }`}
               >
-                {/* Rule Header Bar */}
-                <div className="flex items-center justify-between mb-3">
-                  <input
-                    type="text"
-                    value={rule.name}
-                    onChange={(e) => updateRule(rule.id, { name: e.target.value })}
-                    className="text-xs font-bold text-slate-800 bg-transparent hover:bg-slate-100 focus:bg-white px-2 py-1 rounded-lg border border-transparent hover:border-slate-200 focus:border-slate-300 focus:outline-none transition-colors max-w-xs"
-                    placeholder="Nom de la règle..."
-                  />
+                {/* 1. Header Bar: Accordion Toggle, Name, Folder picker, Active toggle, Duplicate, Delete */}
+                <div className="flex items-center justify-between gap-2 flex-wrap mb-2.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Accordion toggle button */}
+                    <button
+                      type="button"
+                      onClick={() => toggleCollapseRule(rule.id)}
+                      className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer flex items-center justify-center"
+                      title={isCollapsed ? 'Déplier la règle' : 'Replier la règle (gain de place)'}
+                    >
+                      {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </button>
+
+                    <input
+                      type="text"
+                      value={rule.name}
+                      onChange={(e) => updateRule(rule.id, { name: e.target.value })}
+                      className="text-xs font-bold text-slate-800 bg-transparent hover:bg-slate-100 focus:bg-white px-2 py-1 rounded-lg border border-transparent hover:border-slate-200 focus:border-slate-300 focus:outline-none transition-colors max-w-xs"
+                      placeholder="Nom de la règle..."
+                    />
+
+                    {/* Folder assignment picker */}
+                    <div className="flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
+                      <Folder className="w-3 h-3 text-slate-400" />
+                      <select
+                        value={rule.folderId || 'none'}
+                        onChange={(e) => setRuleFolder(rule.id, e.target.value === 'none' ? undefined : e.target.value)}
+                        className="text-[11px] font-bold text-slate-600 bg-transparent outline-none cursor-pointer pr-1"
+                      >
+                        <option value="none">Sans dossier</option>
+                        {folders.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            Dossier : {f.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
 
                   <div className="flex items-center gap-1.5">
                     <button
@@ -509,7 +813,6 @@ export function RuleBook() {
                       {rule.enabled ? 'Active' : 'Désactivée'}
                     </button>
 
-                    {/* Dupliquer la règle */}
                     <button
                       type="button"
                       onClick={() => duplicateRule(rule.id)}
@@ -519,7 +822,6 @@ export function RuleBook() {
                       <Copy className="w-3.5 h-3.5" />
                     </button>
 
-                    {/* Supprimer la règle */}
                     <button
                       type="button"
                       onClick={() => deleteRule(rule.id)}
@@ -531,345 +833,401 @@ export function RuleBook() {
                   </div>
                 </div>
 
-                {/* Horizontal Storyboard Flow with Large Cards */}
-                <div className="flex items-center gap-3 overflow-x-auto pb-1 pt-1">
-                  {/* --- 1. DÉCLENCHEUR SECTION --- */}
-                  <div className="flex items-center gap-2.5 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/90 shrink-0">
-                    {/* CASE 1: SUJET (Large Card) */}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setActiveModal({
-                          type: 'subject',
-                          ruleId: rule.id,
-                          subStep: 'choose_object',
-                        })
-                      }
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        setDragOverSlot(subjectSlotKey);
-                      }}
-                      onDragLeave={() => setDragOverSlot(null)}
-                      onDrop={(e) => handleDropOnSlot(e, rule.id, 'subject')}
-                      className={`w-32 h-36 bg-white border rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group ${
-                        dragOverSlot === subjectSlotKey
-                          ? 'border-indigo-500 ring-4 ring-indigo-300/50 bg-indigo-50/40 scale-105'
-                          : 'border-slate-200 hover:border-slate-400'
-                      }`}
-                      title="Cliquer pour changer l'objet ou son état requis"
-                    >
-                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600">
-                        Sujet
+                {/* 2. Compact View when Collapsed (Accordéon fermé) */}
+                {isCollapsed ? (
+                  <div
+                    onClick={() => toggleCollapseRule(rule.id)}
+                    className="flex items-center justify-between gap-3 px-3 py-2 bg-slate-50 hover:bg-indigo-50/40 rounded-2xl border border-slate-200/80 cursor-pointer transition-all"
+                  >
+                    <div className="flex items-center gap-2 flex-wrap text-xs">
+                      <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                        <div className="w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center p-0.5 shadow-2xs">
+                          <EntityMiniPreview entity={subjectEntity} type={subjectType} stateId={rule.trigger.subjectStateId} size={20} />
+                        </div>
+                        <span>{subjectOpt?.label || subjectType}</span>
+                        {rule.trigger.subjectStateId && (
+                          <span className="text-[10px] text-indigo-700 bg-indigo-50 px-1 py-0.2 rounded font-medium">({subjectStateName})</span>
+                        )}
                       </div>
 
-                      <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
-                        <EntityMiniPreview
-                          entity={subjectEntity}
-                          type={subjectType}
-                          stateId={rule.trigger.subjectStateId}
-                          size={48}
-                        />
+                      <span className="text-slate-400">➔</span>
+
+                      <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900 text-white font-bold text-[11px]">
+                        <span>{eventIcon}</span>
+                        <span>{eventName}</span>
                       </div>
 
-                      <div className="w-full">
-                        <div className="text-xs font-bold text-slate-800 truncate">
-                          {subjectOpt?.label || subjectType}
-                        </div>
-                        <div
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveModal({
-                              type: 'subject',
-                              ruleId: rule.id,
-                              subStep: 'choose_state',
-                              selectedEntityType: subjectType,
-                            });
-                          }}
-                          className="text-[9px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer"
-                          title="Cliquer pour changer l'état requis"
-                        >
-                          {subjectStateName}
-                        </div>
-                      </div>
-                    </button>
+                      {isCollision && (
+                        <>
+                          <span className="text-slate-400">➔</span>
+                          <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                            <div className="w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center p-0.5 shadow-2xs">
+                              <EntityMiniPreview entity={targetEntity} type={targetType} stateId={rule.trigger.targetStateId} size={20} />
+                            </div>
+                            <span>{targetOpt?.label || targetType}</span>
+                            {rule.trigger.targetStateId && (
+                              <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded font-medium">({targetStateName})</span>
+                            )}
+                          </div>
+                        </>
+                      )}
 
-                    {/* CASE 2: ÉVÉNEMENT (Large Card) */}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setActiveModal({
-                          type: 'event',
-                          ruleId: rule.id,
-                        })
-                      }
-                      className="w-32 h-36 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group"
-                      title="Cliquer pour changer le type d'événement"
-                    >
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Événement
-                      </span>
-                      <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center text-2xl shadow-inner group-hover:scale-110 transition-transform">
-                        {eventIcon}
-                      </div>
-                      <div className="w-full">
-                        <div className="text-xs font-black uppercase tracking-tight text-amber-300 truncate">
-                          {eventName}
-                        </div>
-                        <div className="text-[9px] text-slate-400 truncate mt-0.5">
-                          {eventSub}
-                        </div>
-                      </div>
-                    </button>
+                      <span className="text-indigo-500 font-bold ml-1">➔</span>
 
-                    {/* CASE 3: CIBLE (Seulement si Collision) */}
-                    {isCollision && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-bold bg-indigo-50 border border-indigo-200 text-indigo-700 px-2 py-0.5 rounded-full">
+                          {rule.actions.length} action{rule.actions.length > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                    </div>
+
+                    <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 shrink-0" />
+                  </div>
+                ) : (
+                  /* 3. Horizontal Storyboard Flow with Large Cards in One Line (Déplié) */
+                  <div className="flex items-center gap-3 overflow-x-auto pb-1 pt-1 scrollbar-thin">
+                    {/* --- DÉCLENCHEUR SECTION --- */}
+                    <div className="flex items-center gap-2.5 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/90 shrink-0">
+                      {/* CASE 1: SUJET (Large Card) */}
                       <button
                         type="button"
                         onClick={() =>
                           setActiveModal({
-                            type: 'target',
+                            type: 'subject',
                             ruleId: rule.id,
                             subStep: 'choose_object',
                           })
                         }
                         onDragOver={(e) => {
                           e.preventDefault();
-                          setDragOverSlot(targetSlotKey);
+                          setDragOverSlot(subjectSlotKey);
                         }}
                         onDragLeave={() => setDragOverSlot(null)}
-                        onDrop={(e) => handleDropOnSlot(e, rule.id, 'target')}
+                        onDrop={(e) => handleDropOnSlot(e, rule.id, 'subject')}
                         className={`w-32 h-36 bg-white border rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group ${
-                          dragOverSlot === targetSlotKey
+                          dragOverSlot === subjectSlotKey
                             ? 'border-indigo-500 ring-4 ring-indigo-300/50 bg-indigo-50/40 scale-105'
                             : 'border-slate-200 hover:border-slate-400'
                         }`}
-                        title="Cliquer pour changer la cible ou son état requis"
+                        title="Cliquer pour changer l'objet ou son état requis"
                       >
                         <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600">
-                          Cible touchée
+                          Sujet
                         </div>
 
                         <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
                           <EntityMiniPreview
-                            entity={targetEntity}
-                            type={targetType}
-                            stateId={rule.trigger.targetStateId}
+                            entity={subjectEntity}
+                            type={subjectType}
+                            stateId={rule.trigger.subjectStateId}
                             size={48}
                           />
                         </div>
 
                         <div className="w-full">
                           <div className="text-xs font-bold text-slate-800 truncate">
-                            {targetOpt?.label || targetType}
+                            {subjectOpt?.label || subjectType}
                           </div>
                           <div
                             onClick={(e) => {
                               e.stopPropagation();
                               setActiveModal({
-                                type: 'target',
+                                type: 'subject',
                                 ruleId: rule.id,
                                 subStep: 'choose_state',
-                                selectedEntityType: targetType,
+                                selectedEntityType: subjectType,
                               });
                             }}
                             className="text-[9px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer"
-                            title="Cliquer pour changer l'état requis de la cible"
+                            title="Cliquer pour changer l'état requis"
                           >
-                            {targetStateName}
+                            {subjectStateName}
                           </div>
                         </div>
                       </button>
-                    )}
-                  </div>
 
-                  {/* Connecteur Arrow */}
-                  <div className="text-slate-400 flex items-center justify-center shrink-0">
-                    <ArrowRight className="w-5 h-5 text-indigo-500" strokeWidth={2.5} />
-                  </div>
+                      {/* CASE 2: ÉVÉNEMENT (Large Card) */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveModal({
+                            type: 'event',
+                            ruleId: rule.id,
+                          })
+                        }
+                        className="w-32 h-36 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group"
+                        title="Cliquer pour changer le type d'événement"
+                      >
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                          Événement
+                        </span>
+                        <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center text-2xl shadow-inner group-hover:scale-110 transition-transform">
+                          {eventIcon}
+                        </div>
+                        <div className="w-full">
+                          <div className="text-xs font-black uppercase tracking-tight text-amber-300 truncate">
+                            {eventName}
+                          </div>
+                          <div className="text-[9px] text-slate-400 truncate mt-0.5">
+                            {eventSub}
+                          </div>
+                        </div>
+                      </button>
 
-                  {/* --- 2. ACTIONS SÉQUENCE --- */}
-                  <div className="flex items-center gap-2.5 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/90 shrink-0">
-                    {rule.actions.map((act, actIdx) => {
-                      const actTargetMode = act.targetMode || 'target';
-                      const actTargetType =
-                        actTargetMode === 'subject'
-                          ? subjectType
-                          : actTargetMode === 'target'
-                          ? targetType
-                          : act.targetType || targetType;
+                      {/* CASE 3: CIBLE (Seulement si Collision) */}
+                      {isCollision && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveModal({
+                              type: 'target',
+                              ruleId: rule.id,
+                              subStep: 'choose_object',
+                            })
+                          }
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            setDragOverSlot(targetSlotKey);
+                          }}
+                          onDragLeave={() => setDragOverSlot(null)}
+                          onDrop={(e) => handleDropOnSlot(e, rule.id, 'target')}
+                          className={`w-32 h-36 bg-white border rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group ${
+                            dragOverSlot === targetSlotKey
+                              ? 'border-indigo-500 ring-4 ring-indigo-300/50 bg-indigo-50/40 scale-105'
+                              : 'border-slate-200 hover:border-slate-400'
+                          }`}
+                          title="Cliquer pour changer la cible ou son état requis"
+                        >
+                          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600">
+                            Cible touchée
+                          </div>
 
-                      const actEntity = getEntityObj(actTargetType);
-                      const actStateObj = actEntity && act.targetStateId ? actEntity.states[act.targetStateId] : null;
+                          <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
+                            <EntityMiniPreview
+                              entity={targetEntity}
+                              type={targetType}
+                              stateId={rule.trigger.targetStateId}
+                              size={48}
+                            />
+                          </div>
 
-                      let actionBadge = 'Action';
-                      let actionDetail = 'Exécuter';
+                          <div className="w-full">
+                            <div className="text-xs font-bold text-slate-800 truncate">
+                              {targetOpt?.label || targetType}
+                            </div>
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveModal({
+                                  type: 'target',
+                                  ruleId: rule.id,
+                                  subStep: 'choose_state',
+                                  selectedEntityType: targetType,
+                                });
+                              }}
+                              className="text-[9px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer"
+                              title="Cliquer pour changer l'état requis de la cible"
+                            >
+                              {targetStateName}
+                            </div>
+                          </div>
+                        </button>
+                      )}
+                    </div>
 
-                      if (act.type === 'change_state') {
-                        actionBadge = "Changer d'état";
-                        const targetLabel =
-                          act.targetMode === 'subject'
-                            ? 'Sujet'
-                            : act.targetMode === 'target'
-                            ? 'Cible'
-                            : getEntityObj(act.targetType)?.name || act.targetType || 'Objet';
-                        actionDetail = `${targetLabel} → ${actStateObj?.name || 'État ' + (act.targetStateId || '...')}`;
-                      } else if (act.type === 'delete_entity') {
-                        actionBadge = 'Détruire';
-                        const targetLabel =
-                          act.targetMode === 'subject'
-                            ? 'Sujet'
-                            : act.targetMode === 'target'
-                            ? 'Cible'
-                            : getEntityObj(act.targetType)?.name || act.targetType || 'Objet';
-                        actionDetail = `Supprimer ${targetLabel}`;
-                      } else if (act.type === 'spawn_entity') {
-                        actionBadge = 'Créer Entité';
-                        const locLabel =
-                          act.spawnLocationMode === 'at_target'
-                            ? 'Sur Cible'
-                            : act.spawnLocationMode === 'at_subject'
-                            ? 'Sur Sujet'
-                            : act.spawnLocationMode === 'random'
-                            ? 'Aléatoire'
-                            : act.spawnLocationMode?.startsWith('offset')
-                            ? 'Décalé'
-                            : 'Fixe';
+                    {/* Connecteur Arrow */}
+                    <div className="text-slate-400 flex items-center justify-center shrink-0">
+                      <ArrowRight className="w-5 h-5 text-indigo-500" strokeWidth={2.5} />
+                    </div>
 
-                        let sizeLabel = '';
-                        if (act.spawnSizeMode === 'match_target') {
-                          sizeLabel = ` (${act.spawnScaleMultiplier && act.spawnScaleMultiplier !== 1 ? `${act.spawnScaleMultiplier}x ` : ''}Cible)`;
-                        } else if (act.spawnSizeMode === 'match_subject') {
-                          sizeLabel = ` (${act.spawnScaleMultiplier && act.spawnScaleMultiplier !== 1 ? `${act.spawnScaleMultiplier}x ` : ''}Sujet)`;
-                        } else if (act.spawnSizeMode === 'custom' && act.spawnCustomSize) {
-                          sizeLabel = ` (${act.spawnCustomSize.width}x${act.spawnCustomSize.height}px)`;
-                        } else if (act.spawnScaleMultiplier && act.spawnScaleMultiplier !== 1) {
-                          sizeLabel = ` (${act.spawnScaleMultiplier}x)`;
+                    {/* --- ACTIONS SÉQUENCE --- */}
+                    <div className="flex items-center gap-2.5 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/90 shrink-0">
+                      {rule.actions.map((act, actIdx) => {
+                        const actTargetMode = act.targetMode || 'target';
+                        const actTargetType =
+                          actTargetMode === 'subject'
+                            ? subjectType
+                            : actTargetMode === 'target'
+                            ? targetType
+                            : act.targetType || targetType;
+
+                        const actEntity = getEntityObj(actTargetType);
+                        const actStateObj = actEntity && act.targetStateId ? actEntity.states[act.targetStateId] : null;
+                        const customSound = act.customSoundId ? customSounds.find((s) => s.id === act.customSoundId) : null;
+
+                        let actionBadge = 'Action';
+                        let actionDetail = 'Exécuter';
+
+                        if (act.type === 'change_state') {
+                          actionBadge = "Changer d'état";
+                          const targetLabel =
+                            act.targetMode === 'subject'
+                              ? `Sujet (${subjectOpt?.label || subjectType})`
+                              : act.targetMode === 'target'
+                              ? `Cible (${targetOpt?.label || targetType})`
+                              : getEntityObj(act.targetType)?.name || act.targetType || 'Objet';
+                          actionDetail = `${targetLabel} → ${actStateObj?.name || 'État ' + (act.targetStateId || '...')}`;
+                        } else if (act.type === 'delete_entity') {
+                          actionBadge = 'Détruire';
+                          const targetLabel =
+                            act.targetMode === 'subject'
+                              ? `Sujet (${subjectOpt?.label || subjectType})`
+                              : act.targetMode === 'target'
+                              ? `Cible (${targetOpt?.label || targetType})`
+                              : getEntityObj(act.targetType)?.name || act.targetType || 'Objet';
+                          actionDetail = `Supprimer ${targetLabel}`;
+                        } else if (act.type === 'spawn_entity') {
+                          actionBadge = 'Créer Entité';
+                          const locLabel =
+                            act.spawnLocationMode === 'at_target'
+                              ? 'Sur Cible'
+                              : act.spawnLocationMode === 'at_subject'
+                              ? 'Sur Sujet'
+                              : act.spawnLocationMode === 'random'
+                              ? 'Aléatoire'
+                              : act.spawnLocationMode?.startsWith('offset')
+                              ? 'Décalé'
+                              : 'Fixe';
+                          actionDetail = `+ ${act.spawnEntityType || 'Objet'} • ${locLabel}`;
+                        } else if (act.type === 'play_sound') {
+                          actionBadge = 'Jouer Son';
+                          actionDetail = customSound ? `Son vocal : ${customSound.name}` : act.soundType ? `Son ${act.soundType}` : 'Effet sonore';
+                        } else if (act.type === 'toggle_state') {
+                          actionBadge = 'Basculer État';
+                          actionDetail = 'Alterner ou cycler';
                         }
 
-                        actionDetail = `+ ${act.spawnEntityType || 'Objet'}${sizeLabel} • ${locLabel}`;
-                      } else if (act.type === 'play_sound') {
-                        actionBadge = 'Jouer Son';
-                        actionDetail = act.soundType ? `Son ${act.soundType}` : 'Effet sonore';
-                      }
+                        const actionSlotKey = `${rule.id}-act-${act.id}`;
 
-                      const actionSlotKey = `${rule.id}-act-${act.id}`;
+                        return (
+                          <div key={act.id} className="relative group">
+                            {/* Remove Action Button */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const updatedActions = rule.actions.filter((_, idx) => idx !== actIdx);
+                                updateRule(rule.id, { actions: updatedActions });
+                              }}
+                              className="absolute -top-2 -right-2 w-5 h-5 bg-rose-500 hover:bg-rose-600 text-white rounded-full flex items-center justify-center text-xs shadow-md opacity-0 group-hover:opacity-100 transition-opacity z-10 cursor-pointer"
+                              title="Supprimer cette action"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
 
-                      return (
-                        <div key={act.id} className="relative group">
-                          {/* Remove Action Button */}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const updatedActions = rule.actions.filter((_, idx) => idx !== actIdx);
-                              updateRule(rule.id, { actions: updatedActions });
-                            }}
-                            className="absolute -top-2 -right-2 w-5 h-5 bg-rose-500 hover:bg-rose-600 text-white rounded-full flex items-center justify-center text-xs shadow-md opacity-0 group-hover:opacity-100 transition-opacity z-10 cursor-pointer"
-                            title="Supprimer cette action"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setActiveModal({
-                                type: 'action',
-                                ruleId: rule.id,
-                                actionIndex: actIdx,
-                                actionId: act.id,
-                                actionType: act.type,
-                                targetMode: act.targetMode || 'target',
-                                subStep: 'main',
-                              })
-                            }
-                            onDragOver={(e) => {
-                              e.preventDefault();
-                              setDragOverSlot(actionSlotKey);
-                            }}
-                            onDragLeave={() => setDragOverSlot(null)}
-                            onDrop={(e) => handleDropOnSlot(e, rule.id, 'action', act.id)}
-                            className={`w-32 h-36 bg-white border rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group ${
-                              dragOverSlot === actionSlotKey
-                                ? 'border-indigo-500 ring-4 ring-indigo-300/50 bg-indigo-50/40 scale-105'
-                                : 'border-slate-200 hover:border-slate-400'
-                            }`}
-                            title="Cliquer pour modifier cette action"
-                          >
-                            <div className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">
-                              {actionBadge}
-                            </div>
-
-                            {act.type === 'delete_entity' ? (
-                              <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
-                                💥
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setActiveModal({
+                                  type: 'action',
+                                  ruleId: rule.id,
+                                  actionIndex: actIdx,
+                                  actionId: act.id,
+                                  actionType: act.type,
+                                  targetMode: act.targetMode || 'target',
+                                  subStep: 'main',
+                                })
+                              }
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                setDragOverSlot(actionSlotKey);
+                              }}
+                              onDragLeave={() => setDragOverSlot(null)}
+                              onDrop={(e) => handleDropOnSlot(e, rule.id, 'action', act.id)}
+                              className={`w-32 h-36 bg-white border rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group ${
+                                dragOverSlot === actionSlotKey
+                                  ? 'border-indigo-500 ring-4 ring-indigo-300/50 bg-indigo-50/40 scale-105'
+                                  : 'border-slate-200 hover:border-slate-400'
+                              }`}
+                              title="Cliquer pour modifier cette action"
+                            >
+                              <div className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">
+                                {actionBadge}
                               </div>
-                            ) : act.type === 'play_sound' ? (
-                              <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
-                                🔊
-                              </div>
-                            ) : act.type === 'spawn_entity' ? (
-                              <div className="relative w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
-                                <EntityMiniPreview
-                                  entity={getEntityObj(act.spawnEntityType || 'custom')}
-                                  type={act.spawnEntityType || 'custom'}
-                                  size={44}
-                                />
-                                <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white rounded-full p-0.5 shadow-xs text-[10px]">
-                                  ✨
+
+                              {act.type === 'delete_entity' ? (
+                                <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                  💥
+                                </div>
+                              ) : act.type === 'play_sound' ? (
+                                <div className="relative w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                  🔊
+                                  <div
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handlePlayPreview(act.soundType, act.customSoundId);
+                                    }}
+                                    className="absolute -bottom-1 -right-1 bg-purple-600 text-white rounded-full p-1 shadow-xs hover:bg-purple-700 cursor-pointer"
+                                    title="Écouter"
+                                  >
+                                    <Play className="w-2.5 h-2.5 fill-current" />
+                                  </div>
+                                </div>
+                              ) : act.type === 'spawn_entity' ? (
+                                <div className="relative w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
+                                  <EntityMiniPreview
+                                    entity={getEntityObj(act.spawnEntityType || 'custom')}
+                                    type={act.spawnEntityType || 'custom'}
+                                    size={44}
+                                  />
+                                  <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white rounded-full p-0.5 shadow-xs text-[10px]">
+                                    ✨
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
+                                  <EntityMiniPreview
+                                    entity={actEntity}
+                                    type={actTargetType}
+                                    stateId={act.targetStateId}
+                                    size={44}
+                                  />
+                                </div>
+                              )}
+
+                              <div className="w-full">
+                                <div className="text-[11px] font-bold text-slate-800 truncate">
+                                  {act.type === 'spawn_entity'
+                                    ? `Créer ${act.spawnEntityType || 'Objet'}`
+                                    : act.type === 'play_sound'
+                                    ? customSound?.name || `Son ${act.soundType || ''}`
+                                    : act.targetMode === 'subject'
+                                    ? `Sujet (${subjectOpt?.label || 'Objet'})`
+                                    : act.targetMode === 'target'
+                                    ? `Cible (${targetOpt?.label || 'Objet'})`
+                                    : actEntity?.name || act.targetType || 'Autre Objet'}
+                                </div>
+                                <div className="text-[9px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md font-medium truncate mt-0.5">
+                                  {actionDetail}
                                 </div>
                               </div>
-                            ) : (
-                              <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
-                                <EntityMiniPreview
-                                  entity={actEntity}
-                                  type={actTargetType}
-                                  stateId={act.targetStateId}
-                                  size={44}
-                                />
-                              </div>
-                            )}
+                            </button>
+                          </div>
+                        );
+                      })}
 
-                            <div className="w-full">
-                              <div className="text-[11px] font-bold text-slate-800 truncate">
-                                {act.type === 'spawn_entity'
-                                  ? `Créer ${act.spawnEntityType || 'Objet'}`
-                                  : act.targetMode === 'subject'
-                                  ? `Sujet (${subjectOpt?.label || 'Objet'})`
-                                  : act.targetMode === 'target'
-                                  ? `Cible (${targetOpt?.label || 'Objet'})`
-                                  : actEntity?.name || act.targetType || 'Autre Objet'}
-                              </div>
-                              <div className="text-[9px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md font-medium truncate mt-0.5">
-                                {actionDetail}
-                              </div>
-                            </div>
-                          </button>
-                        </div>
-                      );
-                    })}
-
-                    {/* + Action Slot Button */}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setActiveModal({
-                          type: 'action',
-                          ruleId: rule.id,
-                          actionIndex: undefined,
-                          actionType: 'change_state',
-                          targetMode: isCollision ? 'target' : 'subject',
-                          subStep: 'main',
-                        })
-                      }
-                      className="w-24 h-36 border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/40 rounded-2xl flex flex-col items-center justify-center gap-2 text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer shrink-0"
-                      title="Ajouter une action à la règle"
-                    >
-                      <Plus className="w-6 h-6" strokeWidth={2.5} />
-                      <span className="text-[10px] font-bold uppercase tracking-wider">+ Action</span>
-                    </button>
+                      {/* + Action Slot Button */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveModal({
+                            type: 'action',
+                            ruleId: rule.id,
+                            actionIndex: undefined,
+                            actionType: 'change_state',
+                            targetMode: isCollision ? 'target' : 'subject',
+                            subStep: 'main',
+                          })
+                        }
+                        className="w-24 h-36 border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/40 rounded-2xl flex flex-col items-center justify-center gap-2 text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer shrink-0"
+                        title="Ajouter une action à la règle"
+                      >
+                        <Plus className="w-6 h-6" strokeWidth={2.5} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">+ Action</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             );
           })
@@ -881,7 +1239,9 @@ export function RuleBook() {
       {/* ========================================================================= */}
       {activeWizard && (
         <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 max-w-3xl w-full shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] flex flex-col overflow-hidden">
+          <div className={`bg-white rounded-3xl border border-slate-200 p-6 w-full shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] flex flex-col overflow-hidden ${
+            activeWizard.step === 4 && activeWizard.triggerType === 'collision' ? 'max-w-5xl' : 'max-w-4xl'
+          }`}>
             {/* Header with Stepper */}
             <div className="border-b border-slate-100 pb-3 shrink-0 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -1323,269 +1683,355 @@ export function RuleBook() {
               {activeWizard.step === 4 && (
                 <div>
                   {/* Mode Principal Étape 4 */}
-                  {activeWizard.actionSubStep === 'main' && (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                        {/* 1. Changer d'état de la Cible (si collision) */}
-                        {activeWizard.triggerType === 'collision' && (
+                  {activeWizard.actionSubStep === 'main' && (() => {
+                    const wizardSubjectEntity = getEntityObj(activeWizard.subjectType);
+                    const wizardSubjectOpt = availableEntityOptions.find((o) => o.type === activeWizard.subjectType);
+                    const wizardSubjectName = wizardSubjectEntity?.name || wizardSubjectOpt?.label || activeWizard.subjectType;
+
+                    const wizardTargetEntity = getEntityObj(activeWizard.targetType);
+                    const wizardTargetOpt = availableEntityOptions.find((o) => o.type === activeWizard.targetType);
+                    const wizardTargetName = wizardTargetEntity?.name || wizardTargetOpt?.label || activeWizard.targetType;
+                    const isCollision = activeWizard.triggerType === 'collision';
+
+                    return (
+                      <div className="space-y-4">
+                        <div className={`grid grid-cols-1 ${isCollision ? 'lg:grid-cols-3 md:grid-cols-2' : 'md:grid-cols-2'} gap-4 items-start`}>
+                          {/* SECTION 1 : SUJET */}
+                          <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-3xl border border-slate-200/90 flex flex-col h-full shadow-2xs">
+                            {/* En-tête Sujet avec miniature et nom de l'entité */}
+                            <div className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-indigo-50 border border-indigo-200/80 shadow-2xs">
+                              <div className="w-10 h-10 rounded-xl bg-white border border-indigo-200 flex items-center justify-center p-1 shadow-2xs shrink-0">
+                                <EntityMiniPreview
+                                  entity={wizardSubjectEntity}
+                                  type={activeWizard.subjectType}
+                                  stateId={activeWizard.subjectStateId}
+                                  size={36}
+                                />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-indigo-600 text-white shadow-2xs">
+                                    Sujet (Qui agit)
+                                  </span>
+                                </div>
+                                <div className="text-sm font-black text-slate-800 truncate mt-0.5" title={wizardSubjectName}>
+                                  {wizardSubjectName}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Actions sur le Sujet */}
+                            <div className="space-y-2.5 flex-1">
+                              {/* 1. Changer l'état du Sujet */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const statesList = wizardSubjectEntity ? Object.values(wizardSubjectEntity.states) : [];
+                                  if (statesList.length > 1) {
+                                    setActiveWizard({
+                                      ...activeWizard,
+                                      actionTargetMode: 'subject',
+                                      actionTargetType: activeWizard.subjectType,
+                                      actionSubStep: 'state_picker',
+                                    });
+                                  } else {
+                                    completeWizardWithAction({
+                                      type: 'change_state',
+                                      targetMode: 'subject',
+                                      targetType: activeWizard.subjectType,
+                                    });
+                                  }
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-indigo-50/70 border-2 border-slate-200 hover:border-indigo-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🔄
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-indigo-700 truncate">
+                                    Changer l'état du Sujet
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Transformer « {wizardSubjectName} »
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 2. Basculer l'état (Toggle ⇄ / Cycle) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    actionSubStep: 'toggle_entity_picker',
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-violet-50/70 border-2 border-slate-200 hover:border-violet-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🔀
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-violet-700 truncate">
+                                    Basculer l'état (Toggle ⇄ / Cycle)
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Alterner A ⇄ B sur « {wizardSubjectName} »
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 3. Détruire le Sujet */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  completeWizardWithAction({
+                                    type: 'delete_entity',
+                                    targetMode: 'subject',
+                                    targetType: activeWizard.subjectType,
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-rose-50/70 border-2 border-slate-200 hover:border-rose-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  💥
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-rose-700 truncate">
+                                    Détruire le Sujet
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Faire disparaître « {wizardSubjectName} »
+                                  </div>
+                                </div>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* SECTION 2 : CIBLE (Si Collision) */}
+                          {isCollision && (
+                            <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-3xl border border-slate-200/90 flex flex-col h-full shadow-2xs">
+                              {/* En-tête Cible avec miniature et nom de l'entité */}
+                              <div className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-emerald-50 border border-emerald-200/80 shadow-2xs">
+                                <div className="w-10 h-10 rounded-xl bg-white border border-emerald-200 flex items-center justify-center p-1 shadow-2xs shrink-0">
+                                  <EntityMiniPreview
+                                    entity={wizardTargetEntity}
+                                    type={activeWizard.targetType}
+                                    stateId={activeWizard.targetStateId}
+                                    size={36}
+                                  />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-600 text-white shadow-2xs">
+                                      Cible (Touchée)
+                                    </span>
+                                  </div>
+                                  <div className="text-sm font-black text-slate-800 truncate mt-0.5" title={wizardTargetName}>
+                                    {wizardTargetName}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Actions sur la Cible */}
+                              <div className="space-y-2.5 flex-1">
+                                {/* 1. Changer l'état de la Cible */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const statesList = wizardTargetEntity ? Object.values(wizardTargetEntity.states) : [];
+                                    if (statesList.length > 1) {
+                                      setActiveWizard({
+                                        ...activeWizard,
+                                        actionTargetMode: 'target',
+                                        actionTargetType: activeWizard.targetType,
+                                        actionSubStep: 'state_picker',
+                                      });
+                                    } else {
+                                      completeWizardWithAction({
+                                        type: 'change_state',
+                                        targetMode: 'target',
+                                        targetType: activeWizard.targetType,
+                                      });
+                                    }
+                                  }}
+                                  className="w-full p-3.5 bg-white hover:bg-emerald-50/70 border-2 border-slate-200 hover:border-emerald-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                                >
+                                  <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                    🔄
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-xs font-black text-slate-900 group-hover:text-emerald-700 truncate">
+                                      Changer l'état de la Cible
+                                    </div>
+                                    <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                      Transformer « {wizardTargetName} »
+                                    </div>
+                                  </div>
+                                </button>
+
+                                {/* 2. Détruire la Cible */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    completeWizardWithAction({
+                                      type: 'delete_entity',
+                                      targetMode: 'target',
+                                      targetType: activeWizard.targetType,
+                                    });
+                                  }}
+                                  className="w-full p-3.5 bg-white hover:bg-rose-50/70 border-2 border-slate-200 hover:border-rose-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                                >
+                                  <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                    💥
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-xs font-black text-slate-900 group-hover:text-rose-700 truncate">
+                                      Détruire la Cible
+                                    </div>
+                                    <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                      Faire disparaître « {wizardTargetName} »
+                                    </div>
+                                  </div>
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* SECTION 3 : MONDE & EFFETS */}
+                          <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-3xl border border-slate-200/90 flex flex-col h-full shadow-2xs">
+                            {/* En-tête Monde & Effets */}
+                            <div className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-purple-50 border border-purple-200/80 shadow-2xs">
+                              <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 border border-purple-200 flex items-center justify-center text-xl shrink-0 shadow-2xs">
+                                🌐
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-purple-600 text-white shadow-2xs">
+                                    Monde & Effets
+                                  </span>
+                                </div>
+                                <div className="text-xs font-bold text-slate-700 truncate mt-0.5">
+                                  Apparitions, sons & tiers
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Actions Monde & Effets */}
+                            <div className="space-y-2.5 flex-1">
+                              {/* 1. Créer un nouvel Objet (Spawn) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    actionSubStep: 'spawn_entity_picker',
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-amber-50/70 border-2 border-slate-200 hover:border-amber-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  ✨
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-amber-700 truncate">
+                                    Créer un nouvel Objet (Spawn)
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Faire apparaître sur la scène
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 2. Jouer un effet sonore */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    actionSubStep: 'sound_picker',
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-purple-50/70 border-2 border-slate-200 hover:border-purple-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🔊
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-purple-700 truncate">
+                                    Jouer un effet sonore
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Effets audio ou voix micro
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 3. Changer un Autre Objet (Tierce) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    actionSubStep: 'third_party_entity_picker',
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-cyan-50/70 border-2 border-slate-200 hover:border-cyan-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-cyan-100 text-cyan-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🪄
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-cyan-700 truncate">
+                                    Changer un Autre Objet (Tierce)
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Modifier une entité C à distance
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 4. Détruire un Autre Objet (Tierce) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    actionSubStep: 'third_party_destroy_picker',
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-rose-50/70 border-2 border-slate-200 hover:border-rose-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  💣
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-rose-700 truncate">
+                                    Détruire un Autre Objet (Tierce)
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Supprimer une entité C à distance
+                                  </div>
+                                </div>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Créer sans action immédiate */}
+                        <div className="flex justify-end pt-3 border-t border-slate-100">
                           <button
                             type="button"
-                            onClick={() => {
-                              const tarEnt = getEntityObj(activeWizard.targetType);
-                              const statesList = tarEnt ? Object.values(tarEnt.states) : [];
-                              if (statesList.length > 1) {
-                                setActiveWizard({
-                                  ...activeWizard,
-                                  actionTargetMode: 'target',
-                                  actionTargetType: activeWizard.targetType,
-                                  actionSubStep: 'state_picker',
-                                });
-                              } else {
-                                completeWizardWithAction({
-                                  type: 'change_state',
-                                  targetMode: 'target',
-                                  targetType: activeWizard.targetType,
-                                });
-                              }
-                            }}
-                            className="p-4 bg-slate-50 hover:bg-emerald-50 border-2 border-slate-200 hover:border-emerald-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
+                            onClick={() => completeWizardWithAction(undefined)}
+                            className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-2xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
                           >
-                            <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                              🔄
-                            </div>
-                            <div>
-                              <div className="text-xs font-black text-slate-900 group-hover:text-emerald-700">
-                                Changer l'état de la Cible
-                              </div>
-                              <div className="text-[11px] text-slate-500 mt-0.5">
-                                Transformer l'objet touché
-                              </div>
-                            </div>
+                            <span>Terminer sans action (+ Action plus tard)</span>
+                            <ChevronRight className="w-4 h-4" />
                           </button>
-                        )}
-
-                        {/* 2. Changer d'état du Sujet */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const subEnt = getEntityObj(activeWizard.subjectType);
-                            const statesList = subEnt ? Object.values(subEnt.states) : [];
-                            if (statesList.length > 1) {
-                              setActiveWizard({
-                                ...activeWizard,
-                                actionTargetMode: 'subject',
-                                actionTargetType: activeWizard.subjectType,
-                                actionSubStep: 'state_picker',
-                              });
-                            } else {
-                              completeWizardWithAction({
-                                type: 'change_state',
-                                targetMode: 'subject',
-                                targetType: activeWizard.subjectType,
-                              });
-                            }
-                          }}
-                          className="p-4 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            🔄
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-indigo-700">
-                              Changer l'état du Sujet
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">
-                              Transformer l'objet qui agit
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* 3. Changer d'état d'un Autre Objet (Entité Tierce) */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWizard({
-                              ...activeWizard,
-                              actionSubStep: 'third_party_entity_picker',
-                            });
-                          }}
-                          className="p-4 bg-slate-50 hover:bg-cyan-50 border-2 border-slate-200 hover:border-cyan-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-cyan-100 text-cyan-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            🪄
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-cyan-700">
-                              Changer un Autre Objet (Tierce)
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">
-                              Modifier l'état d'un objet C à distance
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* 4. Basculer l'état (Toggle ⇄ / Cycle entre les états) */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWizard({
-                              ...activeWizard,
-                              actionSubStep: 'toggle_entity_picker',
-                            });
-                          }}
-                          className="p-4 bg-slate-50 hover:bg-violet-50 border-2 border-slate-200 hover:border-violet-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            🔀
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-violet-700">
-                              Basculer l'état (Toggle ⇄ / Cycle)
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">
-                              Alterner A ⇄ B ou cycler entre tous les états
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* 5. Détruire la Cible (si collision) */}
-                        {activeWizard.triggerType === 'collision' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              completeWizardWithAction({
-                                type: 'delete_entity',
-                                targetMode: 'target',
-                                targetType: activeWizard.targetType,
-                              });
-                            }}
-                            className="p-4 bg-slate-50 hover:bg-rose-50 border-2 border-slate-200 hover:border-rose-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                          >
-                            <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                              💥
-                            </div>
-                            <div>
-                              <div className="text-xs font-black text-slate-900 group-hover:text-rose-700">
-                                Détruire la Cible
-                              </div>
-                              <div className="text-[11px] text-slate-500 mt-0.5">
-                                Faire disparaître l'objet touché
-                              </div>
-                            </div>
-                          </button>
-                        )}
-
-                        {/* 6. Détruire le Sujet */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            completeWizardWithAction({
-                              type: 'delete_entity',
-                              targetMode: 'subject',
-                              targetType: activeWizard.subjectType,
-                            });
-                          }}
-                          className="p-4 bg-slate-50 hover:bg-rose-50 border-2 border-slate-200 hover:border-rose-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            💥
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-rose-700">
-                              Détruire le Sujet
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">
-                              Faire disparaître l'objet qui agit
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* 7. Détruire un Autre Objet (Tierce) */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWizard({
-                              ...activeWizard,
-                              actionSubStep: 'third_party_destroy_picker',
-                            });
-                          }}
-                          className="p-4 bg-slate-50 hover:bg-rose-50 border-2 border-slate-200 hover:border-rose-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            💣
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-rose-700">
-                              Détruire un Autre Objet (Tierce)
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">
-                              Supprimer une entité C à distance
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* 8. Créer un Objet (Spawn) */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWizard({
-                              ...activeWizard,
-                              actionSubStep: 'spawn_entity_picker',
-                            });
-                          }}
-                          className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            ✨
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-amber-700">
-                              Créer un nouvel Objet (Spawn)
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">
-                              Faire apparaître (marquage scène / relatif / aléatoire)
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* 9. Jouer un son */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWizard({
-                              ...activeWizard,
-                              actionSubStep: 'sound_picker',
-                            });
-                          }}
-                          className="p-4 bg-slate-50 hover:bg-purple-50 border-2 border-slate-200 hover:border-purple-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            🔊
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-purple-700">
-                              Jouer un effet sonore
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">
-                              Victoire, Magie, Pop, Rebond...
-                            </div>
-                          </div>
-                        </button>
+                        </div>
                       </div>
-
-                      {/* Créer sans action immédiate */}
-                      <div className="flex justify-end pt-3 border-t border-slate-100">
-                        <button
-                          type="button"
-                          onClick={() => completeWizardWithAction(undefined)}
-                          className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-2xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                        >
-                          <span>Terminer sans action (+ Action plus tard)</span>
-                          <ChevronRight className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Sous-étape : Choix de l'état (Sujet ou Cible) */}
                   {activeWizard.actionSubStep === 'state_picker' && (() => {
@@ -1932,8 +2378,57 @@ export function RuleBook() {
                   {/* Sous-étape : Choix du son */}
                   {activeWizard.actionSubStep === 'sound_picker' && (
                     <div className="space-y-4">
-                      <div className="text-xs font-bold text-slate-600">
-                        Cliquez sur l'effet sonore à jouer :
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="text-xs font-bold text-slate-600">
+                          Cliquez sur l'effet sonore à jouer :
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsSoundModalOpen(true)}
+                          className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-xl border border-purple-200 flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                        >
+                          <Mic className="w-3.5 h-3.5" />
+                          <span>+ Enregistrer micro / Importer</span>
+                        </button>
+                      </div>
+
+                      {/* Sons personnalisés (Micro & Upload) */}
+                      {customSounds.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-[10px] font-black uppercase text-purple-800 tracking-wider">
+                            Mes Sons ({customSounds.length})
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                            {customSounds.map((snd) => (
+                              <button
+                                key={snd.id}
+                                type="button"
+                                onClick={() => {
+                                  soundSynth.playCustom(snd.dataUrl);
+                                  completeWizardWithAction({
+                                    type: 'play_sound',
+                                    customSoundId: snd.id,
+                                  });
+                                }}
+                                className="p-3 bg-purple-50/70 hover:bg-purple-100/90 border border-purple-200 rounded-2xl flex items-center gap-2.5 text-left cursor-pointer transition-all shadow-2xs group"
+                              >
+                                <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0">
+                                  {snd.source === 'mic' ? '🎤' : '📁'}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="text-xs font-bold text-slate-800 truncate">{snd.name}</div>
+                                  <div className="text-[10px] text-purple-700 font-medium">
+                                    {snd.duration ? `${snd.duration}s` : 'Audio'}
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                        Sons Prédéfinis
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
                         {[
@@ -1979,7 +2474,9 @@ export function RuleBook() {
       {/* ========================================================================= */}
       {activeModal && (
         <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 max-w-2xl w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col overflow-hidden">
+          <div className={`bg-white rounded-3xl border border-slate-200 p-6 w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col overflow-hidden ${
+            activeModal.type === 'action' ? 'max-w-5xl' : 'max-w-2xl'
+          }`}>
             {/* 1. SUJET / CIBLE MODAL */}
             {(activeModal.type === 'subject' || activeModal.type === 'target') && (() => {
               const rule = rules.find((r) => r.id === activeModal.ruleId);
@@ -2334,210 +2831,315 @@ export function RuleBook() {
                   </div>
 
                   <div className="overflow-y-auto pr-1 flex-1 py-1">
-                    {(!activeModal.subStep || activeModal.subStep === 'main') && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                        {/* Changer état Cible */}
-                        {isCollision && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const ent = getEntityObj(targetType);
-                              if (ent && Object.values(ent.states).length > 1) {
-                                setActiveModal({
-                                  ...activeModal,
-                                  subStep: 'choose_state',
-                                  targetMode: 'target',
-                                  selectedTargetType: targetType,
-                                });
-                              } else {
-                                applyAction({
-                                  type: 'change_state',
-                                  targetMode: 'target',
-                                  targetType,
-                                });
-                              }
-                            }}
-                            className="p-4 bg-slate-50 hover:bg-emerald-50 border-2 border-slate-200 hover:border-emerald-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                          >
-                            <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                              🔄
-                            </div>
-                            <div>
-                              <div className="text-xs font-black text-slate-900 group-hover:text-emerald-700">
-                                Changer l'état de la Cible
+                    {(!activeModal.subStep || activeModal.subStep === 'main') && (() => {
+                      const modalSubjectEntity = getEntityObj(subjectType);
+                      const modalSubjectOpt = availableEntityOptions.find((o) => o.type === subjectType);
+                      const modalSubjectName = modalSubjectEntity?.name || modalSubjectOpt?.label || subjectType;
+
+                      const modalTargetEntity = getEntityObj(targetType);
+                      const modalTargetOpt = availableEntityOptions.find((o) => o.type === targetType);
+                      const modalTargetName = modalTargetEntity?.name || modalTargetOpt?.label || targetType;
+
+                      return (
+                        <div className={`grid grid-cols-1 ${isCollision ? 'lg:grid-cols-3 md:grid-cols-2' : 'md:grid-cols-2'} gap-4 items-start`}>
+                          {/* SECTION 1 : SUJET */}
+                          <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-3xl border border-slate-200/90 flex flex-col h-full shadow-2xs">
+                            {/* En-tête Sujet avec miniature et nom de l'entité */}
+                            <div className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-indigo-50 border border-indigo-200/80 shadow-2xs">
+                              <div className="w-10 h-10 rounded-xl bg-white border border-indigo-200 flex items-center justify-center p-1 shadow-2xs shrink-0">
+                                <EntityMiniPreview
+                                  entity={modalSubjectEntity}
+                                  type={subjectType}
+                                  stateId={rule.trigger.subjectStateId}
+                                  size={36}
+                                />
                               </div>
-                              <div className="text-[11px] text-slate-500 mt-0.5">Modifier l'apparence</div>
-                            </div>
-                          </button>
-                        )}
-
-                        {/* Changer état Sujet */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const ent = getEntityObj(subjectType);
-                            if (ent && Object.values(ent.states).length > 1) {
-                              setActiveModal({
-                                ...activeModal,
-                                subStep: 'choose_state',
-                                targetMode: 'subject',
-                                selectedTargetType: subjectType,
-                              });
-                            } else {
-                              applyAction({
-                                type: 'change_state',
-                                targetMode: 'subject',
-                                targetType: subjectType,
-                              });
-                            }
-                          }}
-                          className="p-4 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            🔄
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-indigo-700">
-                              Changer l'état du Sujet
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">Modifier l'apparence</div>
-                          </div>
-                        </button>
-
-                        {/* Changer état d'un Autre Objet (Entité Tierce) */}
-                        <button
-                          type="button"
-                          onClick={() => setActiveModal({ ...activeModal, subStep: 'choose_third_party_entity' })}
-                          className="p-4 bg-slate-50 hover:bg-cyan-50 border-2 border-slate-200 hover:border-cyan-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-cyan-100 text-cyan-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            🪄
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-cyan-700">
-                              Changer un Autre Objet (Tierce)
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">Modifier une entité C à distance</div>
-                          </div>
-                        </button>
-
-                        {/* Basculer entre états (Toggle) */}
-                        <button
-                          type="button"
-                          onClick={() => setActiveModal({ ...activeModal, subStep: 'choose_toggle_entity' })}
-                          className="p-4 bg-slate-50 hover:bg-violet-50 border-2 border-slate-200 hover:border-violet-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            🔀
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-violet-700">
-                              Basculer l'état (Toggle ⇄)
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">Alterner A ⇄ B ou cycler</div>
-                          </div>
-                        </button>
-
-                        {/* Détruire Cible */}
-                        {isCollision && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              applyAction({
-                                type: 'delete_entity',
-                                targetMode: 'target',
-                                targetType,
-                              });
-                            }}
-                            className="p-4 bg-slate-50 hover:bg-rose-50 border-2 border-slate-200 hover:border-rose-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                          >
-                            <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                              💥
-                            </div>
-                            <div>
-                              <div className="text-xs font-black text-slate-900 group-hover:text-rose-700">
-                                Détruire la Cible
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-indigo-600 text-white shadow-2xs">
+                                    Sujet (Qui agit)
+                                  </span>
+                                </div>
+                                <div className="text-sm font-black text-slate-800 truncate mt-0.5" title={modalSubjectName}>
+                                  {modalSubjectName}
+                                </div>
                               </div>
-                              <div className="text-[11px] text-slate-500 mt-0.5">Faire disparaître</div>
                             </div>
-                          </button>
-                        )}
 
-                        {/* Détruire Sujet */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            applyAction({
-                              type: 'delete_entity',
-                              targetMode: 'subject',
-                              targetType: subjectType,
-                            });
-                          }}
-                          className="p-4 bg-slate-50 hover:bg-rose-50 border-2 border-slate-200 hover:border-rose-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            💥
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-rose-700">
-                              Détruire le Sujet
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">Faire disparaître</div>
-                          </div>
-                        </button>
+                            {/* Actions sur le Sujet */}
+                            <div className="space-y-2.5 flex-1">
+                              {/* 1. Changer l'état du Sujet */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const ent = getEntityObj(subjectType);
+                                  if (ent && Object.values(ent.states).length > 1) {
+                                    setActiveModal({
+                                      ...activeModal,
+                                      subStep: 'choose_state',
+                                      targetMode: 'subject',
+                                      selectedTargetType: subjectType,
+                                    });
+                                  } else {
+                                    applyAction({
+                                      type: 'change_state',
+                                      targetMode: 'subject',
+                                      targetType: subjectType,
+                                    });
+                                  }
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-indigo-50/70 border-2 border-slate-200 hover:border-indigo-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🔄
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-indigo-700 truncate">
+                                    Changer l'état du Sujet
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Transformer « {modalSubjectName} »
+                                  </div>
+                                </div>
+                              </button>
 
-                        {/* Détruire Autre Objet (Tierce) */}
-                        <button
-                          type="button"
-                          onClick={() => setActiveModal({ ...activeModal, subStep: 'choose_third_party_destroy' })}
-                          className="p-4 bg-slate-50 hover:bg-rose-50 border-2 border-slate-200 hover:border-rose-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            💣
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-rose-700">
-                              Détruire un Autre Objet (Tierce)
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">Supprimer une entité C à distance</div>
-                          </div>
-                        </button>
+                              {/* 2. Basculer entre états (Toggle) */}
+                              <button
+                                type="button"
+                                onClick={() => setActiveModal({ ...activeModal, subStep: 'choose_toggle_entity' })}
+                                className="w-full p-3.5 bg-white hover:bg-violet-50/70 border-2 border-slate-200 hover:border-violet-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🔀
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-violet-700 truncate">
+                                    Basculer l'état (Toggle ⇄ / Cycle)
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Alterner A ⇄ B sur « {modalSubjectName} »
+                                  </div>
+                                </div>
+                              </button>
 
-                        {/* Créer un Objet */}
-                        <button
-                          type="button"
-                          onClick={() => setActiveModal({ ...activeModal, subStep: 'choose_spawn_entity' })}
-                          className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            ✨
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-amber-700">
-                              Créer un Objet (Spawn)
+                              {/* 3. Détruire le Sujet */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  applyAction({
+                                    type: 'delete_entity',
+                                    targetMode: 'subject',
+                                    targetType: subjectType,
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-rose-50/70 border-2 border-slate-200 hover:border-rose-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  💥
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-rose-700 truncate">
+                                    Détruire le Sujet
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Faire disparaître « {modalSubjectName} »
+                                  </div>
+                                </div>
+                              </button>
                             </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">Faire apparaître</div>
                           </div>
-                        </button>
 
-                        {/* Jouer un son */}
-                        <button
-                          type="button"
-                          onClick={() => setActiveModal({ ...activeModal, subStep: 'choose_sound' })}
-                          className="p-4 bg-slate-50 hover:bg-purple-50 border-2 border-slate-200 hover:border-purple-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                        >
-                          <div className="w-14 h-14 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                            🔊
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-purple-700">
-                              Jouer un son
+                          {/* SECTION 2 : CIBLE (Si Collision) */}
+                          {isCollision && (
+                            <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-3xl border border-slate-200/90 flex flex-col h-full shadow-2xs">
+                              {/* En-tête Cible avec miniature et nom de l'entité */}
+                              <div className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-emerald-50 border border-emerald-200/80 shadow-2xs">
+                                <div className="w-10 h-10 rounded-xl bg-white border border-emerald-200 flex items-center justify-center p-1 shadow-2xs shrink-0">
+                                  <EntityMiniPreview
+                                    entity={modalTargetEntity}
+                                    type={targetType}
+                                    stateId={rule.trigger.targetStateId}
+                                    size={36}
+                                  />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-600 text-white shadow-2xs">
+                                      Cible (Touchée)
+                                    </span>
+                                  </div>
+                                  <div className="text-sm font-black text-slate-800 truncate mt-0.5" title={modalTargetName}>
+                                    {modalTargetName}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Actions sur la Cible */}
+                              <div className="space-y-2.5 flex-1">
+                                {/* 1. Changer état Cible */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const ent = getEntityObj(targetType);
+                                    if (ent && Object.values(ent.states).length > 1) {
+                                      setActiveModal({
+                                        ...activeModal,
+                                        subStep: 'choose_state',
+                                        targetMode: 'target',
+                                        selectedTargetType: targetType,
+                                      });
+                                    } else {
+                                      applyAction({
+                                        type: 'change_state',
+                                        targetMode: 'target',
+                                        targetType,
+                                      });
+                                    }
+                                  }}
+                                  className="w-full p-3.5 bg-white hover:bg-emerald-50/70 border-2 border-slate-200 hover:border-emerald-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                                >
+                                  <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                    🔄
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-xs font-black text-slate-900 group-hover:text-emerald-700 truncate">
+                                      Changer l'état de la Cible
+                                    </div>
+                                    <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                      Transformer « {modalTargetName} »
+                                    </div>
+                                  </div>
+                                </button>
+
+                                {/* 2. Détruire Cible */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    applyAction({
+                                      type: 'delete_entity',
+                                      targetMode: 'target',
+                                      targetType,
+                                    });
+                                  }}
+                                  className="w-full p-3.5 bg-white hover:bg-rose-50/70 border-2 border-slate-200 hover:border-rose-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                                >
+                                  <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                    💥
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-xs font-black text-slate-900 group-hover:text-rose-700 truncate">
+                                      Détruire la Cible
+                                    </div>
+                                    <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                      Faire disparaître « {modalTargetName} »
+                                    </div>
+                                  </div>
+                                </button>
+                              </div>
                             </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">Effet audio</div>
+                          )}
+
+                          {/* SECTION 3 : MONDE & EFFETS */}
+                          <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-3xl border border-slate-200/90 flex flex-col h-full shadow-2xs">
+                            {/* En-tête Monde & Effets */}
+                            <div className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-purple-50 border border-purple-200/80 shadow-2xs">
+                              <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 border border-purple-200 flex items-center justify-center text-xl shrink-0 shadow-2xs">
+                                🌐
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-purple-600 text-white shadow-2xs">
+                                    Monde & Effets
+                                  </span>
+                                </div>
+                                <div className="text-xs font-bold text-slate-700 truncate mt-0.5">
+                                  Apparitions, sons & tiers
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Actions Monde & Effets */}
+                            <div className="space-y-2.5 flex-1">
+                              {/* 1. Créer un Objet */}
+                              <button
+                                type="button"
+                                onClick={() => setActiveModal({ ...activeModal, subStep: 'choose_spawn_entity' })}
+                                className="w-full p-3.5 bg-white hover:bg-amber-50/70 border-2 border-slate-200 hover:border-amber-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  ✨
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-amber-700 truncate">
+                                    Créer un nouvel Objet (Spawn)
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Faire apparaître sur la scène
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 2. Jouer un son */}
+                              <button
+                                type="button"
+                                onClick={() => setActiveModal({ ...activeModal, subStep: 'choose_sound' })}
+                                className="w-full p-3.5 bg-white hover:bg-purple-50/70 border-2 border-slate-200 hover:border-purple-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🔊
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-purple-700 truncate">
+                                    Jouer un effet sonore
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Effets audio ou voix micro
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 3. Changer état d'un Autre Objet (Entité Tierce) */}
+                              <button
+                                type="button"
+                                onClick={() => setActiveModal({ ...activeModal, subStep: 'choose_third_party_entity' })}
+                                className="w-full p-3.5 bg-white hover:bg-cyan-50/70 border-2 border-slate-200 hover:border-cyan-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-cyan-100 text-cyan-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🪄
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-cyan-700 truncate">
+                                    Changer un Autre Objet (Tierce)
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Modifier une entité C à distance
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 4. Détruire Autre Objet (Tierce) */}
+                              <button
+                                type="button"
+                                onClick={() => setActiveModal({ ...activeModal, subStep: 'choose_third_party_destroy' })}
+                                className="w-full p-3.5 bg-white hover:bg-rose-50/70 border-2 border-slate-200 hover:border-rose-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  💣
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-rose-700 truncate">
+                                    Détruire un Autre Objet (Tierce)
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Supprimer une entité C à distance
+                                  </div>
+                                </div>
+                              </button>
+                            </div>
                           </div>
-                        </button>
-                      </div>
-                    )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Choix d'état direct */}
                     {activeModal.subStep === 'choose_state' && (() => {
@@ -2874,35 +3476,89 @@ export function RuleBook() {
 
                     {/* Choix du son */}
                     {activeModal.subStep === 'choose_sound' && (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
-                        {[
-                          { id: 'win', label: '🏆 Victoire' },
-                          { id: 'magic', label: '✨ Magie' },
-                          { id: 'pop', label: '🎈 Pop' },
-                          { id: 'bounce', label: '🏀 Rebond' },
-                          { id: 'bell', label: '🔔 Cloche' },
-                          { id: 'laser', label: '⚡ Laser' },
-                        ].map((s) => (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div className="text-xs font-bold text-slate-600">
+                            Choisissez un son ou enregistrez votre voix :
+                          </div>
                           <button
-                            key={s.id}
                             type="button"
-                            onClick={() => {
-                              soundSynth.play(s.id as any);
-                              applyAction({
-                                type: 'play_sound',
-                                soundType: s.id as any,
-                              });
-                            }}
-                            className="p-5 bg-slate-50 hover:bg-purple-50 border-2 border-slate-200 hover:border-purple-500 rounded-3xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-xs group active:scale-95"
+                            onClick={() => setIsSoundModalOpen(true)}
+                            className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-xl border border-purple-200 flex items-center gap-1.5 cursor-pointer shadow-2xs"
                           >
-                            <span className="text-3xl group-hover:scale-125 transition-transform">
-                              {s.label.split(' ')[0]}
-                            </span>
-                            <span className="text-xs font-black text-slate-800 group-hover:text-purple-700">
-                              {s.label.split(' ')[1]}
-                            </span>
+                            <Mic className="w-3.5 h-3.5" />
+                            <span>+ Enregistrer micro / Importer</span>
                           </button>
-                        ))}
+                        </div>
+
+                        {/* Sons personnalisés (Micro & Upload) */}
+                        {customSounds.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="text-[10px] font-black uppercase text-purple-800 tracking-wider">
+                              Mes Sons ({customSounds.length})
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                              {customSounds.map((snd) => (
+                                <button
+                                  key={snd.id}
+                                  type="button"
+                                  onClick={() => {
+                                    soundSynth.playCustom(snd.dataUrl);
+                                    applyAction({
+                                      type: 'play_sound',
+                                      customSoundId: snd.id,
+                                    });
+                                  }}
+                                  className="p-3 bg-purple-50/70 hover:bg-purple-100/90 border border-purple-200 rounded-2xl flex items-center gap-2.5 text-left cursor-pointer transition-all shadow-2xs group"
+                                >
+                                  <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0">
+                                    {snd.source === 'mic' ? '🎤' : '📁'}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="text-xs font-bold text-slate-800 truncate">{snd.name}</div>
+                                    <div className="text-[10px] text-purple-700 font-medium">
+                                      {snd.duration ? `${snd.duration}s` : 'Audio'}
+                                    </div>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                          Sons Synthétisés
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+                          {[
+                            { id: 'win', label: '🏆 Victoire' },
+                            { id: 'magic', label: '✨ Magie' },
+                            { id: 'pop', label: '🎈 Pop' },
+                            { id: 'bounce', label: '🏀 Rebond' },
+                            { id: 'bell', label: '🔔 Cloche' },
+                            { id: 'laser', label: '⚡ Laser' },
+                          ].map((s) => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => {
+                                soundSynth.play(s.id as any);
+                                applyAction({
+                                  type: 'play_sound',
+                                  soundType: s.id as any,
+                                });
+                              }}
+                              className="p-5 bg-slate-50 hover:bg-purple-50 border-2 border-slate-200 hover:border-purple-500 rounded-3xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-xs group active:scale-95"
+                            >
+                              <span className="text-3xl group-hover:scale-125 transition-transform">
+                                {s.label.split(' ')[0]}
+                              </span>
+                              <span className="text-xs font-black text-slate-800 group-hover:text-purple-700">
+                                {s.label.split(' ')[1]}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -2912,6 +3568,36 @@ export function RuleBook() {
           </div>
         </div>
       )}
+
+      {/* Boîte modale de gestion et enregistrement des sons audio */}
+      <SoundRecorderModal
+        isOpen={isSoundModalOpen}
+        onClose={() => setIsSoundModalOpen(false)}
+        onSelectSound={(sound) => {
+          if (activeModal && activeModal.type === 'action') {
+            const rule = rules.find((r) => r.id === activeModal.ruleId);
+            if (rule) {
+              const updatedActions = [...rule.actions];
+              const newAct: RuleAction = {
+                id: `act-${Date.now()}`,
+                type: 'play_sound',
+                customSoundId: sound.id,
+              };
+              if (activeModal.actionIndex !== undefined) {
+                updatedActions[activeModal.actionIndex] = {
+                  ...updatedActions[activeModal.actionIndex],
+                  type: 'play_sound',
+                  customSoundId: sound.id,
+                };
+              } else {
+                updatedActions.push(newAct);
+              }
+              updateRule(rule.id, { actions: updatedActions });
+              setActiveModal(null);
+            }
+          }
+        }}
+      />
     </div>
   );
 }

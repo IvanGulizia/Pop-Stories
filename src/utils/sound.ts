@@ -112,6 +112,22 @@ class SoundSynth {
       }
     }
   }
+
+  playCustom(dataUrl: string) {
+    if (typeof window === 'undefined' || !dataUrl) return;
+    try {
+      const audio = new Audio(dataUrl);
+      audio.volume = 0.85;
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn('Audio playback was prevented:', err);
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to play custom sound', e);
+    }
+  }
 }
 
 export const soundSynth = new SoundSynth();
