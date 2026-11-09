@@ -89,6 +89,7 @@ interface WizardData {
   targetSubStep?: 'choose_object' | 'choose_state';
   actionSubStep?:
     | 'main'
+    | 'config_event_params'
     | 'state_picker'
     | 'third_party_entity_picker'
     | 'third_party_state_picker'
@@ -146,8 +147,13 @@ export function RuleBook() {
   const deleteFolder = useSceneStore((state) => state.deleteFolder);
   const settings = useSceneStore((state) => state.settings);
 
-  const [filterType, setFilterType] = useState<'all' | 'collision' | 'click'>('all');
+  // Pagination & Rule Drag-and-Drop state
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [draggedRuleId, setDraggedRuleId] = useState<string | null>(null);
+  const [dragOverRuleTarget, setDragOverRuleTarget] = useState<{ id: string; position: 'above' | 'below' } | null>(null);
+  const RULES_PER_PAGE = 5;
   const [filterObject, setFilterObject] = useState<string>('all');
+  const [filterType, setFilterType] = useState<string>('all');
   const [showFiltersManual, setShowFiltersManual] = useState(false);
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
   const [activeWizard, setActiveWizard] = useState<WizardData | null>(null);
@@ -413,6 +419,10 @@ export function RuleBook() {
     }
     return true;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredRules.length / RULES_PER_PAGE));
+  const validPage = Math.min(Math.max(1, currentPage), totalPages);
+  const paginatedRules = filteredRules.slice((validPage - 1) * RULES_PER_PAGE, validPage * RULES_PER_PAGE);
 
   return (
     <div className="bg-slate-50/80 rounded-3xl border border-slate-200 p-4 sm:p-5 flex flex-col h-full overflow-hidden text-slate-800 space-y-3.5">
@@ -753,7 +763,7 @@ export function RuleBook() {
             </p>
           </div>
         ) : (
-          filteredRules.map((rule) => {
+          paginatedRules.map((rule) => {
             const isCollision = rule.trigger.type === 'collision' || rule.trigger.type === 'proximity';
 
             // Find subject display info
@@ -808,7 +818,8 @@ export function RuleBook() {
               eventIcon = '⏱️';
               eventSub = rule.trigger.timerType === 'once' ? 'Après délai' : 'Chaque intervalle';
             } else if (rule.trigger.type === 'keyboard') {
-              eventName = `Touche [${rule.trigger.keyName || 'Espace'}]`;
+              const kPhase = rule.trigger.phase === 'up' || rule.trigger.phase === 'key_up' ? ' (Relâché)' : ' (Appui)';
+              eventName = `Touche [${rule.trigger.keyName || 'Espace'}]${kPhase}`;
               eventIcon = '⌨️';
               eventSub = 'Touche Clavier';
             } else if (rule.trigger.type === 'state_change') {
@@ -849,40 +860,75 @@ export function RuleBook() {
 
             const subjectSlotKey = `${rule.id}-subject`;
             const targetSlotKey = `${rule.id}-target`;
-            const isCollapsed = !!collapsedRuleIds[rule.id];
+            // Default rules to collapsed state (Request 3)
+            const isCollapsed = collapsedRuleIds[rule.id] !== false;
+
+            const isRuleTargeted = dragOverRuleTarget?.id === rule.id;
+            const showGapAbove = isRuleTargeted && dragOverRuleTarget.position === 'above';
+            const showGapBelow = isRuleTargeted && dragOverRuleTarget.position === 'below';
 
             return (
-              <div
-                key={rule.id}
-                className={`p-3.5 sm:p-4 rounded-3xl border transition-all shadow-xs ${
-                  rule.enabled
-                    ? 'bg-white border-slate-200/90 hover:border-slate-300'
-                    : 'bg-slate-50/70 border-slate-200/50 opacity-60'
-                }`}
-              >
-                {/* 1. Header Bar: Accordion Toggle, Name, Folder picker, Active toggle, Duplicate, Delete */}
-                <div className="flex items-center justify-between gap-2 flex-wrap mb-2.5">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {/* Drag handle for rule hierarchy reordering */}
-                    <div
-                      draggable={true}
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData('text/rule-id', rule.id);
-                        e.dataTransfer.effectAllowed = 'move';
-                      }}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        const sourceId = e.dataTransfer.getData('text/rule-id');
-                        if (sourceId && sourceId !== rule.id) {
-                          useSceneStore.getState().reorderRules(sourceId, rule.id);
-                        }
-                      }}
-                      className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded cursor-grab active:cursor-grabbing flex items-center justify-center"
-                      title="Glisser-déposer pour réordonner cette règle"
-                    >
-                      <GripVertical className="w-4 h-4" />
-                    </div>
+              <div key={rule.id} className="relative">
+                {/* Visual Drag Indicator ABOVE */}
+                {showGapAbove && (
+                  <div className="my-1.5 py-1.5 px-4 bg-indigo-50 border-2 border-dashed border-indigo-500 rounded-2xl text-center text-indigo-700 text-xs font-bold shadow-xs animate-pulse flex items-center justify-center gap-1.5">
+                    <span>↓ Placer la règle ici (Au-dessus)</span>
+                  </div>
+                )}
+
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const midY = rect.top + rect.height / 2;
+                    const pos = e.clientY < midY ? 'above' : 'below';
+                    if (dragOverRuleTarget?.id !== rule.id || dragOverRuleTarget.position !== pos) {
+                      setDragOverRuleTarget({ id: rule.id, position: pos });
+                    }
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverRuleTarget?.id === rule.id) {
+                      setDragOverRuleTarget(null);
+                    }
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const sourceId = e.dataTransfer.getData('text/rule-id') || draggedRuleId;
+                    if (sourceId && sourceId !== rule.id) {
+                      useSceneStore.getState().reorderRules(sourceId, rule.id, dragOverRuleTarget?.position || 'above');
+                    }
+                    setDraggedRuleId(null);
+                    setDragOverRuleTarget(null);
+                  }}
+                  className={`p-3.5 sm:p-4 rounded-3xl border transition-all shadow-xs ${
+                    isRuleTargeted
+                      ? 'border-indigo-500 ring-2 ring-indigo-400 bg-indigo-50/20'
+                      : rule.enabled
+                      ? 'bg-white border-slate-200/90 hover:border-slate-300'
+                      : 'bg-slate-50/70 border-slate-200/50 opacity-60'
+                  }`}
+                >
+                  {/* 1. Header Bar: Accordion Toggle, Name, Folder picker, Active toggle, Duplicate, Delete */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap mb-2.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* Drag handle for rule hierarchy reordering */}
+                      <div
+                        draggable={true}
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/rule-id', rule.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                          setDraggedRuleId(rule.id);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedRuleId(null);
+                          setDragOverRuleTarget(null);
+                        }}
+                        className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded cursor-grab active:cursor-grabbing flex items-center justify-center"
+                        title="Glisser-déposer pour réordonner cette règle"
+                      >
+                        <GripVertical className="w-4 h-4" />
+                      </div>
 
                     {/* Accordion toggle button */}
                     <button
@@ -1439,10 +1485,50 @@ export function RuleBook() {
                   </div>
                 )}
               </div>
+
+              {/* Visual Drag Indicator BELOW */}
+              {showGapBelow && (
+                <div className="my-1.5 py-1.5 px-4 bg-indigo-50 border-2 border-dashed border-indigo-500 rounded-2xl text-center text-indigo-700 text-xs font-bold shadow-xs animate-pulse flex items-center justify-center gap-1.5">
+                  <span>↑ Placer la règle ici (En-dessous)</span>
+                </div>
+              )}
+            </div>
             );
           })
         )}
       </div>
+
+      {/* --- PAGINATION BAR (Max 5 règles par page) --- */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-3 py-2 bg-white rounded-2xl border border-slate-200/90 text-xs font-bold text-slate-700 shrink-0 shadow-2xs">
+          <button
+            type="button"
+            disabled={validPage === 1}
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:pointer-events-none rounded-xl text-slate-700 transition-all cursor-pointer flex items-center gap-1"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            <span>Précédent</span>
+          </button>
+
+          <div className="flex items-center gap-2">
+            <span className="text-slate-500 text-[11px]">Règles {((validPage - 1) * RULES_PER_PAGE) + 1} à {Math.min(filteredRules.length, validPage * RULES_PER_PAGE)} sur {filteredRules.length}</span>
+            <span className="bg-indigo-50 border border-indigo-200 text-indigo-700 px-2 py-0.5 rounded-lg font-mono">
+              Page {validPage} / {totalPages}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            disabled={validPage === totalPages}
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:pointer-events-none rounded-xl text-slate-700 transition-all cursor-pointer flex items-center gap-1"
+          >
+            <span>Suivant</span>
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* 🪄 1-CLICK SEQUENTIAL CREATION WIZARD (Grandes Cartes, 1 Clic par Étape) */}
@@ -1593,8 +1679,8 @@ export function RuleBook() {
                               triggerType: 'timer',
                               timerInterval: 2,
                               timerType: 'repeat',
-                              step: 4,
-                              actionSubStep: 'main',
+                              step: 2,
+                              actionSubStep: 'config_event_params',
                             });
                           }}
                           className="p-5 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex items-center gap-4 cursor-pointer transition-all shadow-xs group active:scale-95 text-left"
@@ -1620,8 +1706,9 @@ export function RuleBook() {
                               ...activeWizard,
                               triggerType: 'keyboard',
                               keyName: 'Space',
-                              step: 4,
-                              actionSubStep: 'main',
+                              triggerPhase: 'down',
+                              step: 2,
+                              actionSubStep: 'config_event_params',
                             });
                           }}
                           className="p-5 bg-slate-50 hover:bg-purple-50 border-2 border-slate-200 hover:border-purple-500 rounded-3xl flex items-center gap-4 cursor-pointer transition-all shadow-xs group active:scale-95 text-left"
@@ -1634,7 +1721,7 @@ export function RuleBook() {
                               Touche de Clavier
                             </div>
                             <div className="text-xs text-slate-500 mt-1">
-                              Espace, Flèches de direction, Touches A, S, D...
+                              Espace, Flèches de direction, Touches A, S, D (Appui ou Relâché)
                             </div>
                           </div>
                         </button>
@@ -1649,8 +1736,8 @@ export function RuleBook() {
                               variableName: 'score',
                               variableOperator: '>=',
                               variableValue: 5,
-                              step: 4,
-                              actionSubStep: 'main',
+                              step: 2,
+                              actionSubStep: 'config_event_params',
                             });
                           }}
                           className="p-5 bg-slate-50 hover:bg-emerald-50 border-2 border-slate-200 hover:border-emerald-500 rounded-3xl flex items-center gap-4 cursor-pointer transition-all shadow-xs group active:scale-95 text-left"
@@ -1676,8 +1763,8 @@ export function RuleBook() {
                               ...activeWizard,
                               triggerType: 'boundary',
                               boundaryEdge: 'any',
-                              step: 4,
-                              actionSubStep: 'main',
+                              step: 2,
+                              actionSubStep: 'config_event_params',
                             });
                           }}
                           className="p-5 bg-slate-50 hover:bg-rose-50 border-2 border-slate-200 hover:border-rose-500 rounded-3xl flex items-center gap-4 cursor-pointer transition-all shadow-xs group active:scale-95 text-left"
@@ -1805,8 +1892,213 @@ export function RuleBook() {
                 </div>
               )}
 
-              {/* ÉTAPE 2 : ÉVÉNEMENT (Organisé en 4 Cases Logiques) */}
+              {/* ÉTAPE 2 : ÉVÉNEMENT (Organisé en Cases Logiques & Écran Intermédiaire de Paramètres) */}
               {activeWizard.step === 2 && (
+                activeWizard.actionSubStep === 'config_event_params' ? (
+                  <div className="bg-slate-50/90 p-6 rounded-3xl border border-slate-200/90 space-y-6 max-w-xl mx-auto shadow-xs animate-in fade-in zoom-in-95">
+                    <div className="flex items-center gap-3 border-b border-slate-200 pb-4">
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-2xl font-black shadow-inner">
+                        ⚙️
+                      </div>
+                      <div>
+                        <h4 className="text-base font-black text-slate-900">
+                          Réglage des paramètres de l'événement
+                        </h4>
+                        <p className="text-xs text-slate-500">
+                          Définissez la valeur exacte pour cet événement avant de continuer.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* 1. Minuteur / Timer */}
+                    {activeWizard.triggerType === 'timer' && (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1">Intervalle de temps (secondes) :</label>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="number"
+                              min={0.5}
+                              step={0.5}
+                              value={activeWizard.timerInterval || 2}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, timerInterval: Math.max(0.5, parseFloat(e.target.value) || 1) })}
+                              className="w-28 text-center text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-400"
+                            />
+                            <span className="text-xs text-slate-500 font-bold">secondes</span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1">Fréquence de déclenchement :</label>
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setActiveWizard({ ...activeWizard, timerType: 'repeat' })}
+                              className={`p-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                                activeWizard.timerType !== 'once' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-2xs' : 'bg-white border-slate-200 text-slate-600'
+                              }`}
+                            >
+                              🔁 Répéter (Toutes les X sec)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveWizard({ ...activeWizard, timerType: 'once' })}
+                              className={`p-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                                activeWizard.timerType === 'once' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-2xs' : 'bg-white border-slate-200 text-slate-600'
+                              }`}
+                            >
+                              1️⃣ Une seule fois (Après X sec)
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 2. Touche de Clavier */}
+                    {activeWizard.triggerType === 'keyboard' && (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1">Touche à détecter :</label>
+                          <select
+                            value={activeWizard.keyName || 'Space'}
+                            onChange={(e) => setActiveWizard({ ...activeWizard, keyName: e.target.value })}
+                            className="w-full text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2.5 outline-none cursor-pointer"
+                          >
+                            <option value="Space">Touche Espace (Spacebar)</option>
+                            <option value="ArrowUp">↑ Flèche Haut</option>
+                            <option value="ArrowDown">↓ Flèche Bas</option>
+                            <option value="ArrowLeft">← Flèche Gauche</option>
+                            <option value="ArrowRight">→ Flèche Droite</option>
+                            <option value="Enter">Touche Entrée</option>
+                            <option value="a">Touche A</option>
+                            <option value="w">Touche W</option>
+                            <option value="s">Touche S</option>
+                            <option value="d">Touche D</option>
+                            <option value="any">N'importe quelle touche</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1">Phase de la touche (Key Down / Key Up) :</label>
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setActiveWizard({ ...activeWizard, triggerPhase: 'down' })}
+                              className={`p-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                                activeWizard.triggerPhase !== 'up' && activeWizard.triggerPhase !== 'key_up'
+                                  ? 'bg-purple-50 border-purple-500 text-purple-700 shadow-2xs'
+                                  : 'bg-white border-slate-200 text-slate-600'
+                              }`}
+                            >
+                              👇 Appui (Key Down)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveWizard({ ...activeWizard, triggerPhase: 'up' })}
+                              className={`p-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                                activeWizard.triggerPhase === 'up' || activeWizard.triggerPhase === 'key_up'
+                                  ? 'bg-purple-50 border-purple-500 text-purple-700 shadow-2xs'
+                                  : 'bg-white border-slate-200 text-slate-600'
+                              }`}
+                            >
+                              🖐️ Relâchement (Key Up)
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3. Proximité */}
+                    {activeWizard.triggerType === 'proximity' && (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1">Rayon de proximité (pixels) :</label>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="number"
+                              min={10}
+                              step={10}
+                              value={activeWizard.proximityDistance || 80}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, proximityDistance: Math.max(10, parseInt(e.target.value) || 50) })}
+                              className="w-32 text-center text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2 outline-none"
+                            />
+                            <span className="text-xs text-slate-500 font-bold">pixels</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 4. Variable / Score */}
+                    {activeWizard.triggerType === 'variable' && (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs font-bold text-slate-700 block mb-1">Comparaison :</label>
+                            <select
+                              value={activeWizard.variableOperator || '>='}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, variableOperator: e.target.value as any })}
+                              className="w-full text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2.5 outline-none cursor-pointer"
+                            >
+                              <option value=">=">Supérieur ou Égal (&gt;=)</option>
+                              <option value="==">Exactement Égal (==)</option>
+                              <option value="<=">Inférieur ou Égal (&lt;=)</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-bold text-slate-700 block mb-1">Valeur du Score :</label>
+                            <input
+                              type="number"
+                              value={activeWizard.variableValue ?? 5}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, variableValue: parseInt(e.target.value) || 0 })}
+                              className="w-full text-center text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2 outline-none"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 5. Bord de Scène */}
+                    {activeWizard.triggerType === 'boundary' && (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1">Bord de scène à contacter :</label>
+                          <select
+                            value={activeWizard.boundaryEdge || 'any'}
+                            onChange={(e) => setActiveWizard({ ...activeWizard, boundaryEdge: e.target.value as any })}
+                            className="w-full text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2.5 outline-none cursor-pointer"
+                          >
+                            <option value="any">N'importe quel bord</option>
+                            <option value="top">Bord Haut</option>
+                            <option value="bottom">Bord Bas</option>
+                            <option value="left">Bord Gauche</option>
+                            <option value="right">Bord Droit</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const needsTarget = activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity';
+                          const nextStep = needsTarget ? 3 : 4;
+                          setActiveWizard({
+                            ...activeWizard,
+                            step: nextStep,
+                            actionSubStep: 'main',
+                            targetSubStep: 'choose_object',
+                          });
+                        }}
+                        className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                      >
+                        <span>Continuer vers {activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity' ? 'la Cible' : "l'Action"}</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
                 <div className="space-y-5">
                   {/* CASE 1 : COLLISIONS & CONTACTS */}
                   <div className="bg-indigo-50/50 p-4 rounded-3xl border border-indigo-200/80 space-y-3">
@@ -2226,7 +2518,7 @@ export function RuleBook() {
 
                     {/* CASE 8 : PROXIMITÉ */}
                     <div className="bg-sky-50/50 p-3.5 rounded-2xl border border-sky-200 space-y-2">
-                      <div className="text-xs font-black uppercase text-sky-800">📏 Proximité (&lt; 80px)</div>
+                      <div className="text-xs font-black uppercase text-sky-800">📏 Proximité</div>
                       <button
                         type="button"
                         onClick={() => {
@@ -2234,8 +2526,7 @@ export function RuleBook() {
                             ...activeWizard,
                             triggerType: 'proximity',
                             proximityDistance: 80,
-                            step: 3,
-                            targetSubStep: 'choose_object',
+                            actionSubStep: 'config_event_params',
                           });
                         }}
                         className="w-full p-2.5 bg-white hover:bg-sky-100 border border-sky-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
@@ -2243,7 +2534,7 @@ export function RuleBook() {
                         <span className="text-xl">📏</span>
                         <div>
                           <div className="text-xs font-black text-slate-900">Approche Cible</div>
-                          <div className="text-[9px] text-slate-500">Moins de 80px de distance</div>
+                          <div className="text-[9px] text-slate-500">Définir le rayon en px →</div>
                         </div>
                       </button>
                     </div>
@@ -2258,8 +2549,7 @@ export function RuleBook() {
                             ...activeWizard,
                             triggerType: 'boundary',
                             boundaryEdge: 'any',
-                            step: 4,
-                            actionSubStep: 'main',
+                            actionSubStep: 'config_event_params',
                           });
                         }}
                         className="w-full p-2.5 bg-white hover:bg-rose-100 border border-rose-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
@@ -2267,7 +2557,7 @@ export function RuleBook() {
                         <span className="text-xl">🖼️</span>
                         <div>
                           <div className="text-xs font-black text-slate-900">Touche le Cadre</div>
-                          <div className="text-[9px] text-slate-500">Contact bord de scène</div>
+                          <div className="text-[9px] text-slate-500">Définir le bord à contacter →</div>
                         </div>
                       </button>
                     </div>
@@ -2284,22 +2574,22 @@ export function RuleBook() {
                             variableName: 'score',
                             variableOperator: '>=',
                             variableValue: 5,
-                            step: 4,
-                            actionSubStep: 'main',
+                            actionSubStep: 'config_event_params',
                           });
                         }}
                         className="w-full p-2.5 bg-white hover:bg-amber-100 border border-amber-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
                       >
                         <span className="text-xl">🏆</span>
                         <div>
-                          <div className="text-xs font-black text-slate-900">Score &gt;= 5</div>
-                          <div className="text-[9px] text-slate-500">Objectif atteint</div>
+                          <div className="text-xs font-black text-slate-900">Score &amp; Compteur</div>
+                          <div className="text-[9px] text-slate-500">Régler le seuil du score →</div>
                         </div>
                       </button>
                     </div>
                   </div>
                 </div>
-              )}
+              )
+            )}
 
               {/* ÉTAPE 3 : CIBLE (Collision - Grandes Cartes) */}
               {activeWizard.step === 3 && (

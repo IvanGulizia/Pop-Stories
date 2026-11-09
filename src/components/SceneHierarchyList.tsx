@@ -26,7 +26,7 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
   const reorderEntities = useSceneStore((state) => state.reorderEntities);
 
   const [draggedEntityId, setDraggedEntityId] = useState<string | null>(null);
-  const [dragOverEntityId, setDragOverEntityId] = useState<string | null>(null);
+  const [dragOverTarget, setDragOverTarget] = useState<{ id: string; position: 'above' | 'below' } | null>(null);
 
   const order = entityOrder && entityOrder.length > 0 ? entityOrder : Object.keys(entities);
   const allKeys = Array.from(new Set([...order, ...Object.keys(entities)]));
@@ -78,54 +78,64 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
       <div className="space-y-1.5 flex-1 overflow-y-auto pr-0.5">
         {displayList.map((entity, index) => {
           const isSelected = selectedEntityId === entity.id;
-          const isTop = index === 0;
-          const isBottom = index === displayList.length - 1;
           const currentState = entity.states[entity.currentStateId];
-          const isDragOver = dragOverEntityId === entity.id;
+          const isTargeted = dragOverTarget?.id === entity.id;
+          const showGapAbove = isTargeted && dragOverTarget.position === 'above';
+          const showGapBelow = isTargeted && dragOverTarget.position === 'below';
 
           return (
-            <div
-              key={entity.id}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData('text/plain', entity.id);
-                e.dataTransfer.effectAllowed = 'move';
-                setDraggedEntityId(entity.id);
-              }}
-              onDragEnd={() => {
-                setDraggedEntityId(null);
-                setDragOverEntityId(null);
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                if (dragOverEntityId !== entity.id) {
-                  setDragOverEntityId(entity.id);
-                }
-              }}
-              onDragLeave={() => {
-                if (dragOverEntityId === entity.id) {
-                  setDragOverEntityId(null);
-                }
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                const sourceId = e.dataTransfer.getData('text/plain') || draggedEntityId;
-                if (sourceId && sourceId !== entity.id) {
-                  reorderEntities(sourceId, entity.id);
-                }
-                setDraggedEntityId(null);
-                setDragOverEntityId(null);
-              }}
-              onClick={() => selectEntity(entity.id)}
-              className={`p-2.5 bg-white border rounded-2xl transition-all cursor-pointer flex flex-col gap-2 group ${
-                isDragOver
-                  ? 'border-indigo-600 ring-2 ring-indigo-400 bg-indigo-50/50 scale-[1.01]'
-                  : isSelected
-                  ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 shadow-xs'
-                  : 'border-slate-200/90 hover:border-slate-300'
-              }`}
-            >
+            <div key={entity.id} className="relative">
+              {/* Drop slot indicator ABOVE */}
+              {showGapAbove && (
+                <div className="my-1.5 py-1.5 px-3 bg-indigo-50 border-2 border-dashed border-indigo-500 rounded-xl text-center text-indigo-700 text-[11px] font-bold shadow-xs animate-pulse flex items-center justify-center gap-1">
+                  <span>↓ Placer ici (Au-dessus)</span>
+                </div>
+              )}
+
+              <div
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('text/plain', entity.id);
+                  e.dataTransfer.effectAllowed = 'move';
+                  setDraggedEntityId(entity.id);
+                }}
+                onDragEnd={() => {
+                  setDraggedEntityId(null);
+                  setDragOverTarget(null);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const midY = rect.top + rect.height / 2;
+                  const pos = e.clientY < midY ? 'above' : 'below';
+                  if (dragOverTarget?.id !== entity.id || dragOverTarget.position !== pos) {
+                    setDragOverTarget({ id: entity.id, position: pos });
+                  }
+                }}
+                onDragLeave={() => {
+                  if (dragOverTarget?.id === entity.id) {
+                    setDragOverTarget(null);
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const sourceId = e.dataTransfer.getData('text/plain') || draggedEntityId;
+                  if (sourceId && sourceId !== entity.id) {
+                    reorderEntities(sourceId, entity.id, dragOverTarget?.position || 'above');
+                  }
+                  setDraggedEntityId(null);
+                  setDragOverTarget(null);
+                }}
+                onClick={() => selectEntity(entity.id)}
+                className={`p-2.5 bg-white border rounded-2xl transition-all cursor-pointer flex flex-col gap-2 group ${
+                  isTargeted
+                    ? 'border-indigo-600 ring-2 ring-indigo-400 bg-indigo-50/50 scale-[1.01]'
+                    : isSelected
+                    ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 shadow-xs'
+                    : 'border-slate-200/90 hover:border-slate-300'
+                }`}
+              >
               {/* Entête d'item : poignée, miniature, nom, état */}
               <div className="flex items-center justify-between gap-2 min-w-0">
                 <div className="flex items-center gap-2 min-w-0">
@@ -181,7 +191,15 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                   </button>
                 </div>
               </div>
+
+              {/* Drop slot indicator BELOW */}
+              {showGapBelow && (
+                <div className="my-1.5 py-1.5 px-3 bg-indigo-50 border-2 border-dashed border-indigo-500 rounded-xl text-center text-indigo-700 text-[11px] font-bold shadow-xs animate-pulse flex items-center justify-center gap-1">
+                  <span>↑ Placer ici (En-dessous)</span>
+                </div>
+              )}
             </div>
+          </div>
           );
         })}
       </div>

@@ -101,8 +101,8 @@ export type TriggerPhase =
   | 'click'             // Clic complet (sans drag)
   | 'mouse_down'        // Appui (MouseDown / PointerDown)
   | 'mouse_up'          // Relâchement souris (MouseUp / PointerUp)
-  | 'down'              // Appui bouton souris
-  | 'up'                // Relâchement bouton souris
+  | 'down'              // Appui (bouton souris ou touche clavier)
+  | 'up'                // Relâchement (bouton souris ou touche clavier)
   | 'drag_release'      // Relâchement du glissement (On Release / Drop)
   | 'drag_start'        // Début du glissement
   | 'enter'             // Entrée en collision ou en survol

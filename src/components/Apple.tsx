@@ -234,6 +234,14 @@ export function Apple({ entity, style }: AppleProps) {
           }
           if (appMode === 'play') {
             triggerPointerEvent(entity.id, 'mouse_down');
+            triggerPointerEvent(entity.id, 'down');
+
+            const handleGlobalUp = () => {
+              window.removeEventListener('pointerup', handleGlobalUp);
+              triggerPointerEvent(entity.id, 'mouse_up');
+              triggerPointerEvent(entity.id, 'up');
+            };
+            window.addEventListener('pointerup', handleGlobalUp, { once: true });
           }
         }}
         onPointerUp={(e) => {

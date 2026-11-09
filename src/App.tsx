@@ -43,16 +43,26 @@ export default function App() {
   const settings = useSceneStore((state) => state.settings);
   const setLayerVectorPaths = useSceneStore((state) => state.setLayerVectorPaths);
 
-  // Keyboard Event Listener in Play Mode
+  // Keyboard Event Listener in Play Mode (Down & Up phases)
   useEffect(() => {
     if (appMode !== 'play') return;
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      useSceneStore.getState().triggerKeyEvent(e.key);
+      if (e.repeat) return; // Ignore continuous auto-repeat key events
+      useSceneStore.getState().triggerKeyEvent(e.key, 'down');
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      useSceneStore.getState().triggerKeyEvent(e.key, 'up');
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
   }, [appMode]);
 
   // Continuous 60fps evaluation loop in Play mode (physics, continuous timers, collisions, proximity, boundary)

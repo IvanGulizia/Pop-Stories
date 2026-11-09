@@ -77,7 +77,7 @@ interface SceneState {
   collapsedRuleIds: Record<string, boolean>;
   toggleRuleCollapse: (ruleId: string) => void;
   gameScore: number;
-  triggerKeyEvent: (keyName: string) => void;
+  triggerKeyEvent: (keyName: string, phase?: 'down' | 'up') => void;
 
   // Direct scene canvas drawing tools state
   drawingTool: 'pencil' | 'line' | 'rectangle' | 'circle' | 'bucket' | 'eraser_stroke' | 'eraser_partial' | 'select';
@@ -108,7 +108,7 @@ interface SceneState {
   bringToFront: (id: EntityId) => void;
   sendToBack: (id: EntityId) => void;
   duplicateEntity: (id: EntityId) => string;
-  reorderEntities: (sourceId: EntityId, targetId: EntityId) => void;
+  reorderEntities: (sourceId: EntityId, targetId: EntityId, position?: 'above' | 'below') => void;
 
   // State actions
   setAppMode: (mode: AppMode) => void;
@@ -163,7 +163,7 @@ interface SceneState {
   duplicateRule: (id: string) => string;
   deleteRule: (id: string) => void;
   toggleRule: (id: string) => void;
-  reorderRules: (sourceId: string, targetId: string) => void;
+  reorderRules: (sourceId: string, targetId: string, position?: 'above' | 'below') => void;
   setRuleFolder: (ruleId: string, folderId?: string) => void;
 
   // Folder CRUD
@@ -727,16 +727,24 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     return newId;
   },
 
-  reorderEntities: (sourceId, targetId) => {
+  reorderEntities: (sourceId, targetId, position = 'above') => {
     set((state) => {
       const order = state.entityOrder && state.entityOrder.length > 0
         ? [...state.entityOrder]
         : Object.keys(state.entities);
       const fromIdx = order.indexOf(sourceId);
-      const toIdx = order.indexOf(targetId);
-      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return state;
+      if (fromIdx === -1) return state;
       order.splice(fromIdx, 1);
-      order.splice(toIdx, 0, sourceId);
+      const toIdx = order.indexOf(targetId);
+      if (toIdx === -1) {
+        order.push(sourceId);
+      } else {
+        // Since order list has top entity at last position (highest z-index),
+        // 'above' in reversed display list means after target in order list,
+        // 'below' in reversed display list means before target in order list.
+        const insertIdx = position === 'above' ? toIdx + 1 : toIdx;
+        order.splice(insertIdx, 0, sourceId);
+      }
       return { entityOrder: order };
     });
   },
@@ -1728,14 +1736,19 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     get().evaluateRules();
   },
 
-  reorderRules: (sourceId, targetId) => {
+  reorderRules: (sourceId, targetId, position = 'above') => {
     set((state) => {
       const rules = [...state.rules];
       const fromIdx = rules.findIndex((r) => r.id === sourceId);
-      const toIdx = rules.findIndex((r) => r.id === targetId);
-      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return state;
+      if (fromIdx === -1) return state;
       const [moved] = rules.splice(fromIdx, 1);
-      rules.splice(toIdx, 0, moved);
+      const toIdx = rules.findIndex((r) => r.id === targetId);
+      if (toIdx === -1) {
+        rules.push(moved);
+      } else {
+        const insertIdx = position === 'below' ? toIdx + 1 : toIdx;
+        rules.splice(insertIdx, 0, moved);
+      }
       return { rules };
     });
     get().evaluateRules();
@@ -1807,7 +1820,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     }));
   },
 
-  triggerKeyEvent: (keyName) => {
+  triggerKeyEvent: (keyName, phase = 'down') => {
     if (get().appMode !== 'play') return;
     const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
     const now = Date.now();
@@ -1828,8 +1841,18 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
       if (!isKeyMatch) return;
 
-      const cooldownKey = `key_${rule.id}_${keyName}`;
-      if (now - (ruleCooldowns[cooldownKey] || 0) < RULE_COOLDOWN_MS) return;
+      // Verify key event phase ('down' vs 'up')
+      const rulePhase = rule.trigger.phase || 'down';
+      const phaseMatch =
+        rulePhase === phase ||
+        (rulePhase === 'key_down' && phase === 'down') ||
+        (rulePhase === 'key_up' && phase === 'up') ||
+        (rulePhase === 'click' && phase === 'down');
+
+      if (!phaseMatch) return;
+
+      const cooldownKey = `key_${rule.id}_${keyName}_${phase}`;
+      if (now - (ruleCooldowns[cooldownKey] || 0) < 50) return;
       ruleCooldowns[cooldownKey] = now;
 
       const allEnts = Object.values(entities);
@@ -1912,7 +1935,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     activePointerRules.forEach((rule) => {
       const cooldownKey = `ptr_${rule.id}_${subject.id}_${phase}`;
       const isClickType = phase === 'click' || phase === 'down' || phase === 'up' || phase === 'mouse_down' || phase === 'mouse_up';
-      const cooldownMs = isClickType ? 50 : RULE_COOLDOWN_MS;
+      // Use 0 cooldown for mouse_down and mouse_up so rapid clicks work seamlessly
+      const cooldownMs = (phase === 'down' || phase === 'mouse_down' || phase === 'up' || phase === 'mouse_up') ? 0 : isClickType ? 20 : RULE_COOLDOWN_MS;
 
       if (now - (ruleCooldowns[cooldownKey] || 0) < cooldownMs) {
         return;
