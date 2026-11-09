@@ -174,13 +174,6 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           />
         )}
 
-        {/* HUD Score Badge in Play Mode */}
-        {isPlayMode && (
-          <div className="absolute top-3 right-3 z-50 bg-amber-400 text-slate-950 font-black text-xs px-3 py-1.5 rounded-2xl shadow-lg border border-amber-300 flex items-center gap-1.5 animate-in fade-in zoom-in-95 duration-200 pointer-events-none">
-            <span className="text-sm">🏆</span>
-            <span>Score : {gameScore}</span>
-          </div>
-        )}
 
         {/* 1. ARRIÈRE-PLANS DESSINÉS (BACKGROUND LAYERS) */}
         <div className="absolute inset-0 pointer-events-none z-1">

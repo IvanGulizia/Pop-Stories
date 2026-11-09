@@ -255,6 +255,8 @@ export interface AppSettings {
   playModeOverlay?: boolean;
   playModeDimOpacity?: 'light' | 'medium' | 'dark';
   aspectRatio?: SceneAspectRatio;
+  showRuleFolders?: boolean;
+  entityFilterDisplayMode?: 'icon_only' | 'icon_and_text' | 'text_only';
 }
 
 export interface CursorPackExportData {

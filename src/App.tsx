@@ -60,7 +60,7 @@ export default function App() {
   const [isEntitiesOpen, setIsEntitiesOpen] = useState(true);
   const [leftTab, setLeftTab] = useState<'entities' | 'scene'>('entities');
   const [rightPanel, setRightPanel] = useState<'none' | 'inspector' | 'settings'>('inspector');
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(true);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [isSlotsModalOpen, setIsSlotsModalOpen] = useState(false);
 

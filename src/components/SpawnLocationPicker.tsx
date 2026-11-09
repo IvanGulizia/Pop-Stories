@@ -19,6 +19,7 @@ import {
 
 export interface SpawnConfigData {
   spawnLocationMode: SpawnLocationMode;
+  spawnInitialStateId?: string;
   spawnOffset?: { x: number; y: number };
   spawnAbsoluteCoords?: { x: number; y: number };
   spawnPosition?: { x: number; y: number };
@@ -33,6 +34,7 @@ interface SpawnLocationPickerProps {
   targetEntity?: Entity;
   spawnEntity?: Entity;
   initialMode?: SpawnLocationMode;
+  initialStateId?: string;
   initialOffset?: { x: number; y: number };
   initialAbsoluteCoords?: { x: number; y: number };
   initialSizeMode?: 'default' | 'match_target' | 'match_subject' | 'custom';
@@ -48,6 +50,7 @@ export function SpawnLocationPicker({
   targetEntity,
   spawnEntity,
   initialMode = isCollision ? 'at_target' : 'at_subject',
+  initialStateId,
   initialOffset = { x: 50, y: 0 },
   initialAbsoluteCoords = { x: 300, y: 200 },
   initialSizeMode = 'default',
@@ -58,6 +61,9 @@ export function SpawnLocationPicker({
 }: SpawnLocationPickerProps) {
   const [activeTab, setActiveTab] = useState<'location' | 'size'>('location');
   const [mode, setMode] = useState<SpawnLocationMode>(initialMode);
+  const [selectedStateId, setSelectedStateId] = useState<string | undefined>(
+    initialStateId || spawnEntity?.currentStateId || Object.keys(spawnEntity?.states || {})[0]
+  );
   const [offset, setOffset] = useState<{ x: number; y: number }>(initialOffset);
   const [absoluteCoords, setAbsoluteCoords] = useState<{ x: number; y: number }>(initialAbsoluteCoords);
 
@@ -137,6 +143,7 @@ export function SpawnLocationPicker({
   const handleApply = () => {
     onConfirm({
       spawnLocationMode: mode,
+      spawnInitialStateId: selectedStateId,
       spawnOffset: mode.startsWith('offset') ? offset : undefined,
       spawnAbsoluteCoords: mode === 'absolute' ? absoluteCoords : undefined,
       spawnPosition: mode === 'absolute' ? absoluteCoords : undefined,

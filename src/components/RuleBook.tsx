@@ -38,6 +38,7 @@ import {
   Mic,
   Edit2,
   Check,
+  GripVertical,
 } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
 
@@ -95,8 +96,10 @@ interface WizardData {
     | 'toggle_entity_picker'
     | 'toggle_states_picker'
     | 'spawn_entity_picker'
+    | 'spawn_state_picker'
     | 'spawn_location_picker'
-    | 'sound_picker';
+    | 'sound_picker'
+    | 'key_picker';
   name: string;
   subjectType: EntityType;
   subjectStateId?: string;
@@ -110,6 +113,7 @@ interface WizardData {
   actionTargetStateId?: string;
   pendingSpawnType?: EntityType;
   actionSpawnEntityType?: EntityType;
+  actionSpawnInitialStateId?: string;
   actionSpawnLocationMode?: 'at_subject' | 'at_target' | 'offset_subject' | 'offset_target' | 'random' | 'absolute';
   actionSoundType?: SoundType;
   toggleStateA?: string;
@@ -489,145 +493,189 @@ export function RuleBook() {
         </button>
       </div>
 
-      {/* --- FOLDER TABS BAR (Dossiers Thématiques Pliables) --- */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 shrink-0 scrollbar-thin">
-        {/* Tab: Toutes */}
+      {/* --- 1-CLICK ENTITY FILTER BAR AT ROOT OF RULEBOOK --- */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 shrink-0 scrollbar-thin bg-slate-100/70 p-1.5 rounded-2xl border border-slate-200/80">
+        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider px-1">Entités :</span>
         <button
           type="button"
-          onClick={() => setSelectedFolderId('all')}
-          className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
-            selectedFolderId === 'all'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+          onClick={() => setFilterObject('all')}
+          className={`px-2.5 py-1 text-xs font-bold rounded-xl transition-all cursor-pointer shrink-0 ${
+            filterObject === 'all'
+              ? 'bg-indigo-600 text-white shadow-2xs'
+              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
           }`}
         >
-          <span>Toutes</span>
-          <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-            selectedFolderId === 'all' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-500'
-          }`}>
-            {rules.length}
-          </span>
+          Toutes
         </button>
-
-        {/* Dynamic folders */}
-        {folders.map((folder) => {
-          const count = rules.filter((r) => r.folderId === folder.id).length;
-          const isSelected = selectedFolderId === folder.id;
-
-          const colorClasses: Record<string, string> = {
-            indigo: isSelected ? 'bg-indigo-600 text-white' : 'hover:border-indigo-300 text-indigo-800',
-            emerald: isSelected ? 'bg-emerald-600 text-white' : 'hover:border-emerald-300 text-emerald-800',
-            amber: isSelected ? 'bg-amber-600 text-white' : 'hover:border-amber-300 text-amber-800',
-            rose: isSelected ? 'bg-rose-600 text-white' : 'hover:border-rose-300 text-rose-800',
-            purple: isSelected ? 'bg-purple-600 text-white' : 'hover:border-purple-300 text-purple-800',
-            sky: isSelected ? 'bg-sky-600 text-white' : 'hover:border-sky-300 text-sky-800',
-          };
+        {availableEntityOptions.map((opt) => {
+          const ent = getEntityObj(opt.type);
+          const isSelected = filterObject === opt.type;
+          const displayMode = settings?.entityFilterDisplayMode || 'icon_and_text';
 
           return (
-            <div
-              key={folder.id}
-              className={`flex items-center rounded-xl border transition-all shrink-0 ${
+            <button
+              key={opt.type}
+              type="button"
+              onClick={() => setFilterObject(isSelected ? 'all' : opt.type)}
+              className={`px-2.5 py-1 text-xs font-bold rounded-xl border transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
                 isSelected
-                  ? 'border-transparent shadow-xs ' + (colorClasses[folder.color || 'indigo'] || 'bg-indigo-600 text-white')
-                  : 'bg-white border-slate-200 ' + (colorClasses[folder.color || 'indigo'] || 'text-slate-700')
+                  ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-indigo-50/60'
               }`}
+              title={`Filtrer les règles pour ${opt.label}`}
             >
-              <button
-                type="button"
-                onClick={() => setSelectedFolderId(folder.id)}
-                className="px-3 py-1.5 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-              >
-                <Folder className="w-3.5 h-3.5 fill-current opacity-80" />
-                <span>{folder.name}</span>
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                  isSelected ? 'bg-black/20 text-white' : 'bg-slate-100 text-slate-500'
-                }`}>
-                  {count}
-                </span>
-              </button>
-              {isSelected && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (confirm(`Supprimer le dossier "${folder.name}" ? (Les règles seront conservées en Non Classées)`)) {
-                      deleteFolder(folder.id);
-                      setSelectedFolderId('all');
-                    }
-                  }}
-                  className="pr-2 pl-0.5 text-white/70 hover:text-white cursor-pointer"
-                  title="Supprimer ce dossier"
-                >
-                  <X className="w-3 h-3" />
-                </button>
+              {displayMode !== 'text_only' && (
+                <div className="w-4 h-4 rounded bg-slate-100 flex items-center justify-center p-0.5 shrink-0">
+                  <EntityMiniPreview entity={ent} type={opt.type} size={14} />
+                </div>
               )}
-            </div>
+              {displayMode !== 'icon_only' && <span>{opt.label}</span>}
+            </button>
           );
         })}
+      </div>
 
-        {/* Tab: Non classées */}
-        {rules.some((r) => !r.folderId) && (
+      {/* --- FOLDER TABS BAR (Dossiers Thématiques Pliables - Optionnel via Settings) --- */}
+      {settings?.showRuleFolders && (
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 shrink-0 scrollbar-thin">
+          {/* Tab: Toutes */}
           <button
             type="button"
-            onClick={() => setSelectedFolderId('unassigned')}
+            onClick={() => setSelectedFolderId('all')}
             className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
-              selectedFolderId === 'unassigned'
-                ? 'bg-slate-700 text-white shadow-xs'
-                : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-100'
+              selectedFolderId === 'all'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <span>Non classées</span>
+            <span>Toutes</span>
             <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-              selectedFolderId === 'unassigned' ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-500'
+              selectedFolderId === 'all' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-500'
             }`}>
-              {rules.filter((r) => !r.folderId).length}
+              {rules.length}
             </span>
           </button>
-        )}
 
-        {/* Add folder inline form / button */}
-        {isCreatingFolder ? (
-          <div className="flex items-center gap-1 bg-white border border-indigo-300 rounded-xl px-2 py-1 shrink-0">
-            <input
-              type="text"
-              autoFocus
-              value={newFolderName}
-              onChange={(e) => setNewFolderName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleCreateFolder();
-                if (e.key === 'Escape') setIsCreatingFolder(false);
-              }}
-              placeholder="Nom du dossier..."
-              className="text-xs font-bold text-slate-800 outline-none w-28"
-            />
+          {/* Dynamic folders */}
+          {folders.map((folder) => {
+            const count = rules.filter((r) => r.folderId === folder.id).length;
+            const isSelected = selectedFolderId === folder.id;
+
+            const colorClasses: Record<string, string> = {
+              indigo: isSelected ? 'bg-indigo-600 text-white' : 'hover:border-indigo-300 text-indigo-800',
+              emerald: isSelected ? 'bg-emerald-600 text-white' : 'hover:border-emerald-300 text-emerald-800',
+              amber: isSelected ? 'bg-amber-600 text-white' : 'hover:border-amber-300 text-amber-800',
+              rose: isSelected ? 'bg-rose-600 text-white' : 'hover:border-rose-300 text-rose-800',
+              purple: isSelected ? 'bg-purple-600 text-white' : 'hover:border-purple-300 text-purple-800',
+              sky: isSelected ? 'bg-sky-600 text-white' : 'hover:border-sky-300 text-sky-800',
+            };
+
+            return (
+              <div
+                key={folder.id}
+                className={`flex items-center rounded-xl border transition-all shrink-0 ${
+                  isSelected
+                    ? 'border-transparent shadow-xs ' + (colorClasses[folder.color || 'indigo'] || 'bg-indigo-600 text-white')
+                    : 'bg-white border-slate-200 ' + (colorClasses[folder.color || 'indigo'] || 'text-slate-700')
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => setSelectedFolderId(folder.id)}
+                  className="px-3 py-1.5 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Folder className="w-3.5 h-3.5 fill-current opacity-80" />
+                  <span>{folder.name}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                    isSelected ? 'bg-black/20 text-white' : 'bg-slate-100 text-slate-500'
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+                {isSelected && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`Supprimer le dossier "${folder.name}" ? (Les règles seront conservées en Non Classées)`)) {
+                        deleteFolder(folder.id);
+                        setSelectedFolderId('all');
+                      }
+                    }}
+                    className="pr-2 pl-0.5 text-white/70 hover:text-white cursor-pointer"
+                    title="Supprimer ce dossier"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Tab: Non classées */}
+          {rules.some((r) => !r.folderId) && (
             <button
               type="button"
-              onClick={handleCreateFolder}
-              className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg cursor-pointer"
-              title="Créer"
+              onClick={() => setSelectedFolderId('unassigned')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                selectedFolderId === 'unassigned'
+                  ? 'bg-slate-700 text-white shadow-xs'
+                  : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-100'
+              }`}
             >
-              <Check className="w-3.5 h-3.5" />
+              <span>Non classées</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                selectedFolderId === 'unassigned' ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-500'
+              }`}>
+                {rules.filter((r) => !r.folderId).length}
+              </span>
             </button>
+          )}
+
+          {/* Add folder inline form / button */}
+          {isCreatingFolder ? (
+            <div className="flex items-center gap-1 bg-white border border-indigo-300 rounded-xl px-2 py-1 shrink-0">
+              <input
+                type="text"
+                autoFocus
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreateFolder();
+                  if (e.key === 'Escape') setIsCreatingFolder(false);
+                }}
+                placeholder="Nom du dossier..."
+                className="text-xs font-bold text-slate-800 outline-none w-28"
+              />
+              <button
+                type="button"
+                onClick={handleCreateFolder}
+                className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg cursor-pointer"
+                title="Créer"
+              >
+                <Check className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsCreatingFolder(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+                title="Annuler"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
             <button
               type="button"
-              onClick={() => setIsCreatingFolder(false)}
-              className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
-              title="Annuler"
+              onClick={() => setIsCreatingFolder(true)}
+              className="px-2.5 py-1.5 text-xs font-bold rounded-xl border border-dashed border-slate-300 hover:border-indigo-400 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50/40 transition-all flex items-center gap-1 cursor-pointer shrink-0"
             >
-              <X className="w-3.5 h-3.5" />
+              <FolderPlus className="w-3.5 h-3.5" />
+              <span>+ Dossier</span>
             </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setIsCreatingFolder(true)}
-            className="px-2.5 py-1.5 text-xs font-bold rounded-xl border border-dashed border-slate-300 hover:border-indigo-400 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50/40 transition-all flex items-center gap-1 cursor-pointer shrink-0"
-          >
-            <FolderPlus className="w-3.5 h-3.5" />
-            <span>+ Dossier</span>
-          </button>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Barre de filtres avancés (Visible si togglée) */}
       {areFiltersVisible && (
@@ -814,6 +862,27 @@ export function RuleBook() {
                 {/* 1. Header Bar: Accordion Toggle, Name, Folder picker, Active toggle, Duplicate, Delete */}
                 <div className="flex items-center justify-between gap-2 flex-wrap mb-2.5">
                   <div className="flex items-center gap-2 flex-wrap">
+                    {/* Drag handle for rule hierarchy reordering */}
+                    <div
+                      draggable={true}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/rule-id', rule.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const sourceId = e.dataTransfer.getData('text/rule-id');
+                        if (sourceId && sourceId !== rule.id) {
+                          useSceneStore.getState().reorderRules(sourceId, rule.id);
+                        }
+                      }}
+                      className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded cursor-grab active:cursor-grabbing flex items-center justify-center"
+                      title="Glisser-déposer pour réordonner cette règle"
+                    >
+                      <GripVertical className="w-4 h-4" />
+                    </div>
+
                     {/* Accordion toggle button */}
                     <button
                       type="button"
@@ -1863,36 +1932,35 @@ export function RuleBook() {
                       </div>
                     </div>
 
-                    {/* CASE 6 : CLAVIER & COMMANDES */}
+                    {/* CASE 6 : CLAVIER & COMMANDES (Unique carte -> Choix de la touche) */}
                     <div className="bg-slate-100/80 p-4 rounded-3xl border border-slate-300 space-y-3">
                       <div className="text-xs font-black uppercase text-slate-800 tracking-wider">
                         ⌨️ Touches du Clavier
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        {[
-                          { key: 'Space', label: 'Espace', icon: '⌨️' },
-                          { key: 'ArrowUp', label: 'Flèche ⬆️', icon: '⬆️' },
-                          { key: 'Enter', label: 'Entrée', icon: '⏎' },
-                        ].map((k) => (
-                          <button
-                            key={k.key}
-                            type="button"
-                            onClick={() => {
-                              setActiveWizard({
-                                ...activeWizard,
-                                triggerType: 'keyboard',
-                                keyName: k.key,
-                                step: 4,
-                                actionSubStep: 'main',
-                              });
-                            }}
-                            className="p-2.5 bg-white hover:bg-slate-200/80 border border-slate-300 rounded-2xl flex flex-col items-center justify-center text-center cursor-pointer transition-all shadow-xs group"
-                          >
-                            <span className="text-lg">{k.icon}</span>
-                            <span className="text-[10px] font-black text-slate-800 mt-1">{k.label}</span>
-                          </button>
-                        ))}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            triggerType: 'keyboard',
+                            actionSubStep: 'key_picker',
+                          });
+                        }}
+                        className="w-full p-4 bg-white hover:bg-slate-200/80 border-2 border-slate-300 hover:border-indigo-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                      >
+                        <div className="w-12 h-12 rounded-xl bg-slate-200 text-slate-800 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-110 transition-transform">
+                          ⌨️
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
+                            Touche de Clavier
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Choisir la touche (Espace, Flèches, Z/Q/S/D, Entrée, etc.) →
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 shrink-0" />
+                      </button>
                     </div>
                   </div>
 
@@ -2751,16 +2819,26 @@ export function RuleBook() {
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
                         {availableEntityOptions.map((opt) => {
                           const ent = getEntityObj(opt.type);
+                          const statesList = ent ? Object.values(ent.states) : [];
                           return (
                             <button
                               key={opt.type}
                               type="button"
                               onClick={() => {
-                                setActiveWizard({
-                                  ...activeWizard,
-                                  pendingSpawnType: opt.type,
-                                  actionSubStep: 'spawn_location_picker',
-                                });
+                                if (statesList.length > 1) {
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    pendingSpawnType: opt.type,
+                                    actionSubStep: 'spawn_state_picker',
+                                  });
+                                } else {
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    pendingSpawnType: opt.type,
+                                    actionSpawnInitialStateId: undefined,
+                                    actionSubStep: 'spawn_location_picker',
+                                  });
+                                }
                               }}
                               className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-xs group active:scale-95"
                             >
@@ -2770,9 +2848,98 @@ export function RuleBook() {
                               <div className="text-xs font-black text-slate-800 group-hover:text-amber-700 truncate w-full text-center">
                                 + {opt.label}
                               </div>
+                              {statesList.length > 1 && (
+                                <div className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full font-bold">
+                                  {statesList.length} états →
+                                </div>
+                              )}
                             </button>
                           );
                         })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Sous-étape : Choix de l'état initial pour l'objet créé (Spawn State Picker) */}
+                  {activeWizard.actionSubStep === 'spawn_state_picker' && (() => {
+                    const spawnType = activeWizard.pendingSpawnType || availableEntityOptions[0]?.type || 'apple';
+                    const ent = getEntityObj(spawnType);
+                    const states = ent ? Object.values(ent.states) : [];
+
+                    return (
+                      <div className="space-y-4">
+                        <div className="text-xs font-bold text-slate-600">
+                          Choisissez l'état dans lequel « {ent?.name || spawnType} » va apparaître :
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+                          {states.map((st) => (
+                            <button
+                              key={st.id}
+                              type="button"
+                              onClick={() => {
+                                setActiveWizard({
+                                  ...activeWizard,
+                                  actionSpawnInitialStateId: st.id,
+                                  actionSubStep: 'spawn_location_picker',
+                                });
+                              }}
+                              className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-xs group active:scale-95"
+                            >
+                              <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs group-hover:scale-110 transition-transform">
+                                <EntityMiniPreview entity={ent} type={spawnType} stateId={st.id} size={52} />
+                              </div>
+                              <div className="text-xs font-black text-slate-800 group-hover:text-amber-700">
+                                État {st.name}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Sous-étape : Choix de la touche Clavier (Key Picker Window) */}
+                  {activeWizard.actionSubStep === 'key_picker' && (
+                    <div className="space-y-4">
+                      <div className="text-xs font-bold text-slate-600">
+                        Choisissez la touche du clavier qui déclenche cette règle :
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+                        {[
+                          { key: 'Space', label: "Barre d'Espace", icon: '🚀' },
+                          { key: 'ArrowUp', label: 'Flèche Haut ⬆️', icon: '⬆️' },
+                          { key: 'ArrowDown', label: 'Flèche Bas ⬇️', icon: '⬇️' },
+                          { key: 'ArrowLeft', label: 'Flèche Gauche ⬅️', icon: '⬅️' },
+                          { key: 'ArrowRight', label: 'Flèche Droite ➡️', icon: '➡️' },
+                          { key: 'Enter', label: 'Touche Entrée ↩️', icon: '↩️' },
+                          { key: 'z', label: 'Touche Z (Avancer)', icon: '⌨️' },
+                          { key: 'q', label: 'Touche Q (Gauche)', icon: '⌨️' },
+                          { key: 's', label: 'Touche S (Reculer)', icon: '⌨️' },
+                          { key: 'd', label: 'Touche D (Droite)', icon: '⌨️' },
+                          { key: 'any', label: 'N’importe quelle touche', icon: '🌟' },
+                        ].map((k) => (
+                          <button
+                            key={k.key}
+                            type="button"
+                            onClick={() => {
+                              setActiveWizard({
+                                ...activeWizard,
+                                triggerType: 'keyboard',
+                                keyName: k.key,
+                                step: 4,
+                                actionSubStep: 'main',
+                              });
+                            }}
+                            className="p-4 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-xs group active:scale-95"
+                          >
+                            <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-3xl shadow-2xs group-hover:scale-110 transition-transform">
+                              {k.icon}
+                            </div>
+                            <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700 text-center">
+                              {k.label}
+                            </div>
+                          </button>
+                        ))}
                       </div>
                     </div>
                   )}
@@ -2789,10 +2956,12 @@ export function RuleBook() {
                         targetEntity={getEntityObj(activeWizard.targetType)}
                         spawnEntity={getEntityObj(activeWizard.pendingSpawnType)}
                         initialMode={activeWizard.triggerType === 'collision' ? 'at_target' : 'at_subject'}
+                        initialStateId={activeWizard.actionSpawnInitialStateId}
                         onConfirm={(data) => {
                           completeWizardWithAction({
                             type: 'spawn_entity',
                             spawnEntityType: activeWizard.pendingSpawnType,
+                            spawnInitialStateId: data.spawnInitialStateId || activeWizard.actionSpawnInitialStateId,
                             spawnLocationMode: data.spawnLocationMode,
                             spawnOffset: data.spawnOffset,
                             spawnPosition: data.spawnPosition,

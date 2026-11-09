@@ -163,6 +163,7 @@ interface SceneState {
   duplicateRule: (id: string) => string;
   deleteRule: (id: string) => void;
   toggleRule: (id: string) => void;
+  reorderRules: (sourceId: string, targetId: string) => void;
   setRuleFolder: (ruleId: string, folderId?: string) => void;
 
   // Folder CRUD
@@ -496,7 +497,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   appMode: 'edit',
   entityOrder: ['plant-1', 'apple-1'],
   layerGroups: JSON.parse(JSON.stringify(initialSceneLayerGroups)),
-  selectedLayerId: 'layer-bg-1',
+  selectedLayerId: null,
   snapshotEntities: null,
   snapshotEntityOrder: null,
   currentSlotId: null,
@@ -534,7 +535,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     enableHoverScaleAnimation: false,
     playModeOverlay: true,
     playModeDimOpacity: 'light',
-    aspectRatio: 'free',
+    showRuleFolders: false,
+    entityFilterDisplayMode: 'icon_and_text',
   },
 
   updateSettings: (partial) => {
@@ -1723,6 +1725,19 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     set((state) => ({
       rules: state.rules.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r)),
     }));
+    get().evaluateRules();
+  },
+
+  reorderRules: (sourceId, targetId) => {
+    set((state) => {
+      const rules = [...state.rules];
+      const fromIdx = rules.findIndex((r) => r.id === sourceId);
+      const toIdx = rules.findIndex((r) => r.id === targetId);
+      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return state;
+      const [moved] = rules.splice(fromIdx, 1);
+      rules.splice(toIdx, 0, moved);
+      return { rules };
+    });
     get().evaluateRules();
   },
 

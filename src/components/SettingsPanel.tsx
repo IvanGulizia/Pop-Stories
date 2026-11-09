@@ -1,4 +1,4 @@
-import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, CheckCircle2, AlertCircle, Filter, MousePointer2, Paintbrush, Undo2, Scan, Sparkles, Moon, ChevronDown, ChevronRight, FolderArchive, Tv } from 'lucide-react';
+import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, Filter, MousePointer2, Paintbrush, Undo2, Scan, Sparkles, Moon, ChevronDown, ChevronRight, FolderArchive, Tv, Layers, Zap } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
 import { useRef, useState } from 'react';
 import { CursorState, cursorMetadata, renderCursorSvg, getHugeIconGuidePaths, getDefaultCursorHotspot } from '../utils/cursorIcons';
@@ -21,9 +21,25 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
 
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [editingCursorState, setEditingCursorState] = useState<CursorState | null>(null);
-  const [isCursorsExpanded, setIsCursorsExpanded] = useState<boolean>(false);
+
+  // Accordion Sections Open/Closed state
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    files: true,
+    canvas: true,
+    rules: true,
+    cursors: false,
+    play: false,
+  });
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cursorFileInputRef = useRef<HTMLInputElement>(null);
+
+  const toggleSection = (sectionKey: string) => {
+    setOpenSections((prev) => ({
+      ...prev,
+      [sectionKey]: !prev[sectionKey],
+    }));
+  };
 
   const handleExport = () => {
     try {
@@ -40,7 +56,7 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
       URL.revokeObjectURL(url);
       setImportStatus({ type: 'success', message: 'Projet exporté avec succès !' });
       setTimeout(() => setImportStatus(null), 3500);
-    } catch (err: any) {
+    } catch {
       setImportStatus({ type: 'error', message: 'Erreur lors de l’exportation.' });
     }
   };
@@ -70,7 +86,7 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
       URL.revokeObjectURL(url);
       setImportStatus({ type: 'success', message: 'Pack de curseurs exporté avec succès !' });
       setTimeout(() => setImportStatus(null), 3500);
-    } catch (err: any) {
+    } catch {
       setImportStatus({ type: 'error', message: 'Erreur lors de l’exportation du pack de curseurs.' });
     }
   };
@@ -105,7 +121,7 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
         } else {
           setImportStatus({ type: 'error', message: 'Le fichier ne contient pas de pack de curseurs valide.' });
         }
-      } catch (err: any) {
+      } catch {
         setImportStatus({ type: 'error', message: 'Fichier JSON corrompu ou invalide.' });
       }
       setTimeout(() => setImportStatus(null), 4000);
@@ -129,7 +145,7 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
         } else {
           setImportStatus({ type: 'error', message: result.message || 'Fichier de projet invalide.' });
         }
-      } catch (err: any) {
+      } catch {
         setImportStatus({ type: 'error', message: 'Fichier JSON corrompu ou illisible.' });
       }
       setTimeout(() => setImportStatus(null), 4000);
@@ -153,7 +169,7 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
   };
 
   return (
-    <div className="space-y-4 text-slate-800">
+    <div className="space-y-3.5 text-slate-800">
       {/* Hidden file input for cursor packs */}
       <input
         type="file"
@@ -167,7 +183,6 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
       {editingCursorState && (() => {
         const availableGuides: ReferenceGuideOption[] = [];
 
-        // 1. Modèle Hugeicon officiel pour l'état en cours
         availableGuides.push({
           id: `hugeicon-${editingCursorState}`,
           name: `Modèle Hugeicons (${cursorMetadata[editingCursorState]?.label})`,
@@ -176,7 +191,6 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
           isCustom: false,
         });
 
-        // 2. Autres états de curseur personnalisés déjà dessinés par l'utilisateur
         (Object.keys(cursorMetadata) as CursorState[]).forEach((st) => {
           const customVecs = settings.customCursorVectorPaths?.[st];
           if (customVecs && customVecs.length > 0 && st !== editingCursorState) {
@@ -190,7 +204,6 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
           }
         });
 
-        // 3. Autres modèles Hugeicons
         (Object.keys(cursorMetadata) as CursorState[]).forEach((st) => {
           if (st !== editingCursorState) {
             availableGuides.push({
@@ -246,518 +259,577 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
         );
       })()}
 
-      <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-        <Sliders className="w-4 h-4 text-slate-600" />
-        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-          Paramètres du Studio
-        </h3>
-      </div>
-
-      {/* Import / Export & Sauvegarde (Tout en haut) */}
-      <div className="p-3 bg-indigo-50/60 rounded-2xl border border-indigo-100 space-y-2.5">
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] font-bold text-indigo-900 uppercase tracking-wider block">
-            Import / Export & Sauvegarde
-          </span>
-          {onOpenSlotsModal && (
-            <button
-              onClick={onOpenSlotsModal}
-              className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shadow-xs active:scale-95"
-            >
-              <FolderArchive className="w-3 h-3" />
-              <span>Gérer les Slots</span>
-            </button>
-          )}
+      {/* Header */}
+      <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+        <div className="flex items-center gap-2">
+          <Sliders className="w-4 h-4 text-indigo-600" />
+          <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider">
+            Paramètres du Studio
+          </h3>
         </div>
-
-        {/* Bouton Projets & Slots Principal */}
-        {onOpenSlotsModal && (
-          <button
-            onClick={onOpenSlotsModal}
-            className="w-full p-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-[0.99]"
-          >
-            <FolderArchive className="w-4 h-4 text-indigo-200" />
-            <span>Mes Projets & Sauvegardes Locales (Slots)</span>
-          </button>
+        {importStatus && (
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+            importStatus.type === 'success' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+          }`}>
+            {importStatus.message}
+          </span>
         )}
-
-        {/* Export & Import Buttons */}
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={handleExport}
-            className="p-2.5 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
-            title="Exporter tout le projet au format JSON"
-          >
-            <Download className="w-3.5 h-3.5 text-indigo-600" /> Exporter JSON
-          </button>
-
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="p-2.5 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
-            title="Importer un fichier de projet JSON"
-          >
-            <Upload className="w-3.5 h-3.5 text-slate-600" /> Importer JSON
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            onChange={handleImportFile}
-            className="hidden"
-          />
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-          <button
-            onClick={restoreDefaultScene}
-            className="p-2 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl text-[11px] font-bold text-slate-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-slate-500" /> Restaurer Démo
-          </button>
-
-          {onOpenClearModal && (
-            <button
-              onClick={onOpenClearModal}
-              className="p-2 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl text-[11px] font-bold text-rose-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-rose-600" /> Nettoyer Projet
-            </button>
-          )}
-        </div>
       </div>
 
-      {/* Format & Ratio de Scène */}
-      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Tv className="w-4 h-4 text-indigo-600" />
-            <div>
-              <label className="text-xs font-bold text-slate-800 block">Format & Ratio de Scène</label>
-              <span className="text-[10px] text-slate-500">Presets 16:9, 4:3, 1:1, 9:16 ou Libre</span>
-            </div>
+      {/* ========================================================================= */}
+      {/* ACCORDION CATEGORY 1: FICHIERS & SAUVEGARDES (SLOTS) */}
+      {/* ========================================================================= */}
+      <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 overflow-hidden transition-all shadow-2xs">
+        <button
+          type="button"
+          onClick={() => toggleSection('files')}
+          className="w-full p-3 flex items-center justify-between bg-indigo-100/50 hover:bg-indigo-100/80 transition-colors cursor-pointer text-left"
+        >
+          <div className="flex items-center gap-2 text-xs font-black text-indigo-950 uppercase tracking-wider">
+            <FolderArchive className="w-4 h-4 text-indigo-600" />
+            <span>1. Fichiers & Sauvegardes (Slots)</span>
           </div>
-          <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-200 text-slate-700 rounded-md uppercase">
-            {settings.aspectRatio || 'free'}
-          </span>
-        </div>
+          {openSections.files ? <ChevronDown className="w-4 h-4 text-indigo-700" /> : <ChevronRight className="w-4 h-4 text-indigo-700" />}
+        </button>
 
-        <div className="grid grid-cols-5 gap-1 pt-1">
-          {[
-            { id: '16:9', label: '16:9', desc: 'Paysage' },
-            { id: '4:3', label: '4:3', desc: 'Rétro' },
-            { id: '1:1', label: '1:1', desc: 'Carré' },
-            { id: '9:16', label: '9:16', desc: 'Mobile' },
-            { id: 'free', label: 'Libre', desc: 'Plein' },
-          ].map((fmt) => {
-            const isSelected = (settings.aspectRatio || 'free') === fmt.id;
-            return (
+        {openSections.files && (
+          <div className="p-3 space-y-2.5 animate-in fade-in duration-150">
+            {onOpenSlotsModal && (
               <button
-                key={fmt.id}
                 type="button"
-                onClick={() => updateSettings({ aspectRatio: fmt.id as SceneAspectRatio })}
-                className={`py-1.5 px-1 rounded-xl text-center transition-all cursor-pointer ${
-                  isSelected
-                    ? 'bg-indigo-600 text-white shadow-xs font-bold'
-                    : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 font-semibold'
-                }`}
+                onClick={onOpenSlotsModal}
+                className="w-full p-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-[0.99]"
               >
-                <div className="text-[11px] leading-none">{fmt.label}</div>
-                <div className={`text-[8px] mt-0.5 ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>
-                  {fmt.desc}
-                </div>
+                <FolderArchive className="w-4 h-4 text-indigo-200" />
+                <span>Mes Projets & Sauvegardes Locales (Slots)</span>
               </button>
-            );
-          })}
-        </div>
-      </div>
+            )}
 
-      {/* Toggle Labels */}
-      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-        <div className="flex items-center gap-2.5">
-          <Eye className="w-4 h-4 text-slate-500" />
-          <div>
-            <label className="text-xs font-bold text-slate-800 block">Étiquettes Canvas</label>
-            <span className="text-[10px] text-slate-500">Nom & état sur la scène</span>
-          </div>
-        </div>
-        <button
-          onClick={() => updateSettings({ showCanvasLabels: !settings.showCanvasLabels })}
-          className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
-            settings.showCanvasLabels ? 'bg-slate-900 justify-end' : 'bg-slate-300 justify-start'
-          }`}
-        >
-          <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
-        </button>
-      </div>
-
-      {/* Toggle Grid */}
-      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-        <div className="flex items-center gap-2.5">
-          <Grid className="w-4 h-4 text-slate-500" />
-          <div>
-            <label className="text-xs font-bold text-slate-800 block">Grille de Repère</label>
-            <span className="text-[10px] text-slate-500">Motif de fond</span>
-          </div>
-        </div>
-        <button
-          onClick={() => updateSettings({ showGrid: !settings.showGrid })}
-          className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
-            settings.showGrid ? 'bg-slate-900 justify-end' : 'bg-slate-300 justify-start'
-          }`}
-        >
-          <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
-        </button>
-      </div>
-
-      {/* Grid Style */}
-      {settings.showGrid && (
-        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1.5">
-          <label className="text-[11px] font-bold text-slate-700 block">Style du repère</label>
-          <div className="grid grid-cols-3 gap-1.5">
-            {[
-              { id: 'dots', label: 'Points' },
-              { id: 'lines', label: 'Lignes' },
-              { id: 'clean', label: 'Épuré' },
-            ].map((st) => (
+            <div className="grid grid-cols-2 gap-2">
               <button
-                key={st.id}
-                onClick={() => updateSettings({ gridStyle: st.id as any })}
-                className={`py-1.5 px-2 text-[11px] font-bold rounded-lg transition-colors cursor-pointer text-center ${
-                  settings.gridStyle === st.id
-                    ? 'bg-slate-900 text-white shadow-2xs'
-                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
-                }`}
+                type="button"
+                onClick={handleExport}
+                className="p-2.5 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
+                title="Exporter tout le projet au format JSON"
               >
-                {st.label}
+                <Download className="w-3.5 h-3.5 text-indigo-600" /> Exporter JSON
               </button>
-            ))}
-          </div>
-        </div>
-      )}
 
-      {/* Toggle Tags System */}
-      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-        <div className="flex items-center gap-2.5">
-          <Tag className="w-3.5 h-3.5 text-purple-600" />
-          <div>
-            <label className="text-xs font-bold text-slate-800 block">Système de #Tags</label>
-            <span className="text-[10px] text-slate-500">Filtrage & règles par tags</span>
-          </div>
-        </div>
-        <button
-          onClick={() => updateSettings({ showTagsSystem: !settings.showTagsSystem })}
-          className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
-            settings.showTagsSystem ? 'bg-slate-900 justify-end' : 'bg-slate-300 justify-start'
-          }`}
-        >
-          <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
-        </button>
-      </div>
-
-      {/* Toggle RuleBook Filters */}
-      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-        <div className="flex items-center gap-2.5">
-          <Filter className="w-3.5 h-3.5 text-indigo-600" />
-          <div>
-            <label className="text-xs font-bold text-slate-800 block">Filtres du Livre de Règles</label>
-            <span className="text-[10px] text-slate-500">Filtrer par objet et par type d'événement</span>
-          </div>
-        </div>
-        <button
-          onClick={() => updateSettings({ showRuleFilters: !settings.showRuleFilters })}
-          className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
-            settings.showRuleFilters ? 'bg-slate-900 justify-end' : 'bg-slate-300 justify-start'
-          }`}
-        >
-          <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
-        </button>
-      </div>
-
-      {/* Toggle Gizmo Debug des Colliders */}
-      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-        <div className="flex items-center gap-2.5">
-          <Scan className="w-3.5 h-3.5 text-emerald-600" />
-          <div>
-            <label className="text-xs font-bold text-slate-800 block">Gizmo Debug des Colliders</label>
-            <span className="text-[10px] text-slate-500">Affiche la zone verte de collision en direct</span>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => updateSettings({ showColliderDebugGizmos: !settings.showColliderDebugGizmos })}
-          className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
-            settings.showColliderDebugGizmos ? 'bg-emerald-600 justify-end' : 'bg-slate-300 justify-start'
-          }`}
-          title="Afficher/Masquer le contour vert de hitbox des entités en jeu et en édition"
-        >
-          <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
-        </button>
-      </div>
-
-      {/* Toggle Surélévation / Grossissement au survol en mode Play */}
-      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-        <div className="flex items-center gap-2.5">
-          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-          <div>
-            <label className="text-xs font-bold text-slate-800 block">Animation de survol (Play)</label>
-            <span className="text-[10px] text-slate-500">Léger agrandissement et surélévation</span>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => updateSettings({ enableHoverScaleAnimation: !settings.enableHoverScaleAnimation })}
-          className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
-            settings.enableHoverScaleAnimation ? 'bg-amber-500 justify-end' : 'bg-slate-300 justify-start'
-          }`}
-          title="Activer/Désactiver l'effet de surélévation et d'agrandissement au survol en mode play"
-        >
-          <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
-        </button>
-      </div>
-
-      {/* Assombrissement de l'interface en mode Play */}
-      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2.5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <Moon className="w-3.5 h-3.5 text-purple-600" />
-            <div>
-              <label className="text-xs font-bold text-slate-800 block">Assombrir en mode Play</label>
-              <span className="text-[10px] text-slate-500">Distinguer le mode Jeu du mode Édition</span>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="p-2.5 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
+                title="Importer un fichier de projet JSON"
+              >
+                <Upload className="w-3.5 h-3.5 text-slate-600" /> Importer JSON
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleImportFile}
+                className="hidden"
+              />
             </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => updateSettings({ playModeOverlay: settings.playModeOverlay === false ? true : false })}
-            className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
-              settings.playModeOverlay !== false ? 'bg-purple-600 justify-end' : 'bg-slate-300 justify-start'
-            }`}
-            title="Assombrir l'interface pour distinguer et immerger en mode Play"
-          >
-            <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
-          </button>
-        </div>
 
-        {settings.playModeOverlay !== false && (
-          <div className="space-y-1.5 pt-1 border-t border-slate-200/60">
-            <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block">
-              Intensité du fond sombre :
-            </label>
-            <div className="grid grid-cols-3 gap-1.5 bg-slate-200/70 p-1 rounded-xl">
-              {[
-                { id: 'light', label: 'Léger' },
-                { id: 'medium', label: 'Moyen' },
-                { id: 'dark', label: 'Intense' },
-              ].map((opt) => (
+            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-indigo-100">
+              <button
+                type="button"
+                onClick={restoreDefaultScene}
+                className="p-2 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl text-[11px] font-bold text-slate-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-slate-500" /> Restaurer Démo
+              </button>
+
+              {onOpenClearModal && (
                 <button
-                  key={opt.id}
                   type="button"
-                  onClick={() => updateSettings({ playModeDimOpacity: opt.id as any })}
-                  className={`py-1 px-2 rounded-lg text-[10px] font-bold transition-all cursor-pointer text-center ${
-                    (settings.playModeDimOpacity || 'medium') === opt.id
-                      ? 'bg-purple-600 text-white shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                  }`}
+                  onClick={onOpenClearModal}
+                  className="p-2 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl text-[11px] font-bold text-rose-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                 >
-                  {opt.label}
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" /> Nettoyer
                 </button>
-              ))}
+              )}
             </div>
           </div>
         )}
       </div>
 
-      {/* CURSEURS PERSONNALISÉS & PACK HUGEICONS */}
-      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsCursorsExpanded(!isCursorsExpanded)}
-              className="p-1 text-slate-500 hover:text-slate-800 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
-              title={isCursorsExpanded ? 'Replier la section curseurs' : 'Déplier la section curseurs'}
-            >
-              {isCursorsExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-            </button>
-            <MousePointer2 className="w-4 h-4 text-indigo-600" />
-            <div>
-              <label className="text-xs font-bold text-slate-800 block">Curseurs Dynamiques (Mode Jeu)</label>
-              <span className="text-[10px] text-slate-500">Pack Hugeicons & Personnalisation</span>
-            </div>
+      {/* ========================================================================= */}
+      {/* ACCORDION CATEGORY 2: CANVAS & SCÈNE */}
+      {/* ========================================================================= */}
+      <div className="rounded-2xl border border-slate-200 bg-slate-50/60 overflow-hidden transition-all shadow-2xs">
+        <button
+          type="button"
+          onClick={() => toggleSection('canvas')}
+          className="w-full p-3 flex items-center justify-between bg-slate-100 hover:bg-slate-200/60 transition-colors cursor-pointer text-left"
+        >
+          <div className="flex items-center gap-2 text-xs font-black text-slate-800 uppercase tracking-wider">
+            <Tv className="w-4 h-4 text-indigo-600" />
+            <span>2. Canvas & Scène</span>
           </div>
-          <button
-            onClick={() => updateSettings({ useCustomCursors: settings.useCustomCursors === false ? true : false })}
-            className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
-              settings.useCustomCursors !== false ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'
-            }`}
-            title="Activer/Désactiver les curseurs vectoriels dynamiques en mode jeu"
-          >
-            <div className="w-4 h-4 bg-white rounded-full shadow-xs" />
-          </button>
-        </div>
+          {openSections.canvas ? <ChevronDown className="w-4 h-4 text-slate-600" /> : <ChevronRight className="w-4 h-4 text-slate-600" />}
+        </button>
 
-        {isCursorsExpanded && settings.useCustomCursors !== false && (
-          <div className="space-y-3 pt-1">
-            {/* SWITCH / SELECTEUR DE SOURCE : HUGEICONS VS DESSINS PERSONNALISÉS */}
-            <div className="space-y-1.5 bg-white p-2 rounded-xl border border-slate-200 shadow-2xs">
-              <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block">
-                Style des icônes du curseur
-              </label>
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => updateSettings({ cursorSourceMode: 'hugeicons' })}
-                  className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                    (settings.cursorSourceMode || 'hugeicons') === 'hugeicons'
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                  }`}
-                >
-                  <span>⚡ Pack Hugeicons</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => updateSettings({ cursorSourceMode: 'custom_drawn' })}
-                  className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                    settings.cursorSourceMode === 'custom_drawn'
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                  }`}
-                >
-                  <span>🎨 Dessin Atelier</span>
-                </button>
+        {openSections.canvas && (
+          <div className="p-3 space-y-2.5 animate-in fade-in duration-150">
+            {/* Format & Ratio */}
+            <div className="p-2.5 bg-white rounded-xl border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-800 block">Format & Ratio</label>
+                <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-200 text-slate-700 rounded uppercase">
+                  {settings.aspectRatio || 'free'}
+                </span>
+              </div>
+              <div className="grid grid-cols-5 gap-1">
+                {[
+                  { id: '16:9', label: '16:9' },
+                  { id: '4:3', label: '4:3' },
+                  { id: '1:1', label: '1:1' },
+                  { id: '9:16', label: '9:16' },
+                  { id: 'free', label: 'Libre' },
+                ].map((fmt) => {
+                  const isSelected = (settings.aspectRatio || 'free') === fmt.id;
+                  return (
+                    <button
+                      key={fmt.id}
+                      type="button"
+                      onClick={() => updateSettings({ aspectRatio: fmt.id as SceneAspectRatio })}
+                      className={`py-1 text-center rounded-lg text-xs transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      {fmt.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            {/* CURSOR SHADOW & PACK ACTIONS */}
-            <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block">Effet d'ombre portée</label>
-                  <span className="text-[10px] text-slate-400">Ajoute un relief immersif sous le curseur</span>
+            {/* Étiquettes */}
+            <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200">
+              <div className="flex items-center gap-2">
+                <Eye className="w-4 h-4 text-slate-500" />
+                <span className="text-xs font-bold text-slate-800">Étiquettes Canvas</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateSettings({ showCanvasLabels: !settings.showCanvasLabels })}
+                className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+                  settings.showCanvasLabels ? 'bg-slate-900 justify-end' : 'bg-slate-300 justify-start'
+                }`}
+              >
+                <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+              </button>
+            </div>
+
+            {/* Grille */}
+            <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200">
+              <div className="flex items-center gap-2">
+                <Grid className="w-4 h-4 text-slate-500" />
+                <span className="text-xs font-bold text-slate-800">Grille de Repère</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateSettings({ showGrid: !settings.showGrid })}
+                className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+                  settings.showGrid ? 'bg-slate-900 justify-end' : 'bg-slate-300 justify-start'
+                }`}
+              >
+                <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+              </button>
+            </div>
+
+            {settings.showGrid && (
+              <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase block">Style repère :</label>
+                <div className="grid grid-cols-3 gap-1">
+                  {[
+                    { id: 'dots', label: 'Points' },
+                    { id: 'lines', label: 'Lignes' },
+                    { id: 'clean', label: 'Épuré' },
+                  ].map((st) => (
+                    <button
+                      key={st.id}
+                      type="button"
+                      onClick={() => updateSettings({ gridStyle: st.id as any })}
+                      className={`py-1 text-[11px] font-bold rounded-lg cursor-pointer text-center ${
+                        settings.gridStyle === st.id
+                          ? 'bg-slate-900 text-white shadow-2xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {st.label}
+                    </button>
+                  ))}
                 </div>
+              </div>
+            )}
+
+            {/* Gizmo Debug Colliders */}
+            <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200">
+              <div className="flex items-center gap-2">
+                <Scan className="w-4 h-4 text-emerald-600" />
+                <span className="text-xs font-bold text-slate-800">Gizmo Debug Hitbox Vert</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateSettings({ showColliderDebugGizmos: !settings.showColliderDebugGizmos })}
+                className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+                  settings.showColliderDebugGizmos ? 'bg-emerald-600 justify-end' : 'bg-slate-300 justify-start'
+                }`}
+              >
+                <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+              </button>
+            </div>
+
+            {/* Tags System */}
+            <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200">
+              <div className="flex items-center gap-2">
+                <Tag className="w-4 h-4 text-purple-600" />
+                <span className="text-xs font-bold text-slate-800">Système de #Tags</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateSettings({ showTagsSystem: !settings.showTagsSystem })}
+                className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+                  settings.showTagsSystem ? 'bg-slate-900 justify-end' : 'bg-slate-300 justify-start'
+                }`}
+              >
+                <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ========================================================================= */}
+      {/* ACCORDION CATEGORY 3: RÈGLES & RULEBOOK */}
+      {/* ========================================================================= */}
+      <div className="rounded-2xl border border-amber-200 bg-amber-50/40 overflow-hidden transition-all shadow-2xs">
+        <button
+          type="button"
+          onClick={() => toggleSection('rules')}
+          className="w-full p-3 flex items-center justify-between bg-amber-100/60 hover:bg-amber-100/90 transition-colors cursor-pointer text-left"
+        >
+          <div className="flex items-center gap-2 text-xs font-black text-amber-950 uppercase tracking-wider">
+            <Zap className="w-4 h-4 text-amber-600 fill-amber-600" />
+            <span>3. Règles & RuleBook</span>
+          </div>
+          {openSections.rules ? <ChevronDown className="w-4 h-4 text-amber-700" /> : <ChevronRight className="w-4 h-4 text-amber-700" />}
+        </button>
+
+        {openSections.rules && (
+          <div className="p-3 space-y-2.5 animate-in fade-in duration-150">
+            {/* Toggle Dossiers Thématiques */}
+            <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-amber-200">
+              <div>
+                <label className="text-xs font-bold text-slate-800 block">Dossiers Thématiques</label>
+                <span className="text-[10px] text-slate-500">Afficher la barre d'onglets dossiers</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateSettings({ showRuleFolders: settings.showRuleFolders === true ? false : true })}
+                className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+                  settings.showRuleFolders === true ? 'bg-amber-500 justify-end' : 'bg-slate-300 justify-start'
+                }`}
+              >
+                <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+              </button>
+            </div>
+
+            {/* Select Mode Affichage Filtre Entité */}
+            <div className="p-2.5 bg-white rounded-xl border border-amber-200 space-y-1.5">
+              <label className="text-xs font-bold text-slate-800 block">
+                Filtre d'Entités rapides (RuleBook)
+              </label>
+              <div className="grid grid-cols-3 gap-1">
+                {[
+                  { id: 'icon_and_text', label: 'Icône + Texte' },
+                  { id: 'icon_only', label: 'Icône seule' },
+                  { id: 'text_only', label: 'Texte seul' },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => updateSettings({ entityFilterDisplayMode: opt.id as any })}
+                    className={`py-1 px-1.5 rounded-lg text-[10px] font-bold cursor-pointer text-center transition-all ${
+                      (settings.entityFilterDisplayMode || 'icon_and_text') === opt.id
+                        ? 'bg-amber-500 text-white shadow-2xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Toggle Barre Filtres Avancés */}
+            <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-amber-200">
+              <div>
+                <label className="text-xs font-bold text-slate-800 block">Barre de Filtres Avancés</label>
+                <span className="text-[10px] text-slate-500">Filtrer par type de déclencheur</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateSettings({ showRuleFilters: !settings.showRuleFilters })}
+                className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+                  settings.showRuleFilters ? 'bg-amber-500 justify-end' : 'bg-slate-300 justify-start'
+                }`}
+              >
+                <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ========================================================================= */}
+      {/* ACCORDION CATEGORY 4: CURSEURS VECTORIELS DYNAMIQUES */}
+      {/* ========================================================================= */}
+      <div className="rounded-2xl border border-purple-200 bg-purple-50/40 overflow-hidden transition-all shadow-2xs">
+        <button
+          type="button"
+          onClick={() => toggleSection('cursors')}
+          className="w-full p-3 flex items-center justify-between bg-purple-100/60 hover:bg-purple-100/90 transition-colors cursor-pointer text-left"
+        >
+          <div className="flex items-center gap-2 text-xs font-black text-purple-950 uppercase tracking-wider">
+            <MousePointer2 className="w-4 h-4 text-purple-600" />
+            <span>4. Curseurs Vectoriels Dynamiques</span>
+          </div>
+          {openSections.cursors ? <ChevronDown className="w-4 h-4 text-purple-700" /> : <ChevronRight className="w-4 h-4 text-purple-700" />}
+        </button>
+
+        {openSections.cursors && (
+          <div className="p-3 space-y-3 animate-in fade-in duration-150">
+            <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-purple-200">
+              <span className="text-xs font-bold text-slate-800">Utiliser Curseurs Vectoriels</span>
+              <button
+                type="button"
+                onClick={() => updateSettings({ useCustomCursors: settings.useCustomCursors === false ? true : false })}
+                className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+                  settings.useCustomCursors !== false ? 'bg-purple-600 justify-end' : 'bg-slate-300 justify-start'
+                }`}
+              >
+                <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+              </button>
+            </div>
+
+            {settings.useCustomCursors !== false && (
+              <>
+                <div className="bg-white p-2 rounded-xl border border-purple-200 space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block">Style d'icônes :</label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => updateSettings({ cursorSourceMode: 'hugeicons' })}
+                      className={`py-1.5 text-xs font-bold rounded-lg cursor-pointer ${
+                        (settings.cursorSourceMode || 'hugeicons') === 'hugeicons'
+                          ? 'bg-purple-600 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      ⚡ Hugeicons
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateSettings({ cursorSourceMode: 'custom_drawn' })}
+                      className={`py-1.5 text-xs font-bold rounded-lg cursor-pointer ${
+                        settings.cursorSourceMode === 'custom_drawn'
+                          ? 'bg-purple-600 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      🎨 Dessin Atelier
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-purple-200">
+                  <span className="text-xs font-semibold text-slate-700">Ombre Portée sous le curseur</span>
+                  <button
+                    type="button"
+                    onClick={() => updateSettings({ cursorShadow: settings.cursorShadow === false ? true : false })}
+                    className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+                      settings.cursorShadow !== false ? 'bg-purple-600 justify-end' : 'bg-slate-300 justify-start'
+                    }`}
+                  >
+                    <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleExportCursorPack}
+                    className="flex-1 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Download className="w-3 h-3" /> Exporter Pack
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => cursorFileInputRef.current?.click()}
+                    className="flex-1 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Upload className="w-3 h-3" /> Importer Pack
+                  </button>
+                </div>
+
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase block">États curseurs :</span>
+                  <div className="space-y-1.5">
+                    {(Object.keys(cursorMetadata) as CursorState[]).map((st) => {
+                      const meta = cursorMetadata[st];
+                      const customVecs = settings.customCursorVectorPaths?.[st];
+                      const isCustom = !!customVecs && customVecs.length > 0;
+                      return (
+                        <div
+                          key={st}
+                          className="p-2 bg-white rounded-xl border border-purple-200/80 flex items-center justify-between text-xs"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded bg-slate-50 border border-slate-200 flex items-center justify-center p-1">
+                              {renderCursorSvg(st, {
+                                customVectorPaths: customVecs,
+                                sourceMode: settings.cursorSourceMode || 'hugeicons',
+                              })}
+                            </div>
+                            <span className="font-bold text-slate-800">{meta.label}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setEditingCursorState(st)}
+                              className="px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-800 text-[10px] font-bold rounded-lg cursor-pointer"
+                            >
+                              Dessiner
+                            </button>
+                            {isCustom && (
+                              <button
+                                type="button"
+                                onClick={() => handleResetCursor(st)}
+                                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                              >
+                                <Undo2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ========================================================================= */}
+      {/* ACCORDION CATEGORY 5: MODE PLAY & SYNTHÉTISEUR AUDIO */}
+      {/* ========================================================================= */}
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 overflow-hidden transition-all shadow-2xs">
+        <button
+          type="button"
+          onClick={() => toggleSection('play')}
+          className="w-full p-3 flex items-center justify-between bg-emerald-100/60 hover:bg-emerald-100/90 transition-colors cursor-pointer text-left"
+        >
+          <div className="flex items-center gap-2 text-xs font-black text-emerald-950 uppercase tracking-wider">
+            <Moon className="w-4 h-4 text-emerald-600" />
+            <span>5. Mode Play & Présentation</span>
+          </div>
+          {openSections.play ? <ChevronDown className="w-4 h-4 text-emerald-700" /> : <ChevronRight className="w-4 h-4 text-emerald-700" />}
+        </button>
+
+        {openSections.play && (
+          <div className="p-3 space-y-3 animate-in fade-in duration-150">
+            {/* Assombrissement */}
+            <div className="p-2.5 bg-white rounded-xl border border-emerald-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800">Assombrir en mode Play</span>
                 <button
                   type="button"
-                  onClick={() => updateSettings({ cursorShadow: settings.cursorShadow === false ? true : false })}
+                  onClick={() => updateSettings({ playModeOverlay: settings.playModeOverlay === false ? true : false })}
                   className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
-                    settings.cursorShadow !== false ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'
+                    settings.playModeOverlay !== false ? 'bg-emerald-600 justify-end' : 'bg-slate-300 justify-start'
                   }`}
-                  title="Activer ou désactiver l'ombre portée sous le curseur"
                 >
                   <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
                 </button>
               </div>
 
-              <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleExportCursorPack}
-                  className="flex-1 py-1.5 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  title="Exporter les dessins et configurations de ce pack de curseurs"
-                >
-                  <Download className="w-3 h-3 text-slate-500" />
-                  <span>Exporter le Pack</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => cursorFileInputRef.current?.click()}
-                  className="flex-1 py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  title="Importer un pack de curseurs JSON"
-                >
-                  <Upload className="w-3 h-3 text-indigo-600" />
-                  <span>Importer un Pack</span>
-                </button>
-              </div>
+              {settings.playModeOverlay !== false && (
+                <div className="grid grid-cols-3 gap-1 pt-1">
+                  {[
+                    { id: 'light', label: 'Léger' },
+                    { id: 'medium', label: 'Moyen' },
+                    { id: 'dark', label: 'Intense' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => updateSettings({ playModeDimOpacity: opt.id as any })}
+                      className={`py-1 text-[10px] font-bold rounded-lg cursor-pointer text-center ${
+                        (settings.playModeDimOpacity || 'medium') === opt.id
+                          ? 'bg-emerald-600 text-white shadow-2xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-              États du curseur ({Object.keys(cursorMetadata).length})
-            </span>
-            <div className="grid grid-cols-1 gap-2">
-              {(Object.keys(cursorMetadata) as CursorState[]).map((st) => {
-                const meta = cursorMetadata[st];
-                const customVecs = settings.customCursorVectorPaths?.[st];
-                const isCustom = !!customVecs && customVecs.length > 0;
-                const activeSourceMode = settings.cursorSourceMode || 'hugeicons';
+            {/* Animation Hover */}
+            <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-emerald-200">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+                <span className="text-xs font-bold text-slate-800">Animation survol (Play)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateSettings({ enableHoverScaleAnimation: !settings.enableHoverScaleAnimation })}
+                className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+                  settings.enableHoverScaleAnimation ? 'bg-amber-500 justify-end' : 'bg-slate-300 justify-start'
+                }`}
+              >
+                <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+              </button>
+            </div>
 
-                return (
-                  <div
-                    key={st}
-                    className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2 shadow-2xs"
+            {/* Test Synthétiseur Sonore */}
+            <div className="p-2.5 bg-white rounded-xl border border-emerald-200 space-y-1.5">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                <Volume2 className="w-4 h-4 text-emerald-600" />
+                <span>Test Synthétiseur Sonore</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                {[
+                  { id: 'magic', label: '✨ Magic' },
+                  { id: 'pop', label: '🎈 Pop' },
+                  { id: 'bell', label: '🔔 Cloche' },
+                  { id: 'bounce', label: '🏀 Rebond' },
+                  { id: 'laser', label: '⚡ Laser' },
+                  { id: 'win', label: '🏆 Win' },
+                ].map((snd) => (
+                  <button
+                    key={snd.id}
+                    type="button"
+                    onClick={() => soundSynth.play(snd.id as any)}
+                    className="py-1 text-[10px] font-semibold bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 rounded-lg transition-colors cursor-pointer"
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-9 h-9 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0 p-1.5">
-                        {renderCursorSvg(st, {
-                          customVectorPaths: customVecs,
-                          sourceMode: activeSourceMode,
-                        })}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-slate-800 truncate flex items-center gap-1.5">
-                          {meta.label}
-                          {isCustom && (
-                            <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
-                              Dessiné
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[10px] text-slate-400 truncate">
-                          Ref : <span className="font-semibold text-slate-600">{meta.refHugeIcon}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={() => setEditingCursorState(st)}
-                        className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
-                        title="Dessiner ce curseur dans l'atelier vectoriel"
-                      >
-                        <Paintbrush className="w-3 h-3" />
-                        <span className="text-[10px] font-bold">Dessiner</span>
-                      </button>
-
-                      {isCustom && (
-                        <button
-                          onClick={() => handleResetCursor(st)}
-                          className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                          title="Restaurer l'icône d'origine Hugeicon"
-                        >
-                          <Undo2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                    {snd.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
-      </div>
-
-      {/* Audio Synth Preview (light test) */}
-      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2">
-        <div className="flex items-center gap-2">
-          <Volume2 className="w-4 h-4 text-slate-600" />
-          <label className="text-xs font-bold text-slate-800">Test Synthétiseur Sonore</label>
-        </div>
-        <div className="grid grid-cols-3 gap-1.5">
-          {[
-            { id: 'magic', label: '✨ Magic' },
-            { id: 'pop', label: '🎈 Pop' },
-            { id: 'bell', label: '🔔 Cloche' },
-            { id: 'bounce', label: '🏀 Rebond' },
-            { id: 'laser', label: '⚡ Laser' },
-            { id: 'win', label: '🏆 Win' },
-          ].map((snd) => (
-            <button
-              key={snd.id}
-              onClick={() => soundSynth.play(snd.id as any)}
-              className="py-1 text-[10px] font-semibold bg-white border border-slate-200 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-            >
-              {snd.label}
-            </button>
-          ))}
-        </div>
       </div>
     </div>
   );
