@@ -1837,15 +1837,13 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         matchesEntityFilter(e, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)
       ) || allEnts[0];
 
-      rule.actions.forEach((act) => {
-        executeAction(act, {
-          subject,
-          allEntities: entities,
-          updateEntityState,
-          updateEntityDetails,
-          deleteEntity,
-          spawnEntity,
-        });
+      executeRuleActions(rule.actions, {
+        subject,
+        allEntities: entities,
+        updateEntityState,
+        updateEntityDetails,
+        deleteEntity,
+        spawnEntity,
       });
     });
   },
@@ -1913,20 +1911,21 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
     activePointerRules.forEach((rule) => {
       const cooldownKey = `ptr_${rule.id}_${subject.id}_${phase}`;
-      if (now - (ruleCooldowns[cooldownKey] || 0) < RULE_COOLDOWN_MS) {
+      const isClickType = phase === 'click' || phase === 'down' || phase === 'up' || phase === 'mouse_down' || phase === 'mouse_up';
+      const cooldownMs = isClickType ? 50 : RULE_COOLDOWN_MS;
+
+      if (now - (ruleCooldowns[cooldownKey] || 0) < cooldownMs) {
         return;
       }
       ruleCooldowns[cooldownKey] = now;
 
-      rule.actions.forEach((act) => {
-        executeAction(act, {
-          subject,
-          allEntities: entities,
-          updateEntityState,
-          updateEntityDetails,
-          deleteEntity,
-          spawnEntity,
-        });
+      executeRuleActions(rule.actions, {
+        subject,
+        allEntities: entities,
+        updateEntityState,
+        updateEntityDetails,
+        deleteEntity,
+        spawnEntity,
       });
     });
   },
@@ -1976,15 +1975,13 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       }
       ruleCooldowns[cooldownKey] = now;
 
-      rule.actions.forEach((act) => {
-        executeAction(act, {
-          subject,
-          allEntities: entities,
-          updateEntityState,
-          updateEntityDetails,
-          deleteEntity,
-          spawnEntity,
-        });
+      executeRuleActions(rule.actions, {
+        subject,
+        allEntities: entities,
+        updateEntityState,
+        updateEntityDetails,
+        deleteEntity,
+        spawnEntity,
       });
     });
 
@@ -2029,16 +2026,14 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
             const cooldownKey = `coll_rel_${rule.id}_${subject.id}_${other.id}`;
             if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
               ruleCooldowns[cooldownKey] = now;
-              rule.actions.forEach((act) => {
-                executeAction(act, {
-                  subject,
-                  target: other,
-                  allEntities: entities,
-                  updateEntityState,
-                  updateEntityDetails,
-                  deleteEntity,
-                  spawnEntity,
-                });
+              executeRuleActions(rule.actions, {
+                subject,
+                target: other,
+                allEntities: entities,
+                updateEntityState,
+                updateEntityDetails,
+                deleteEntity,
+                spawnEntity,
               });
             }
           }
@@ -2051,16 +2046,14 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
             const cooldownKey = `coll_rel_${rule.id}_${other.id}_${subject.id}`;
             if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
               ruleCooldowns[cooldownKey] = now;
-              rule.actions.forEach((act) => {
-                executeAction(act, {
-                  subject: other,
-                  target: subject,
-                  allEntities: entities,
-                  updateEntityState,
-                  updateEntityDetails,
-                  deleteEntity,
-                  spawnEntity,
-                });
+              executeRuleActions(rule.actions, {
+                subject: other,
+                target: subject,
+                allEntities: entities,
+                updateEntityState,
+                updateEntityDetails,
+                deleteEntity,
+                spawnEntity,
               });
             }
           }
@@ -2197,15 +2190,13 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
           matchesEntityFilter(e, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)
         ) || allEnts[0];
 
-        rule.actions.forEach((act) => {
-          executeAction(act, {
-            subject,
-            allEntities: entities,
-            updateEntityState,
-            updateEntityDetails,
-            deleteEntity,
-            spawnEntity,
-          });
+        executeRuleActions(rule.actions, {
+          subject,
+          allEntities: entities,
+          updateEntityState,
+          updateEntityDetails,
+          deleteEntity,
+          spawnEntity,
         });
       }
     });
@@ -2228,16 +2219,14 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
             const cooldownKey = `prox_${rule.id}_${entA.id}_${entB.id}`;
             if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
               ruleCooldowns[cooldownKey] = now;
-              rule.actions.forEach((act) => {
-                executeAction(act, {
-                  subject: entA,
-                  target: entB,
-                  allEntities: entities,
-                  updateEntityState,
-                  updateEntityDetails,
-                  deleteEntity,
-                  spawnEntity,
-                });
+              executeRuleActions(rule.actions, {
+                subject: entA,
+                target: entB,
+                allEntities: entities,
+                updateEntityState,
+                updateEntityDetails,
+                deleteEntity,
+                spawnEntity,
               });
             }
           }
@@ -2263,15 +2252,13 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
           const cooldownKey = `bound_${rule.id}_${subject.id}`;
           if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
             ruleCooldowns[cooldownKey] = now;
-            rule.actions.forEach((act) => {
-              executeAction(act, {
-                subject,
-                allEntities: entities,
-                updateEntityState,
-                updateEntityDetails,
-                deleteEntity,
-                spawnEntity,
-              });
+            executeRuleActions(rule.actions, {
+              subject,
+              allEntities: entities,
+              updateEntityState,
+              updateEntityDetails,
+              deleteEntity,
+              spawnEntity,
             });
           }
         }
@@ -2295,15 +2282,13 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
         if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS * 2) {
           ruleCooldowns[cooldownKey] = now;
           const allEnts = Object.values(entities);
-          rule.actions.forEach((act) => {
-            executeAction(act, {
-              subject: allEnts[0],
-              allEntities: entities,
-              updateEntityState,
-              updateEntityDetails,
-              deleteEntity,
-              spawnEntity,
-            });
+          executeRuleActions(rule.actions, {
+            subject: allEnts[0],
+            allEntities: entities,
+            updateEntityState,
+            updateEntityDetails,
+            deleteEntity,
+            spawnEntity,
           });
         }
       }
@@ -2405,17 +2390,46 @@ function handleCollisionPair(
     }
     ruleCooldowns[cooldownKey] = now;
 
-    rule.actions.forEach((act) => {
-      executeAction(act, {
-        subject,
-        target,
-        allEntities: helpers.entities,
-        updateEntityState: helpers.updateEntityState,
-        updateEntityDetails: helpers.updateEntityDetails,
-        deleteEntity: helpers.deleteEntity,
-        spawnEntity: helpers.spawnEntity,
-      });
+    executeRuleActions(rule.actions, {
+      subject,
+      target,
+      allEntities: helpers.entities,
+      updateEntityState: helpers.updateEntityState,
+      updateEntityDetails: helpers.updateEntityDetails,
+      deleteEntity: helpers.deleteEntity,
+      spawnEntity: helpers.spawnEntity,
     });
+  }
+}
+
+// Helper pour exécuter une séquence d'actions avec support des délais (Attendre / Pause)
+function executeRuleActions(
+  actions: RuleAction[],
+  helpers: {
+    subject?: Entity;
+    target?: Entity;
+    allEntities: Record<EntityId, Entity>;
+    updateEntityState: (id: EntityId, stateId: StateId) => void;
+    updateEntityDetails: (id: EntityId, partial: Partial<Entity>) => void;
+    deleteEntity: (id: EntityId) => void;
+    spawnEntity: (params: { type: EntityType; position: Position; initialStateId?: StateId; size?: Size }) => void;
+  }
+) {
+  let accumulatedDelay = 0;
+  for (let i = 0; i < actions.length; i++) {
+    const act = actions[i];
+    if (act.type === 'delay') {
+      accumulatedDelay += (act.delayDuration ?? 1) * 1000;
+      continue;
+    }
+    if (accumulatedDelay > 0) {
+      const delayMs = accumulatedDelay;
+      setTimeout(() => {
+        executeAction(act, helpers);
+      }, delayMs);
+    } else {
+      executeAction(act, helpers);
+    }
   }
 }
 
@@ -2459,8 +2473,8 @@ function executeAction(
 
     // Find default archetype dimensions
     const sampleEntity = Object.values(helpers.allEntities).find((e) => e.type === spawnType);
-    const defaultW = sampleEntity?.size.width || (spawnType === 'apple' ? 64 : spawnType === 'plant' ? 120 : 64);
-    const defaultH = sampleEntity?.size.height || (spawnType === 'apple' ? 64 : spawnType === 'plant' ? 160 : 64);
+    const defaultW = sampleEntity?.size.width || 256;
+    const defaultH = sampleEntity?.size.height || 256;
 
     // Compute dynamic sizing
     const scaleMultiplier = act.spawnScaleMultiplier ?? 1;

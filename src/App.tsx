@@ -55,6 +55,18 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [appMode]);
 
+  // Continuous 60fps evaluation loop in Play mode (physics, continuous timers, collisions, proximity, boundary)
+  useEffect(() => {
+    if (appMode !== 'play') return;
+    let animId: number;
+    const loop = () => {
+      useSceneStore.getState().evaluateRules();
+      animId = requestAnimationFrame(loop);
+    };
+    animId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animId);
+  }, [appMode]);
+
   // Main UI View States
   const [activeView, setActiveView] = useState<'canvas' | 'rules'>('canvas');
   const [isEntitiesOpen, setIsEntitiesOpen] = useState(true);

@@ -161,7 +161,7 @@ export interface RuleTrigger {
 
 export type ActionTargetMode = 'subject' | 'target' | 'type' | 'tag' | 'instance';
 
-export type ActionType = 'change_state' | 'toggle_state' | 'toggle_draggable' | 'delete_entity' | 'spawn_entity' | 'play_sound' | 'add_score';
+export type ActionType = 'change_state' | 'toggle_state' | 'toggle_draggable' | 'delete_entity' | 'spawn_entity' | 'play_sound' | 'add_score' | 'delay';
 
 export type SpawnLocationMode = 'at_subject' | 'at_target' | 'offset_subject' | 'offset_target' | 'random' | 'absolute';
 
@@ -194,6 +194,9 @@ export interface RuleAction {
   toggleStateAId?: StateId;
   toggleStateBId?: StateId;
   onlyInStateId?: StateId; // Condition optionnelle sur l'état actuel pour appliquer l'action
+
+  // Champs pour 'delay' (Attendre / Pause)
+  delayDuration?: number; // durée en secondes (ex: 1, 2, 0.5)
 
   // Champs pour 'spawn_entity'
   spawnEntityType?: EntityType;

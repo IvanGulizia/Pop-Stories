@@ -152,6 +152,7 @@ export function RuleBook() {
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
   const [activeWizard, setActiveWizard] = useState<WizardData | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
+  const [wizardEntryTab, setWizardEntryTab] = useState<'subject' | 'global_event'>('subject');
 
   // Folder & Search state
   const [selectedFolderId, setSelectedFolderId] = useState<string | 'all'>('all');
@@ -395,13 +396,7 @@ export function RuleBook() {
       if (!ruleNameMatch && !subjectMatch && !targetMatch && !actionMatch) return false;
     }
 
-    // 3. Filtres avancés optionnels (Collision / Clic / Objet)
-    if (!areFiltersVisible) return true;
-
-    if (filterType !== 'all') {
-      if (filterType === 'collision' && rule.trigger.type !== 'collision') return false;
-      if (filterType === 'click' && rule.trigger.type !== 'click' && rule.trigger.type !== 'drag') return false;
-    }
+    // 3. Filtrage par Entité (Bandeau 1-clic racine)
     if (filterObject !== 'all') {
       const matchSubject = rule.trigger.subjectType === filterObject;
       const matchTarget = rule.trigger.targetType === filterObject;
@@ -409,6 +404,12 @@ export function RuleBook() {
         (a) => a.targetType === filterObject || a.spawnEntityType === filterObject
       );
       if (!matchSubject && !matchTarget && !matchAction) return false;
+    }
+
+    // 4. Filtres par type d'événement (Collision / Clic)
+    if (areFiltersVisible && filterType !== 'all') {
+      if (filterType === 'collision' && rule.trigger.type !== 'collision') return false;
+      if (filterType === 'click' && rule.trigger.type !== 'click' && rule.trigger.type !== 'drag') return false;
     }
     return true;
   });
@@ -897,26 +898,28 @@ export function RuleBook() {
                       type="text"
                       value={rule.name}
                       onChange={(e) => updateRule(rule.id, { name: e.target.value })}
-                      className="text-xs font-bold text-slate-800 bg-transparent hover:bg-slate-100 focus:bg-white px-2 py-1 rounded-lg border border-transparent hover:border-slate-200 focus:border-slate-300 focus:outline-none transition-colors max-w-xs"
+                      className="text-sm font-black text-slate-900 bg-transparent hover:bg-slate-100 focus:bg-white px-2 py-1 rounded-xl border border-transparent hover:border-slate-200 focus:border-slate-300 focus:outline-none transition-colors max-w-sm"
                       placeholder="Nom de la règle..."
                     />
 
-                    {/* Folder assignment picker */}
-                    <div className="flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
-                      <Folder className="w-3 h-3 text-slate-400" />
-                      <select
-                        value={rule.folderId || 'none'}
-                        onChange={(e) => setRuleFolder(rule.id, e.target.value === 'none' ? undefined : e.target.value)}
-                        className="text-[11px] font-bold text-slate-600 bg-transparent outline-none cursor-pointer pr-1"
-                      >
-                        <option value="none">Sans dossier</option>
-                        {folders.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            Dossier : {f.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    {/* Folder assignment picker (Masqué par défaut, activable dans Settings) */}
+                    {settings?.showRuleFolders && (
+                      <div className="flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
+                        <Folder className="w-3 h-3 text-slate-400" />
+                        <select
+                          value={rule.folderId || 'none'}
+                          onChange={(e) => setRuleFolder(rule.id, e.target.value === 'none' ? undefined : e.target.value)}
+                          className="text-[11px] font-bold text-slate-600 bg-transparent outline-none cursor-pointer pr-1"
+                        >
+                          <option value="none">Sans dossier</option>
+                          {folders.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              Dossier : {f.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1.5">
@@ -1087,9 +1090,93 @@ export function RuleBook() {
                           <div className="text-xs font-black uppercase tracking-tight text-amber-300 truncate">
                             {eventName}
                           </div>
-                          <div className="text-[9px] text-slate-400 truncate mt-0.5">
-                            {eventSub}
-                          </div>
+                          {/* Contrôles interactifs inline pour modifier les valeurs de conditions (Minuteur, Touche, Proximité, Score, Bords) */}
+                          {rule.trigger.type === 'timer' && (
+                            <div className="mt-1 flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="number"
+                                min={0.5}
+                                step={0.5}
+                                value={rule.trigger.timerInterval || 2}
+                                onChange={(e) => updateRule(rule.id, { trigger: { ...rule.trigger, timerInterval: Math.max(0.5, parseFloat(e.target.value) || 1) } })}
+                                className="w-12 text-center text-[10px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none"
+                              />
+                              <span className="text-[9px] text-slate-400">sec</span>
+                            </div>
+                          )}
+                          {rule.trigger.type === 'keyboard' && (
+                            <div className="mt-1" onClick={(e) => e.stopPropagation()}>
+                              <select
+                                value={rule.trigger.keyName || 'Space'}
+                                onChange={(e) => updateRule(rule.id, { trigger: { ...rule.trigger, keyName: e.target.value } })}
+                                className="text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none cursor-pointer w-full text-center"
+                              >
+                                <option value="Space">Espace</option>
+                                <option value="ArrowUp">↑ Haut</option>
+                                <option value="ArrowDown">↓ Bas</option>
+                                <option value="ArrowLeft">← Gauche</option>
+                                <option value="ArrowRight">→ Droite</option>
+                                <option value="Enter">Entrée</option>
+                                <option value="a">Touche A</option>
+                                <option value="w">Touche W</option>
+                                <option value="s">Touche S</option>
+                                <option value="d">Touche D</option>
+                                <option value="any">Toute touche</option>
+                              </select>
+                            </div>
+                          )}
+                          {rule.trigger.type === 'proximity' && (
+                            <div className="mt-1 flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="number"
+                                min={10}
+                                step={10}
+                                value={rule.trigger.proximityDistance || 80}
+                                onChange={(e) => updateRule(rule.id, { trigger: { ...rule.trigger, proximityDistance: Math.max(10, parseInt(e.target.value) || 50) } })}
+                                className="w-14 text-center text-[10px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none"
+                              />
+                              <span className="text-[9px] text-slate-400">px</span>
+                            </div>
+                          )}
+                          {rule.trigger.type === 'boundary' && (
+                            <div className="mt-1" onClick={(e) => e.stopPropagation()}>
+                              <select
+                                value={rule.trigger.boundaryEdge || 'any'}
+                                onChange={(e) => updateRule(rule.id, { trigger: { ...rule.trigger, boundaryEdge: e.target.value as any } })}
+                                className="text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none cursor-pointer w-full"
+                              >
+                                <option value="any">Tous bords</option>
+                                <option value="top">Haut</option>
+                                <option value="bottom">Bas</option>
+                                <option value="left">Gauche</option>
+                                <option value="right">Droite</option>
+                              </select>
+                            </div>
+                          )}
+                          {rule.trigger.type === 'variable' && (
+                            <div className="mt-1 flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
+                              <select
+                                value={rule.trigger.variableOperator || '>='}
+                                onChange={(e) => updateRule(rule.id, { trigger: { ...rule.trigger, variableOperator: e.target.value as any } })}
+                                className="text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none cursor-pointer"
+                              >
+                                <option value=">=">&gt;=</option>
+                                <option value="==">==</option>
+                                <option value="<=">&lt;=</option>
+                              </select>
+                              <input
+                                type="number"
+                                value={rule.trigger.variableValue ?? 5}
+                                onChange={(e) => updateRule(rule.id, { trigger: { ...rule.trigger, variableValue: parseInt(e.target.value) || 0 } })}
+                                className="w-10 text-center text-[10px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none"
+                              />
+                            </div>
+                          )}
+                          {rule.trigger.type !== 'timer' && rule.trigger.type !== 'keyboard' && rule.trigger.type !== 'proximity' && rule.trigger.type !== 'boundary' && rule.trigger.type !== 'variable' && (
+                            <div className="text-[9px] text-slate-400 truncate mt-0.5">
+                              {eventSub}
+                            </div>
+                          )}
                         </div>
                       </button>
 
@@ -1211,9 +1298,9 @@ export function RuleBook() {
                         } else if (act.type === 'play_sound') {
                           actionBadge = 'Jouer Son';
                           actionDetail = customSound ? `Son vocal : ${customSound.name}` : act.soundType ? `Son ${act.soundType}` : 'Effet sonore';
-                        } else if (act.type === 'toggle_state') {
-                          actionBadge = 'Basculer État';
-                          actionDetail = 'Alterner ou cycler';
+                        } else if (act.type === 'delay') {
+                          actionBadge = 'Attendre (Pause)';
+                          actionDetail = `Délai : ${act.delayDuration || 1}s`;
                         }
 
                         const actionSlotKey = `${rule.id}-act-${act.id}`;
@@ -1292,6 +1379,10 @@ export function RuleBook() {
                                   <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white rounded-full p-0.5 shadow-xs text-[10px]">
                                     ✨
                                   </div>
+                                </div>
+                              ) : act.type === 'delay' ? (
+                                <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                  ⏱️
                                 </div>
                               ) : (
                                 <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
@@ -1458,10 +1549,154 @@ export function RuleBook() {
 
             {/* --- BODY (Large Cards Grid) --- */}
             <div className="overflow-y-auto flex-1 pr-1 py-1">
-              {/* ÉTAPE 1 : SUJET (Grandes Cartes) */}
+              {/* ÉTAPE 1 : SUJET (Grandes Cartes) OU ÉVÉNEMENT GLOBAL */}
               {activeWizard.step === 1 && (
-                <div>
-                  {activeWizard.subjectSubStep === 'choose_state' ? (
+                <div className="space-y-4">
+                  {/* Switcher de mode de départ : Par Objet vs Par Événement Global */}
+                  <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setWizardEntryTab('subject')}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                        wizardEntryTab === 'subject'
+                          ? 'bg-white text-indigo-700 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>📦 Par Objet / Sujet (Plante, Pomme, etc.)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWizardEntryTab('global_event')}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                        wizardEntryTab === 'global_event'
+                          ? 'bg-white text-indigo-700 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>⚡ Par Événement Global (Minuteur, Clavier, Score...)</span>
+                    </button>
+                  </div>
+
+                  {wizardEntryTab === 'global_event' ? (
+                    <div className="space-y-3">
+                      <div className="text-xs font-bold text-slate-600">
+                        Choisissez un événement thématique global (déclenchement sans sélectionner un objet d'abord) :
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Minuteur / Chronomètre */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'timer',
+                              timerInterval: 2,
+                              timerType: 'repeat',
+                              step: 4,
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-5 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex items-center gap-4 cursor-pointer transition-all shadow-xs group active:scale-95 text-left"
+                        >
+                          <div className="w-16 h-16 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition-transform">
+                            ⏱️
+                          </div>
+                          <div>
+                            <div className="text-sm font-black text-slate-900 group-hover:text-amber-800">
+                              Minuteur / Chronomètre
+                            </div>
+                            <div className="text-xs text-slate-500 mt-1">
+                              Exécuter périodiquement (toutes les X secondes)
+                            </div>
+                          </div>
+                        </button>
+
+                        {/* Touche de Clavier */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'keyboard',
+                              keyName: 'Space',
+                              step: 4,
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-5 bg-slate-50 hover:bg-purple-50 border-2 border-slate-200 hover:border-purple-500 rounded-3xl flex items-center gap-4 cursor-pointer transition-all shadow-xs group active:scale-95 text-left"
+                        >
+                          <div className="w-16 h-16 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition-transform">
+                            ⌨️
+                          </div>
+                          <div>
+                            <div className="text-sm font-black text-slate-900 group-hover:text-purple-800">
+                              Touche de Clavier
+                            </div>
+                            <div className="text-xs text-slate-500 mt-1">
+                              Espace, Flèches de direction, Touches A, S, D...
+                            </div>
+                          </div>
+                        </button>
+
+                        {/* Condition de Score */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'variable',
+                              variableName: 'score',
+                              variableOperator: '>=',
+                              variableValue: 5,
+                              step: 4,
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-5 bg-slate-50 hover:bg-emerald-50 border-2 border-slate-200 hover:border-emerald-500 rounded-3xl flex items-center gap-4 cursor-pointer transition-all shadow-xs group active:scale-95 text-left"
+                        >
+                          <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition-transform">
+                            📊
+                          </div>
+                          <div>
+                            <div className="text-sm font-black text-slate-900 group-hover:text-emerald-800">
+                              Score &amp; Compteur
+                            </div>
+                            <div className="text-xs text-slate-500 mt-1">
+                              Déclencher quand le score atteint le seuil choisi
+                            </div>
+                          </div>
+                        </button>
+
+                        {/* Bord de Scène */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'boundary',
+                              boundaryEdge: 'any',
+                              step: 4,
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-5 bg-slate-50 hover:bg-rose-50 border-2 border-slate-200 hover:border-rose-500 rounded-3xl flex items-center gap-4 cursor-pointer transition-all shadow-xs group active:scale-95 text-left"
+                        >
+                          <div className="w-16 h-16 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition-transform">
+                            🖼️
+                          </div>
+                          <div>
+                            <div className="text-sm font-black text-slate-900 group-hover:text-rose-800">
+                              Bord de Scène
+                            </div>
+                            <div className="text-xs text-slate-500 mt-1">
+                              Toucher le cadre extérieur du Canvas
+                            </div>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  ) : activeWizard.subjectSubStep === 'choose_state' ? (
                     <div className="space-y-4">
                       <div className="text-xs font-bold text-slate-600">
                         Choisissez si la règle requiert un état précis ou s'applique à tous les états :
@@ -2465,6 +2700,30 @@ export function RuleBook() {
                                   </div>
                                   <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                                     Effets audio ou voix micro
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 2.5. Attendre / Pause (Délai) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  completeWizardWithAction({
+                                    type: 'delay',
+                                    delayDuration: 1,
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-amber-50/70 border-2 border-slate-200 hover:border-amber-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  ⏱️
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-amber-700 truncate">
+                                    Attendre / Pause (Délai 1s)
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Pause avant la prochaine action
                                   </div>
                                 </div>
                               </button>
@@ -3880,6 +4139,30 @@ export function RuleBook() {
                                   </div>
                                   <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                                     Effets audio ou voix micro
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 2.5. Attendre / Pause (Délai) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  applyAction({
+                                    type: 'delay',
+                                    delayDuration: 1,
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-amber-50/70 border-2 border-slate-200 hover:border-amber-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  ⏱️
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-amber-700 truncate">
+                                    Attendre / Pause (Délai 1s)
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Pause avant la prochaine action
                                   </div>
                                 </div>
                               </button>
