@@ -148,7 +148,8 @@ export function RuleBook() {
   const settings = useSceneStore((state) => state.settings);
 
   // Pagination & Rule Drag-and-Drop state
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const currentPage = useSceneStore((state) => state.ruleBookPage || 1);
+  const setCurrentPage = useSceneStore((state) => state.setRuleBookPage);
   const [draggedRuleId, setDraggedRuleId] = useState<string | null>(null);
   const [dragOverRuleTarget, setDragOverRuleTarget] = useState<{ id: string; position: 'above' | 'below' } | null>(null);
   const RULES_PER_PAGE = 5;
@@ -862,6 +863,7 @@ export function RuleBook() {
             const targetSlotKey = `${rule.id}-target`;
             // Default rules to collapsed state (Request 3)
             const isCollapsed = collapsedRuleIds[rule.id] !== false;
+            const isGlobalTrigger = ['keyboard', 'timer', 'variable', 'boundary'].includes(rule.trigger.type);
 
             const isRuleTargeted = dragOverRuleTarget?.id === rule.id;
             const showGapAbove = isRuleTargeted && dragOverRuleTarget.position === 'above';
@@ -871,8 +873,10 @@ export function RuleBook() {
               <div key={rule.id} className="relative">
                 {/* Visual Drag Indicator ABOVE */}
                 {showGapAbove && (
-                  <div className="my-1.5 py-1.5 px-4 bg-indigo-50 border-2 border-dashed border-indigo-500 rounded-2xl text-center text-indigo-700 text-xs font-bold shadow-xs animate-pulse flex items-center justify-center gap-1.5">
-                    <span>↓ Placer la règle ici (Au-dessus)</span>
+                  <div className="absolute -top-2 left-2 right-2 h-1.5 bg-indigo-600 rounded-full shadow-md z-30 pointer-events-none animate-pulse flex items-center justify-center">
+                    <span className="bg-indigo-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full -top-2.5 relative shadow-xs">
+                      ↓ Placer la règle ici
+                    </span>
                   </div>
                 )}
 
@@ -902,8 +906,10 @@ export function RuleBook() {
                     setDragOverRuleTarget(null);
                   }}
                   className={`p-3.5 sm:p-4 rounded-3xl border transition-all shadow-xs ${
-                    isRuleTargeted
-                      ? 'border-indigo-500 ring-2 ring-indigo-400 bg-indigo-50/20'
+                    isRuleTargeted && dragOverRuleTarget?.position === 'above'
+                      ? 'border-t-4 border-t-indigo-600 border-x-indigo-400 border-b-slate-200 bg-indigo-50/40 shadow-md'
+                      : isRuleTargeted && dragOverRuleTarget?.position === 'below'
+                      ? 'border-b-4 border-b-indigo-600 border-x-indigo-400 border-t-slate-200 bg-indigo-50/40 shadow-md'
                       : rule.enabled
                       ? 'bg-white border-slate-200/90 hover:border-slate-300'
                       : 'bg-slate-50/70 border-slate-200/50 opacity-60'
@@ -1008,15 +1014,21 @@ export function RuleBook() {
                     className="flex items-center justify-between gap-3 px-3 py-2 bg-slate-50 hover:bg-indigo-50/40 rounded-2xl border border-slate-200/80 cursor-pointer transition-all"
                   >
                     <div className="flex items-center gap-2 flex-wrap text-xs">
-                      <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                        <div className="w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center p-0.5 shadow-2xs">
-                          <EntityMiniPreview entity={subjectEntity} type={subjectType} stateId={rule.trigger.subjectStateId} size={20} />
+                      {isGlobalTrigger ? (
+                        <div className="flex items-center gap-1.5 font-extrabold text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-2 py-0.5 rounded-xl">
+                          <span>⚡ Système / Global</span>
                         </div>
-                        <span>{subjectOpt?.label || subjectType}</span>
-                        {rule.trigger.subjectStateId && (
-                          <span className="text-[10px] text-indigo-700 bg-indigo-50 px-1 py-0.2 rounded font-medium">({subjectStateName})</span>
-                        )}
-                      </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                          <div className="w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center p-0.5 shadow-2xs">
+                            <EntityMiniPreview entity={subjectEntity} type={subjectType} stateId={rule.trigger.subjectStateId} size={20} />
+                          </div>
+                          <span>{subjectOpt?.label || subjectType}</span>
+                          {rule.trigger.subjectStateId && (
+                            <span className="text-[10px] text-indigo-700 bg-indigo-50 px-1 py-0.2 rounded font-medium">({subjectStateName})</span>
+                          )}
+                        </div>
+                      )}
 
                       <span className="text-slate-400">➔</span>
 
@@ -1060,6 +1072,7 @@ export function RuleBook() {
                       <button
                         type="button"
                         onClick={() =>
+                          !isGlobalTrigger &&
                           setActiveModal({
                             type: 'subject',
                             ruleId: rule.id,
@@ -1068,50 +1081,70 @@ export function RuleBook() {
                         }
                         onDragOver={(e) => {
                           e.preventDefault();
-                          setDragOverSlot(subjectSlotKey);
+                          if (!isGlobalTrigger) setDragOverSlot(subjectSlotKey);
                         }}
                         onDragLeave={() => setDragOverSlot(null)}
-                        onDrop={(e) => handleDropOnSlot(e, rule.id, 'subject')}
-                        className={`w-32 h-36 bg-white border rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group ${
-                          dragOverSlot === subjectSlotKey
-                            ? 'border-indigo-500 ring-4 ring-indigo-300/50 bg-indigo-50/40 scale-105'
-                            : 'border-slate-200 hover:border-slate-400'
+                        onDrop={(e) => !isGlobalTrigger && handleDropOnSlot(e, rule.id, 'subject')}
+                        className={`w-32 h-36 bg-white border rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all text-center group ${
+                          isGlobalTrigger
+                            ? 'border-indigo-200 bg-indigo-50/20 cursor-default'
+                            : dragOverSlot === subjectSlotKey
+                            ? 'border-indigo-500 ring-4 ring-indigo-300/50 bg-indigo-50/40 scale-105 cursor-pointer'
+                            : 'border-slate-200 hover:border-slate-400 cursor-pointer'
                         }`}
-                        title="Cliquer pour changer l'objet ou son état requis"
+                        title={isGlobalTrigger ? 'Événement Global / Système' : "Cliquer pour changer l'objet ou son état requis"}
                       >
                         <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600">
                           Sujet
                         </div>
 
-                        <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
-                          <EntityMiniPreview
-                            entity={subjectEntity}
-                            type={subjectType}
-                            stateId={rule.trigger.subjectStateId}
-                            size={48}
-                          />
-                        </div>
+                        {isGlobalTrigger ? (
+                          <>
+                            <div className="w-14 h-14 rounded-2xl bg-indigo-100/90 text-indigo-700 border border-indigo-200 flex items-center justify-center text-2xl shadow-inner font-black">
+                              ⚡
+                            </div>
+                            <div className="w-full">
+                              <div className="text-xs font-black text-indigo-900 truncate">
+                                Système
+                              </div>
+                              <div className="text-[9px] text-indigo-600 bg-indigo-50 border border-indigo-200/60 px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5">
+                                Événement Global
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
+                              <EntityMiniPreview
+                                entity={subjectEntity}
+                                type={subjectType}
+                                stateId={rule.trigger.subjectStateId}
+                                size={48}
+                              />
+                            </div>
 
-                        <div className="w-full">
-                          <div className="text-xs font-bold text-slate-800 truncate">
-                            {subjectOpt?.label || subjectType}
-                          </div>
-                          <div
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveModal({
-                                type: 'subject',
-                                ruleId: rule.id,
-                                subStep: 'choose_state',
-                                selectedEntityType: subjectType,
-                              });
-                            }}
-                            className="text-[9px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer"
-                            title="Cliquer pour changer l'état requis"
-                          >
-                            {subjectStateName}
-                          </div>
-                        </div>
+                            <div className="w-full">
+                              <div className="text-xs font-bold text-slate-800 truncate">
+                                {subjectOpt?.label || subjectType}
+                              </div>
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveModal({
+                                    type: 'subject',
+                                    ruleId: rule.id,
+                                    subStep: 'choose_state',
+                                    selectedEntityType: subjectType,
+                                  });
+                                }}
+                                className="text-[9px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer"
+                                title="Cliquer pour changer l'état requis"
+                              >
+                                {subjectStateName}
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </button>
 
                       {/* CASE 2: ÉVÉNEMENT (Large Card) */}
@@ -1504,7 +1537,7 @@ export function RuleBook() {
           <button
             type="button"
             disabled={validPage === 1}
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            onClick={() => setCurrentPage(Math.max(1, validPage - 1))}
             className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:pointer-events-none rounded-xl text-slate-700 transition-all cursor-pointer flex items-center gap-1"
           >
             <ChevronLeft className="w-4 h-4" />
@@ -1521,7 +1554,7 @@ export function RuleBook() {
           <button
             type="button"
             disabled={validPage === totalPages}
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            onClick={() => setCurrentPage(Math.min(totalPages, validPage + 1))}
             className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:pointer-events-none rounded-xl text-slate-700 transition-all cursor-pointer flex items-center gap-1"
           >
             <span>Suivant</span>

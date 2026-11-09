@@ -76,6 +76,8 @@ interface SceneState {
   currentSlotId: string | null;
   collapsedRuleIds: Record<string, boolean>;
   toggleRuleCollapse: (ruleId: string) => void;
+  ruleBookPage: number;
+  setRuleBookPage: (page: number) => void;
   gameScore: number;
   triggerKeyEvent: (keyName: string, phase?: 'down' | 'up') => void;
 
@@ -502,6 +504,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   snapshotEntityOrder: null,
   currentSlotId: null,
   collapsedRuleIds: {},
+  ruleBookPage: 1,
+  setRuleBookPage: (page) => set({ ruleBookPage: Math.max(1, page) }),
   gameScore: 0,
   toggleRuleCollapse: (ruleId) => {
     set((state) => ({
@@ -1935,8 +1939,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     activePointerRules.forEach((rule) => {
       const cooldownKey = `ptr_${rule.id}_${subject.id}_${phase}`;
       const isClickType = phase === 'click' || phase === 'down' || phase === 'up' || phase === 'mouse_down' || phase === 'mouse_up';
-      // Use 0 cooldown for mouse_down and mouse_up so rapid clicks work seamlessly
-      const cooldownMs = (phase === 'down' || phase === 'mouse_down' || phase === 'up' || phase === 'mouse_up') ? 0 : isClickType ? 20 : RULE_COOLDOWN_MS;
+      // Use a 50ms single-gesture debounce for pointer release ('up' / 'mouse_up') to avoid multi-spawns from dual event listeners
+      const cooldownMs = (phase === 'up' || phase === 'mouse_up') ? 50 : (phase === 'down' || phase === 'mouse_down') ? 0 : isClickType ? 20 : RULE_COOLDOWN_MS;
 
       if (now - (ruleCooldowns[cooldownKey] || 0) < cooldownMs) {
         return;

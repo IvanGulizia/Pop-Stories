@@ -87,8 +87,10 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
             <div key={entity.id} className="relative">
               {/* Drop slot indicator ABOVE */}
               {showGapAbove && (
-                <div className="my-1.5 py-1.5 px-3 bg-indigo-50 border-2 border-dashed border-indigo-500 rounded-xl text-center text-indigo-700 text-[11px] font-bold shadow-xs animate-pulse flex items-center justify-center gap-1">
-                  <span>↓ Placer ici (Au-dessus)</span>
+                <div className="absolute -top-1.5 left-1 right-1 h-1 bg-indigo-600 rounded-full shadow-md z-30 pointer-events-none animate-pulse flex items-center justify-center">
+                  <span className="bg-indigo-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full -top-2.5 relative shadow-xs">
+                    ↓ Placer ici
+                  </span>
                 </div>
               )}
 
@@ -129,8 +131,10 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                 }}
                 onClick={() => selectEntity(entity.id)}
                 className={`p-2.5 bg-white border rounded-2xl transition-all cursor-pointer flex flex-col gap-2 group ${
-                  isTargeted
-                    ? 'border-indigo-600 ring-2 ring-indigo-400 bg-indigo-50/50 scale-[1.01]'
+                  isTargeted && dragOverTarget?.position === 'above'
+                    ? 'border-t-4 border-t-indigo-600 border-x-indigo-400 border-b-slate-200 bg-indigo-50/50 shadow-md scale-[1.01]'
+                    : isTargeted && dragOverTarget?.position === 'below'
+                    ? 'border-b-4 border-b-indigo-600 border-x-indigo-400 border-t-slate-200 bg-indigo-50/50 shadow-md scale-[1.01]'
                     : isSelected
                     ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 shadow-xs'
                     : 'border-slate-200/90 hover:border-slate-300'
@@ -191,14 +195,16 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                   </button>
                 </div>
               </div>
-
-              {/* Drop slot indicator BELOW */}
-              {showGapBelow && (
-                <div className="my-1.5 py-1.5 px-3 bg-indigo-50 border-2 border-dashed border-indigo-500 rounded-xl text-center text-indigo-700 text-[11px] font-bold shadow-xs animate-pulse flex items-center justify-center gap-1">
-                  <span>↑ Placer ici (En-dessous)</span>
-                </div>
-              )}
             </div>
+
+            {/* Drop slot indicator BELOW */}
+            {showGapBelow && (
+              <div className="absolute -bottom-1.5 left-1 right-1 h-1 bg-indigo-600 rounded-full shadow-md z-30 pointer-events-none animate-pulse flex items-center justify-center">
+                <span className="bg-indigo-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full top-2.5 relative shadow-xs">
+                  ↑ Placer ici
+                </span>
+              </div>
+            )}
           </div>
           );
         })}
