@@ -65,15 +65,15 @@ export function SpawnLocationPicker({
   const [sizeMode, setSizeMode] = useState<'default' | 'match_target' | 'match_subject' | 'custom'>(initialSizeMode);
   const [scaleMultiplier, setScaleMultiplier] = useState<number>(initialScaleMultiplier);
   const [customSize, setCustomSize] = useState<Size>(
-    initialCustomSize || spawnEntity?.size || { width: 64, height: 64 }
+    initialCustomSize || spawnEntity?.size || { width: 256, height: 256 }
   );
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const relativeBoxRef = useRef<HTMLDivElement>(null);
 
   // Compute calculated spawn size
-  const defaultSpawnWidth = spawnEntity?.size.width || 64;
-  const defaultSpawnHeight = spawnEntity?.size.height || 64;
+  const defaultSpawnWidth = spawnEntity?.size.width || 256;
+  const defaultSpawnHeight = spawnEntity?.size.height || 256;
 
   let calculatedSpawnWidth = defaultSpawnWidth;
   let calculatedSpawnHeight = defaultSpawnHeight;
@@ -278,42 +278,74 @@ export function SpawnLocationPicker({
           {/* 2. RELATIVE OFFSET (Interactive box with marker + inputs) */}
           {mode.startsWith('offset') && (
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+              {/* Anchor Switcher: Sujet vs Cible */}
+              <div className="flex items-center justify-between gap-2 flex-wrap bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+                <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5 ml-1">
                   <Crosshair className="w-4 h-4 text-indigo-600" />
+                  Ancre de référence :
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setMode('offset_subject')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      mode === 'offset_subject'
+                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    👤 Sujet ({subjectEntity?.name || 'Sujet'})
+                  </button>
+                  {isCollision && targetEntity && (
+                    <button
+                      type="button"
+                      onClick={() => setMode('offset_target')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                        mode === 'offset_target'
+                          ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      🎯 Cible ({targetEntity?.name || 'Cible'})
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-600">
                   Cliquez ou glissez pour orienter la direction d'apparition :
                 </span>
                 <span className="text-xs font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-200">
                   ΔX: {offset.x > 0 ? `+${offset.x}` : offset.x}px | ΔY: {offset.y > 0 ? `+${offset.y}` : offset.y}px
-                  {extraDistance > 0 && ` (Adapté +${Math.round(extraDistance)}px pour la taille)`}
                 </span>
               </div>
 
-              {/* Interactive relative plane */}
+              {/* Interactive relative plane with WHITE background & clear superposition preview */}
               <div
                 ref={relativeBoxRef}
                 onClick={handleRelativeBoxClick}
-                className="relative w-full h-44 bg-slate-900 rounded-2xl border-2 border-indigo-300 overflow-hidden cursor-crosshair select-none flex items-center justify-center shadow-inner"
+                className="relative w-full h-64 sm:h-72 bg-white rounded-3xl border-2 border-slate-300 overflow-hidden cursor-crosshair select-none flex items-center justify-center shadow-inner"
                 style={{
-                  backgroundImage: 'radial-gradient(circle, #334155 1px, transparent 1px)',
-                  backgroundSize: '16px 16px',
+                  backgroundImage: 'radial-gradient(circle, #cbd5e1 1.5px, transparent 1.5px)',
+                  backgroundSize: '20px 20px',
                 }}
               >
                 {/* Center axes */}
-                <div className="absolute inset-x-0 top-1/2 h-px bg-slate-700 border-dashed" />
-                <div className="absolute inset-y-0 left-1/2 w-px bg-slate-700 border-dashed" />
+                <div className="absolute inset-x-0 top-1/2 h-px bg-slate-300 border-dashed" />
+                <div className="absolute inset-y-0 left-1/2 w-px bg-slate-300 border-dashed" />
 
-                {/* Center Reference Entity */}
-                <div className="relative z-10 flex flex-col items-center pointer-events-none opacity-90">
-                  <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-600 flex items-center justify-center p-1 shadow-md">
+                {/* Center Reference Entity (Anchor: Sujet ou Cible) */}
+                <div className="relative z-10 flex flex-col items-center pointer-events-none">
+                  <div className="w-20 h-20 rounded-2xl bg-slate-50 border-2 border-slate-300 flex items-center justify-center p-1.5 shadow-md">
                     <EntityMiniPreview
                       entity={mode === 'offset_target' ? targetEntity : subjectEntity}
                       type={mode === 'offset_target' ? targetEntity?.type : subjectEntity?.type}
-                      size={36}
+                      size={60}
                     />
                   </div>
-                  <span className="text-[9px] font-bold text-slate-400 mt-1">
-                    {mode === 'offset_target' ? 'Cible' : 'Sujet'}
+                  <span className="text-[10px] font-black text-slate-700 bg-white/90 border border-slate-200 px-2 py-0.5 rounded-full shadow-2xs mt-1">
+                    Ancre : {mode === 'offset_target' ? 'Cible' : 'Sujet'}
                   </span>
                 </div>
 
@@ -325,12 +357,12 @@ export function SpawnLocationPicker({
                     x2={`calc(50% + ${adjustedOffsetX / 1.2}px)`}
                     y2={`calc(50% + ${adjustedOffsetY / 1.2}px)`}
                     stroke="#6366f1"
-                    strokeWidth="2"
-                    strokeDasharray="4 4"
+                    strokeWidth="2.5"
+                    strokeDasharray="5 5"
                   />
                 </svg>
 
-                {/* Target Spawn Marker Pin with live preview size */}
+                {/* Target Spawn Marker Pin with transparent superposition preview */}
                 <div
                   className="absolute z-20 pointer-events-none transition-all duration-75 flex flex-col items-center -translate-x-1/2 -translate-y-1/2"
                   style={{
@@ -339,13 +371,12 @@ export function SpawnLocationPicker({
                   }}
                 >
                   <div className="relative flex items-center justify-center">
-                    <div className="w-8 h-8 rounded-full bg-indigo-500/30 border-2 border-indigo-400 animate-ping absolute" />
-                    <div className="w-8 h-8 rounded-xl bg-indigo-600 border-2 border-white shadow-lg flex items-center justify-center p-0.5 overflow-hidden">
-                      <EntityMiniPreview entity={spawnEntity} type={spawnEntity?.type} size={28} />
+                    <div className="w-20 h-20 rounded-2xl bg-indigo-500/20 border-2 border-indigo-600 backdrop-blur-2xs opacity-75 shadow-lg flex items-center justify-center p-1 overflow-hidden">
+                      <EntityMiniPreview entity={spawnEntity} type={spawnEntity?.type} size={56} />
                     </div>
                   </div>
-                  <span className="text-[9px] font-black text-indigo-300 bg-indigo-950/90 px-1.5 py-0.5 rounded shadow-xs mt-0.5 whitespace-nowrap">
-                    Spawn ({adjustedOffsetX}, {adjustedOffsetY}) • {calculatedSpawnWidth}x{calculatedSpawnHeight}px
+                  <span className="text-[10px] font-black text-indigo-950 bg-indigo-100 border border-indigo-300 px-2 py-0.5 rounded-full shadow-xs mt-1 whitespace-nowrap">
+                    Objet Créé ({adjustedOffsetX}, {adjustedOffsetY}) • {calculatedSpawnWidth}x{calculatedSpawnHeight}px
                   </span>
                 </div>
               </div>

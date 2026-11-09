@@ -56,13 +56,40 @@
   - Presets standards disponibles : **16:9** (Paysage), **4:3** (Rétro), **1:1** (Carré), **9:16** (Mobile / Vertical) et **Libre** (Plein écran).
   - Ancrage propre au sommet du conteneur (`justify-start`), centré horizontalement (`items-center`), évitant tout effondrement ou disparition du canvas lors des changements de format.
   - Sélecteur de ratio visuel directement accessible dans le panneau des Paramètres.
-- **Décors & Arrière-plans Multi-Calques Dessinables (Background & Foreground)** :
-  - **Groupes de calques pliables dans l'onglet Scène** : Groupe *Arrière-plan (Background)*, *Premier-plan (Foreground)* et possibilité de créer de nouveaux groupes de calques personnalisés.
-  - **Gestion complète de calques** : Ajout de calques, nommage, masquage/affichage (`Eye` / `EyeOff`), suppression et opacité.
-  - **Dessin vectoriel direct sur calque** : Clic sur le bouton *« Dessiner »* d'un calque pour ouvrir l'atelier vectoriel complet et dessiner le décor de fond ou de premier plan.
-  - **Rendu étagé dans la scène** : Les calques d'arrière-plan sont rendus en dessous de tous les objets de jeu (`z-index: 1`), tandis que les calques de premier-plan sont projetés au-dessus (`z-index: 40`).
-  - **Persistance intégrée** : Sauvegarde et restauration des groupes de calques et tracés vectoriels dans les slots de projets et fichiers JSON d'export/import.
-  - **Suppression du badge de format** : Retrait du badge textuel *"Format 16:9"* superposé sur le canvas pour un rendu visuel net.
+- **Dessin Direct sur Canvas de Scène (Calques Décor Background & Foreground)** :
+  - Dessin vectoriel en direct directement sur le canvas principal de la scène lors de l'édition d'un calque de décor.
+  - Panneau d'outils de dessin vectoriel (`DrawingToolsPanel`) affiché dans le tiroir de droite à la place de l'inspecteur lorsqu'un calque est sélectionné (crayon, lignes, rectangles, cercles, pot de peinture, gomme précise et trait, palettes de couleurs contour et fond, slider d'épaisseur, annulation).
+- **Persistance de l'État de Pliage/Dépliage des Règles (Accordéon)** :
+  - Conservation de l'état plié/déplié (`isCollapsed`) de chaque règle à la racine du Rulebook dans le store global `useSceneStore`.
+  - Maintien rigoureux de l'état d'accordéon lors du passage en mode Play / Édition et lors des changements d'onglets ou de fenêtres.
+- **Nouveau Déclencheur "Survol Souris" (Mouse Hover Enter & Exit)** :
+  - Ajout du déclencheur d'événement **Survol Souris** (`TriggerType = 'hover'`).
+  - Sélection précise de la phase souhaitée : **Survol Entrée** (`enter` / `hover_enter`) vs **Survol Sortie** (`exit` / `hover_exit`).
+- **Déclencheurs "Clic Enfoncé" (Mouse Down) et "Clic Relâché" (Mouse Up)** :
+  - Ajout des sous-phases d'appui (**Mouse Down**) et de relâchement (**Mouse Up**) au déclencheur de clic.
+- **Amélioration de la Fenêtre d'Aperçu de Création d'Objet (`SpawnLocationPicker`)** :
+  - Fenêtre relative interactive plus grand format avec fond blanc épuré (`bg-white`) et repères de grille clairs.
+  - Sélecteur d'ancre de référence explicite pour basculer la position relative entre le **Sujet** et la **Cible**.
+  - Rendu de l'objet à créer en superposition semi-transparente (`opacity-70`) pour apercevoir nettement le chevauchement et l'empilement visuel sur l'objet ancré.
+  - Dimensions par défaut de l'objet créé ajustées sur 256px par 256px.
+
+- **Lissage du Dessin Direct Vectoriel sur Canvas (Stroke Width & Alignement Précis)** :
+  - Élimination du saut ou changement d'épaisseur de trait (`strokeWidth`) après avoir relâché le pointeur en dessin direct.
+  - Alignement exact 1:1 sans aucun décalage (offset) entre le curseur et le tracé vectoriel via le calage `preserveAspectRatio="none"` sur le `DirectCanvasDrawingOverlay`.
+  - Épure de l'interface des calques dans `SceneLayerManager` : suppression du bouton "Dessiner" superflu car la simple sélection du calque active le mode dessin sur le canvas principal et ouvre le panneau d'outils vectoriels à droite.
+- **Organisation des Conditions en 4 Cases Logiques dans le RuleBook** :
+  - Étape 2 du wizard séquentiel et modal d'événement restructurés en 4 grands cadres à bordures colorées :
+    1. **Collisions & Contacts entre Objets** (Bordure Indigo/Sky) : *Collision Entrée*, *Collision Sortie / Séparation*, *Contact Continu*, *Lâché sur Cible*.
+    2. **Clics & Pointeur** (Bordure Violet/Purple) : *Clic Complet*, *Appui Clic (Mouse Down)*, *Relâchement Clic (Mouse Up)*.
+    3. **Survol Souris (Hover)** (Bordure Amber/Yellow) : *Survol Entrée (Mouse Hover Enter)*, *Survol Sortie (Mouse Hover Exit)*.
+    4. **Glisser-Déposer Libre** (Bordure Emerald/Teal) : *Relâchement libre dans le vide (Drop)*.
+- **Ajout Intégral de toutes les Nouvelles Conditions & Système de Score** :
+  - **⏱️ Minuteurs & Chronomètres (`timer`)** : support des délais uniques (ex: *Après X secondes*) et récurrents (*Toutes les X secondes*).
+  - **⌨️ Touches du Clavier (`keyboard`)** : réactivité immédiate en mode Play sur les touches (Flèches, Espace, Entrée, etc.).
+  - **🔄 Changement d'État (`state_change`)** : déclenchement automatique dès qu'un objet passe à un nouvel état.
+  - **📏 Proximité & Distance (`proximity`)** : déclenchement par rayon de proximité (&lt; 80px) entre deux entités.
+  - **🖼️ Bords de Scène (`boundary`)** : détection de collision avec les 4 bords du canvas (Haut, Bas, Gauche, Droite ou tout bord).
+  - **📊 Variable & Score (`variable` / `add_score`)** : action d'incrémentation du score (`Ajouter au score (+1)`), affichage du badge HUD `🏆 Score : X` sur la scène en mode Jeu, et déclencheur par seuil de score (ex: *Score >= 5*).
 
 ## Étape Logique Suivante
 - **Bibliothèque de Préréglages & Modèles de Jeu** : Presets de démarrage pré-configurés (mini-jeux type plateforme, collecteur d'objets, tamagotchi).

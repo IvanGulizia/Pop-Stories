@@ -198,22 +198,8 @@ export function SceneLayerManager({ onOpenDrawLayerModal }: SceneLayerManagerPro
                             </div>
                           </div>
 
-                          {/* Bouton Dessiner sur ce calque */}
+                          {/* Actions calque */}
                           <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                selectLayer(layer.id);
-                                onOpenDrawLayerModal(layer, group);
-                              }}
-                              className="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shadow-2xs active:scale-95"
-                              title="Ouvrir l'atelier de dessin vectoriel pour ce calque"
-                            >
-                              <Paintbrush className="w-3 h-3" />
-                              <span>Dessiner</span>
-                            </button>
-
                             <button
                               type="button"
                               onClick={(e) => {

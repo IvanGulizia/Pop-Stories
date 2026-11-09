@@ -85,18 +85,39 @@ export interface Entity {
   zIndex?: number;
 }
 
-export type TriggerType = 'collision' | 'click' | 'drag';
+export type TriggerType =
+  | 'collision'
+  | 'click'
+  | 'drag'
+  | 'hover'
+  | 'timer'
+  | 'keyboard'
+  | 'state_change'
+  | 'proximity'
+  | 'boundary'
+  | 'variable';
 
 export type TriggerPhase =
   | 'click'             // Clic complet (sans drag)
   | 'mouse_down'        // Appui (MouseDown / PointerDown)
   | 'mouse_up'          // Relâchement souris (MouseUp / PointerUp)
+  | 'down'              // Appui bouton souris
+  | 'up'                // Relâchement bouton souris
   | 'drag_release'      // Relâchement du glissement (On Release / Drop)
   | 'drag_start'        // Début du glissement
-  | 'enter'             // Entrée en collision (Premier contact)
+  | 'enter'             // Entrée en collision ou en survol
+  | 'exit'              // Sortie de survol ou de collision
+  | 'hover_enter'       // Entrée du survol souris
+  | 'hover_exit'        // Sortie du survol souris
   | 'stay'              // Pendant la collision (Contact continu)
   | 'release'           // Sortie de collision (Fin de contact / Séparation)
-  | 'collision_release'; // Relâchement d'un objet pendant une collision avec la cible
+  | 'collision_release' // Relâchement d'un objet pendant une collision avec la cible
+  | 'timer'             // Chronomètre / Minuteur
+  | 'key_down'          // Touche enfoncée
+  | 'key_up'            // Touche relâchée
+  | 'state_enter'       // Passage à un état
+  | 'proximity_enter'   // Approche / Proximité
+  | 'boundary_hit';     // Contact bord de scène
 
 export type SelectionMode = 'type' | 'tag' | 'instance';
 
@@ -112,17 +133,35 @@ export interface RuleTrigger {
   subjectTag?: string;         // Si mode = 'tag'
   subjectStateId?: StateId;    // État spécifique requis pour le sujet
 
-  // Cible (Pour collision)
+  // Cible (Pour collision, proximité)
   targetMode?: SelectionMode;
   targetId?: EntityId;        // Si mode = 'instance'
   targetType?: EntityType;
   targetTag?: string;
   targetStateId?: StateId;
+
+  // Configuration Minuteur / Timer
+  timerInterval?: number;       // secondes (ex: 2, 5, 10)
+  timerType?: 'once' | 'repeat'; // 'once' (après X sec) | 'repeat' (toutes les X sec)
+
+  // Configuration Touche Clavier
+  keyName?: string;             // 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' | 'Space' | 'Enter' | 'a' | 'w' | 's' | 'd'
+
+  // Configuration Proximité / Distance
+  proximityDistance?: number;   // pixels en rayon (ex: 60, 100)
+
+  // Configuration Bords de Scène
+  boundaryEdge?: 'any' | 'top' | 'bottom' | 'left' | 'right';
+
+  // Configuration Compteur / Score
+  variableName?: string;        // 'score' | 'counter'
+  variableOperator?: '>=' | '==' | '<=';
+  variableValue?: number;
 }
 
 export type ActionTargetMode = 'subject' | 'target' | 'type' | 'tag' | 'instance';
 
-export type ActionType = 'change_state' | 'toggle_state' | 'toggle_draggable' | 'delete_entity' | 'spawn_entity' | 'play_sound';
+export type ActionType = 'change_state' | 'toggle_state' | 'toggle_draggable' | 'delete_entity' | 'spawn_entity' | 'play_sound' | 'add_score';
 
 export type SpawnLocationMode = 'at_subject' | 'at_target' | 'offset_subject' | 'offset_target' | 'random' | 'absolute';
 
@@ -171,6 +210,9 @@ export interface RuleAction {
   // Champs pour 'play_sound'
   soundType?: 'pop' | 'bell' | 'laser' | 'bounce' | 'magic' | 'win';
   customSoundId?: string;
+
+  // Champs pour 'add_score'
+  scoreAmount?: number;
 }
 
 export interface DynamicRule {

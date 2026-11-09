@@ -114,6 +114,16 @@ interface WizardData {
   actionSoundType?: SoundType;
   toggleStateA?: string;
   toggleStateB?: string;
+
+  // Configuration Minuteurs, Clavier, Proximité, Bords, Score
+  timerInterval?: number;
+  timerType?: 'once' | 'repeat';
+  keyName?: string;
+  proximityDistance?: number;
+  boundaryEdge?: 'any' | 'top' | 'bottom' | 'left' | 'right';
+  variableName?: string;
+  variableOperator?: '>=' | '==' | '<=';
+  variableValue?: number;
 }
 
 export function RuleBook() {
@@ -146,14 +156,8 @@ export function RuleBook() {
   const [newFolderName, setNewFolderName] = useState<string>('');
   const [isSoundModalOpen, setIsSoundModalOpen] = useState<boolean>(false);
   const [playingSoundId, setPlayingSoundId] = useState<string | null>(null);
-  const [collapsedRuleIds, setCollapsedRuleIds] = useState<Record<string, boolean>>({});
-
-  const toggleCollapseRule = (id: string) => {
-    setCollapsedRuleIds((prev) => ({
-      ...prev,
-      [id]: !prev[id],
-    }));
-  };
+  const collapsedRuleIds = useSceneStore((state) => state.collapsedRuleIds || {});
+  const toggleCollapseRule = useSceneStore((state) => state.toggleRuleCollapse);
 
   // Sound preview helper
   const handlePlayPreview = (soundType?: SoundType, customSoundId?: string) => {
@@ -240,16 +244,16 @@ export function RuleBook() {
   const completeWizardWithAction = (actionData?: Partial<RuleAction>) => {
     if (!activeWizard) return;
 
-    const isCollision = activeWizard.triggerType === 'collision';
+    const needsTarget = activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity';
     const actions: RuleAction[] = [];
 
     if (actionData && actionData.type) {
       actions.push({
         id: `act-${Date.now()}`,
         type: actionData.type,
-        targetMode: actionData.targetMode || (isCollision ? 'target' : 'subject'),
+        targetMode: actionData.targetMode || (needsTarget ? 'target' : 'subject'),
         targetType: actionData.targetType || (actionData.targetMode === 'subject' ? activeWizard.subjectType : activeWizard.targetType),
-        spawnLocationMode: actionData.spawnLocationMode || (isCollision ? 'at_target' : 'at_subject'),
+        spawnLocationMode: actionData.spawnLocationMode || (needsTarget ? 'at_target' : 'at_subject'),
         spawnSizeMode: actionData.spawnSizeMode || 'default',
         ...actionData,
       });
@@ -264,9 +268,17 @@ export function RuleBook() {
         subjectMode: 'type',
         subjectType: activeWizard.subjectType,
         subjectStateId: activeWizard.subjectStateId,
-        targetMode: isCollision ? 'type' : undefined,
-        targetType: isCollision ? activeWizard.targetType : undefined,
-        targetStateId: isCollision ? activeWizard.targetStateId : undefined,
+        targetMode: needsTarget ? 'type' : undefined,
+        targetType: needsTarget ? activeWizard.targetType : undefined,
+        targetStateId: needsTarget ? activeWizard.targetStateId : undefined,
+        timerInterval: activeWizard.timerInterval,
+        timerType: activeWizard.timerType,
+        keyName: activeWizard.keyName,
+        proximityDistance: activeWizard.proximityDistance,
+        boundaryEdge: activeWizard.boundaryEdge,
+        variableName: activeWizard.variableName,
+        variableOperator: activeWizard.variableOperator,
+        variableValue: activeWizard.variableValue,
       },
       actions,
     });
@@ -693,7 +705,7 @@ export function RuleBook() {
           </div>
         ) : (
           filteredRules.map((rule) => {
-            const isCollision = rule.trigger.type === 'collision';
+            const isCollision = rule.trigger.type === 'collision' || rule.trigger.type === 'proximity';
 
             // Find subject display info
             const subjectType = rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
@@ -715,36 +727,74 @@ export function RuleBook() {
             let eventName = 'Contact';
             let eventIcon = '💥';
             let eventSub = 'Collision (Premier contact)';
-            if (rule.trigger.type === 'click') {
+            if (rule.trigger.type === 'hover') {
+              if (rule.trigger.phase === 'exit' || rule.trigger.phase === 'hover_exit') {
+                eventName = 'Sortie Survol';
+                eventIcon = '🏃';
+                eventSub = 'Mouse Hover Exit';
+              } else {
+                eventName = 'Survol';
+                eventIcon = '👀';
+                eventSub = 'Mouse Hover Enter';
+              }
+            } else if (rule.trigger.type === 'click') {
               eventName = 'Clic';
               eventIcon = '👆';
               eventSub = 'Sur l’objet';
-              if (rule.trigger.phase === 'mouse_down') {
+              if (rule.trigger.phase === 'mouse_down' || rule.trigger.phase === 'down') {
                 eventName = 'Appui';
-                eventIcon = '✋';
-                eventSub = 'Bouton enfoncé';
-              } else if (rule.trigger.phase === 'mouse_up') {
+                eventIcon = '👇';
+                eventSub = 'Mouse Down';
+              } else if (rule.trigger.phase === 'mouse_up' || rule.trigger.phase === 'up') {
                 eventName = 'Relâcher';
-                eventIcon = '👋';
-                eventSub = 'Bouton relâché';
+                eventIcon = '🖐️';
+                eventSub = 'Mouse Up';
               }
             } else if (rule.trigger.type === 'drag' || rule.trigger.phase === 'drag_release') {
               eventName = 'Relâcher';
               eventIcon = '🫳';
               eventSub = 'On Release';
+            } else if (rule.trigger.type === 'timer') {
+              eventName = `Timer (${rule.trigger.timerInterval || 2}s)`;
+              eventIcon = '⏱️';
+              eventSub = rule.trigger.timerType === 'once' ? 'Après délai' : 'Chaque intervalle';
+            } else if (rule.trigger.type === 'keyboard') {
+              eventName = `Touche [${rule.trigger.keyName || 'Espace'}]`;
+              eventIcon = '⌨️';
+              eventSub = 'Touche Clavier';
+            } else if (rule.trigger.type === 'state_change') {
+              eventName = "Chgt d'État";
+              eventIcon = '🔄';
+              eventSub = 'Nouveau statut';
+            } else if (rule.trigger.type === 'proximity') {
+              eventName = `Proximité (<${rule.trigger.proximityDistance || 80}px)`;
+              eventIcon = '📏';
+              eventSub = 'Approche de Cible';
+            } else if (rule.trigger.type === 'boundary') {
+              eventName = 'Bord de Scène';
+              eventIcon = '🖼️';
+              eventSub = 'Toucher le cadre';
+            } else if (rule.trigger.type === 'variable') {
+              eventName = `Score ${rule.trigger.variableOperator || '>='} ${rule.trigger.variableValue ?? 5}`;
+              eventIcon = '📊';
+              eventSub = 'Condition de Score';
             } else if (rule.trigger.type === 'collision') {
               if (rule.trigger.phase === 'collision_release') {
                 eventName = 'Relâcher sur cible';
                 eventIcon = '🎯';
                 eventSub = 'Collision on Release';
-              } else if (rule.trigger.phase === 'release') {
-                eventName = 'Séparation';
+              } else if (rule.trigger.phase === 'exit' || rule.trigger.phase === 'release') {
+                eventName = 'Collision Sortie';
                 eventIcon = '💨';
-                eventSub = 'Fin de contact';
+                eventSub = 'Collision on Exit';
               } else if (rule.trigger.phase === 'stay') {
-                eventName = 'Pendant le contact';
+                eventName = 'Contact Continu';
                 eventIcon = '⏳';
-                eventSub = 'Contact continu';
+                eventSub = 'Pendant le contact';
+              } else {
+                eventName = 'Collision Entrée';
+                eventIcon = '💥';
+                eventSub = 'Collision on Enter';
               }
             }
 
@@ -1451,116 +1501,500 @@ export function RuleBook() {
                 </div>
               )}
 
-              {/* ÉTAPE 2 : ÉVÉNEMENT (Grandes Cartes) */}
+              {/* ÉTAPE 2 : ÉVÉNEMENT (Organisé en 4 Cases Logiques) */}
               {activeWizard.step === 2 && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Collision Contact */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveWizard({
-                        ...activeWizard,
-                        triggerType: 'collision',
-                        triggerPhase: 'enter',
-                        step: 3,
-                        targetSubStep: 'choose_object',
-                      });
-                    }}
-                    className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex items-center gap-4 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                  >
-                    <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-3xl shadow-2xs group-hover:scale-110 transition-transform shrink-0">
-                      💥
+                <div className="space-y-5">
+                  {/* CASE 1 : COLLISIONS & CONTACTS */}
+                  <div className="bg-indigo-50/50 p-4 rounded-3xl border border-indigo-200/80 space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-black uppercase text-indigo-800 tracking-wider">
+                      <span>💥 Collisions & Contacts entre Objets</span>
+                      <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full">
+                        Nécessite une Cible
+                      </span>
                     </div>
-                    <div>
-                      <div className="text-sm font-black text-slate-900 group-hover:text-indigo-700">
-                        Collision (Contact Immédiat)
-                      </div>
-                      <div className="text-xs text-slate-500 mt-1">
-                        Dès que le sujet touche une cible spécifique
-                      </div>
-                    </div>
-                  </button>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      {/* Collision Entrée */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            triggerType: 'collision',
+                            triggerPhase: 'enter',
+                            step: 3,
+                            targetSubStep: 'choose_object',
+                          });
+                        }}
+                        className="p-4 bg-white hover:bg-indigo-100/60 border-2 border-indigo-100 hover:border-indigo-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
+                          💥
+                        </div>
+                        <div>
+                          <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
+                            Collision Entrée
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Premier contact quand le sujet touche la cible
+                          </div>
+                        </div>
+                      </button>
 
-                  {/* Collision Au Relâchement */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveWizard({
-                        ...activeWizard,
-                        triggerType: 'collision',
-                        triggerPhase: 'collision_release',
-                        step: 3,
-                        targetSubStep: 'choose_object',
-                      });
-                    }}
-                    className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex items-center gap-4 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                  >
-                    <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-3xl shadow-2xs group-hover:scale-110 transition-transform shrink-0">
-                      🎯
-                    </div>
-                    <div>
-                      <div className="text-sm font-black text-slate-900 group-hover:text-indigo-700">
-                        Au Relâchement sur Cible
-                      </div>
-                      <div className="text-xs text-slate-500 mt-1">
-                        Quand le joueur glisse et lâche le sujet sur la cible
-                      </div>
-                    </div>
-                  </button>
+                      {/* Collision Sortie */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            triggerType: 'collision',
+                            triggerPhase: 'exit',
+                            step: 3,
+                            targetSubStep: 'choose_object',
+                          });
+                        }}
+                        className="p-4 bg-white hover:bg-indigo-100/60 border-2 border-indigo-100 hover:border-indigo-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
+                          💨
+                        </div>
+                        <div>
+                          <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
+                            Collision Sortie
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Séparation dès que le sujet quitte la cible
+                          </div>
+                        </div>
+                      </button>
 
-                  {/* Clic Direct */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveWizard({
-                        ...activeWizard,
-                        triggerType: 'click',
-                        triggerPhase: 'click',
-                        step: 4,
-                        actionSubStep: 'main',
-                      });
-                    }}
-                    className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex items-center gap-4 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                  >
-                    <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-3xl shadow-2xs group-hover:scale-110 transition-transform shrink-0">
-                      👆
-                    </div>
-                    <div>
-                      <div className="text-sm font-black text-slate-900 group-hover:text-indigo-700">
-                        Clic Souris / Pointeur
-                      </div>
-                      <div className="text-xs text-slate-500 mt-1">
-                        Quand le joueur clique directement sur le sujet
-                      </div>
-                    </div>
-                  </button>
+                      {/* Contact Continu */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            triggerType: 'collision',
+                            triggerPhase: 'stay',
+                            step: 3,
+                            targetSubStep: 'choose_object',
+                          });
+                        }}
+                        className="p-4 bg-white hover:bg-indigo-100/60 border-2 border-indigo-100 hover:border-indigo-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
+                          ⏳
+                        </div>
+                        <div>
+                          <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
+                            Contact Continu
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Maintenu tant que les deux objets se touchent
+                          </div>
+                        </div>
+                      </button>
 
-                  {/* Glisser Relâcher Libre (Drop) */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveWizard({
-                        ...activeWizard,
-                        triggerType: 'drag',
-                        triggerPhase: 'drag_release',
-                        step: 4,
-                        actionSubStep: 'main',
-                      });
-                    }}
-                    className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex items-center gap-4 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                  >
-                    <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-3xl shadow-2xs group-hover:scale-110 transition-transform shrink-0">
-                      🫳
+                      {/* Collision Au Relâchement */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            triggerType: 'collision',
+                            triggerPhase: 'collision_release',
+                            step: 3,
+                            targetSubStep: 'choose_object',
+                          });
+                        }}
+                        className="p-4 bg-white hover:bg-indigo-100/60 border-2 border-indigo-100 hover:border-indigo-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
+                          🎯
+                        </div>
+                        <div>
+                          <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
+                            Lâché sur Cible
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Relâchement du sujet pendant la collision
+                          </div>
+                        </div>
+                      </button>
                     </div>
-                    <div>
-                      <div className="text-sm font-black text-slate-900 group-hover:text-indigo-700">
-                        Relâcher dans le vide (Drop)
+                  </div>
+
+                  {/* CASE 2 : CLICS & POINTEUR */}
+                  <div className="bg-purple-50/50 p-4 rounded-3xl border border-purple-200/80 space-y-3">
+                    <div className="text-xs font-black uppercase text-purple-800 tracking-wider">
+                      👆 Clics & Pointeur Souris / Tactile
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {/* Clic Complet */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            triggerType: 'click',
+                            triggerPhase: 'click',
+                            step: 4,
+                            actionSubStep: 'main',
+                          });
+                        }}
+                        className="p-4 bg-white hover:bg-purple-100/60 border-2 border-purple-100 hover:border-purple-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
+                          👆
+                        </div>
+                        <div>
+                          <div className="text-xs font-black text-slate-900 group-hover:text-purple-800">
+                            Clic Complet
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Action exécutée lors d'un clic complet sur l'objet
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* Appui Clic (Mouse Down) */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            triggerType: 'click',
+                            triggerPhase: 'down',
+                            step: 4,
+                            actionSubStep: 'main',
+                          });
+                        }}
+                        className="p-4 bg-white hover:bg-purple-100/60 border-2 border-purple-100 hover:border-purple-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
+                          👇
+                        </div>
+                        <div>
+                          <div className="text-xs font-black text-slate-900 group-hover:text-purple-800">
+                            Appui Clic (Mouse Down)
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Dès la pression du bouton du pointeur
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* Relâchement Clic (Mouse Up) */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            triggerType: 'click',
+                            triggerPhase: 'up',
+                            step: 4,
+                            actionSubStep: 'main',
+                          });
+                        }}
+                        className="p-4 bg-white hover:bg-purple-100/60 border-2 border-purple-100 hover:border-purple-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
+                          🖐️
+                        </div>
+                        <div>
+                          <div className="text-xs font-black text-slate-900 group-hover:text-purple-800">
+                            Relâchement Clic (Mouse Up)
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Au relâchement du bouton du pointeur
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* CASE 3 & 4 : SURVOL & GLISSER-DÉPOSER */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* CASE 3 : SURVOL SOURIS (HOVER) */}
+                    <div className="bg-amber-50/50 p-4 rounded-3xl border border-amber-200/80 space-y-3">
+                      <div className="text-xs font-black uppercase text-amber-800 tracking-wider">
+                        👀 Survol Souris (Hover)
                       </div>
-                      <div className="text-xs text-slate-500 mt-1">
-                        Quand le sujet est relâché n'importe où
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'hover',
+                              triggerPhase: 'hover_enter',
+                              step: 4,
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-3.5 bg-white hover:bg-amber-100/60 border-2 border-amber-100 hover:border-amber-500 rounded-2xl flex flex-col justify-between gap-1.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                        >
+                          <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-xl shadow-2xs group-hover:scale-110 transition-transform">
+                            👀
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-amber-800">
+                              Survol Entrée
+                            </div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              Mouse Hover Enter
+                            </div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'hover',
+                              triggerPhase: 'hover_exit',
+                              step: 4,
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-3.5 bg-white hover:bg-amber-100/60 border-2 border-amber-100 hover:border-amber-500 rounded-2xl flex flex-col justify-between gap-1.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                        >
+                          <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-xl shadow-2xs group-hover:scale-110 transition-transform">
+                            🏃
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-amber-800">
+                              Survol Sortie
+                            </div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              Mouse Hover Exit
+                            </div>
+                          </div>
+                        </button>
                       </div>
                     </div>
-                  </button>
+
+                    {/* CASE 4 : GLISSER-DÉPOSER (DRAG & DROP) */}
+                    <div className="bg-emerald-50/50 p-4 rounded-3xl border border-emerald-200/80 space-y-3">
+                      <div className="text-xs font-black uppercase text-emerald-800 tracking-wider">
+                        🫳 Glisser-Déposer libre
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            triggerType: 'drag',
+                            triggerPhase: 'drag_release',
+                            step: 4,
+                            actionSubStep: 'main',
+                          });
+                        }}
+                        className="w-full p-3.5 bg-white hover:bg-emerald-100/60 border-2 border-emerald-100 hover:border-emerald-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-110 transition-transform">
+                          🫳
+                        </div>
+                        <div>
+                          <div className="text-xs font-black text-slate-900 group-hover:text-emerald-800">
+                            Relâcher dans le vide (Drop)
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Quand l'objet est déposé n'importe où sur le canvas
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* CASE 5 & 6 : MINUTEURS & CLAVIER */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* CASE 5 : MINUTEURS & CHRONOMÈTRES */}
+                    <div className="bg-cyan-50/50 p-4 rounded-3xl border border-cyan-200/80 space-y-3">
+                      <div className="text-xs font-black uppercase text-cyan-800 tracking-wider">
+                        ⏱️ Minuteurs & Chronomètres
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'timer',
+                              timerInterval: 3,
+                              timerType: 'once',
+                              step: 4,
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-3 bg-white hover:bg-cyan-100/60 border-2 border-cyan-100 hover:border-cyan-500 rounded-2xl text-left cursor-pointer transition-all shadow-xs group"
+                        >
+                          <div className="text-xl mb-1">⏱️</div>
+                          <div className="text-xs font-black text-slate-900 group-hover:text-cyan-800">
+                            Après 3 secondes
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            Timer unique
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'timer',
+                              timerInterval: 2,
+                              timerType: 'repeat',
+                              step: 4,
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-3 bg-white hover:bg-cyan-100/60 border-2 border-cyan-100 hover:border-cyan-500 rounded-2xl text-left cursor-pointer transition-all shadow-xs group"
+                        >
+                          <div className="text-xl mb-1">🔄</div>
+                          <div className="text-xs font-black text-slate-900 group-hover:text-cyan-800">
+                            Toutes les 2 secondes
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            Timer récurrent
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* CASE 6 : CLAVIER & COMMANDES */}
+                    <div className="bg-slate-100/80 p-4 rounded-3xl border border-slate-300 space-y-3">
+                      <div className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                        ⌨️ Touches du Clavier
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { key: 'Space', label: 'Espace', icon: '⌨️' },
+                          { key: 'ArrowUp', label: 'Flèche ⬆️', icon: '⬆️' },
+                          { key: 'Enter', label: 'Entrée', icon: '⏎' },
+                        ].map((k) => (
+                          <button
+                            key={k.key}
+                            type="button"
+                            onClick={() => {
+                              setActiveWizard({
+                                ...activeWizard,
+                                triggerType: 'keyboard',
+                                keyName: k.key,
+                                step: 4,
+                                actionSubStep: 'main',
+                              });
+                            }}
+                            className="p-2.5 bg-white hover:bg-slate-200/80 border border-slate-300 rounded-2xl flex flex-col items-center justify-center text-center cursor-pointer transition-all shadow-xs group"
+                          >
+                            <span className="text-lg">{k.icon}</span>
+                            <span className="text-[10px] font-black text-slate-800 mt-1">{k.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* CASE 7, 8, 9, 10 : ÉTATS, PROXIMITÉ, BORDS & SCORE */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {/* CASE 7 : CHANGEMENT D'ÉTAT */}
+                    <div className="bg-violet-50/50 p-3.5 rounded-2xl border border-violet-200 space-y-2">
+                      <div className="text-xs font-black uppercase text-violet-800">🔄 Changement d'État</div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            triggerType: 'state_change',
+                            step: 4,
+                            actionSubStep: 'main',
+                          });
+                        }}
+                        className="w-full p-2.5 bg-white hover:bg-violet-100 border border-violet-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
+                      >
+                        <span className="text-xl">✨</span>
+                        <div>
+                          <div className="text-xs font-black text-slate-900">Nouveau statut</div>
+                          <div className="text-[9px] text-slate-500">L'objet passe à l'état X</div>
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* CASE 8 : PROXIMITÉ */}
+                    <div className="bg-sky-50/50 p-3.5 rounded-2xl border border-sky-200 space-y-2">
+                      <div className="text-xs font-black uppercase text-sky-800">📏 Proximité (&lt; 80px)</div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            triggerType: 'proximity',
+                            proximityDistance: 80,
+                            step: 3,
+                            targetSubStep: 'choose_object',
+                          });
+                        }}
+                        className="w-full p-2.5 bg-white hover:bg-sky-100 border border-sky-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
+                      >
+                        <span className="text-xl">📏</span>
+                        <div>
+                          <div className="text-xs font-black text-slate-900">Approche Cible</div>
+                          <div className="text-[9px] text-slate-500">Moins de 80px de distance</div>
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* CASE 9 : BORDS DE SCÈNE */}
+                    <div className="bg-rose-50/50 p-3.5 rounded-2xl border border-rose-200 space-y-2">
+                      <div className="text-xs font-black uppercase text-rose-800">🖼️ Bords du Canvas</div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            triggerType: 'boundary',
+                            boundaryEdge: 'any',
+                            step: 4,
+                            actionSubStep: 'main',
+                          });
+                        }}
+                        className="w-full p-2.5 bg-white hover:bg-rose-100 border border-rose-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
+                      >
+                        <span className="text-xl">🖼️</span>
+                        <div>
+                          <div className="text-xs font-black text-slate-900">Touche le Cadre</div>
+                          <div className="text-[9px] text-slate-500">Contact bord de scène</div>
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* CASE 10 : SCORE & VARIABLE */}
+                    <div className="bg-amber-50/50 p-3.5 rounded-2xl border border-amber-200 space-y-2">
+                      <div className="text-xs font-black uppercase text-amber-800">📊 Score &amp; Variables</div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            triggerType: 'variable',
+                            variableName: 'score',
+                            variableOperator: '>=',
+                            variableValue: 5,
+                            step: 4,
+                            actionSubStep: 'main',
+                          });
+                        }}
+                        className="w-full p-2.5 bg-white hover:bg-amber-100 border border-amber-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
+                      >
+                        <span className="text-xl">🏆</span>
+                        <div>
+                          <div className="text-xs font-black text-slate-900">Score &gt;= 5</div>
+                          <div className="text-[9px] text-slate-500">Objectif atteint</div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -2667,108 +3101,291 @@ export function RuleBook() {
                     </button>
                   </div>
 
-                  <div className="space-y-3 overflow-y-auto pr-1 flex-1 py-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        updateRule(rule.id, {
-                          trigger: {
-                            ...rule.trigger,
-                            type: 'collision',
-                            phase: 'enter',
-                            targetType: rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant',
-                          },
-                        });
-                        setActiveModal(null);
-                      }}
-                      className="w-full p-4 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex items-center gap-4 text-left cursor-pointer transition-all shadow-xs group active:scale-98"
-                    >
-                      <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-110 transition-transform">
-                        💥
+                  <div className="space-y-4 overflow-y-auto pr-1 flex-1 py-1">
+                    {/* CASE 1 : COLLISIONS */}
+                    <div className="bg-indigo-50/50 p-3.5 rounded-2xl border border-indigo-200/80 space-y-2">
+                      <div className="text-xs font-black uppercase text-indigo-800 tracking-wider">
+                        💥 Collisions & Contacts entre Objets
                       </div>
-                      <div>
-                        <div className="text-sm font-black text-slate-900 group-hover:text-indigo-700">
-                          Collision (Premier Contact)
-                        </div>
-                        <div className="text-xs text-slate-500">Quand le sujet touche une cible</div>
-                      </div>
-                    </button>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {/* Collision Entrée */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateRule(rule.id, {
+                              trigger: {
+                                ...rule.trigger,
+                                type: 'collision',
+                                phase: 'enter',
+                                targetType: rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant',
+                              },
+                            });
+                            setActiveModal(null);
+                          }}
+                          className="p-3 bg-white hover:bg-indigo-100/60 border border-indigo-200 rounded-xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-2xs group"
+                        >
+                          <div className="w-9 h-9 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center text-xl shrink-0 group-hover:scale-110 transition-transform">
+                            💥
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
+                              Collision Entrée
+                            </div>
+                            <div className="text-[10px] text-slate-500">Premier contact</div>
+                          </div>
+                        </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        updateRule(rule.id, {
-                          trigger: {
-                            ...rule.trigger,
-                            type: 'collision',
-                            phase: 'collision_release',
-                            targetType: rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant',
-                          },
-                        });
-                        setActiveModal(null);
-                      }}
-                      className="w-full p-4 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex items-center gap-4 text-left cursor-pointer transition-all shadow-xs group active:scale-98"
-                    >
-                      <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-110 transition-transform">
-                        🎯
-                      </div>
-                      <div>
-                        <div className="text-sm font-black text-slate-900 group-hover:text-indigo-700">
-                          Collision au Relâchement
-                        </div>
-                        <div className="text-xs text-slate-500">Quand le sujet est lâché sur la cible touchée</div>
-                      </div>
-                    </button>
+                        {/* Collision Sortie */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateRule(rule.id, {
+                              trigger: {
+                                ...rule.trigger,
+                                type: 'collision',
+                                phase: 'exit',
+                                targetType: rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant',
+                              },
+                            });
+                            setActiveModal(null);
+                          }}
+                          className="p-3 bg-white hover:bg-indigo-100/60 border border-indigo-200 rounded-xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-2xs group"
+                        >
+                          <div className="w-9 h-9 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center text-xl shrink-0 group-hover:scale-110 transition-transform">
+                            💨
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
+                              Collision Sortie
+                            </div>
+                            <div className="text-[10px] text-slate-500">Séparation / Fin de contact</div>
+                          </div>
+                        </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        updateRule(rule.id, {
-                          trigger: {
-                            ...rule.trigger,
-                            type: 'click',
-                            phase: 'click',
-                          },
-                        });
-                        setActiveModal(null);
-                      }}
-                      className="w-full p-4 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex items-center gap-4 text-left cursor-pointer transition-all shadow-xs group active:scale-98"
-                    >
-                      <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-110 transition-transform">
-                        👆
-                      </div>
-                      <div>
-                        <div className="text-sm font-black text-slate-900 group-hover:text-indigo-700">
-                          Clic Direct sur le Sujet
-                        </div>
-                        <div className="text-xs text-slate-500">Quand l'utilisateur clique sur l'objet</div>
-                      </div>
-                    </button>
+                        {/* Contact Continu */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateRule(rule.id, {
+                              trigger: {
+                                ...rule.trigger,
+                                type: 'collision',
+                                phase: 'stay',
+                                targetType: rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant',
+                              },
+                            });
+                            setActiveModal(null);
+                          }}
+                          className="p-3 bg-white hover:bg-indigo-100/60 border border-indigo-200 rounded-xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-2xs group"
+                        >
+                          <div className="w-9 h-9 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-xl shrink-0 group-hover:scale-110 transition-transform">
+                            ⏳
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
+                              Contact Continu
+                            </div>
+                            <div className="text-[10px] text-slate-500">Pendant le contact</div>
+                          </div>
+                        </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        updateRule(rule.id, {
-                          trigger: {
-                            ...rule.trigger,
-                            type: 'drag',
-                            phase: 'drag_release',
-                          },
-                        });
-                        setActiveModal(null);
-                      }}
-                      className="w-full p-4 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex items-center gap-4 text-left cursor-pointer transition-all shadow-xs group active:scale-98"
-                    >
-                      <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-110 transition-transform">
-                        🫳
+                        {/* Collision Relâchement */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateRule(rule.id, {
+                              trigger: {
+                                ...rule.trigger,
+                                type: 'collision',
+                                phase: 'collision_release',
+                                targetType: rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant',
+                              },
+                            });
+                            setActiveModal(null);
+                          }}
+                          className="p-3 bg-white hover:bg-indigo-100/60 border border-indigo-200 rounded-xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-2xs group"
+                        >
+                          <div className="w-9 h-9 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center text-xl shrink-0 group-hover:scale-110 transition-transform">
+                            🎯
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
+                              Lâché sur Cible
+                            </div>
+                            <div className="text-[10px] text-slate-500">Relâché au-dessus</div>
+                          </div>
+                        </button>
                       </div>
-                      <div>
-                        <div className="text-sm font-black text-slate-900 group-hover:text-indigo-700">
-                          Relâcher dans le vide (Drop)
+                    </div>
+
+                    {/* CASE 2 : CLICS */}
+                    <div className="bg-purple-50/50 p-3.5 rounded-2xl border border-purple-200/80 space-y-2">
+                      <div className="text-xs font-black uppercase text-purple-800 tracking-wider">
+                        👆 Clics & Pointeur
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateRule(rule.id, {
+                              trigger: {
+                                ...rule.trigger,
+                                type: 'click',
+                                phase: 'click',
+                              },
+                            });
+                            setActiveModal(null);
+                          }}
+                          className="p-3 bg-white hover:bg-purple-100/60 border border-purple-200 rounded-xl flex items-center gap-2.5 text-left cursor-pointer transition-all shadow-2xs group"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                            👆
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-purple-800">
+                              Clic Complet
+                            </div>
+                            <div className="text-[10px] text-slate-500">Click classique</div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateRule(rule.id, {
+                              trigger: {
+                                ...rule.trigger,
+                                type: 'click',
+                                phase: 'down',
+                              },
+                            });
+                            setActiveModal(null);
+                          }}
+                          className="p-3 bg-white hover:bg-purple-100/60 border border-purple-200 rounded-xl flex items-center gap-2.5 text-left cursor-pointer transition-all shadow-2xs group"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                            👇
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-purple-800">
+                              Appui (Down)
+                            </div>
+                            <div className="text-[10px] text-slate-500">Pression bouton</div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateRule(rule.id, {
+                              trigger: {
+                                ...rule.trigger,
+                                type: 'click',
+                                phase: 'up',
+                              },
+                            });
+                            setActiveModal(null);
+                          }}
+                          className="p-3 bg-white hover:bg-purple-100/60 border border-purple-200 rounded-xl flex items-center gap-2.5 text-left cursor-pointer transition-all shadow-2xs group"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-violet-100 text-violet-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                            🖐️
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-purple-800">
+                              Relâché (Up)
+                            </div>
+                            <div className="text-[10px] text-slate-500">Relâchement bouton</div>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* CASE 3 & 4 : SURVOL & GLISSER */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* SURVOL SOURIS */}
+                      <div className="bg-amber-50/50 p-3.5 rounded-2xl border border-amber-200/80 space-y-2">
+                        <div className="text-xs font-black uppercase text-amber-800 tracking-wider">
+                          👀 Survol Souris (Hover)
                         </div>
-                        <div className="text-xs text-slate-500">Quand l'objet est relâché n'importe où</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateRule(rule.id, {
+                                trigger: {
+                                  ...rule.trigger,
+                                  type: 'hover',
+                                  phase: 'hover_enter',
+                                },
+                              });
+                              setActiveModal(null);
+                            }}
+                            className="p-2.5 bg-white hover:bg-amber-100/60 border border-amber-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
+                          >
+                            <div className="w-7 h-7 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center text-sm shrink-0">
+                              👀
+                            </div>
+                            <div>
+                              <div className="text-xs font-black text-slate-900">Entrée</div>
+                              <div className="text-[9px] text-slate-500">Hover Enter</div>
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateRule(rule.id, {
+                                trigger: {
+                                  ...rule.trigger,
+                                  type: 'hover',
+                                  phase: 'hover_exit',
+                                },
+                              });
+                              setActiveModal(null);
+                            }}
+                            className="p-2.5 bg-white hover:bg-amber-100/60 border border-amber-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
+                          >
+                            <div className="w-7 h-7 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center text-sm shrink-0">
+                              🏃
+                            </div>
+                            <div>
+                              <div className="text-xs font-black text-slate-900">Sortie</div>
+                              <div className="text-[9px] text-slate-500">Hover Exit</div>
+                            </div>
+                          </button>
+                        </div>
                       </div>
-                    </button>
+
+                      {/* GLISSER-DÉPOSER */}
+                      <div className="bg-emerald-50/50 p-3.5 rounded-2xl border border-emerald-200/80 space-y-2">
+                        <div className="text-xs font-black uppercase text-emerald-800 tracking-wider">
+                          🫳 Glisser-Déposer libre
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateRule(rule.id, {
+                              trigger: {
+                                ...rule.trigger,
+                                type: 'drag',
+                                phase: 'drag_release',
+                              },
+                            });
+                            setActiveModal(null);
+                          }}
+                          className="w-full p-2.5 bg-white hover:bg-emerald-100/60 border border-emerald-200 rounded-xl flex items-center gap-2.5 text-left cursor-pointer transition-all shadow-2xs group"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-lg shrink-0">
+                            🫳
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900">Relâcher libre (Drop)</div>
+                            <div className="text-[10px] text-slate-500">Lâcher dans le vide</div>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               );
@@ -3132,6 +3749,30 @@ export function RuleBook() {
                                   </div>
                                   <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                                     Supprimer une entité C à distance
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 5. Ajouter au Score (+1) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  applyAction({
+                                    type: 'add_score',
+                                    scoreAmount: 1,
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-amber-50/70 border-2 border-slate-200 hover:border-amber-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🏆
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-amber-700 truncate">
+                                    Ajouter au Score (+1)
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Incrémenter le score de jeu
                                   </div>
                                 </div>
                               </button>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Scene } from './components/Scene';
 import { Inspector } from './components/Inspector';
 import { RuleBook } from './components/RuleBook';
@@ -8,6 +8,7 @@ import { SceneHierarchyList } from './components/SceneHierarchyList';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ProjectSlotsModal } from './components/ProjectSlotsModal';
 import { FullScreenDrawingModal } from './components/FullScreenDrawingModal';
+import { DrawingToolsPanel } from './components/DrawingToolsPanel';
 import { useSceneStore } from './store/useSceneStore';
 import { SceneLayer, SceneLayerGroup } from './types';
 import {
@@ -29,6 +30,8 @@ import {
 export default function App() {
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
   const selectEntity = useSceneStore((state) => state.selectEntity);
+  const selectedLayerId = useSceneStore((state) => state.selectedLayerId);
+  const selectLayer = useSceneStore((state) => state.selectLayer);
   const appMode = useSceneStore((state) => state.appMode);
   const setAppMode = useSceneStore((state) => state.setAppMode);
   const resetScene = useSceneStore((state) => state.resetScene);
@@ -39,6 +42,18 @@ export default function App() {
   const entities = useSceneStore((state) => state.entities);
   const settings = useSceneStore((state) => state.settings);
   const setLayerVectorPaths = useSceneStore((state) => state.setLayerVectorPaths);
+
+  // Keyboard Event Listener in Play Mode
+  useEffect(() => {
+    if (appMode !== 'play') return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      useSceneStore.getState().triggerKeyEvent(e.key);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [appMode]);
 
   // Main UI View States
   const [activeView, setActiveView] = useState<'canvas' | 'rules'>('canvas');
@@ -311,12 +326,17 @@ export default function App() {
           )}
         </main>
 
-        {/* 3. RIGHT DRAWER: INSPECTOR OR SETTINGS */}
+        {/* 3. RIGHT DRAWER: INSPECTOR, DRAWING TOOLS OR SETTINGS */}
         {rightPanel !== 'none' && (
           <aside className="w-72 sm:w-80 bg-white rounded-3xl border border-slate-300/80 shadow-xs flex flex-col overflow-hidden shrink-0 transition-all">
             <div className="p-3.5 bg-slate-50/80 border-b border-slate-200/80 flex items-center justify-between shrink-0">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                {rightPanel === 'inspector' ? (
+                {selectedLayerId ? (
+                  <>
+                    <Pencil className="w-4 h-4 text-indigo-600" strokeWidth={2} />
+                    Dessin Décor
+                  </>
+                ) : rightPanel === 'inspector' ? (
                   <>
                     <SlidersHorizontal className="w-4 h-4 text-slate-700" strokeWidth={2} />
                     Inspecteur d'Entité
@@ -329,14 +349,34 @@ export default function App() {
                 )}
               </span>
               <button
-                onClick={() => setRightPanel('none')}
+                onClick={() => {
+                  if (selectedLayerId) selectLayer(null);
+                  setRightPanel('none');
+                }}
                 className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
             <div className="p-4 flex-1 overflow-y-auto">
-              {rightPanel === 'inspector' ? (
+              {selectedLayerId ? (
+                <DrawingToolsPanel
+                  onUndo={() => {
+                    const layerGroups = useSceneStore.getState().layerGroups || [];
+                    for (const g of layerGroups) {
+                      const l = g.layers.find((ly) => ly.id === selectedLayerId);
+                      if (l && l.vectorPaths && l.vectorPaths.length > 0) {
+                        useSceneStore.getState().setLayerVectorPaths(selectedLayerId, l.vectorPaths.slice(0, -1));
+                        break;
+                      }
+                    }
+                  }}
+                  onClearLayer={() => {
+                    useSceneStore.getState().setLayerVectorPaths(selectedLayerId, []);
+                  }}
+                  onClose={() => selectLayer(null)}
+                />
+              ) : rightPanel === 'inspector' ? (
                 <Inspector />
               ) : (
                 <SettingsPanel

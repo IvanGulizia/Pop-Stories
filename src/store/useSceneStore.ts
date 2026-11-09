@@ -74,6 +74,20 @@ interface SceneState {
   snapshotEntityOrder: EntityId[] | null;
   settings: AppSettings;
   currentSlotId: string | null;
+  collapsedRuleIds: Record<string, boolean>;
+  toggleRuleCollapse: (ruleId: string) => void;
+  gameScore: number;
+  triggerKeyEvent: (keyName: string) => void;
+
+  // Direct scene canvas drawing tools state
+  drawingTool: 'pencil' | 'line' | 'rectangle' | 'circle' | 'bucket' | 'eraser_stroke' | 'eraser_partial' | 'select';
+  drawingStrokeColor: string;
+  drawingFillColor: string;
+  drawingStrokeWidth: number;
+  setDrawingTool: (tool: 'pencil' | 'line' | 'rectangle' | 'circle' | 'bucket' | 'eraser_stroke' | 'eraser_partial' | 'select') => void;
+  setDrawingStrokeColor: (color: string) => void;
+  setDrawingFillColor: (color: string) => void;
+  setDrawingStrokeWidth: (width: number) => void;
 
   updateSettings: (partial: Partial<AppSettings>) => void;
   setAspectRatio: (ratio: SceneAspectRatio) => void;
@@ -486,6 +500,26 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   snapshotEntities: null,
   snapshotEntityOrder: null,
   currentSlotId: null,
+  collapsedRuleIds: {},
+  gameScore: 0,
+  toggleRuleCollapse: (ruleId) => {
+    set((state) => ({
+      collapsedRuleIds: {
+        ...state.collapsedRuleIds,
+        [ruleId]: !state.collapsedRuleIds?.[ruleId],
+      },
+    }));
+  },
+
+  drawingTool: 'pencil',
+  drawingStrokeColor: '#6366f1',
+  drawingFillColor: 'none',
+  drawingStrokeWidth: 6,
+  setDrawingTool: (tool) => set({ drawingTool: tool }),
+  setDrawingStrokeColor: (color) => set({ drawingStrokeColor: color }),
+  setDrawingFillColor: (color) => set({ drawingFillColor: color }),
+  setDrawingStrokeWidth: (width) => set({ drawingStrokeWidth: width }),
+
   settings: {
     showCanvasLabels: false,
     showGrid: false,
@@ -1758,6 +1792,49 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     }));
   },
 
+  triggerKeyEvent: (keyName) => {
+    if (get().appMode !== 'play') return;
+    const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
+    const now = Date.now();
+
+    const kbRules = rules.filter((r) => r.enabled && r.trigger.type === 'keyboard');
+    if (kbRules.length === 0) return;
+
+    kbRules.forEach((rule) => {
+      const targetKey = rule.trigger.keyName || 'Space';
+      const isKeyMatch =
+        targetKey === 'any' ||
+        targetKey.toLowerCase() === keyName.toLowerCase() ||
+        (targetKey === 'Space' && (keyName === ' ' || keyName === 'Space')) ||
+        (targetKey === 'ArrowUp' && keyName === 'ArrowUp') ||
+        (targetKey === 'ArrowDown' && keyName === 'ArrowDown') ||
+        (targetKey === 'ArrowLeft' && keyName === 'ArrowLeft') ||
+        (targetKey === 'ArrowRight' && keyName === 'ArrowRight');
+
+      if (!isKeyMatch) return;
+
+      const cooldownKey = `key_${rule.id}_${keyName}`;
+      if (now - (ruleCooldowns[cooldownKey] || 0) < RULE_COOLDOWN_MS) return;
+      ruleCooldowns[cooldownKey] = now;
+
+      const allEnts = Object.values(entities);
+      const subject = allEnts.find((e) =>
+        matchesEntityFilter(e, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)
+      ) || allEnts[0];
+
+      rule.actions.forEach((act) => {
+        executeAction(act, {
+          subject,
+          allEntities: entities,
+          updateEntityState,
+          updateEntityDetails,
+          deleteEntity,
+          spawnEntity,
+        });
+      });
+    });
+  },
+
   triggerClickEvent: (entityId) => {
     get().triggerPointerEvent(entityId, 'click');
   },
@@ -1772,8 +1849,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
     const now = Date.now();
 
-    const activeClickRules = rules.filter((r) => {
-      if (!r.enabled || r.trigger.type !== 'click') return false;
+    const activePointerRules = rules.filter((r) => {
+      if (!r.enabled) return false;
+      if (r.trigger.type !== 'click' && r.trigger.type !== 'hover') return false;
 
       // Vérifier si le sujet correspond au filtre
       const isSubjectMatch = matchesEntityFilter(
@@ -1786,8 +1864,26 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       if (!isSubjectMatch) return false;
 
       // Vérifier la phase spécifiée
-      const rulePhase = r.trigger.phase || 'click';
-      if (rulePhase !== phase) return false;
+      const rulePhase = r.trigger.phase || (r.trigger.type === 'hover' ? 'enter' : 'click');
+
+      let phaseMatch = false;
+      if (r.trigger.type === 'hover') {
+        if (phase === 'enter' || phase === 'hover_enter') {
+          phaseMatch = rulePhase === 'enter' || rulePhase === 'hover_enter';
+        } else if (phase === 'exit' || phase === 'hover_exit') {
+          phaseMatch = rulePhase === 'exit' || rulePhase === 'hover_exit';
+        }
+      } else if (r.trigger.type === 'click') {
+        if (phase === 'click') {
+          phaseMatch = rulePhase === 'click';
+        } else if (phase === 'down' || phase === 'mouse_down') {
+          phaseMatch = rulePhase === 'down' || rulePhase === 'mouse_down';
+        } else if (phase === 'up' || phase === 'mouse_up') {
+          phaseMatch = rulePhase === 'up' || rulePhase === 'mouse_up';
+        }
+      }
+
+      if (!phaseMatch) return false;
 
       // Vérifier l'état requis pour le sujet
       if (
@@ -1800,8 +1896,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       return true;
     });
 
-    activeClickRules.forEach((rule) => {
-      const cooldownKey = `click_${rule.id}_${subject.id}_${phase}`;
+    activePointerRules.forEach((rule) => {
+      const cooldownKey = `ptr_${rule.id}_${subject.id}_${phase}`;
       if (now - (ruleCooldowns[cooldownKey] || 0) < RULE_COOLDOWN_MS) {
         return;
       }
@@ -2069,6 +2165,135 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
       }
     });
 
+    // 3. Règles de Minuteur / Chronomètre (Timer)
+    const timerRules = rules.filter((r) => r.enabled && r.trigger.type === 'timer');
+    timerRules.forEach((rule) => {
+      const intervalMs = (rule.trigger.timerInterval || 2) * 1000;
+      const cooldownKey = `timer_${rule.id}`;
+      const lastTrigger = ruleCooldowns[cooldownKey] || 0;
+
+      if (now - lastTrigger >= intervalMs) {
+        if (rule.trigger.timerType === 'once' && lastTrigger > 0) {
+          return; // Une seule fois déjà exécutée
+        }
+        ruleCooldowns[cooldownKey] = now;
+        const allEnts = Object.values(entities);
+        const subject = allEnts.find((e) =>
+          matchesEntityFilter(e, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)
+        ) || allEnts[0];
+
+        rule.actions.forEach((act) => {
+          executeAction(act, {
+            subject,
+            allEntities: entities,
+            updateEntityState,
+            updateEntityDetails,
+            deleteEntity,
+            spawnEntity,
+          });
+        });
+      }
+    });
+
+    // 4. Règles de Proximité / Distance entre objets
+    const proximityRules = rules.filter((r) => r.enabled && r.trigger.type === 'proximity');
+    proximityRules.forEach((rule) => {
+      const reqDist = rule.trigger.proximityDistance || 80;
+      allEntitiesList.forEach((entA) => {
+        allEntitiesList.forEach((entB) => {
+          if (entA.id === entB.id) return;
+          if (!matchesEntityFilter(entA, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)) return;
+          if (!matchesEntityFilter(entB, rule.trigger.targetMode, rule.trigger.targetId, rule.trigger.targetType, rule.trigger.targetTag)) return;
+
+          const centerA = { x: entA.position.x + entA.size.width / 2, y: entA.position.y + entA.size.height / 2 };
+          const centerB = { x: entB.position.x + entB.size.width / 2, y: entB.position.y + entB.size.height / 2 };
+          const dist = Math.hypot(centerA.x - centerB.x, centerA.y - centerB.y);
+
+          if (dist <= reqDist) {
+            const cooldownKey = `prox_${rule.id}_${entA.id}_${entB.id}`;
+            if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
+              ruleCooldowns[cooldownKey] = now;
+              rule.actions.forEach((act) => {
+                executeAction(act, {
+                  subject: entA,
+                  target: entB,
+                  allEntities: entities,
+                  updateEntityState,
+                  updateEntityDetails,
+                  deleteEntity,
+                  spawnEntity,
+                });
+              });
+            }
+          }
+        });
+      });
+    });
+
+    // 5. Règles de Bords de Scène / Canvas (Boundary)
+    const boundaryRules = rules.filter((r) => r.enabled && r.trigger.type === 'boundary');
+    boundaryRules.forEach((rule) => {
+      const edge = rule.trigger.boundaryEdge || 'any';
+      allEntitiesList.forEach((subject) => {
+        if (!matchesEntityFilter(subject, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)) return;
+
+        let hitEdge = false;
+        if (edge === 'left' && subject.position.x <= 15) hitEdge = true;
+        if (edge === 'right' && subject.position.x + subject.size.width >= 185) hitEdge = true;
+        if (edge === 'top' && subject.position.y <= 15) hitEdge = true;
+        if (edge === 'bottom' && subject.position.y + subject.size.height >= 185) hitEdge = true;
+        if (edge === 'any' && (subject.position.x <= 15 || subject.position.x + subject.size.width >= 185 || subject.position.y <= 15 || subject.position.y + subject.size.height >= 185)) hitEdge = true;
+
+        if (hitEdge) {
+          const cooldownKey = `bound_${rule.id}_${subject.id}`;
+          if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
+            ruleCooldowns[cooldownKey] = now;
+            rule.actions.forEach((act) => {
+              executeAction(act, {
+                subject,
+                allEntities: entities,
+                updateEntityState,
+                updateEntityDetails,
+                deleteEntity,
+                spawnEntity,
+              });
+            });
+          }
+        }
+      });
+    });
+
+    // 6. Règles de Variables / Compteur de Score
+    const variableRules = rules.filter((r) => r.enabled && r.trigger.type === 'variable');
+    variableRules.forEach((rule) => {
+      const targetVal = rule.trigger.variableValue ?? 5;
+      const op = rule.trigger.variableOperator || '>=';
+      const score = get().gameScore || 0;
+
+      let satisfied = false;
+      if (op === '>=' && score >= targetVal) satisfied = true;
+      if (op === '==' && score === targetVal) satisfied = true;
+      if (op === '<=' && score <= targetVal) satisfied = true;
+
+      if (satisfied) {
+        const cooldownKey = `var_${rule.id}`;
+        if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS * 2) {
+          ruleCooldowns[cooldownKey] = now;
+          const allEnts = Object.values(entities);
+          rule.actions.forEach((act) => {
+            executeAction(act, {
+              subject: allEnts[0],
+              allEntities: entities,
+              updateEntityState,
+              updateEntityDetails,
+              deleteEntity,
+              spawnEntity,
+            });
+          });
+        }
+      }
+    });
+
     set({ activeCollisions: nextCollisions });
   },
 }));
@@ -2136,7 +2361,7 @@ function handleCollisionPair(
     nextCollisions[collisionKey] = true;
   } else if (!isColliding && wasColliding) {
     // Sortie / Séparation (Release / Exit)
-    if (rulePhase === 'release') {
+    if (rulePhase === 'release' || rulePhase === 'exit') {
       shouldExecute = true;
     }
 
@@ -2192,6 +2417,14 @@ function executeAction(
     spawnEntity: (params: { type: EntityType; position: Position; initialStateId?: StateId; size?: Size }) => void;
   }
 ) {
+  if (act.type === 'add_score') {
+    const amount = act.scoreAmount ?? 1;
+    const current = useSceneStore.getState().gameScore || 0;
+    useSceneStore.setState({ gameScore: current + amount });
+    soundSynth.play('win');
+    return;
+  }
+
   if (act.type === 'play_sound') {
     if (act.customSoundId) {
       const sounds = useSceneStore.getState().customSounds;

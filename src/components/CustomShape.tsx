@@ -226,6 +226,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
           );
           if (isInside) {
             setCursorState(getHoverState());
+            triggerPointerEvent(entity.id, 'enter');
           } else {
             setCursorState('idle');
           }
@@ -248,6 +249,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
         onPointerLeave={() => {
           if (!isDraggingRef.current && appMode === 'play') {
             setCursorState('idle');
+            triggerPointerEvent(entity.id, 'exit');
           }
         }}
         onPointerDown={(e) => {

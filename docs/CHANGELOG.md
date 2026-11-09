@@ -1,4 +1,45 @@
-# Journal des Modifications (CHANGELOG)
+## [Phase 8] - 2026-11-08
+### Ajouté & Optimisé
+- **Support complet des 6 nouveaux types de conditions** :
+  - **⏱️ Timers & Chronomètres (`timer`)** : déclencheur après X secondes (délai unique) ou répétition toutes les X secondes.
+  - **⌨️ Événements Clavier (`keyboard`)** : écoute globale des touches (Flèches directionnelles, Espace, Entrée) en mode Play.
+  - **🔄 Changements d'État (`state_change`)** : réaction en chaîne quand une entité passe à un état donné.
+  - **📏 Proximité & Distance (`proximity`)** : détection de rapprochement (&lt; 80px) entre deux entités.
+  - **🖼️ Bords de Scène (`boundary`)** : réaction au contact avec le cadre du canvas.
+  - **📊 Variables & Système de Score (`variable` / `add_score`)** : action d'ajout au score (+1), affichage dynamique du badge `🏆 Score` en mode Play et condition sur seuil de score.
+
+## [Phase 7] - 2026-11-08
+### Ajouté & Optimisé
+- **Lissage du Dessin Direct Vectoriel sur Canvas (Stroke Width & Alignement Précis)** :
+  - Alignement exact 1:1 entre les coordonnées du curseur et la vue SVG (`preserveAspectRatio="none"`), éliminant tout décalage (offset) de pointeur.
+  - Garantie de constante d'épaisseur de trait (`strokeWidth`) et de rendu visuel entre la prévisualisation en direct et la sauvegarde du calque vectoriel.
+  - Retrait du bouton "Dessiner" sur les lignes de calques dans `SceneLayerManager` pour une UI épurée (la sélection de la ligne de calque active directement le mode dessin canvas).
+- **Organisation des Conditions en 4 Cases Logiques dans le RuleBook** :
+  - Restructuration visuelle de l'Étape 2 du Wizard et du modal de choix d'événement en 4 cases thématiques avec contours colorés et icônes distinctes :
+    1. **Collisions & Contacts** (*Collision Entrée*, *Collision Sortie*, *Contact Continu*, *Relâchement sur Cible*).
+    2. **Clics & Pointeur** (*Clic Complet*, *Appui / Down*, *Relâchement / Up*).
+    3. **Survol Souris (Hover)** (*Survol Entrée*, *Survol Sortie*).
+    4. **Glisser-Déposer Libre** (*Relâchement dans le vide / Drop*).
+- **Déclencheurs Explicit "Collision Entrée" et "Collision Sortie"** :
+  - Prise en charge complète dans le moteur physique de `collision` avec `phase = 'enter'` (premier contact) et `phase = 'exit'` (séparation des colliders) avec badges et étiquettes explicites dans la vue storyboard.
+
+## [Phase 6] - 2026-11-08
+### Ajouté & Optimisé
+- **Dessin Direct sur Canvas de Scène (Calques Background / Foreground)** :
+  - Possibilité de dessiner directement sur le canvas principal de la scène lors de la sélection d'un calque de décor (sans ouvrir de modal plein écran).
+  - Intégration du composant `DrawingToolsPanel` dans la colonne de droite (à la place de l'inspecteur) lors de l'édition d'un calque (outils crayon, lignes, formes géométriques, remplissage pot de peinture, gomme, sélecteur de couleurs et épaisseur).
+- **Persistance de l'État Plié / Déplié des Règles (Accordéon)** :
+  - Migration de l'état `collapsedRuleIds` vers le store central `useSceneStore`.
+  - Conservation automatique des règles pliées ou dépliées lors du basculement Mode Play / Mode Edit et lors des changements d'onglets ou de fenêtres.
+- **Nouveaux Déclencheurs de Survol Souris (Hover Enter & Exit)** :
+  - Ajout du type de déclencheur `hover` avec choix explicite de sous-phase : **Survol Entrée** (`enter` / `hover_enter`) et **Survol Sortie** (`exit` / `hover_exit`).
+- **Déclencheurs d'Appui (Mouse Down) et Relâchement (Mouse Up)** :
+  - Ajout des déclencheurs d'appui enfoncé (`down` / `mouse_down`) et de relâchement (`up` / `mouse_up`) dans les règles de clics.
+- **Lisibilité & Superposition Améliorées dans la Fenêtre de Spawn (`SpawnLocationPicker`)** :
+  - Fenêtre relative interactive plus grand format avec fond blanc (`bg-white`) et grille nette.
+  - Sélecteur d'ancre de référence explicite pour basculer entre **Sujet** et **Cible**.
+  - Rendu de l'objet à créer en superposition semi-transparente (`opacity-70`) pour visualiser clairement le chevauchement avec l'objet d'ancrage.
+  - Taille initiale par défaut réglée sur 256px par 256px.
 
 ## [Phase 4 & 5] - 2026-11-07
 ### Ajouté & Optimisé

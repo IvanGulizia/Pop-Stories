@@ -188,6 +188,7 @@ export function Plant({ entity, style }: PlantProps) {
           );
           if (isInside) {
             setCursorState(canDrag ? 'hover_drag' : 'hover_click');
+            triggerPointerEvent(entity.id, 'enter');
           } else {
             setCursorState('idle');
           }
@@ -210,6 +211,7 @@ export function Plant({ entity, style }: PlantProps) {
         onPointerLeave={() => {
           if (!isDraggingRef.current && appMode === 'play') {
             setCursorState('idle');
+            triggerPointerEvent(entity.id, 'exit');
           }
         }}
         onPointerDown={(e) => {

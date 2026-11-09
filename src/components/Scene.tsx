@@ -1,3 +1,4 @@
+import { useState, useRef } from 'react';
 import { useSceneStore } from '../store/useSceneStore';
 import { Apple } from './Apple';
 import { Plant } from './Plant';
@@ -12,12 +13,15 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const entities = useSceneStore((state) => state.entities);
   const entityOrder = useSceneStore((state) => state.entityOrder);
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
+  const selectedLayerId = useSceneStore((state) => state.selectedLayerId);
+  const setLayerVectorPaths = useSceneStore((state) => state.setLayerVectorPaths);
   const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
   const selectEntity = useSceneStore((state) => state.selectEntity);
   const spawnEntity = useSceneStore((state) => state.spawnEntity);
   const restoreDefaultScene = useSceneStore((state) => state.restoreDefaultScene);
   const settings = useSceneStore((state) => state.settings);
   const appMode = useSceneStore((state) => state.appMode);
+  const gameScore = useSceneStore((state) => state.gameScore);
 
   const hasEntitiesOnCanvas = Object.keys(entities).length > 0;
   const hasArchetypesInCatalog = Object.keys(customArchetypes).length > 0;
@@ -170,6 +174,14 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           />
         )}
 
+        {/* HUD Score Badge in Play Mode */}
+        {isPlayMode && (
+          <div className="absolute top-3 right-3 z-50 bg-amber-400 text-slate-950 font-black text-xs px-3 py-1.5 rounded-2xl shadow-lg border border-amber-300 flex items-center gap-1.5 animate-in fade-in zoom-in-95 duration-200 pointer-events-none">
+            <span className="text-sm">🏆</span>
+            <span>Score : {gameScore}</span>
+          </div>
+        )}
+
         {/* 1. ARRIÈRE-PLANS DESSINÉS (BACKGROUND LAYERS) */}
         <div className="absolute inset-0 pointer-events-none z-1">
           {backgroundGroups.flatMap((g) => g.layers).map((layer) => {
@@ -283,7 +295,272 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
             );
           })}
         </div>
+
+        {/* 4. OVERLAY DE DESSIN EN DIRECT SUR SCÈNE (QUAND UN CALQUE DÉCOR EST SÉLECTIONNÉ) */}
+        {selectedLayerId && !isPlayMode && (() => {
+          let activeLayer: any = null;
+          for (const g of layerGroups) {
+            const found = g.layers.find((l) => l.id === selectedLayerId);
+            if (found) {
+              activeLayer = found;
+              break;
+            }
+          }
+          if (!activeLayer) return null;
+
+          return (
+            <DirectCanvasDrawingOverlay
+              layer={activeLayer}
+              onUpdatePaths={(paths) => setLayerVectorPaths(selectedLayerId, paths)}
+            />
+          );
+        })()}
       </div>
+    </div>
+  );
+}
+
+// Composant d'interaction de dessin direct vectoriel sur le canvas de scène
+function DirectCanvasDrawingOverlay({
+  layer,
+  onUpdatePaths,
+}: {
+  layer: any;
+  onUpdatePaths: (paths: any[]) => void;
+}) {
+  const drawingTool = useSceneStore((state) => state.drawingTool);
+  const strokeColor = useSceneStore((state) => state.drawingStrokeColor);
+  const fillColor = useSceneStore((state) => state.drawingFillColor);
+  const strokeWidth = useSceneStore((state) => state.drawingStrokeWidth);
+  const selectLayer = useSceneStore((state) => state.selectLayer);
+
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [points, setPoints] = useState<{ x: number; y: number }[]>([]);
+  const [startPt, setStartPt] = useState<{ x: number; y: number } | null>(null);
+  const [currentPt, setCurrentPt] = useState<{ x: number; y: number } | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  const getSvgCoordinates = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!svgRef.current) return { x: 0, y: 0 };
+    const rect = svgRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(200, ((e.clientX - rect.left) / rect.width) * 200));
+    const y = Math.max(0, Math.min(200, ((e.clientY - rect.top) / rect.height) * 200));
+    return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+  };
+
+  const pointsToPath = (pts: { x: number; y: number }[]) => {
+    if (pts.length === 0) return '';
+    if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y} L ${pts[0].x + 0.1} ${pts[0].y + 0.1}`;
+    let d = `M ${pts[0].x} ${pts[0].y}`;
+    for (let i = 1; i < pts.length; i++) {
+      const xc = (pts[i].x + pts[i - 1].x) / 2;
+      const yc = (pts[i].y + pts[i - 1].y) / 2;
+      d += ` Q ${pts[i - 1].x} ${pts[i - 1].y}, ${xc} ${yc}`;
+    }
+    d += ` L ${pts[pts.length - 1].x} ${pts[pts.length - 1].y}`;
+    return d;
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    e.stopPropagation();
+    try {
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+    } catch (_) {}
+
+    const pt = getSvgCoordinates(e);
+    setIsDrawing(true);
+    setStartPt(pt);
+    setCurrentPt(pt);
+    setPoints([pt]);
+
+    if (drawingTool === 'eraser_stroke' || drawingTool === 'eraser_partial') {
+      const existing = layer.vectorPaths || [];
+      const updated = existing.filter((p: any) => {
+        // Erase any path near click point
+        if (p.points && p.points.length > 0) {
+          const hit = p.points.some((pPoint: any) => Math.hypot(pPoint.x - pt.x, pPoint.y - pt.y) <= Math.max(10, strokeWidth * 2));
+          return !hit;
+        }
+        return true;
+      });
+      onUpdatePaths(updated);
+    }
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!isDrawing) return;
+    const pt = getSvgCoordinates(e);
+    setCurrentPt(pt);
+
+    if (drawingTool === 'pencil') {
+      setPoints((prev) => {
+        const last = prev[prev.length - 1];
+        if (!last || Math.hypot(pt.x - last.x, pt.y - last.y) >= 0.8) {
+          return [...prev, pt];
+        }
+        return prev;
+      });
+    } else if (drawingTool === 'eraser_partial' || drawingTool === 'eraser_stroke') {
+      const existing = layer.vectorPaths || [];
+      const updated = existing.filter((p: any) => {
+        if (p.points && p.points.length > 0) {
+          const hit = p.points.some((pPoint: any) => Math.hypot(pPoint.x - pt.x, pPoint.y - pt.y) <= Math.max(10, strokeWidth * 2));
+          return !hit;
+        }
+        return true;
+      });
+      if (updated.length !== existing.length) {
+        onUpdatePaths(updated);
+      }
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!isDrawing) return;
+    setIsDrawing(false);
+
+    try {
+      (e.target as Element).releasePointerCapture?.(e.pointerId);
+    } catch (_) {}
+
+    const pt = getSvgCoordinates(e);
+    const existingPaths = layer.vectorPaths || [];
+    let newPath: any = null;
+
+    if (drawingTool === 'pencil' && points.length > 0) {
+      newPath = {
+        id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        d: pointsToPath(points),
+        stroke: strokeColor,
+        strokeWidth,
+        fill: fillColor,
+        points,
+      };
+    } else if (drawingTool === 'line' && startPt) {
+      newPath = {
+        id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        d: `M ${startPt.x} ${startPt.y} L ${pt.x} ${pt.y}`,
+        stroke: strokeColor,
+        strokeWidth,
+        fill: 'none',
+        points: [startPt, pt],
+      };
+    } else if (drawingTool === 'rectangle' && startPt) {
+      const rx = Math.min(startPt.x, pt.x);
+      const ry = Math.min(startPt.y, pt.y);
+      const rw = Math.abs(pt.x - startPt.x);
+      const rh = Math.abs(pt.y - startPt.y);
+      if (rw > 2 && rh > 2) {
+        newPath = {
+          id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          d: `M ${rx} ${ry} h ${rw} v ${rh} h ${-rw} Z`,
+          stroke: strokeColor,
+          strokeWidth,
+          fill: fillColor,
+          rect: { x: rx, y: ry, width: rw, height: rh },
+          points: [{ x: rx, y: ry }, { x: rx + rw, y: ry }, { x: rx + rw, y: ry + rh }, { x: rx, y: ry + rh }],
+        };
+      }
+    } else if (drawingTool === 'circle' && startPt) {
+      const cx = (startPt.x + pt.x) / 2;
+      const cy = (startPt.y + pt.y) / 2;
+      const r = Math.max(3, Math.hypot(pt.x - startPt.x, pt.y - startPt.y) / 2);
+      newPath = {
+        id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        d: `M ${cx - r} ${cy} a ${r} ${r} 0 1 0 ${r * 2} 0 a ${r} ${r} 0 1 0 ${-r * 2} 0 Z`,
+        stroke: strokeColor,
+        strokeWidth,
+        fill: fillColor,
+      };
+    }
+
+    if (newPath) {
+      onUpdatePaths([...existingPaths, newPath]);
+    }
+
+    setPoints([]);
+    setStartPt(null);
+    setCurrentPt(null);
+  };
+
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center">
+      {/* Top Banner indicating active layer drawing mode */}
+      <div className="absolute top-3 left-3 z-50 bg-slate-900/90 text-white text-xs font-bold px-3 py-1.5 rounded-2xl shadow-lg border border-slate-700 flex items-center gap-2 backdrop-blur-xs">
+        <span className="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-ping" />
+        <span>Dessin Direct sur : <strong>{layer.name}</strong></span>
+        <button
+          type="button"
+          onClick={() => selectLayer(null)}
+          className="ml-2 px-2 py-0.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] rounded-lg font-bold transition-all cursor-pointer"
+        >
+          Terminer
+        </button>
+      </div>
+
+      {/* SVG Canvas Interactive Surface */}
+      <svg
+        ref={svgRef}
+        viewBox="0 0 200 200"
+        preserveAspectRatio="none"
+        className="w-full h-full cursor-crosshair touch-none select-none"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+      >
+        {/* Live Drawing Preview */}
+        {isDrawing && drawingTool === 'pencil' && points.length > 0 && (
+          <path
+            d={pointsToPath(points)}
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            fill={fillColor}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
+
+        {isDrawing && drawingTool === 'line' && startPt && currentPt && (
+          <line
+            x1={startPt.x}
+            y1={startPt.y}
+            x2={currentPt.x}
+            y2={currentPt.y}
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
+
+        {isDrawing && drawingTool === 'rectangle' && startPt && currentPt && (
+          <rect
+            x={Math.min(startPt.x, currentPt.x)}
+            y={Math.min(startPt.y, currentPt.y)}
+            width={Math.abs(currentPt.x - startPt.x)}
+            height={Math.abs(currentPt.y - startPt.y)}
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            fill={fillColor}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
+
+        {isDrawing && drawingTool === 'circle' && startPt && currentPt && (
+          <circle
+            cx={(startPt.x + currentPt.x) / 2}
+            cy={(startPt.y + currentPt.y) / 2}
+            r={Math.hypot(currentPt.x - startPt.x, currentPt.y - startPt.y) / 2}
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            fill={fillColor}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
+      </svg>
     </div>
   );
 }
