@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Paintbrush, X } from 'lucide-react';
 import { DrawingCanvas, OnionStateOption, ReferenceGuideOption } from './DrawingCanvas';
-import { VectorPath, ColliderType } from '../types';
+import { VectorPath, ColliderType, DrawingLayer } from '../types';
 
 interface FullScreenDrawingModalProps {
   title?: string;
   subtitle?: string;
   initialPaths?: VectorPath[];
+  initialLayers?: DrawingLayer[];
   initialColliderType?: ColliderType;
   onionStates?: OnionStateOption[];
   currentEditingStateName?: string;
@@ -20,7 +21,8 @@ interface FullScreenDrawingModalProps {
     dataUrl?: string,
     colliderType?: ColliderType,
     stateName?: string,
-    hotspot?: { x: number; y: number }
+    hotspot?: { x: number; y: number },
+    layers?: DrawingLayer[]
   ) => void;
   onClose: () => void;
 }
@@ -29,6 +31,7 @@ export function FullScreenDrawingModal({
   title,
   subtitle = 'Dessinez votre forme vectorielle en plein écran',
   initialPaths = [],
+  initialLayers = [],
   initialColliderType = 'box',
   onionStates = [],
   currentEditingStateName,
@@ -40,6 +43,7 @@ export function FullScreenDrawingModal({
   onClose,
 }: FullScreenDrawingModalProps) {
   const [currentPaths, setCurrentPaths] = useState<VectorPath[]>(initialPaths);
+  const [currentLayers, setCurrentLayers] = useState<DrawingLayer[] | undefined>(initialLayers);
   const [currentDataUrl, setCurrentDataUrl] = useState<string | undefined>(undefined);
   const [currentColliderType, setCurrentColliderType] = useState<ColliderType>(initialColliderType);
   const [currentHotspot, setCurrentHotspot] = useState<{ x: number; y: number }>(
@@ -117,7 +121,8 @@ export function FullScreenDrawingModal({
                   currentDataUrl,
                   currentColliderType,
                   stateName.trim() || undefined,
-                  currentHotspot
+                  currentHotspot,
+                  currentLayers
                 )
               }
               className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer active:scale-95"
@@ -138,6 +143,8 @@ export function FullScreenDrawingModal({
         <div className="flex-1 p-4 sm:p-6 overflow-hidden bg-slate-100/60 flex items-center justify-center">
           <DrawingCanvas
             initialPaths={initialPaths}
+            initialLayers={initialLayers}
+            onLayersChange={setCurrentLayers}
             initialColliderType={initialColliderType}
             onionStates={onionStates}
             currentEditingStateName={currentEditingStateName}

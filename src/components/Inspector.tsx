@@ -116,15 +116,21 @@ export function Inspector() {
                 []
             )
           )}
-          onSave={(paths, _dataUrl, colliderType, stateName) => {
+          initialLayers={
+            selectedEntity.states[editingStateDrawingId]?.drawingLayers ||
+            (selectedEntity.currentStateId === editingStateDrawingId ? selectedEntity.drawingLayers : undefined)
+          }
+          onSave={(paths, _dataUrl, colliderType, stateName, _hotspot, layers) => {
             updateStateProperties(selectedEntity.id, editingStateDrawingId, {
               vectorPaths: paths,
+              drawingLayers: layers,
               colliderType: colliderType || 'box',
               ...(stateName ? { name: stateName } : {}),
             });
             if (selectedEntity.currentStateId === editingStateDrawingId) {
               updateEntityDetails(selectedEntity.id, {
                 vectorPaths: paths,
+                drawingLayers: layers,
                 colliderType: colliderType || 'box',
               });
             }

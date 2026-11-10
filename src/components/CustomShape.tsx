@@ -451,17 +451,44 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
               viewBox="0 0 200 200"
               className="w-full h-full pointer-events-none overflow-visible"
             >
-              {currentState.vectorPaths.map((p) => (
-                <path
-                  key={p.id}
-                  d={p.d}
-                  stroke={p.stroke}
-                  strokeWidth={p.strokeWidth}
-                  fill={p.fill || 'none'}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              ))}
+              {(() => {
+                const layers = currentState.drawingLayers || entity.drawingLayers;
+                const paths = currentState.vectorPaths;
+                if (!layers || layers.length === 0) {
+                  return paths.map((p) => (
+                    <path
+                      key={p.id}
+                      d={p.d}
+                      stroke={p.stroke}
+                      strokeWidth={p.strokeWidth}
+                      fill={p.fill || 'none'}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  ));
+                }
+                return [...layers].reverse().map((layer) => {
+                  if (!layer.visible) return null;
+                  const layerPaths = paths.filter(
+                    (p) => (p.layerId || layers[layers.length - 1]?.id || 'layer-1') === layer.id
+                  );
+                  return (
+                    <g key={layer.id} opacity={layer.opacity ?? 1}>
+                      {layerPaths.map((p) => (
+                        <path
+                          key={p.id}
+                          d={p.d}
+                          stroke={p.stroke}
+                          strokeWidth={p.strokeWidth}
+                          fill={p.fill || 'none'}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      ))}
+                    </g>
+                  );
+                });
+              })()}
             </svg>
           </div>
         ) : (currentState?.drawingDataUrl || entity.drawingDataUrl) ? (
@@ -478,17 +505,44 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
               viewBox="0 0 200 200"
               className="w-full h-full pointer-events-none overflow-visible"
             >
-              {entity.vectorPaths.map((p) => (
-                <path
-                  key={p.id}
-                  d={p.d}
-                  stroke={p.stroke}
-                  strokeWidth={p.strokeWidth}
-                  fill={p.fill || 'none'}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              ))}
+              {(() => {
+                const layers = entity.drawingLayers;
+                const paths = entity.vectorPaths;
+                if (!layers || layers.length === 0) {
+                  return paths.map((p) => (
+                    <path
+                      key={p.id}
+                      d={p.d}
+                      stroke={p.stroke}
+                      strokeWidth={p.strokeWidth}
+                      fill={p.fill || 'none'}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  ));
+                }
+                return [...layers].reverse().map((layer) => {
+                  if (!layer.visible) return null;
+                  const layerPaths = paths.filter(
+                    (p) => (p.layerId || layers[layers.length - 1]?.id || 'layer-1') === layer.id
+                  );
+                  return (
+                    <g key={layer.id} opacity={layer.opacity ?? 1}>
+                      {layerPaths.map((p) => (
+                        <path
+                          key={p.id}
+                          d={p.d}
+                          stroke={p.stroke}
+                          strokeWidth={p.strokeWidth}
+                          fill={p.fill || 'none'}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      ))}
+                    </g>
+                  );
+                });
+              })()}
             </svg>
           </div>
         ) : entity.icon ? (

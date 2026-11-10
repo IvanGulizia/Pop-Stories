@@ -26,6 +26,14 @@ export interface VectorRect {
   cornerRadius?: number;
 }
 
+export interface DrawingLayer {
+  id: string;
+  name: string;
+  visible: boolean;
+  locked: boolean;
+  opacity: number; // 0 to 1
+}
+
 export interface VectorPath {
   id: string;
   d: string;
@@ -34,9 +42,10 @@ export interface VectorPath {
   fill?: string;
   transform?: string;
   // Metadata for geometric manipulation & interpolation
-  type?: 'freehand' | 'polyline' | 'rectangle';
+  type?: 'freehand' | 'polyline' | 'rectangle' | 'circle' | 'straight' | 'fill_bucket';
   points?: VectorPoint[];
   rect?: VectorRect;
+  layerId?: string;
 }
 
 export type ColliderType = 'box' | 'circle' | 'polygon';
@@ -60,6 +69,7 @@ export interface EntityState {
   colliderBounds?: ColliderBounds;
   // Vector drawing overrides per state
   vectorPaths?: VectorPath[];
+  drawingLayers?: DrawingLayer[];
   drawingDataUrl?: string;
   // Specific visual properties for drawing customization
   stemHeight?: number;
@@ -82,6 +92,7 @@ export interface Entity {
   icon?: string;
   drawingDataUrl?: string;
   vectorPaths?: VectorPath[];
+  drawingLayers?: DrawingLayer[];
   zIndex?: number;
 }
 

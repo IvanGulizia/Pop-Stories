@@ -1,6 +1,9 @@
 # État du Projet
 
 ## Complété
+- **Gestionnaire Complet de Calques de Dessin (Drawing Layers)** : Chaque état d'objet intègre son propre système de calques (pile ordonnée, calque actif, visibilité œil, verrouillage cadenas, réglage d'opacité, réordonnancement premier-plan/arrière-plan, suppression et réassignation des tracés sélectionnés).
+- **Pot de Peinture Hybride Haute Fidélité (Option B)** : Remplissage vectoriel direct 100% pur sur les formes fermées (`fill: couleur` sans polygone créé) et détection à 1000×1000 px pour les croisements de traits multiples (préservant les segments droits sans déformation).
+- **Éradication Définitive du Scintillement du Curseur** : Mise en cache statique du curseur via `.atelier-fine-crosshair` dans `index.css` et arrêt des re-renders React à 120Hz sur le simple survol du pointeur.
 - **Curseur Croix Fine & Scintillement Éliminé** : Remplacement de la grosse croix OS par une croix fine 19px blanche/noire ultra-nette (`FINE_CROSSHAIR_CURSOR`) en mode édition et dans le canvas de dessin. Résolution du scintillement par suppression des bascules d'événements pointeur sur les tracés SVG lors du tracé. En mode Play, conservation des curseurs personnalisés configurés dans les paramètres.
 - **Pot de Peinture avec Détection Réelle de Cavités Fermées** : Remplissage par flood fill rasterisé haute résolution et vectorisation Moore-Neighbor 8-connectée. Les tracés sous-jacents restent strictement intacts et ouverts (aucun ajout forcé de `Z` ni déformation géométrique).
 - **Couleur Noire par Défaut & Sélecteur Personnalisé (HEX/Palette)** : Initialisation des outils de dessin sur le noir `#000000`, intégration d'un sélecteur complet avec pastille d'état, palette, pipette/input couleur et champ hexadécimal libre.

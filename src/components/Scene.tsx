@@ -157,29 +157,24 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
       className="relative w-full h-full min-h-0 bg-slate-100/70 overflow-hidden select-none flex flex-col items-center justify-start p-3 sm:p-4"
       onClick={() => selectEntity(null)}
     >
-      {isCustomCursorActive ? (
+      {isCustomCursorActive && (
         <style>{`
           #scene-canvas-container, #scene-canvas-container * {
             cursor: none !important;
           }
         `}</style>
-      ) : !isPlayMode ? (
-        <style>{`
-          #scene-canvas-container {
-            cursor: ${FINE_CROSSHAIR_CURSOR} !important;
-          }
-        `}</style>
-      ) : null}
+      )}
 
       {/* CADRE DE SCÈNE AVEC RESPECT DU FORMAT / RATIO */}
       <div
         id="scene-canvas-container"
         onDragOver={handleDragOver}
         onDrop={handleDrop}
-        className="relative bg-white overflow-hidden select-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-all duration-300"
+        className={`relative bg-white overflow-hidden select-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-all duration-300 ${
+          !isPlayMode && !isCustomCursorActive ? 'atelier-fine-crosshair' : ''
+        }`}
         style={{
           ...getAspectRatioStyle(),
-          cursor: isCustomCursorActive ? 'none' : !isPlayMode ? FINE_CROSSHAIR_CURSOR : 'default',
         }}
       >
         {/* Canvas Grid Background */}
@@ -512,7 +507,7 @@ function DirectCanvasDrawingOverlay({
         ref={svgRef}
         viewBox="0 0 200 200"
         preserveAspectRatio="none"
-        className="w-full h-full cursor-crosshair touch-none select-none"
+        className="w-full h-full atelier-fine-crosshair touch-none select-none"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

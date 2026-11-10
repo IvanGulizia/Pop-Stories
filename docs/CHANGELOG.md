@@ -1,3 +1,19 @@
+## [Phase 9.1] - 2026-11-10
+### Ajouté & Perfectionné
+- **Élimination Définitive du Scintillement du Curseur** :
+  - Déclaration de la classe CSS statique `.atelier-fine-crosshair` dans `index.css` mise en cache par le moteur graphique du navigateur, supprimant les recalculs d'URL de données SVG en boucle.
+  - Arrêt du re-render React à 120Hz/240Hz : suppression de l'appel `setCursorPos` lors du survol normal en dessin.
+  - Application cohérente sur la scène, le canvas de dessin et les calques sans conflits de pointeur.
+- **Pot de Peinture Hybride Haute Fidélité (Option B)** :
+  - **Niveau 1 (Formes fermées)** : Remplissage direct `fill: couleur` sur les rectangles, cercles et boucles vectorielles fermées. Exactitude mathématique absolue à 100%, zéro polygone supplémentaire créé.
+  - **Niveau 2 (Intersections de traits multiples)** : Détection sur masque haute définition 1000×1000 px (supersampling 5×) avec simplification RDP préservant les segments droits (ex: segment vertical vert de la capture 01) et lissage naturel des courbes sans effet de boudin.
+- **Système de Gestion de Calques dans l'Atelier de Dessin (Drawing Layers)** :
+  - Nouveau modèle `DrawingLayer` (nom, visibilité œil, verrouillage cadenas, opacité).
+  - Panneau interactif des calques dans la barre latérale : création (`+ Nouveau`), renommage par double-clic, réordonnancement (monter/descendre), suppression, et réglage d'opacité.
+  - Rendu étagé des calques de bas en haut dans le SVG avec masquage dynamique et protection contre le dessin sur calque verrouillé.
+  - Sélecteur de calque dans l'inspecteur pour réassigner instantanément les tracés sélectionnés.
+  - Sauvegarde et persistance transparente dans les états d'entités avec rétrocompatibilité totale.
+
 ## [Phase 9] - 2026-11-10
 ### Corrigé & Optimisé
 - **Curseur Croix Fine & Élimination du Scintillement (Edit & Dessin)** :
