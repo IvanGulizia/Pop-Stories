@@ -125,6 +125,7 @@ export interface RuleTrigger {
   type: TriggerType;
   phase?: TriggerPhase; // Phase optionnelle (défaut: 'click' pour clic, 'enter' pour collision)
   revertOnExit?: boolean; // Pour 'stay' : revenir à l'état précédent quand le contact cesse (Toggle)
+  autoRevert?: boolean;   // Restauration automatique de l'état initial lors de la fin d'événement (Hover Exit, Mouse Up, Key Up, etc.)
   
   // Sujet (Qui déclenche)
   subjectMode?: SelectionMode; // 'type', 'tag' ou 'instance'

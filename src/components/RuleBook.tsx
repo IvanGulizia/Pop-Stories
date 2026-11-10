@@ -209,6 +209,78 @@ export function RuleBook() {
     return entityList.find((e) => e.type === type) || customArchetypes[type];
   };
 
+  // Action badge renderer for compact view
+  const renderActionSummary = (act: RuleAction) => {
+    if (act.type === 'change_state') {
+      const stateName = act.targetStateId || 'Nouvel état';
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-indigo-50 border border-indigo-200 text-indigo-700 px-2 py-0.5 rounded-lg shrink-0">
+          <span>🪄</span>
+          <span>Passe à « {stateName} »</span>
+        </span>
+      );
+    }
+    if (act.type === 'toggle_state') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-purple-50 border border-purple-200 text-purple-700 px-2 py-0.5 rounded-lg shrink-0">
+          <span>🔄</span>
+          <span>Bascule d'état</span>
+        </span>
+      );
+    }
+    if (act.type === 'delete_entity') {
+      const tgtName = act.targetType ? (getEntityObj(act.targetType)?.name || act.targetType) : 'l\'objet';
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-rose-50 border border-rose-200 text-rose-700 px-2 py-0.5 rounded-lg shrink-0">
+          <span>💥</span>
+          <span>Détruire {tgtName}</span>
+        </span>
+      );
+    }
+    if (act.type === 'spawn_entity') {
+      const spwName = act.spawnEntityType ? (getEntityObj(act.spawnEntityType)?.name || act.spawnEntityType) : 'un objet';
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-emerald-50 border border-emerald-200 text-emerald-700 px-2 py-0.5 rounded-lg shrink-0">
+          <span>➕</span>
+          <span>Créer « {spwName} »</span>
+        </span>
+      );
+    }
+    if (act.type === 'play_sound') {
+      const soundLabel = act.customSoundId
+        ? (customSounds.find((s) => s.id === act.customSoundId)?.name || 'Audio')
+        : (act.soundType || 'Audio');
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-purple-50 border border-purple-200 text-purple-700 px-2 py-0.5 rounded-lg shrink-0">
+          <span>🎵</span>
+          <span>Son « {soundLabel} »</span>
+        </span>
+      );
+    }
+    if (act.type === 'add_score') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-amber-50 border border-amber-200 text-amber-700 px-2 py-0.5 rounded-lg shrink-0">
+          <span>🏆</span>
+          <span>Score +{act.scoreAmount || 1}</span>
+        </span>
+      );
+    }
+    if (act.type === 'delay') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-cyan-50 border border-cyan-200 text-cyan-700 px-2 py-0.5 rounded-lg shrink-0">
+          <span>⏱️</span>
+          <span>Attendre {act.delayDuration || 1}s</span>
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-slate-100 border border-slate-200 text-slate-700 px-2 py-0.5 rounded-lg shrink-0">
+        <span>⚡</span>
+        <span>{act.type}</span>
+      </span>
+    );
+  };
+
   // Available entity options (archetypes & custom drawn only)
   const availableEntityOptions: { type: EntityType; label: string }[] = [];
 
@@ -950,7 +1022,7 @@ export function RuleBook() {
                       type="text"
                       value={rule.name}
                       onChange={(e) => updateRule(rule.id, { name: e.target.value })}
-                      className="text-sm font-black text-slate-900 bg-transparent hover:bg-slate-100 focus:bg-white px-2 py-1 rounded-xl border border-transparent hover:border-slate-200 focus:border-slate-300 focus:outline-none transition-colors max-w-sm"
+                      className="text-sm font-black text-slate-900 bg-transparent hover:bg-slate-100 focus:bg-white px-2 py-1 rounded-xl border border-transparent hover:border-slate-200 focus:border-slate-300 focus:outline-none transition-colors flex-1 min-w-[200px] max-w-[50%]"
                       placeholder="Nom de la règle..."
                     />
 
@@ -975,6 +1047,20 @@ export function RuleBook() {
                   </div>
 
                   <div className="flex items-center gap-1.5">
+                    {/* Bouton Toggle Auto-remise à l'état initial */}
+                    <button
+                      type="button"
+                      onClick={() => updateRule(rule.id, { trigger: { ...rule.trigger, autoRevert: !rule.trigger.autoRevert } })}
+                      className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${
+                        rule.trigger.autoRevert
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs'
+                          : 'bg-slate-100 text-slate-500 border border-slate-200 hover:text-slate-700'
+                      }`}
+                      title="Remise automatique à l'état initial lors de la fin de l'événement (relâchement, sortie de survol, etc.)"
+                    >
+                      <span>↩️ Auto-remise</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => toggleRule(rule.id)}
@@ -1054,10 +1140,18 @@ export function RuleBook() {
 
                       <span className="text-indigo-500 font-bold ml-1">➔</span>
 
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] font-bold bg-indigo-50 border border-indigo-200 text-indigo-700 px-2 py-0.5 rounded-full">
-                          {rule.actions.length} action{rule.actions.length > 1 ? 's' : ''}
-                        </span>
+                      {/* Visuel complet des actions en mode compact */}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {rule.actions.map((act) => (
+                          <React.Fragment key={act.id}>
+                            {renderActionSummary(act)}
+                          </React.Fragment>
+                        ))}
+                        {rule.trigger.autoRevert && (
+                          <span className="text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                            <span>↩️ Auto-remise</span>
+                          </span>
+                        )}
                       </div>
                     </div>
 

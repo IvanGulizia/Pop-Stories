@@ -97,6 +97,7 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
               <div
                 draggable
                 onDragStart={(e) => {
+                  e.dataTransfer.setData('text/entity-id', entity.id);
                   e.dataTransfer.setData('text/plain', entity.id);
                   e.dataTransfer.effectAllowed = 'move';
                   setDraggedEntityId(entity.id);
@@ -107,6 +108,7 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                 }}
                 onDragOver={(e) => {
                   e.preventDefault();
+                  e.stopPropagation();
                   e.dataTransfer.dropEffect = 'move';
                   const rect = e.currentTarget.getBoundingClientRect();
                   const midY = rect.top + rect.height / 2;
@@ -115,14 +117,17 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                     setDragOverTarget({ id: entity.id, position: pos });
                   }
                 }}
-                onDragLeave={() => {
-                  if (dragOverTarget?.id === entity.id) {
-                    setDragOverTarget(null);
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                    if (dragOverTarget?.id === entity.id) {
+                      setDragOverTarget(null);
+                    }
                   }
                 }}
                 onDrop={(e) => {
                   e.preventDefault();
-                  const sourceId = e.dataTransfer.getData('text/plain') || draggedEntityId;
+                  e.stopPropagation();
+                  const sourceId = e.dataTransfer.getData('text/entity-id') || e.dataTransfer.getData('text/plain') || draggedEntityId;
                   if (sourceId && sourceId !== entity.id) {
                     reorderEntities(sourceId, entity.id, dragOverTarget?.position || 'above');
                   }

@@ -396,6 +396,7 @@ const initialRules: DynamicRule[] = [
 const ruleCooldowns: Record<string, number> = {};
 const entityStateTimestamps: Record<string, number> = {};
 const preCollisionStates: Record<string, { subjectState?: string; targetState?: string }> = {};
+const preEventAutoRevertStates: Record<string, string> = {};
 const RULE_COOLDOWN_MS = 350; // Minimum interval between identical rule trigger on same entities
 const ENTITY_STATE_COOLDOWN_MS = 250; // Prevents oscillating state ping-pong
 
@@ -733,23 +734,25 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   reorderEntities: (sourceId, targetId, position = 'above') => {
     set((state) => {
-      const order = state.entityOrder && state.entityOrder.length > 0
-        ? [...state.entityOrder]
+      const rawOrder = state.entityOrder && state.entityOrder.length > 0
+        ? state.entityOrder
         : Object.keys(state.entities);
-      const fromIdx = order.indexOf(sourceId);
-      if (fromIdx === -1) return state;
-      order.splice(fromIdx, 1);
-      const toIdx = order.indexOf(targetId);
-      if (toIdx === -1) {
-        order.push(sourceId);
-      } else {
-        // Since order list has top entity at last position (highest z-index),
-        // 'above' in reversed display list means after target in order list,
-        // 'below' in reversed display list means before target in order list.
-        const insertIdx = position === 'above' ? toIdx + 1 : toIdx;
-        order.splice(insertIdx, 0, sourceId);
+
+      if (!rawOrder.includes(sourceId) || !rawOrder.includes(targetId) || sourceId === targetId) {
+        return state;
       }
-      return { entityOrder: order };
+
+      const filtered = rawOrder.filter((id) => id !== sourceId);
+      const targetIdx = filtered.indexOf(targetId);
+      if (targetIdx === -1) return state;
+
+      // In display list (reversed): top element in UI = highest Z-index (last in order array)
+      // 'above' in UI means higher Z-index -> insert AFTER target in order array
+      // 'below' in UI means lower Z-index -> insert BEFORE target in order array
+      const insertIdx = position === 'above' ? targetIdx + 1 : targetIdx;
+      filtered.splice(insertIdx, 0, sourceId);
+
+      return { entityOrder: filtered };
     });
   },
 
@@ -1946,6 +1949,20 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         return;
       }
       ruleCooldowns[cooldownKey] = now;
+
+      if (rule.trigger.autoRevert) {
+        const revertKey = `${subject.id}_${rule.id}`;
+        if (phase === 'enter' || phase === 'hover_enter' || phase === 'down' || phase === 'mouse_down') {
+          preEventAutoRevertStates[revertKey] = subject.currentStateId;
+        } else if (phase === 'exit' || phase === 'hover_exit' || phase === 'up' || phase === 'mouse_up') {
+          const prevState = preEventAutoRevertStates[revertKey];
+          if (prevState) {
+            updateEntityState(subject.id, prevState);
+            delete preEventAutoRevertStates[revertKey];
+            return;
+          }
+        }
+      }
 
       executeRuleActions(rule.actions, {
         subject,
