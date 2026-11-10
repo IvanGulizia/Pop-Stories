@@ -5,6 +5,7 @@ import {
   TriggerPhase,
   ActionType,
   RuleAction,
+  RuleTrigger,
   EntityType,
   DynamicRule,
   ActionTargetMode,
@@ -71,13 +72,15 @@ type ActiveModal =
         | 'choose_toggle_states'
         | 'choose_spawn_entity'
         | 'choose_spawn_location'
-        | 'choose_sound';
+        | 'choose_sound'
+        | 'choose_delay_duration';
       actionType?: ActionType;
       targetMode?: ActionTargetMode;
       selectedTargetType?: EntityType;
       pendingSpawnType?: EntityType;
       toggleStateA?: string;
       toggleStateB?: string;
+      delayDuration?: number;
       spawnOffset?: { x: number; y: number };
       spawnAbsoluteCoords?: { x: number; y: number };
     }
@@ -100,7 +103,9 @@ interface WizardData {
     | 'spawn_state_picker'
     | 'spawn_location_picker'
     | 'sound_picker'
-    | 'key_picker';
+    | 'key_picker'
+    | 'delay_duration_picker';
+  delayDuration?: number;
   name: string;
   subjectType: EntityType;
   subjectStateId?: string;
@@ -127,8 +132,9 @@ interface WizardData {
   proximityDistance?: number;
   boundaryEdge?: 'any' | 'top' | 'bottom' | 'left' | 'right';
   variableName?: string;
-  variableOperator?: '>=' | '==' | '<=';
+  variableOperator?: '>=' | '==';
   variableValue?: number;
+  autoRevert?: boolean;
 }
 
 export function RuleBook() {
@@ -206,44 +212,109 @@ export function RuleBook() {
   // Helper to find representative entity from canvas or archetype library
   const getEntityObj = (type?: string) => {
     if (!type) return undefined;
-    return entityList.find((e) => e.type === type) || customArchetypes[type];
+    return (
+      entityList.find((e) => e.type === type || e.id === type || e.name === type) ||
+      customArchetypes[type] ||
+      Object.values(customArchetypes).find((a) => a.id === type || a.name === type)
+    );
   };
 
-  // Action badge renderer for compact view
-  const renderActionSummary = (act: RuleAction) => {
+  const formatStateName = (stateId?: string, entObj?: any) => {
+    if (!stateId) return 'Normal';
+    if (entObj?.states?.[stateId]?.name) return entObj.states[stateId].name;
+    const foundInObj = Object.values(entObj?.states || {}).find(
+      (s: any) => s.id === stateId || s.name === stateId
+    );
+    if (foundInObj && (foundInObj as any).name) return (foundInObj as any).name;
+
+    for (const ent of [...entityList, ...Object.values(customArchetypes)] as any[]) {
+      if (ent?.states?.[stateId]?.name) return ent.states[stateId].name;
+      const f = Object.values(ent?.states || {}).find(
+        (s: any) => s.id === stateId || s.name === stateId
+      );
+      if (f && (f as any).name) return (f as any).name;
+    }
+
+    if (typeof stateId === 'string' && stateId.startsWith('state_')) {
+      const parts = stateId.split('_');
+      if (parts[1]) {
+        return `État ${parts[1].toUpperCase()}`;
+      }
+    }
+    return stateId;
+  };
+
+  // Action badge renderer for compact view - matching left side condition visual language
+  const renderActionSummary = (act: RuleAction, trigger: RuleTrigger) => {
     if (act.type === 'change_state') {
-      const stateName = act.targetStateId || 'Nouvel état';
+      const targetType = act.targetMode === 'subject' || (!act.targetMode && !act.targetType)
+        ? trigger.subjectType
+        : (act.targetType || trigger.targetType || trigger.subjectType);
+
+      const targetEntObj = getEntityObj(targetType);
+      const humanStateName = formatStateName(act.targetStateId, targetEntObj);
+      const targetLabel = targetEntObj?.name || targetType || 'Objet';
+
       return (
-        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-indigo-50 border border-indigo-200 text-indigo-700 px-2 py-0.5 rounded-lg shrink-0">
-          <span>🪄</span>
-          <span>Passe à « {stateName} »</span>
-        </span>
+        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+          <div className="w-5 h-5 rounded-md bg-slate-50 border border-slate-200 flex items-center justify-center p-0.5 shrink-0 overflow-hidden">
+            <EntityMiniPreview entity={targetEntObj} type={targetType} stateId={act.targetStateId} size={18} />
+          </div>
+          <span className="text-xs truncate">{targetLabel}</span>
+          <span className="text-[10px] text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded font-medium truncate">
+            ({humanStateName})
+          </span>
+        </div>
       );
     }
     if (act.type === 'toggle_state') {
+      const targetType = act.targetMode === 'subject' ? trigger.subjectType : (act.targetType || trigger.targetType || trigger.subjectType);
+      const targetEntObj = getEntityObj(targetType);
+      const targetLabel = targetEntObj?.name || targetType || 'Objet';
       return (
-        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-purple-50 border border-purple-200 text-purple-700 px-2 py-0.5 rounded-lg shrink-0">
-          <span>🔄</span>
-          <span>Bascule d'état</span>
-        </span>
+        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+          <div className="w-5 h-5 rounded-md bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+            🔄
+          </div>
+          <span className="text-xs truncate">{targetLabel}</span>
+          <span className="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.2 rounded font-medium truncate">
+            (Bascule d'état)
+          </span>
+        </div>
       );
     }
     if (act.type === 'delete_entity') {
-      const tgtName = act.targetType ? (getEntityObj(act.targetType)?.name || act.targetType) : 'l\'objet';
+      const targetType = act.targetMode === 'subject' ? trigger.subjectType : (act.targetType || trigger.targetType || trigger.subjectType);
+      const targetEntObj = getEntityObj(targetType);
+      const targetLabel = targetEntObj?.name || targetType || 'Objet';
       return (
-        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-rose-50 border border-rose-200 text-rose-700 px-2 py-0.5 rounded-lg shrink-0">
-          <span>💥</span>
-          <span>Détruire {tgtName}</span>
-        </span>
+        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+          <div className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+            💥
+          </div>
+          <span className="text-xs truncate">{targetLabel}</span>
+          <span className="text-[10px] text-rose-700 bg-rose-50 px-1.5 py-0.2 rounded font-medium truncate">
+            (Détruire)
+          </span>
+        </div>
       );
     }
     if (act.type === 'spawn_entity') {
-      const spwName = act.spawnEntityType ? (getEntityObj(act.spawnEntityType)?.name || act.spawnEntityType) : 'un objet';
+      const spawnType = act.spawnEntityType || 'apple';
+      const spawnEntObj = getEntityObj(spawnType);
+      const spawnStateObj = spawnEntObj?.states[act.spawnInitialStateId || spawnEntObj?.currentStateId || ''];
+      const humanStateName = spawnStateObj?.name || 'Normal';
+      const spawnLabel = spawnEntObj?.name || spawnType;
       return (
-        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-emerald-50 border border-emerald-200 text-emerald-700 px-2 py-0.5 rounded-lg shrink-0">
-          <span>➕</span>
-          <span>Créer « {spwName} »</span>
-        </span>
+        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+          <div className="w-5 h-5 rounded-md bg-slate-50 border border-slate-200 flex items-center justify-center p-0.5 shrink-0 overflow-hidden">
+            <EntityMiniPreview entity={spawnEntObj} type={spawnType} stateId={act.spawnInitialStateId} size={18} />
+          </div>
+          <span className="text-xs truncate">{spawnLabel}</span>
+          <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded font-medium truncate">
+            (Créer - {humanStateName})
+          </span>
+        </div>
       );
     }
     if (act.type === 'play_sound') {
@@ -251,33 +322,47 @@ export function RuleBook() {
         ? (customSounds.find((s) => s.id === act.customSoundId)?.name || 'Audio')
         : (act.soundType || 'Audio');
       return (
-        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-purple-50 border border-purple-200 text-purple-700 px-2 py-0.5 rounded-lg shrink-0">
-          <span>🎵</span>
-          <span>Son « {soundLabel} »</span>
-        </span>
+        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+          <div className="w-5 h-5 rounded-md bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+            🎵
+          </div>
+          <span className="text-xs truncate">Son</span>
+          <span className="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.2 rounded font-medium truncate">
+            ({soundLabel})
+          </span>
+        </div>
       );
     }
     if (act.type === 'add_score') {
       return (
-        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-amber-50 border border-amber-200 text-amber-700 px-2 py-0.5 rounded-lg shrink-0">
-          <span>🏆</span>
-          <span>Score +{act.scoreAmount || 1}</span>
-        </span>
+        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+          <div className="w-5 h-5 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+            🏆
+          </div>
+          <span className="text-xs truncate">Score</span>
+          <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded font-medium truncate">
+            (+{act.scoreAmount || 1})
+          </span>
+        </div>
       );
     }
     if (act.type === 'delay') {
       return (
-        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-cyan-50 border border-cyan-200 text-cyan-700 px-2 py-0.5 rounded-lg shrink-0">
-          <span>⏱️</span>
-          <span>Attendre {act.delayDuration || 1}s</span>
-        </span>
+        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+          <div className="w-5 h-5 rounded-md bg-cyan-100 text-cyan-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+            ⏱️
+          </div>
+          <span className="text-xs truncate">Pause</span>
+          <span className="text-[10px] text-cyan-700 bg-cyan-50 px-1.5 py-0.2 rounded font-medium truncate">
+            ({act.delayDuration || 1}s)
+          </span>
+        </div>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-slate-100 border border-slate-200 text-slate-700 px-2 py-0.5 rounded-lg shrink-0">
-        <span>⚡</span>
-        <span>{act.type}</span>
-      </span>
+      <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+        <span className="text-xs">⚡ {act.type}</span>
+      </div>
     );
   };
 
@@ -363,6 +448,7 @@ export function RuleBook() {
         variableName: activeWizard.variableName,
         variableOperator: activeWizard.variableOperator,
         variableValue: activeWizard.variableValue,
+        autoRevert: activeWizard.autoRevert,
       },
       actions,
     });
@@ -1144,7 +1230,7 @@ export function RuleBook() {
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {rule.actions.map((act) => (
                           <React.Fragment key={act.id}>
-                            {renderActionSummary(act)}
+                            {renderActionSummary(act, rule.trigger)}
                           </React.Fragment>
                         ))}
                         {rule.trigger.autoRevert && (
@@ -1504,7 +1590,8 @@ export function RuleBook() {
                                   actionId: act.id,
                                   actionType: act.type,
                                   targetMode: act.targetMode || 'target',
-                                  subStep: 'main',
+                                  subStep: act.type === 'delay' ? 'choose_delay_duration' : 'main',
+                                  delayDuration: act.delayDuration || 1,
                                 })
                               }
                               onDragOver={(e) => {
@@ -2205,6 +2292,50 @@ export function RuleBook() {
                       </div>
                     )}
 
+                    {/* 6. Option d'Auto-remise dédiée */}
+                    {['click', 'hover', 'keyboard', 'collision', 'proximity'].includes(activeWizard.triggerType) && (
+                      <div className="pt-2 border-t border-slate-200/80 space-y-2">
+                        <label className="text-xs font-bold text-slate-800 block flex items-center gap-1.5">
+                          <span>🔄 Option d'Auto-remise (Restaurer l'état initial au relâchement/sortie) :</span>
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setActiveWizard({ ...activeWizard, autoRevert: true })}
+                            className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                              activeWizard.autoRevert
+                                ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-300/60 text-emerald-950 shadow-2xs'
+                                : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 font-black text-xs text-emerald-800">
+                              <span>↩️ Activer l'Auto-remise</span>
+                            </div>
+                            <span className="text-[10px] text-slate-500 font-medium mt-1 leading-tight">
+                              Restaure l'état initial au relâchement (clic/touche) ou à la fin du survol/contact (ex: Clic Down → État B, Clic Up → Normal).
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setActiveWizard({ ...activeWizard, autoRevert: false })}
+                            className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                              !activeWizard.autoRevert
+                                ? 'bg-slate-100 border-slate-400 ring-2 ring-slate-300/60 text-slate-900 shadow-2xs'
+                                : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 font-black text-xs text-slate-700">
+                              <span>➡️ Pas d'Auto-remise</span>
+                            </div>
+                            <span className="text-[10px] text-slate-500 font-medium mt-1 leading-tight">
+                              Conserve le nouvel état définitivement après l'événement.
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="pt-2">
                       <button
                         type="button"
@@ -2849,6 +2980,32 @@ export function RuleBook() {
 
                     return (
                       <div className="space-y-4">
+                        {/* Option Auto-remise (Restauration Automatique) */}
+                        <div className="flex items-center justify-between bg-emerald-50/80 border border-emerald-200/90 rounded-2xl p-3 shadow-2xs">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-xl">↩️</span>
+                            <div>
+                              <div className="text-xs font-black text-emerald-950">
+                                Restauration Automatique (Auto-remise)
+                              </div>
+                              <div className="text-[10px] text-emerald-700 font-medium mt-0.5">
+                                Rétablit automatiquement l'état initial lors de la fin de l'événement (relâchement du clic, sortie de survol, etc.)
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setActiveWizard({ ...activeWizard, autoRevert: !activeWizard.autoRevert })}
+                            className={`px-3 py-1.5 text-xs font-black rounded-xl transition-all cursor-pointer border shrink-0 ${
+                              activeWizard.autoRevert
+                                ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
+                                : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                            }`}
+                          >
+                            {activeWizard.autoRevert ? '✓ Restauration Active' : 'Désactivée'}
+                          </button>
+                        </div>
+
                         <div className={`grid grid-cols-1 ${isCollision ? 'lg:grid-cols-3 md:grid-cols-2' : 'md:grid-cols-2'} gap-4 items-start`}>
                           {/* SECTION 1 : SUJET */}
                           <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-3xl border border-slate-200/90 flex flex-col h-full shadow-2xs">
@@ -3125,9 +3282,10 @@ export function RuleBook() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  completeWizardWithAction({
-                                    type: 'delay',
-                                    delayDuration: 1,
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    actionSubStep: 'delay_duration_picker',
+                                    delayDuration: activeWizard.delayDuration || 1,
                                   });
                                 }}
                                 className="w-full p-3.5 bg-white hover:bg-amber-50/70 border-2 border-slate-200 hover:border-amber-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -3137,10 +3295,10 @@ export function RuleBook() {
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <div className="text-xs font-black text-slate-900 group-hover:text-amber-700 truncate">
-                                    Attendre / Pause (Délai 1s)
+                                    Attendre / Pause (Délai)
                                   </div>
                                   <div className="text-[11px] text-slate-500 mt-0.5 truncate">
-                                    Pause avant la prochaine action
+                                    Définir un délai en secondes avant l'action suivante
                                   </div>
                                 </div>
                               </button>
@@ -3739,6 +3897,106 @@ export function RuleBook() {
                           </button>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Étape dédiée : Configuration de la durée du Délai (Attendre / Pause) */}
+                  {activeWizard.actionSubStep === 'delay_duration_picker' && (
+                    <div className="space-y-6 max-w-lg mx-auto py-2">
+                      <div className="text-center space-y-1">
+                        <div className="w-14 h-14 bg-amber-100 text-amber-700 rounded-2xl flex items-center justify-center text-2xl mx-auto shadow-xs">
+                          ⏱️
+                        </div>
+                        <h4 className="text-sm font-black text-slate-800">
+                          Définir la durée de la pause (Délai)
+                        </h4>
+                        <p className="text-xs text-slate-500">
+                          L'exécution des actions qui suivent sera suspendue pendant ce temps.
+                        </p>
+                      </div>
+
+                      {/* Presets rapides */}
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider block">
+                          Durées suggérées :
+                        </label>
+                        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                          {[
+                            { sec: 0.2, label: '0.2s', sub: 'Éclair' },
+                            { sec: 0.5, label: '0.5s', sub: 'Rapide' },
+                            { sec: 1.0, label: '1.0s', sub: 'Défaut' },
+                            { sec: 2.0, label: '2.0s', sub: 'Pause' },
+                            { sec: 3.0, label: '3.0s', sub: 'Moyen' },
+                            { sec: 5.0, label: '5.0s', sub: 'Long' },
+                          ].map((p) => {
+                            const isSelected = (activeWizard.delayDuration || 1) === p.sec;
+                            return (
+                              <button
+                                key={p.sec}
+                                type="button"
+                                onClick={() => setActiveWizard({ ...activeWizard, delayDuration: p.sec })}
+                                className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-amber-500 text-white border-amber-600 shadow-sm scale-105 font-black'
+                                    : 'bg-slate-50 hover:bg-amber-50/60 border-slate-200 text-slate-700 font-bold'
+                                }`}
+                              >
+                                <div className="text-xs">{p.label}</div>
+                                <div className={`text-[9px] ${isSelected ? 'text-amber-100' : 'text-slate-400'}`}>{p.sub}</div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Slider et Champ numérique */}
+                      <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-700">Durée précise (secondes) :</span>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min="0.1"
+                              max="60"
+                              step="0.1"
+                              value={activeWizard.delayDuration ?? 1}
+                              onChange={(e) => {
+                                const val = Math.max(0.1, Math.min(60, parseFloat(e.target.value) || 0.1));
+                                setActiveWizard({ ...activeWizard, delayDuration: Math.round(val * 10) / 10 });
+                              }}
+                              className="w-20 px-2 py-1 text-center font-mono font-black text-sm bg-white border border-amber-400 rounded-lg shadow-2xs outline-none focus:ring-2 focus:ring-amber-400"
+                            />
+                            <span className="text-xs font-black text-slate-600">sec</span>
+                          </div>
+                        </div>
+
+                        <input
+                          type="range"
+                          min="0.1"
+                          max="10.0"
+                          step="0.1"
+                          value={activeWizard.delayDuration ?? 1}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 1;
+                            setActiveWizard({ ...activeWizard, delayDuration: Math.round(val * 10) / 10 });
+                          }}
+                          className="w-full accent-amber-500 cursor-pointer h-2 bg-slate-200 rounded-lg"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          completeWizardWithAction({
+                            type: 'delay',
+                            delayDuration: activeWizard.delayDuration ?? 1,
+                          });
+                        }}
+                        className="w-full py-3.5 bg-amber-500 hover:bg-amber-600 text-white font-black text-sm rounded-2xl shadow-md transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>Valider ce délai ({activeWizard.delayDuration ?? 1}s)</span>
+                      </button>
                     </div>
                   )}
                 </div>
@@ -4564,9 +4822,10 @@ export function RuleBook() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  applyAction({
-                                    type: 'delay',
-                                    delayDuration: 1,
+                                  setActiveModal({
+                                    ...activeModal,
+                                    subStep: 'choose_delay_duration',
+                                    delayDuration: activeModal.delayDuration || 1,
                                   });
                                 }}
                                 className="w-full p-3.5 bg-white hover:bg-amber-50/70 border-2 border-slate-200 hover:border-amber-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -4576,10 +4835,10 @@ export function RuleBook() {
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <div className="text-xs font-black text-slate-900 group-hover:text-amber-700 truncate">
-                                    Attendre / Pause (Délai 1s)
+                                    Attendre / Pause (Délai)
                                   </div>
                                   <div className="text-[11px] text-slate-500 mt-0.5 truncate">
-                                    Pause avant la prochaine action
+                                    Définir un délai en secondes avant l'action suivante
                                   </div>
                                 </div>
                               </button>
@@ -5069,6 +5328,106 @@ export function RuleBook() {
                             </button>
                           ))}
                         </div>
+                      </div>
+                    )}
+
+                    {/* Étape dédiée : Configuration de la durée du Délai (Modal Action) */}
+                    {activeModal.subStep === 'choose_delay_duration' && (
+                      <div className="space-y-6 max-w-lg mx-auto py-2">
+                        <div className="text-center space-y-1">
+                          <div className="w-14 h-14 bg-amber-100 text-amber-700 rounded-2xl flex items-center justify-center text-2xl mx-auto shadow-xs">
+                            ⏱️
+                          </div>
+                          <h4 className="text-sm font-black text-slate-800">
+                            Définir la durée de la pause (Délai)
+                          </h4>
+                          <p className="text-xs text-slate-500">
+                            L'exécution des actions qui suivent sera suspendue pendant ce temps.
+                          </p>
+                        </div>
+
+                        {/* Presets rapides */}
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider block">
+                            Durées suggérées :
+                          </label>
+                          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                            {[
+                              { sec: 0.2, label: '0.2s', sub: 'Éclair' },
+                              { sec: 0.5, label: '0.5s', sub: 'Rapide' },
+                              { sec: 1.0, label: '1.0s', sub: 'Défaut' },
+                              { sec: 2.0, label: '2.0s', sub: 'Pause' },
+                              { sec: 3.0, label: '3.0s', sub: 'Moyen' },
+                              { sec: 5.0, label: '5.0s', sub: 'Long' },
+                            ].map((p) => {
+                              const isSelected = (activeModal.delayDuration || 1) === p.sec;
+                              return (
+                                <button
+                                  key={p.sec}
+                                  type="button"
+                                  onClick={() => setActiveModal({ ...activeModal, delayDuration: p.sec })}
+                                  className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-amber-500 text-white border-amber-600 shadow-sm scale-105 font-black'
+                                      : 'bg-slate-50 hover:bg-amber-50/60 border-slate-200 text-slate-700 font-bold'
+                                  }`}
+                                >
+                                  <div className="text-xs">{p.label}</div>
+                                  <div className={`text-[9px] ${isSelected ? 'text-amber-100' : 'text-slate-400'}`}>{p.sub}</div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Slider et Champ numérique */}
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-700">Durée précise (secondes) :</span>
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="number"
+                                min="0.1"
+                                max="60"
+                                step="0.1"
+                                value={activeModal.delayDuration ?? 1}
+                                onChange={(e) => {
+                                  const val = Math.max(0.1, Math.min(60, parseFloat(e.target.value) || 0.1));
+                                  setActiveModal({ ...activeModal, delayDuration: Math.round(val * 10) / 10 });
+                                }}
+                                className="w-20 px-2 py-1 text-center font-mono font-black text-sm bg-white border border-amber-400 rounded-lg shadow-2xs outline-none focus:ring-2 focus:ring-amber-400"
+                              />
+                              <span className="text-xs font-black text-slate-600">sec</span>
+                            </div>
+                          </div>
+
+                          <input
+                            type="range"
+                            min="0.1"
+                            max="10.0"
+                            step="0.1"
+                            value={activeModal.delayDuration ?? 1}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 1;
+                              setActiveModal({ ...activeModal, delayDuration: Math.round(val * 10) / 10 });
+                            }}
+                            className="w-full accent-amber-500 cursor-pointer h-2 bg-slate-200 rounded-lg"
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            applyAction({
+                              type: 'delay',
+                              delayDuration: activeModal.delayDuration ?? 1,
+                            });
+                          }}
+                          className="w-full py-3.5 bg-amber-500 hover:bg-amber-600 text-white font-black text-sm rounded-2xl shadow-md transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>Valider ce délai ({activeModal.delayDuration ?? 1}s)</span>
+                        </button>
                       </div>
                     )}
                   </div>

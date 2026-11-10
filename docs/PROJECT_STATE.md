@@ -1,6 +1,12 @@
 # État du Projet
 
 ## Complété
+- **Curseur Croix Fine & Scintillement Éliminé** : Remplacement de la grosse croix OS par une croix fine 19px blanche/noire ultra-nette (`FINE_CROSSHAIR_CURSOR`) en mode édition et dans le canvas de dessin. Résolution du scintillement par suppression des bascules d'événements pointeur sur les tracés SVG lors du tracé. En mode Play, conservation des curseurs personnalisés configurés dans les paramètres.
+- **Pot de Peinture avec Détection Réelle de Cavités Fermées** : Remplissage par flood fill rasterisé haute résolution et vectorisation Moore-Neighbor 8-connectée. Les tracés sous-jacents restent strictement intacts et ouverts (aucun ajout forcé de `Z` ni déformation géométrique).
+- **Couleur Noire par Défaut & Sélecteur Personnalisé (HEX/Palette)** : Initialisation des outils de dessin sur le noir `#000000`, intégration d'un sélecteur complet avec pastille d'état, palette, pipette/input couleur et champ hexadécimal libre.
+- **Undo / Redo Robuste & Réactif** : Gestion de l'historique par références directes (`historyRef` / `historyIndexRef`), écoute globale des raccourcis Ctrl+Z / Cmd+Z / Ctrl+Y / Cmd+Shift+Z sans perte d'état et boutons d'interface synchronisés.
+- **Action Délai (Pause) Paramétrable en Secondes** : Étape dédiée dans le Wizard (`delay_duration_picker`) et dans la modale d'action (`choose_delay_duration`) avec presets rapides (0.2s à 5s), curseur continu et champ numérique libre.
+- **Sections des Paramètres Pliées par Défaut** : Initialisation à `false` de tous les volets de configuration pour un menu clair et épuré.
 - **Pack de Curseurs Vectoriels par défaut** : Intégration du pack utilisateur (`cursorSourceMode: 'custom_drawn'`, ombres désactivées, 7 états dessinés à la main : idle, hover_drag, hover_click, click, drag, release, hover_drag_click).
 - **Simplification de la Fenêtre Hiérarchie (Scène)** : Retrait des badges "Plan #X" et des boutons fléchés manuels au profit exclusif du réordonnancement par glisser-déposer (drag & drop réactif avec poignées).
 - **Lissage du Tracé sur iPad & Apple Pencil** :

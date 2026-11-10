@@ -5,6 +5,9 @@ import { Plant } from './Plant';
 import { CustomShape } from './CustomShape';
 import { Sparkles, Paintbrush, PlayCircle } from 'lucide-react';
 
+export const FINE_CROSSHAIR_CURSOR =
+  'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'19\' height=\'19\' viewBox=\'0 0 19 19\'%3E%3Cpath d=\'M9.5 1v17M1 9.5h17\' stroke=\'%23ffffff\' stroke-width=\'2.5\' stroke-linecap=\'round\'/%3E%3Cpath d=\'M9.5 1v17M1 9.5h17\' stroke=\'%230f172a\' stroke-width=\'1.2\' stroke-linecap=\'round\'/%3E%3C/svg%3E") 9 9, crosshair';
+
 interface SceneProps {
   onOpenCreateModal?: () => void;
 }
@@ -151,20 +154,33 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
 
   return (
     <div
-      className={`relative w-full h-full min-h-0 bg-slate-100/70 overflow-hidden select-none flex flex-col items-center justify-start p-3 sm:p-4 ${
-        isCustomCursorActive ? 'cursor-none [&_*]:cursor-none!' : ''
-      }`}
+      className="relative w-full h-full min-h-0 bg-slate-100/70 overflow-hidden select-none flex flex-col items-center justify-start p-3 sm:p-4"
       onClick={() => selectEntity(null)}
     >
+      {isCustomCursorActive ? (
+        <style>{`
+          #scene-canvas-container, #scene-canvas-container * {
+            cursor: none !important;
+          }
+        `}</style>
+      ) : !isPlayMode ? (
+        <style>{`
+          #scene-canvas-container {
+            cursor: ${FINE_CROSSHAIR_CURSOR} !important;
+          }
+        `}</style>
+      ) : null}
+
       {/* CADRE DE SCÈNE AVEC RESPECT DU FORMAT / RATIO */}
       <div
         id="scene-canvas-container"
         onDragOver={handleDragOver}
         onDrop={handleDrop}
-        className={`relative bg-white overflow-hidden select-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-all duration-300 ${
-          isCustomCursorActive ? 'cursor-none [&_*]:cursor-none!' : 'cursor-crosshair'
-        }`}
-        style={getAspectRatioStyle()}
+        className="relative bg-white overflow-hidden select-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-all duration-300"
+        style={{
+          ...getAspectRatioStyle(),
+          cursor: isCustomCursorActive ? 'none' : !isPlayMode ? FINE_CROSSHAIR_CURSOR : 'default',
+        }}
       >
         {/* Canvas Grid Background */}
         {settings.showGrid && settings.gridStyle !== 'clean' && (

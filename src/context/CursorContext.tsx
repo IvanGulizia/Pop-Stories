@@ -45,9 +45,20 @@ export function CursorProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const target = document.elementFromPoint(e.clientX, e.clientY);
-      const isInsideScene = !!target?.closest('#scene-canvas-container');
-      setIsPointerOverScene(isInsideScene);
+      const sceneEl = document.getElementById('scene-canvas-container') || document.getElementById('canvas-drawing-container');
+      if (sceneEl) {
+        const rect = sceneEl.getBoundingClientRect();
+        const isInsideScene =
+          e.clientX >= rect.left &&
+          e.clientX <= rect.right &&
+          e.clientY >= rect.top &&
+          e.clientY <= rect.bottom;
+        setIsPointerOverScene(isInsideScene);
+      } else {
+        const target = e.target as HTMLElement | null;
+        const isInsideScene = !!target?.closest?.('#scene-canvas-container, #canvas-drawing-container');
+        setIsPointerOverScene(isInsideScene);
+      }
     };
 
     const handleWindowPointerUp = () => {

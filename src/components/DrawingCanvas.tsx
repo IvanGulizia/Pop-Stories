@@ -11,6 +11,7 @@ import {
   Scissors,
   RotateCcw,
   Undo2,
+  Redo2,
   Layers,
   Pipette,
   Eye,
@@ -28,6 +29,7 @@ import {
   Download,
 } from 'lucide-react';
 import { VectorPath, VectorPoint, VectorRect, ColliderType } from '../types';
+import { floodFillRegion } from '../utils/floodFill';
 
 export interface OnionStateOption {
   id: string;
@@ -59,9 +61,12 @@ interface DrawingCanvasProps {
   isCursorMode?: boolean;
 }
 
+export const FINE_CROSSHAIR_CURSOR =
+  'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'19\' height=\'19\' viewBox=\'0 0 19 19\'%3E%3Cpath d=\'M9.5 1v17M1 9.5h17\' stroke=\'%23ffffff\' stroke-width=\'2.5\' stroke-linecap=\'round\'/%3E%3Cpath d=\'M9.5 1v17M1 9.5h17\' stroke=\'%230f172a\' stroke-width=\'1.2\' stroke-linecap=\'round\'/%3E%3C/svg%3E") 9 9, crosshair';
+
 const COLOR_PALETTE = [
-  '#6366f1', '#ef4444', '#f97316', '#f59e0b', '#10b981',
-  '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#1e293b', '#64748b', '#ffffff',
+  '#000000', '#ffffff', '#475569', '#ef4444', '#f97316', '#f59e0b',
+  '#10b981', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#ec4899',
 ];
 
 export type DrawTool =
@@ -158,7 +163,7 @@ export function DrawingCanvas({
   onVectorChange,
   initialPaths = [],
   initialColliderType = 'box',
-  initialStrokeColor = '#6366f1',
+  initialStrokeColor = '#000000',
   initialFillColor = 'none',
   onionStates = [],
   currentEditingStateName,
@@ -171,6 +176,48 @@ export function DrawingCanvas({
 }: DrawingCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [paths, setPaths] = useState<VectorPath[]>(initialPaths);
+  const historyRef = useRef<VectorPath[][]>([initialPaths]);
+  const historyIndexRef = useRef<number>(0);
+  const [, setHistoryVersion] = useState<number>(0);
+  const hasErasedInCurrentStrokeRef = useRef<boolean>(false);
+
+  const pushHistoryState = (newPaths: VectorPath[]) => {
+    const curIndex = historyIndexRef.current;
+    const trimmed = historyRef.current.slice(0, curIndex + 1);
+    trimmed.push(newPaths);
+    if (trimmed.length > 60) trimmed.shift();
+    historyRef.current = trimmed;
+    historyIndexRef.current = trimmed.length - 1;
+    setHistoryVersion((v) => v + 1);
+  };
+
+  const updatePathsWithHistory = (newPaths: VectorPath[]) => {
+    setPaths(newPaths);
+    pushHistoryState(newPaths);
+    notifyChange(newPaths);
+  };
+
+  const handleUndo = () => {
+    if (historyIndexRef.current <= 0) return;
+    const newIndex = historyIndexRef.current - 1;
+    historyIndexRef.current = newIndex;
+    setHistoryVersion((v) => v + 1);
+    const targetPaths = historyRef.current[newIndex] || [];
+    setPaths(targetPaths);
+    setSelectedPathIds((prev) => prev.filter((id) => targetPaths.some((p) => p.id === id)));
+    notifyChange(targetPaths);
+  };
+
+  const handleRedo = () => {
+    if (historyIndexRef.current >= historyRef.current.length - 1) return;
+    const newIndex = historyIndexRef.current + 1;
+    historyIndexRef.current = newIndex;
+    setHistoryVersion((v) => v + 1);
+    const targetPaths = historyRef.current[newIndex] || [];
+    setPaths(targetPaths);
+    setSelectedPathIds((prev) => prev.filter((id) => targetPaths.some((p) => p.id === id)));
+    notifyChange(targetPaths);
+  };
   const [strokeColor, setStrokeColor] = useState(initialStrokeColor);
   const [strokeWidth, setStrokeWidth] = useState(6);
   const [fillColor, setFillColor] = useState<string>(initialFillColor);
@@ -230,6 +277,26 @@ export function DrawingCanvas({
     availableOnionStates[0]?.id || ''
   );
   const [onionOpacity, setOnionOpacity] = useState(0.35);
+  // Keyboard Shortcuts for Undo (Ctrl+Z / Cmd+Z) & Redo (Ctrl+Y / Cmd+Shift+Z)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        if (e.shiftKey) {
+          e.preventDefault();
+          handleRedo();
+        } else {
+          e.preventDefault();
+          handleUndo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     if (!selectedOnionStateId && availableOnionStates.length > 0) {
@@ -458,6 +525,7 @@ export function DrawingCanvas({
     });
 
     if (hasChanged) {
+      hasErasedInCurrentStrokeRef.current = true;
       setPaths(newPaths);
       notifyChange(newPaths);
     }
@@ -489,68 +557,17 @@ export function DrawingCanvas({
     }
 
     if (tool === 'bucket') {
-      // Paint bucket: fill any clicked or enclosing shape
-      const activeColor = fillColor !== 'none' ? fillColor : (strokeColor !== 'none' ? strokeColor : '#6366f1');
-      let filledOne = false;
-
-      // Check reverse order (top to bottom)
-      const updated = [...paths];
-      for (let i = updated.length - 1; i >= 0; i--) {
-        const p = updated[i];
-        if (p.rect) {
-          const b = getPathBounds(p);
-          if (pt.x >= b.x && pt.x <= b.x + b.width && pt.y >= b.y && pt.y <= b.y + b.height) {
-            updated[i] = { ...p, fill: activeColor };
-            filledOne = true;
-            break;
-          }
-        } else if (p.points && p.points.length >= 3) {
-          const first = p.points[0];
-          const last = p.points[p.points.length - 1];
-          const isNearlyClosed = Math.hypot(first.x - last.x, first.y - last.y) < 26;
-          if (isPointInPolygon(pt, p.points) || isNearlyClosed) {
-            const closedPts = isNearlyClosed && !p.d.endsWith('Z') ? [...p.points, first] : p.points;
-            const newD =
-              p.type === 'polyline'
-                ? pointsToPolylinePath(closedPts, true)
-                : pointsToSmoothPath(closedPts, true);
-            updated[i] = {
-              ...p,
-              points: closedPts,
-              d: newD,
-              fill: activeColor,
-            };
-            filledOne = true;
-            break;
-          }
-        }
-      }
-
-      if (!filledOne && paths.length > 0) {
-        // Fallback: fill nearest shape
-        let nearestIdx = -1;
-        let minDist = Infinity;
-        paths.forEach((p, idx) => {
-          const b = getPathBounds(p);
-          const cx = b.x + b.width / 2;
-          const cy = b.y + b.height / 2;
-          const d = Math.hypot(cx - pt.x, cy - pt.y);
-          if (d < minDist) {
-            minDist = d;
-            nearestIdx = idx;
-          }
-        });
-        if (nearestIdx >= 0) {
-          const p = updated[nearestIdx];
-          const newD = p.d.endsWith('Z') ? p.d : `${p.d} Z`;
-          updated[nearestIdx] = { ...p, d: newD, fill: activeColor };
-          filledOne = true;
-        }
-      }
-
-      if (filledOne) {
-        setPaths(updated);
-        notifyChange(updated);
+      const activeColor =
+        fillColor !== 'none'
+          ? fillColor
+          : strokeColor !== 'none'
+          ? strokeColor
+          : '#000000';
+      const fillPath = floodFillRegion(pt.x, pt.y, paths, activeColor);
+      if (fillPath) {
+        // Prepend new fill path behind line strokes so outlines stay crisp on top
+        const updated = [fillPath, ...paths];
+        updatePathsWithHistory(updated);
       }
       return;
     }
@@ -765,6 +782,10 @@ export function DrawingCanvas({
 
     if (isErasingPartial) {
       setIsErasingPartial(false);
+      if (hasErasedInCurrentStrokeRef.current) {
+        pushHistoryState(paths);
+        hasErasedInCurrentStrokeRef.current = false;
+      }
     }
 
     if (isMarqueeSelecting) {
@@ -778,6 +799,7 @@ export function DrawingCanvas({
       setIsDraggingShape(false);
       setActiveHandle(null);
       setDragStartMouse(null);
+      pushHistoryState(paths);
       notifyChange(paths);
       return;
     }
@@ -786,24 +808,18 @@ export function DrawingCanvas({
     setIsDrawing(false);
 
     if (tool === 'pencil' && currentPoints.length > 0) {
-      const firstPt = currentPoints[0];
-      const lastPt = currentPoints[currentPoints.length - 1];
-      const isLoop =
-        currentPoints.length >= 6 && Math.hypot(firstPt.x - lastPt.x, firstPt.y - lastPt.y) < 18;
-      const finalPoints = isLoop ? [...currentPoints, firstPt] : currentPoints;
-      const d = pointsToSmoothPath(finalPoints, isLoop);
+      const d = pointsToSmoothPath(currentPoints, false);
       const newPath: VectorPath = {
         id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         d,
         stroke: strokeColor === 'none' ? '#6366f1' : strokeColor,
         strokeWidth,
-        fill: isLoop && fillColor !== 'none' ? fillColor : 'none',
+        fill: 'none',
         type: 'freehand',
-        points: finalPoints,
+        points: currentPoints,
       };
       const updated = [...paths, newPath];
-      setPaths(updated);
-      notifyChange(updated);
+      updatePathsWithHistory(updated);
     } else if (tool === 'lasso_fill' && currentPoints.length > 1) {
       const d = pointsToSmoothPath(currentPoints, true);
       const effectiveFill = fillColor !== 'none' ? fillColor : strokeColor;
@@ -817,8 +833,7 @@ export function DrawingCanvas({
         points: currentPoints,
       };
       const updated = [...paths, newPath];
-      setPaths(updated);
-      notifyChange(updated);
+      updatePathsWithHistory(updated);
     } else if (tool === 'rectangle' && currentRect && Math.abs(currentRect.width) > 4) {
       const d = generateRoundedRectPath(currentRect);
       const newPath: VectorPath = {
@@ -831,10 +846,9 @@ export function DrawingCanvas({
         rect: currentRect,
       };
       const updated = [...paths, newPath];
-      setPaths(updated);
       setSelectedPathIds([newPath.id]);
       setTool('select');
-      notifyChange(updated);
+      updatePathsWithHistory(updated);
     }
 
     setCurrentPoints([]);
@@ -858,45 +872,38 @@ export function DrawingCanvas({
       points: activePolylinePoints,
     };
     const updated = [...paths, newPath];
-    setPaths(updated);
     setActivePolylinePoints([]);
     setSelectedPathIds([newPath.id]);
     setTool('select');
-    notifyChange(updated);
+    updatePathsWithHistory(updated);
   };
 
   const handleShapeClick = (p: VectorPath, e: React.MouseEvent | React.PointerEvent) => {
     e.stopPropagation();
     if (tool === 'bucket') {
-      const activeColor = fillColor !== 'none' ? fillColor : (strokeColor !== 'none' ? strokeColor : '#6366f1');
-      const updated = paths.map((item) => {
-        if (item.id !== p.id) return item;
-        let newD = item.d;
-        let newPts = item.points;
-        if (item.points && item.points.length >= 3) {
-          const first = item.points[0];
-          const last = item.points[item.points.length - 1];
-          if (Math.hypot(first.x - last.x, first.y - last.y) < 26 && !item.d.endsWith('Z')) {
-            newPts = [...item.points, first];
-            newD =
-              item.type === 'polyline'
-                ? pointsToPolylinePath(newPts, true)
-                : pointsToSmoothPath(newPts, true);
-          }
-        } else if (!newD.endsWith('Z')) {
-          newD = `${newD} Z`;
+      const activeColor =
+        fillColor !== 'none'
+          ? fillColor
+          : strokeColor !== 'none'
+          ? strokeColor
+          : '#000000';
+      const svgEl = svgRef.current;
+      if (svgEl) {
+        const rect = svgEl.getBoundingClientRect();
+        const clickX = ((e.clientX - rect.left) / rect.width) * 200;
+        const clickY = ((e.clientY - rect.top) / rect.height) * 200;
+        const fillPath = floodFillRegion(clickX, clickY, paths, activeColor);
+        if (fillPath) {
+          const updated = [fillPath, ...paths];
+          updatePathsWithHistory(updated);
         }
-        return { ...item, points: newPts, d: newD, fill: activeColor };
-      });
-      setPaths(updated);
-      notifyChange(updated);
+      }
       return;
     }
     if (tool === 'eraser_stroke') {
       const updated = paths.filter((item) => item.id !== p.id);
-      setPaths(updated);
       setSelectedPathIds((prev) => prev.filter((id) => id !== p.id));
-      notifyChange(updated);
+      updatePathsWithHistory(updated);
       return;
     }
     if (tool === 'select') {
@@ -941,8 +948,7 @@ export function DrawingCanvas({
       };
     });
 
-    setPaths(updated);
-    notifyChange(updated);
+    updatePathsWithHistory(updated);
   };
 
   const handleDuplicateSelected = () => {
@@ -984,33 +990,22 @@ export function DrawingCanvas({
     });
 
     const updated = [...paths, ...duplicatedPaths];
-    setPaths(updated);
     setSelectedPathIds(newSelectedIds);
-    notifyChange(updated);
+    updatePathsWithHistory(updated);
   };
 
   const handleDeleteSelected = () => {
     if (selectedPathIds.length === 0) return;
     const updated = paths.filter((p) => !selectedPathIds.includes(p.id));
-    setPaths(updated);
     setSelectedPathIds([]);
-    notifyChange(updated);
-  };
-
-  const handleUndo = () => {
-    if (paths.length === 0) return;
-    const updated = paths.slice(0, -1);
-    setPaths(updated);
-    setSelectedPathIds((prev) => prev.filter((id) => updated.some((p) => p.id === id)));
-    notifyChange(updated);
+    updatePathsWithHistory(updated);
   };
 
   const handleClear = () => {
-    setPaths([]);
     setCurrentPoints([]);
     setActivePolylinePoints([]);
     setSelectedPathIds([]);
-    notifyChange([]);
+    updatePathsWithHistory([]);
   };
 
   const handleCopyGuideToCanvas = () => {
@@ -1028,8 +1023,7 @@ export function DrawingCanvas({
       points: (p as VectorPath).points,
     }));
     const updated = [...paths, ...newPaths];
-    setPaths(updated);
-    notifyChange(updated);
+    updatePathsWithHistory(updated);
   };
 
   const handleResetHotspot = () => {
@@ -1197,15 +1191,17 @@ export function DrawingCanvas({
           <svg
             ref={svgRef}
             viewBox="0 0 200 200"
-            className={`w-full h-full max-w-[500px] max-h-[500px] aspect-square bg-white rounded-3xl touch-none select-none border border-slate-300 shadow-md ${
-              tool === 'eraser_stroke' || tool === 'eraser_partial'
-                ? 'cursor-none'
-                : tool === 'bucket'
-                ? 'cursor-cell'
-                : tool === 'select'
-                ? 'cursor-default'
-                : 'cursor-crosshair'
-            }`}
+            style={{
+              cursor:
+                tool === 'eraser_stroke' || tool === 'eraser_partial'
+                  ? 'none'
+                  : tool === 'bucket'
+                  ? 'cell'
+                  : tool === 'select'
+                  ? 'default'
+                  : FINE_CROSSHAIR_CURSOR,
+            }}
+            className="w-full h-full max-w-[500px] max-h-[500px] aspect-square bg-white rounded-3xl touch-none select-none border border-slate-300 shadow-md"
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
@@ -1334,6 +1330,8 @@ export function DrawingCanvas({
             {/* Tracés existants */}
             {paths.map((p) => {
               const isSelected = selectedPathIds.includes(p.id);
+              const isSelectMode = tool === 'select';
+              const isEraserStroke = tool === 'eraser_stroke';
               return (
                 <path
                   key={p.id}
@@ -1343,12 +1341,13 @@ export function DrawingCanvas({
                   fill={p.fill || 'none'}
                   strokeLinecap="round"
                   strokeLinejoin="round"
+                  style={{
+                    pointerEvents: isSelectMode || isEraserStroke ? 'auto' : 'none',
+                  }}
                   className={`transition-all ${
-                    tool === 'eraser_stroke'
+                    isEraserStroke
                       ? 'hover:stroke-rose-500 hover:opacity-40 cursor-pointer'
-                      : tool === 'bucket'
-                      ? 'hover:opacity-80 cursor-cell'
-                      : tool === 'select'
+                      : isSelectMode
                       ? isSelected
                         ? 'cursor-move filter drop-shadow-xs'
                         : 'hover:opacity-90 cursor-pointer'
@@ -1967,7 +1966,7 @@ export function DrawingCanvas({
                         if (selectedPathIds.length > 0) updateSelectedShapeProperties({ stroke: c });
                       }}
                       className={`w-6 h-6 rounded-xl border transition-all cursor-pointer ${
-                        strokeColor === c
+                        strokeColor.toLowerCase() === c.toLowerCase()
                           ? 'scale-110 ring-2 ring-indigo-500 ring-offset-1 z-10 shadow-sm'
                           : 'hover:scale-105 border-slate-300'
                       }`}
@@ -1975,6 +1974,43 @@ export function DrawingCanvas({
                       title={c}
                     />
                   ))}
+                </div>
+
+                {/* Couleur personnalisée (Stroke) */}
+                <div className="flex items-center gap-2 p-1.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                  <label
+                    className="w-7 h-7 rounded-lg border border-slate-300 shadow-2xs cursor-pointer relative overflow-hidden flex items-center justify-center shrink-0"
+                    style={{ backgroundColor: strokeColor !== 'none' ? strokeColor : '#000000' }}
+                    title="Cliquer pour choisir une couleur personnalisée"
+                  >
+                    <input
+                      type="color"
+                      value={strokeColor.startsWith('#') && strokeColor.length === 7 ? strokeColor : '#000000'}
+                      onChange={(e) => {
+                        const c = e.target.value;
+                        setStrokeColor(c);
+                        if (selectedPathIds.length > 0) updateSelectedShapeProperties({ stroke: c });
+                      }}
+                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                    />
+                  </label>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[9px] font-bold text-slate-400 block uppercase">Couleur perso</span>
+                    <input
+                      type="text"
+                      value={strokeColor}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setStrokeColor(val);
+                        if (/^#[0-9A-Fa-f]{6}$/.test(val) && selectedPathIds.length > 0) {
+                          updateSelectedShapeProperties({ stroke: val });
+                        }
+                      }}
+                      placeholder="#000000"
+                      className="w-full text-xs font-mono font-bold text-slate-800 bg-transparent border-0 p-0 focus:outline-none"
+                    />
+                  </div>
+                  <Pipette className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 </div>
 
                 {/* Épaisseur du trait */}
@@ -2023,7 +2059,7 @@ export function DrawingCanvas({
                       <Pipette className="w-3 h-3" />
                       <input
                         type="color"
-                        value={fillColor.startsWith('#') ? fillColor : '#6366f1'}
+                        value={fillColor.startsWith('#') ? fillColor : '#000000'}
                         onChange={(e) => {
                           const c = e.target.value;
                           setFillColor(c);
@@ -2045,7 +2081,7 @@ export function DrawingCanvas({
                         if (selectedPathIds.length > 0) updateSelectedShapeProperties({ fill: c });
                       }}
                       className={`w-6 h-6 rounded-xl border transition-all cursor-pointer ${
-                        fillColor === c
+                        fillColor.toLowerCase() === c.toLowerCase()
                           ? 'scale-110 ring-2 ring-indigo-500 ring-offset-1 z-10 shadow-sm'
                           : 'hover:scale-105 border-slate-300'
                       }`}
@@ -2053,6 +2089,43 @@ export function DrawingCanvas({
                       title={c}
                     />
                   ))}
+                </div>
+
+                {/* Couleur personnalisée (Fill) */}
+                <div className="flex items-center gap-2 p-1.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                  <label
+                    className="w-7 h-7 rounded-lg border border-slate-300 shadow-2xs cursor-pointer relative overflow-hidden flex items-center justify-center shrink-0"
+                    style={{ backgroundColor: fillColor !== 'none' ? fillColor : '#ffffff' }}
+                    title="Cliquer pour choisir une couleur de remplissage personnalisée"
+                  >
+                    <input
+                      type="color"
+                      value={fillColor.startsWith('#') && fillColor.length === 7 ? fillColor : '#ffffff'}
+                      onChange={(e) => {
+                        const c = e.target.value;
+                        setFillColor(c);
+                        if (selectedPathIds.length > 0) updateSelectedShapeProperties({ fill: c });
+                      }}
+                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                    />
+                  </label>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[9px] font-bold text-slate-400 block uppercase">Remplissage perso</span>
+                    <input
+                      type="text"
+                      value={fillColor}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFillColor(val);
+                        if (/^#[0-9A-Fa-f]{6}$/.test(val) && selectedPathIds.length > 0) {
+                          updateSelectedShapeProperties({ fill: val });
+                        }
+                      }}
+                      placeholder="#ffffff"
+                      className="w-full text-xs font-mono font-bold text-slate-800 bg-transparent border-0 p-0 focus:outline-none"
+                    />
+                  </div>
+                  <Pipette className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 </div>
               </div>
             )}
@@ -2220,16 +2293,25 @@ export function DrawingCanvas({
           )}
         </div>
 
-        {/* Actions : Annuler & Effacer */}
-        <div className="flex items-center gap-2 pt-2 border-t border-slate-200 shrink-0">
+        {/* Actions : Annuler, Rétablir & Effacer */}
+        <div className="flex items-center gap-1.5 pt-2 border-t border-slate-200 shrink-0">
           <button
             type="button"
             onClick={handleUndo}
-            disabled={paths.length === 0}
+            disabled={historyIndexRef.current <= 0}
             className="flex-1 py-1.5 px-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 disabled:opacity-40 rounded-xl border border-slate-200 transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-2xs active:scale-95"
-            title="Annuler le dernier tracé"
+            title="Annuler (Ctrl+Z)"
           >
             <Undo2 className="w-3.5 h-3.5" /> Annuler
+          </button>
+          <button
+            type="button"
+            onClick={handleRedo}
+            disabled={historyIndexRef.current >= historyRef.current.length - 1}
+            className="flex-1 py-1.5 px-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 disabled:opacity-40 rounded-xl border border-slate-200 transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-2xs active:scale-95"
+            title="Rétablir (Ctrl+Y)"
+          >
+            <Redo2 className="w-3.5 h-3.5" /> Rétablir
           </button>
           <button
             type="button"

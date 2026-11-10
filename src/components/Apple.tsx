@@ -41,6 +41,7 @@ export function Apple({ entity, style }: AppleProps) {
 
   const x = useMotionValue(entity.position.x);
   const y = useMotionValue(entity.position.y);
+  const isHoveringRef = useRef(false);
 
   // Sync external changes
   useEffect(() => {
@@ -182,9 +183,16 @@ export function Apple({ entity, style }: AppleProps) {
           );
           if (isInside) {
             setCursorState(canDrag ? 'hover_drag' : 'hover_click');
-            triggerPointerEvent(entity.id, 'enter');
+            if (!isHoveringRef.current) {
+              isHoveringRef.current = true;
+              triggerPointerEvent(entity.id, 'enter');
+            }
           } else {
             setCursorState('idle');
+            if (isHoveringRef.current) {
+              isHoveringRef.current = false;
+              triggerPointerEvent(entity.id, 'exit');
+            }
           }
         }}
         onPointerMove={(e) => {
@@ -198,12 +206,21 @@ export function Apple({ entity, style }: AppleProps) {
           );
           if (isInside) {
             setCursorState(canDrag ? 'hover_drag' : 'hover_click');
+            if (!isHoveringRef.current) {
+              isHoveringRef.current = true;
+              triggerPointerEvent(entity.id, 'enter');
+            }
           } else {
             setCursorState('idle');
+            if (isHoveringRef.current) {
+              isHoveringRef.current = false;
+              triggerPointerEvent(entity.id, 'exit');
+            }
           }
         }}
         onPointerLeave={() => {
-          if (!isDraggingRef.current && appMode === 'play') {
+          if (appMode === 'play' && isHoveringRef.current) {
+            isHoveringRef.current = false;
             setCursorState('idle');
             triggerPointerEvent(entity.id, 'exit');
           }

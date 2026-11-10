@@ -55,12 +55,40 @@ export const initialSceneLayerGroups: SceneLayerGroup[] = [
   },
 ];
 
-// Clé de stockage des slots de projets locaux
+// Clé de stockage des slots de projets locaux et collection permanente d'entités
 const SLOTS_STORAGE_KEY = 'atelier-vivant-project-slots-v1';
+const COLLECTION_STORAGE_KEY = 'atelier-vivant-custom-entity-collection-v1';
+
+function loadLocalCollectionFromStorage(): Record<string, Entity> {
+  if (typeof window === 'undefined' || !window.localStorage) return {};
+  try {
+    const raw = window.localStorage.getItem(COLLECTION_STORAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('Failed to load local entity collection:', e);
+    return {};
+  }
+}
+
+function saveLocalCollectionToStorage(coll: Record<string, Entity>) {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(COLLECTION_STORAGE_KEY, JSON.stringify(coll));
+  } catch (e) {
+    console.error('Failed to save local entity collection:', e);
+  }
+}
 
 interface SceneState {
   entities: Record<EntityId, Entity>;
   customArchetypes: Record<string, Entity>;
+  localEntityCollection: Record<string, Entity>;
+  saveToLocalCollection: (entityOrType: string) => { success: boolean; message: string };
+  removeFromLocalCollection: (type: string) => void;
+  instantiateFromCollection: (type: string, position?: Position) => string;
+  exportCollectionJSON: () => { version: number; exportedAt: string; collection: Record<string, Entity> };
+  importCollectionJSON: (data: any) => { success: boolean; message: string; count: number };
   rules: DynamicRule[];
   folders: RuleFolder[];
   customSounds: CustomSound[];
@@ -492,6 +520,129 @@ const checkCollision = (ent1: Entity, ent2: Entity) => {
 export const useSceneStore = create<SceneState>()((set, get) => ({
   entities: {},
   customArchetypes: {},
+  localEntityCollection: loadLocalCollectionFromStorage(),
+
+  saveToLocalCollection: (entityOrType: string) => {
+    const { entities, customArchetypes, localEntityCollection } = get();
+    const targetEntity =
+      entities[entityOrType] ||
+      customArchetypes[entityOrType] ||
+      localEntityCollection[entityOrType] ||
+      Object.values(entities).find((e) => e.type === entityOrType) ||
+      Object.values(customArchetypes).find((a) => a.type === entityOrType);
+
+    if (!targetEntity) {
+      return { success: false, message: 'Entité introuvable.' };
+    }
+
+    const template: Entity = {
+      ...JSON.parse(JSON.stringify(targetEntity)),
+      position: { x: 0, y: 0 },
+    };
+
+    const updatedCollection = {
+      ...localEntityCollection,
+      [targetEntity.type]: template,
+    };
+
+    saveLocalCollectionToStorage(updatedCollection);
+    set({ localEntityCollection: updatedCollection });
+
+    return {
+      success: true,
+      message: `Entité "${targetEntity.name}" enregistrée dans votre Collection locale !`,
+    };
+  },
+
+  removeFromLocalCollection: (type: string) => {
+    const { localEntityCollection } = get();
+    const { [type]: _, ...remaining } = localEntityCollection;
+    saveLocalCollectionToStorage(remaining);
+    set({ localEntityCollection: remaining });
+  },
+
+  instantiateFromCollection: (type: string, position?: Position) => {
+    const { localEntityCollection, entities, customArchetypes } = get();
+    const template =
+      localEntityCollection[type] ||
+      customArchetypes[type] ||
+      Object.values(entities).find((e) => e.type === type);
+
+    if (!template) return '';
+
+    const currentEntities = Object.values(entities);
+    const count = currentEntities.length + 1;
+    const id = `coll-${type}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const pos = position || { x: 180 + ((count * 35) % 220), y: 140 + ((count * 30) % 180) };
+
+    const newInstance: Entity = {
+      ...JSON.parse(JSON.stringify(template)),
+      id,
+      position: pos,
+    };
+
+    set((state) => {
+      const order = state.entityOrder && state.entityOrder.length > 0
+        ? [...state.entityOrder]
+        : Object.keys(state.entities);
+      return {
+        entities: {
+          ...state.entities,
+          [id]: newInstance,
+        },
+        customArchetypes: {
+          ...state.customArchetypes,
+          [type]: JSON.parse(JSON.stringify(template)),
+        },
+        entityOrder: [...order.filter((i) => i !== id), id],
+        selectedEntityId: id,
+      };
+    });
+
+    get().evaluateRules();
+    return id;
+  },
+
+  exportCollectionJSON: () => {
+    const { localEntityCollection } = get();
+    return {
+      version: 1,
+      name: 'Collection d\'Entités Atelier Vivant',
+      exportedAt: new Date().toISOString(),
+      collection: localEntityCollection,
+    };
+  },
+
+  importCollectionJSON: (data: any) => {
+    try {
+      if (!data || typeof data !== 'object') {
+        return { success: false, message: 'Format JSON invalide.', count: 0 };
+      }
+      const rawColl = data.collection || (data.entities ? data.entities : data);
+      if (!rawColl || typeof rawColl !== 'object') {
+        return { success: false, message: 'Aucune entité trouvée dans ce fichier.', count: 0 };
+      }
+
+      const current = { ...get().localEntityCollection };
+      let added = 0;
+      Object.values(rawColl).forEach((ent: any) => {
+        if (ent && ent.type) {
+          current[ent.type] = {
+            ...JSON.parse(JSON.stringify(ent)),
+            position: { x: 0, y: 0 },
+          };
+          added++;
+        }
+      });
+
+      saveLocalCollectionToStorage(current);
+      set({ localEntityCollection: current });
+      return { success: true, message: `${added} entité(s) importée(s) dans votre collection !`, count: added };
+    } catch (e: any) {
+      return { success: false, message: e?.message || 'Erreur lors de l\'importation.', count: 0 };
+    }
+  },
+
   rules: [],
   folders: initialFolders,
   customSounds: [],
@@ -518,7 +669,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   drawingTool: 'pencil',
-  drawingStrokeColor: '#6366f1',
+  drawingStrokeColor: '#000000',
   drawingFillColor: 'none',
   drawingStrokeWidth: 6,
   setDrawingTool: (tool) => set({ drawingTool: tool }),
@@ -527,6 +678,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   setDrawingStrokeWidth: (width) => set({ drawingStrokeWidth: width }),
 
   settings: {
+    aspectRatio: '1:1',
     showCanvasLabels: false,
     showGrid: false,
     gridStyle: 'dots',
@@ -1450,6 +1602,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   clearProject: () => {
     set({
       entities: {},
+      customArchetypes: {},
       entityOrder: [],
       rules: [],
       folders: initialFolders,
@@ -1848,6 +2001,30 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
       if (!isKeyMatch) return;
 
+      const allEnts = Object.values(entities);
+      const subject = allEnts.find((e) =>
+        matchesEntityFilter(e, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)
+      ) || allEnts[0];
+
+      if (!subject) return;
+
+      const revertKey = `kb_${subject.id}_${rule.id}`;
+
+      if (rule.trigger.autoRevert) {
+        if (phase === 'down') {
+          if (!preEventAutoRevertStates[revertKey]) {
+            preEventAutoRevertStates[revertKey] = subject.currentStateId;
+          }
+        } else if (phase === 'up') {
+          const prevState = preEventAutoRevertStates[revertKey];
+          if (prevState) {
+            updateEntityState(subject.id, prevState);
+            delete preEventAutoRevertStates[revertKey];
+            return;
+          }
+        }
+      }
+
       // Verify key event phase ('down' vs 'up')
       const rulePhase = rule.trigger.phase || 'down';
       const phaseMatch =
@@ -1861,11 +2038,6 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const cooldownKey = `key_${rule.id}_${keyName}_${phase}`;
       if (now - (ruleCooldowns[cooldownKey] || 0) < 50) return;
       ruleCooldowns[cooldownKey] = now;
-
-      const allEnts = Object.values(entities);
-      const subject = allEnts.find((e) =>
-        matchesEntityFilter(e, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)
-      ) || allEnts[0];
 
       executeRuleActions(rule.actions, {
         subject,
@@ -1891,6 +2063,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     if (!subject) return;
 
     const now = Date.now();
+    const isReleasePhase = phase === 'up' || phase === 'mouse_up' || phase === 'exit' || phase === 'hover_exit';
 
     const activePointerRules = rules.filter((r) => {
       if (!r.enabled) return false;
@@ -1914,27 +2087,30 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         if (phase === 'enter' || phase === 'hover_enter') {
           phaseMatch = rulePhase === 'enter' || rulePhase === 'hover_enter';
         } else if (phase === 'exit' || phase === 'hover_exit') {
-          phaseMatch = rulePhase === 'exit' || rulePhase === 'hover_exit';
+          phaseMatch = rulePhase === 'exit' || rulePhase === 'hover_exit' || r.trigger.autoRevert === true;
         }
       } else if (r.trigger.type === 'click') {
         if (phase === 'click') {
-          phaseMatch = rulePhase === 'click';
+          phaseMatch = rulePhase === 'click' || rulePhase === 'down' || rulePhase === 'mouse_down';
         } else if (phase === 'down' || phase === 'mouse_down') {
-          phaseMatch = rulePhase === 'down' || rulePhase === 'mouse_down';
+          phaseMatch = rulePhase === 'down' || rulePhase === 'mouse_down' || rulePhase === 'click';
         } else if (phase === 'up' || phase === 'mouse_up') {
-          phaseMatch = rulePhase === 'up' || rulePhase === 'mouse_up';
+          phaseMatch = rulePhase === 'up' || rulePhase === 'mouse_up' || r.trigger.autoRevert === true;
         }
       }
 
       if (!phaseMatch) return false;
 
-      // Vérifier l'état requis pour le sujet
-      if (
-        r.trigger.subjectStateId &&
-        r.trigger.subjectStateId !== '' &&
-        subject.currentStateId !== r.trigger.subjectStateId
-      ) {
-        return false;
+      // Lors de la phase de relâchement/sortie avec autoRevert, ne pas filtrer par état initial
+      // car l'état de l'entité a déjà changé pendant la phase d'appui/entrée !
+      if (!isReleasePhase || !r.trigger.autoRevert) {
+        if (
+          r.trigger.subjectStateId &&
+          r.trigger.subjectStateId !== '' &&
+          subject.currentStateId !== r.trigger.subjectStateId
+        ) {
+          return false;
+        }
       }
       return true;
     });
@@ -1942,7 +2118,6 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     activePointerRules.forEach((rule) => {
       const cooldownKey = `ptr_${rule.id}_${subject.id}_${phase}`;
       const isClickType = phase === 'click' || phase === 'down' || phase === 'up' || phase === 'mouse_down' || phase === 'mouse_up';
-      // Use a 50ms single-gesture debounce for pointer release ('up' / 'mouse_up') to avoid multi-spawns from dual event listeners
       const cooldownMs = (phase === 'up' || phase === 'mouse_up') ? 50 : (phase === 'down' || phase === 'mouse_down') ? 0 : isClickType ? 20 : RULE_COOLDOWN_MS;
 
       if (now - (ruleCooldowns[cooldownKey] || 0) < cooldownMs) {
@@ -1950,11 +2125,16 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       }
       ruleCooldowns[cooldownKey] = now;
 
+      const revertKey = `${subject.id}_${rule.id}`;
+
       if (rule.trigger.autoRevert) {
-        const revertKey = `${subject.id}_${rule.id}`;
-        if (phase === 'enter' || phase === 'hover_enter' || phase === 'down' || phase === 'mouse_down') {
-          preEventAutoRevertStates[revertKey] = subject.currentStateId;
-        } else if (phase === 'exit' || phase === 'hover_exit' || phase === 'up' || phase === 'mouse_up') {
+        if (phase === 'enter' || phase === 'hover_enter' || phase === 'down' || phase === 'mouse_down' || phase === 'click') {
+          if (!preEventAutoRevertStates[revertKey]) {
+            preEventAutoRevertStates[revertKey] = subject.currentStateId;
+          }
+        }
+        
+        if (isReleasePhase) {
           const prevState = preEventAutoRevertStates[revertKey];
           if (prevState) {
             updateEntityState(subject.id, prevState);
@@ -1964,14 +2144,17 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         }
       }
 
-      executeRuleActions(rule.actions, {
-        subject,
-        allEntities: entities,
-        updateEntityState,
-        updateEntityDetails,
-        deleteEntity,
-        spawnEntity,
-      });
+      // N'exécuter les actions d'entrée/appui que sur les phases non-relâchement (ou si rulePhase est explicitement release)
+      if (!isReleasePhase || rule.trigger.phase === 'up' || rule.trigger.phase === 'mouse_up' || rule.trigger.phase === 'exit' || rule.trigger.phase === 'hover_exit') {
+        executeRuleActions(rule.actions, {
+          subject,
+          allEntities: entities,
+          updateEntityState,
+          updateEntityDetails,
+          deleteEntity,
+          spawnEntity,
+        });
+      }
     });
   },
 
@@ -2361,9 +2544,12 @@ function handleCollisionPair(
   }
 ) {
   const collisionKey = `${rule.id}_${subject.id}_${target.id}`;
+  const wasColliding = !!activeCollisions[collisionKey];
+  const isExiting = !isColliding && wasColliding;
 
-  // Filtrer par état spécifique du sujet
+  // Filtrer par état spécifique du sujet (seulement sur l'entrée ou pendant le contact, pas sur la sortie quand l'état a déjà changé)
   if (
+    !isExiting &&
     rule.trigger.subjectStateId &&
     rule.trigger.subjectStateId !== '' &&
     subject.currentStateId !== rule.trigger.subjectStateId
@@ -2374,6 +2560,7 @@ function handleCollisionPair(
 
   // Filtrer par état spécifique de la cible
   if (
+    !isExiting &&
     rule.trigger.targetStateId &&
     rule.trigger.targetStateId !== '' &&
     target.currentStateId !== rule.trigger.targetStateId
@@ -2382,12 +2569,11 @@ function handleCollisionPair(
     return;
   }
 
-  const wasColliding = !!activeCollisions[collisionKey];
   const rulePhase = rule.trigger.phase || 'enter';
   let shouldExecute = false;
 
   if (isColliding && !wasColliding) {
-    // Enregistrer les états précédents pour le mode stay / revertOnExit
+    // Enregistrer les états précédents pour le mode stay / autoRevert
     preCollisionStates[collisionKey] = {
       subjectState: subject.currentStateId,
       targetState: target.currentStateId,
@@ -2404,14 +2590,14 @@ function handleCollisionPair(
       shouldExecute = true;
     }
     nextCollisions[collisionKey] = true;
-  } else if (!isColliding && wasColliding) {
+  } else if (isExiting) {
     // Sortie / Séparation (Release / Exit)
     if (rulePhase === 'release' || rulePhase === 'exit') {
       shouldExecute = true;
     }
 
-    // Toggle / Revert pour le contact continu (stay)
-    if (rulePhase === 'stay' && rule.trigger.revertOnExit !== false) {
+    // Toggle / Revert pour autoRevert ou contact continu (stay)
+    if (rule.trigger.autoRevert || (rulePhase === 'stay' && rule.trigger.revertOnExit !== false)) {
       const pre = preCollisionStates[collisionKey];
       if (pre) {
         if (pre.subjectState && subject.states[pre.subjectState] && subject.currentStateId !== pre.subjectState) {

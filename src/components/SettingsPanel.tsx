@@ -22,11 +22,11 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [editingCursorState, setEditingCursorState] = useState<CursorState | null>(null);
 
-  // Accordion Sections Open/Closed state
+  // Accordion Sections Open/Closed state (Closed by default)
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    files: true,
-    canvas: true,
-    rules: true,
+    files: false,
+    canvas: false,
+    rules: false,
     cursors: false,
     play: false,
   });

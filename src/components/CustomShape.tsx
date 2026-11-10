@@ -57,6 +57,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
 
   const isClickable = hasClickRules || appMode !== 'play';
   const isDraggable = canDrag;
+  const isHoveringRef = useRef(false);
 
   const getHoverState = (): import('../utils/cursorIcons').CursorState => {
     if (isDraggable && hasClickRules) {
@@ -226,9 +227,16 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
           );
           if (isInside) {
             setCursorState(getHoverState());
-            triggerPointerEvent(entity.id, 'enter');
+            if (!isHoveringRef.current) {
+              isHoveringRef.current = true;
+              triggerPointerEvent(entity.id, 'enter');
+            }
           } else {
             setCursorState('idle');
+            if (isHoveringRef.current) {
+              isHoveringRef.current = false;
+              triggerPointerEvent(entity.id, 'exit');
+            }
           }
         }}
         onPointerMove={(e) => {
@@ -242,12 +250,21 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
           );
           if (isInside) {
             setCursorState(getHoverState());
+            if (!isHoveringRef.current) {
+              isHoveringRef.current = true;
+              triggerPointerEvent(entity.id, 'enter');
+            }
           } else {
             setCursorState('idle');
+            if (isHoveringRef.current) {
+              isHoveringRef.current = false;
+              triggerPointerEvent(entity.id, 'exit');
+            }
           }
         }}
         onPointerLeave={() => {
-          if (!isDraggingRef.current && appMode === 'play') {
+          if (appMode === 'play' && isHoveringRef.current) {
+            isHoveringRef.current = false;
             setCursorState('idle');
             triggerPointerEvent(entity.id, 'exit');
           }

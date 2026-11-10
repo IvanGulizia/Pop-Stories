@@ -1,3 +1,25 @@
+## [Phase 9] - 2026-11-10
+### Corrigé & Optimisé
+- **Curseur Croix Fine & Élimination du Scintillement (Edit & Dessin)** :
+  - Curseur fin `FINE_CROSSHAIR_CURSOR` (croix 19x19 fine blanche et noire ultra-nette) défini par défaut en mode édition et dans l'atelier de dessin.
+  - Élimination des scintillements de curseur lors du survol de tracés existants grâce à l'isolation des événements pointeur (`pointerEvents: none` sur les traits pendant le dessin).
+  - En mode Play, conservation stricte des curseurs dynamiques définis dans les paramètres du projet.
+- **Remplissage Pot de Peinture sans Fermeture Forcée des Tracés** :
+  - Détection automatique des cavités fermées créées par l'intersection de plusieurs tracés ouverts ou fermés (Moore-Neighbor 8-connected contour tracing sur masque de rastérisation + Ramer-Douglas-Peucker).
+  - Rendu vectoriel du remplissage en arrière-plan (`[fillPath, ...paths]`) sans jamais modifier ni forcer la fermeture (`Z`) des tracés originaux (respect des formes ouvertes comme illustré dans les captures 01 et 02).
+- **Sélecteur de Couleur Personnalisée dans l'Atelier de Dessin** :
+  - Ajout d'un sélecteur complet (pastille visuelle active, palette rapide, input natif `type="color"` et champ hexadécimal direct en direct) pour la couleur de contour et de remplissage.
+- **Couleur Noire par Défaut** :
+  - Couleur noire (`#000000`) définie comme couleur de départ pour tous les nouveaux tracés et ateliers de dessin.
+- **Fiabilisation Complète de l'Undo / Redo** :
+  - Gestion d'historique synchronisée par références stables (`historyRef` et `historyIndexRef`), éliminant les bugs de closures périmées.
+  - Prise en charge des raccourcis clavier Ctrl+Z / Cmd+Z (Annuler) et Ctrl+Y / Cmd+Shift+Z (Rétablir), ainsi que des boutons UI avec désactivation réactive.
+- **Paramétrage Précis du Délai d'Action (Secondes)** :
+  - Étape dédiée `delay_duration_picker` dans le Wizard séquentiel et `choose_delay_duration` dans la modal d'action.
+  - Choix rapide par presets (0.2s, 0.5s, 1s, 2s, 3s, 5s), slider fluide et saisie numérique exacte au dixième de seconde.
+- **Sections Repliées par Défaut dans les Paramètres (Settings)** :
+  - Accordéons du panneau des paramètres (`files`, `canvas`, `rules`, `cursors`, `play`) initialisés tous fermés pour une vue épurée à l'ouverture.
+
 ## [Phase 8] - 2026-11-08
 ### Ajouté & Optimisé
 - **Support complet des 6 nouveaux types de conditions** :
