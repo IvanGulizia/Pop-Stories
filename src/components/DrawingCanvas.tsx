@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { VectorPath, VectorPoint, VectorRect, ColliderType, DrawingLayer } from '../types';
 import { floodFillRegion, applyBucketFill } from '../utils/floodFill';
+import { useSceneStore, DEFAULT_PROJECT_PALETTE } from '../store/useSceneStore';
 
 export interface OnionStateOption {
   id: string;
@@ -70,11 +71,6 @@ interface DrawingCanvasProps {
 
 export const FINE_CROSSHAIR_CURSOR =
   'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABMAAAATCAYAAAByUDbMAAAAN0lEQVR4nGNgIAD+IwFCagkCkCH84lqjho08w/4TAWCGEQJwmynFcMOo5rLBGwGjhg0Bw4hNRwArM0of2vmpUwAAAABJRU5ErkJggg==") 9 9, crosshair';
-
-const COLOR_PALETTE = [
-  '#000000', '#ffffff', '#475569', '#ef4444', '#f97316', '#f59e0b',
-  '#10b981', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#ec4899',
-];
 
 export type DrawTool =
   | 'select'
@@ -310,9 +306,26 @@ export function DrawingCanvas({
     setSelectedPathIds((prev) => prev.filter((id) => targetPaths.some((p) => p.id === id)));
     notifyChange(targetPaths);
   };
+  const projectPalette = useSceneStore((state) => state.projectPalette || DEFAULT_PROJECT_PALETTE);
+  const updateProjectPaletteColor = useSceneStore((state) => state.updateProjectPaletteColor);
+  const resetProjectPalette = useSceneStore((state) => state.resetProjectPalette);
+
   const [strokeColor, setStrokeColor] = useState(initialStrokeColor);
+  const [selectedStrokePaletteId, setSelectedStrokePaletteId] = useState<string | null>(() => {
+    const found = (useSceneStore.getState().projectPalette || DEFAULT_PROJECT_PALETTE).find(
+      (p) => p.color.toLowerCase() === initialStrokeColor.toLowerCase()
+    );
+    return found ? found.id : 'pal-1';
+  });
   const [strokeWidth, setStrokeWidth] = useState(6);
   const [fillColor, setFillColor] = useState<string>(initialFillColor);
+  const [selectedFillPaletteId, setSelectedFillPaletteId] = useState<string | null>(() => {
+    if (initialFillColor === 'none') return null;
+    const found = (useSceneStore.getState().projectPalette || DEFAULT_PROJECT_PALETTE).find(
+      (p) => p.color.toLowerCase() === initialFillColor.toLowerCase()
+    );
+    return found ? found.id : null;
+  });
   const [cornerRadius, setCornerRadius] = useState<number>(0);
   const [tool, setTool] = useState<DrawTool>('pencil');
   const [colliderType, setColliderType] = useState<ColliderType>(initialColliderType);
@@ -407,11 +420,59 @@ export function DrawingCanvas({
       setStrokeColor(primarySelectedPath.stroke);
       setStrokeWidth(primarySelectedPath.strokeWidth);
       setFillColor(primarySelectedPath.fill || 'none');
+      if (primarySelectedPath.strokeColorId) {
+        setSelectedStrokePaletteId(primarySelectedPath.strokeColorId);
+      } else {
+        const matchedStroke = projectPalette.find(
+          (p) => p.color.toLowerCase() === primarySelectedPath.stroke.toLowerCase()
+        );
+        setSelectedStrokePaletteId(matchedStroke ? matchedStroke.id : null);
+      }
+      if (primarySelectedPath.fillColorId) {
+        setSelectedFillPaletteId(primarySelectedPath.fillColorId);
+      } else if (primarySelectedPath.fill && primarySelectedPath.fill !== 'none') {
+        const matchedFill = projectPalette.find(
+          (p) => p.color.toLowerCase() === primarySelectedPath.fill.toLowerCase()
+        );
+        setSelectedFillPaletteId(matchedFill ? matchedFill.id : null);
+      } else {
+        setSelectedFillPaletteId(null);
+      }
       if (primarySelectedPath.rect) {
         setCornerRadius(primarySelectedPath.rect.cornerRadius || 0);
       }
     }
   }, [selectedPathIds]);
+
+  // Helper pour modifier durablement une couleur de la palette du projet et répercuter sur le dessin actif
+  const handleModifyPaletteColor = (paletteId: string, newColor: string) => {
+    const oldHex = projectPalette.find((c) => c.id === paletteId)?.color?.toLowerCase();
+    updateProjectPaletteColor(paletteId, newColor);
+
+    const updatedLocalPaths = paths.map((p) => {
+      let nextStroke = p.stroke;
+      let nextStrokeId = p.strokeColorId;
+      let nextFill = p.fill;
+      let nextFillId = p.fillColorId;
+      let changed = false;
+
+      if (p.strokeColorId === paletteId || (!p.strokeColorId && oldHex && p.stroke?.toLowerCase() === oldHex)) {
+        nextStroke = newColor;
+        nextStrokeId = paletteId;
+        changed = true;
+      }
+      if (p.fillColorId === paletteId || (!p.fillColorId && oldHex && p.fill?.toLowerCase() === oldHex)) {
+        nextFill = newColor;
+        nextFillId = paletteId;
+        changed = true;
+      }
+      return changed
+        ? { ...p, stroke: nextStroke, strokeColorId: nextStrokeId, fill: nextFill, fillColorId: nextFillId }
+        : p;
+    });
+    setPaths(updatedLocalPaths);
+    notifyChange(updatedLocalPaths);
+  };
 
   const notifyChange = (updatedPaths: VectorPath[]) => {
     if (!svgRef.current) {
@@ -669,14 +730,22 @@ export function DrawingCanvas({
           : strokeColor !== 'none'
           ? strokeColor
           : '#000000';
+      const activeColorId =
+        fillColor !== 'none'
+          ? selectedFillPaletteId || undefined
+          : strokeColor !== 'none'
+          ? selectedStrokePaletteId || undefined
+          : 'pal-1';
       const result = applyBucketFill(pt.x, pt.y, paths, activeColor, activeLayerId);
       if (result) {
         if (result.type === 'update_path') {
-          const updated = paths.map((p) => (p.id === result.pathId ? result.updatedPath : p));
+          const updated = paths.map((p) =>
+            p.id === result.pathId ? { ...result.updatedPath, fillColorId: activeColorId } : p
+          );
           updatePathsWithHistory(updated);
         } else if (result.type === 'new_path') {
           // Insérer le remplissage en arrière-plan sous les contours existants
-          const updated = [result.newPath, ...paths];
+          const updated = [{ ...result.newPath, fillColorId: activeColorId }, ...paths];
           updatePathsWithHistory(updated);
         }
       }
@@ -928,6 +997,7 @@ export function DrawingCanvas({
         id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         d,
         stroke: strokeColor === 'none' ? '#6366f1' : strokeColor,
+        strokeColorId: strokeColor === 'none' ? undefined : selectedStrokePaletteId || undefined,
         strokeWidth,
         fill: 'none',
         type: 'freehand',
@@ -939,12 +1009,15 @@ export function DrawingCanvas({
     } else if (tool === 'lasso_fill' && currentPoints.length > 1) {
       const d = pointsToSmoothPath(currentPoints, true);
       const effectiveFill = fillColor !== 'none' ? fillColor : strokeColor;
+      const effectiveFillId = fillColor !== 'none' ? selectedFillPaletteId : selectedStrokePaletteId;
       const newPath: VectorPath = {
         id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         d,
         stroke: strokeColor,
+        strokeColorId: strokeColor === 'none' ? undefined : selectedStrokePaletteId || undefined,
         strokeWidth: strokeColor === 'none' ? 0 : strokeWidth,
         fill: effectiveFill,
+        fillColorId: effectiveFillId || undefined,
         type: 'freehand',
         points: currentPoints,
         layerId: activeLayerId,
@@ -957,8 +1030,10 @@ export function DrawingCanvas({
         id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         d,
         stroke: strokeColor === 'none' ? '#6366f1' : strokeColor,
+        strokeColorId: strokeColor === 'none' ? undefined : selectedStrokePaletteId || undefined,
         strokeWidth,
         fill: fillColor === 'none' ? 'none' : fillColor,
+        fillColorId: fillColor === 'none' ? undefined : selectedFillPaletteId || undefined,
         type: 'rectangle',
         rect: currentRect,
         layerId: activeLayerId,
@@ -984,8 +1059,10 @@ export function DrawingCanvas({
       id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       d,
       stroke: strokeColor === 'none' ? '#6366f1' : strokeColor,
+      strokeColorId: strokeColor === 'none' ? undefined : selectedStrokePaletteId || undefined,
       strokeWidth,
       fill: closed && fillColor !== 'none' ? fillColor : 'none',
+      fillColorId: closed && fillColor !== 'none' ? selectedFillPaletteId || undefined : undefined,
       type: 'polyline',
       points: activePolylinePoints,
       layerId: activeLayerId,
@@ -1006,6 +1083,12 @@ export function DrawingCanvas({
           : strokeColor !== 'none'
           ? strokeColor
           : '#000000';
+      const activeColorId =
+        fillColor !== 'none'
+          ? selectedFillPaletteId || undefined
+          : strokeColor !== 'none'
+          ? selectedStrokePaletteId || undefined
+          : 'pal-1';
       const svgEl = svgRef.current;
       if (svgEl) {
         const rect = svgEl.getBoundingClientRect();
@@ -1014,17 +1097,19 @@ export function DrawingCanvas({
         const result = applyBucketFill(clickX, clickY, paths, activeColor, activeLayerId);
         if (result) {
           if (result.type === 'update_path') {
-            const updated = paths.map((item) => (item.id === result.pathId ? result.updatedPath : item));
+            const updated = paths.map((item) =>
+              item.id === result.pathId ? { ...result.updatedPath, fillColorId: activeColorId } : item
+            );
             updatePathsWithHistory(updated);
           } else if (result.type === 'new_path') {
-            const updated = [result.newPath, ...paths];
+            const updated = [{ ...result.newPath, fillColorId: activeColorId }, ...paths];
             updatePathsWithHistory(updated);
           }
         } else {
           // Si on clique sur une forme et qu'aucune cavité séparée n'est trouvée, colorer directement la forme
           const closedD = p.d.trim().endsWith('Z') ? p.d : `${p.d} Z`;
           const updated = paths.map((item) =>
-            item.id === p.id ? { ...item, fill: activeColor, d: closedD } : item
+            item.id === p.id ? { ...item, fill: activeColor, fillColorId: activeColorId, d: closedD } : item
           );
           updatePathsWithHistory(updated);
         }
@@ -1053,8 +1138,10 @@ export function DrawingCanvas({
   const updateSelectedShapeProperties = (
     partial: Partial<{
       stroke: string;
+      strokeColorId?: string;
       strokeWidth: number;
       fill: string;
+      fillColorId?: string;
       cornerRadius: number;
     }>
   ) => {
@@ -1072,8 +1159,10 @@ export function DrawingCanvas({
       return {
         ...p,
         stroke: partial.stroke !== undefined ? partial.stroke : p.stroke,
+        strokeColorId: partial.stroke !== undefined ? partial.strokeColorId : p.strokeColorId,
         strokeWidth: partial.strokeWidth !== undefined ? partial.strokeWidth : p.strokeWidth,
         fill: partial.fill !== undefined ? partial.fill : p.fill,
+        fillColorId: partial.fill !== undefined ? partial.fillColorId : p.fillColorId,
         rect: newRect,
         d: newD,
       };
@@ -2224,8 +2313,23 @@ export function DrawingCanvas({
             </div>
           )}
 
-          {/* Double Sélecteur Couleur : Trait (Stroke) & Remplissage (Fill) */}
+          {/* Double Sélecteur Couleur : Trait (Stroke) & Remplissage (Fill) avec Palette Projet 16 couleurs partagées */}
           <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs space-y-2.5">
+            {/* En-tête Palette partagée du projet */}
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                Palette du Projet (16 couleurs)
+              </span>
+              <button
+                type="button"
+                onClick={resetProjectPalette}
+                className="text-[9px] font-bold text-slate-400 hover:text-indigo-600 cursor-pointer transition-colors"
+                title="Réinitialiser les 16 couleurs par défaut de la palette du projet"
+              >
+                Réinitialiser
+              </button>
+            </div>
+
             {/* Tabs Stroke / Fill */}
             <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-xl gap-1">
               <button
@@ -2270,7 +2374,10 @@ export function DrawingCanvas({
                       type="button"
                       onClick={() => {
                         setStrokeColor('none');
-                        if (selectedPathIds.length > 0) updateSelectedShapeProperties({ stroke: 'none' });
+                        setSelectedStrokePaletteId(null);
+                        if (selectedPathIds.length > 0) {
+                          updateSelectedShapeProperties({ stroke: 'none', strokeColorId: undefined });
+                        }
                       }}
                       className={`text-[10px] font-bold px-2 py-0.5 rounded-md border cursor-pointer ${
                         strokeColor === 'none'
@@ -2280,48 +2387,72 @@ export function DrawingCanvas({
                     >
                       Sans trait
                     </button>
-                    <label className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 cursor-pointer">
-                      <Pipette className="w-3 h-3" />
-                      <input
-                        type="color"
-                        value={strokeColor.startsWith('#') ? strokeColor : '#6366f1'}
-                        onChange={(e) => {
-                          const c = e.target.value;
-                          setStrokeColor(c);
-                          if (selectedPathIds.length > 0) updateSelectedShapeProperties({ stroke: c });
-                        }}
-                        className="sr-only"
-                      />
-                    </label>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-6 gap-1.5">
-                  {COLOR_PALETTE.map((c) => (
-                    <button
-                      key={`stroke-${c}`}
-                      type="button"
-                      onClick={() => {
-                        setStrokeColor(c);
-                        if (selectedPathIds.length > 0) updateSelectedShapeProperties({ stroke: c });
-                      }}
-                      className={`w-6 h-6 rounded-xl border transition-all cursor-pointer ${
-                        strokeColor.toLowerCase() === c.toLowerCase()
-                          ? 'scale-110 ring-2 ring-indigo-500 ring-offset-1 z-10 shadow-sm'
-                          : 'hover:scale-105 border-slate-300'
-                      }`}
-                      style={{ backgroundColor: c }}
-                      title={c}
-                    />
-                  ))}
+                {/* Grille 16 couleurs partagées (8 colonnes x 2 lignes) avec sélecteur direct au clic */}
+                <div className="grid grid-cols-8 gap-1.5">
+                  {projectPalette.map((palItem, idx) => {
+                    const isSelected =
+                      selectedStrokePaletteId === palItem.id ||
+                      (!selectedStrokePaletteId &&
+                        strokeColor !== 'none' &&
+                        strokeColor.toLowerCase() === palItem.color.toLowerCase());
+                    const validHex =
+                      palItem.color.startsWith('#') && palItem.color.length === 7
+                        ? palItem.color
+                        : palItem.color.length === 4
+                        ? `#${palItem.color[1]}${palItem.color[1]}${palItem.color[2]}${palItem.color[2]}${palItem.color[3]}${palItem.color[3]}`
+                        : '#000000';
+                    return (
+                      <label
+                        key={`stroke-${palItem.id}`}
+                        className={`w-6 h-6 rounded-lg border transition-all cursor-pointer relative overflow-hidden flex items-center justify-center ${
+                          isSelected
+                            ? 'scale-110 ring-2 ring-indigo-500 ring-offset-1 z-10 shadow-sm border-white'
+                            : 'hover:scale-105 border-slate-300'
+                        }`}
+                        style={{ backgroundColor: palItem.color }}
+                        title={`${palItem.name || `Couleur #${idx + 1}`} (${palItem.color}) — Appuyez directement pour choisir/modifier la couleur`}
+                      >
+                        <input
+                          type="color"
+                          value={validHex}
+                          onClick={() => {
+                            setSelectedStrokePaletteId(palItem.id);
+                            setStrokeColor(palItem.color);
+                            if (selectedPathIds.length > 0) {
+                              updateSelectedShapeProperties({
+                                stroke: palItem.color,
+                                strokeColorId: palItem.id,
+                              });
+                            }
+                          }}
+                          onChange={(e) => {
+                            const newHex = e.target.value;
+                            setSelectedStrokePaletteId(palItem.id);
+                            setStrokeColor(newHex);
+                            handleModifyPaletteColor(palItem.id, newHex);
+                            if (selectedPathIds.length > 0) {
+                              updateSelectedShapeProperties({
+                                stroke: newHex,
+                                strokeColorId: palItem.id,
+                              });
+                            }
+                          }}
+                          className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                        />
+                      </label>
+                    );
+                  })}
                 </div>
 
-                {/* Couleur personnalisée (Stroke) */}
-                <div className="flex items-center gap-2 p-1.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                {/* Édition durable de la couleur active de la palette (Stroke) */}
+                <div className="flex items-center gap-2 p-1.5 bg-indigo-50/40 rounded-xl border border-indigo-200/80 shadow-2xs">
                   <label
                     className="w-7 h-7 rounded-lg border border-slate-300 shadow-2xs cursor-pointer relative overflow-hidden flex items-center justify-center shrink-0"
                     style={{ backgroundColor: strokeColor !== 'none' ? strokeColor : '#000000' }}
-                    title="Cliquer pour choisir une couleur personnalisée"
+                    title="Cliquer pour modifier cette couleur de la palette dans tout le projet"
                   >
                     <input
                       type="color"
@@ -2329,28 +2460,40 @@ export function DrawingCanvas({
                       onChange={(e) => {
                         const c = e.target.value;
                         setStrokeColor(c);
-                        if (selectedPathIds.length > 0) updateSelectedShapeProperties({ stroke: c });
+                        if (selectedStrokePaletteId) {
+                          handleModifyPaletteColor(selectedStrokePaletteId, c);
+                        } else if (selectedPathIds.length > 0) {
+                          updateSelectedShapeProperties({ stroke: c });
+                        }
                       }}
                       className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
                     />
                   </label>
                   <div className="flex-1 min-w-0">
-                    <span className="text-[9px] font-bold text-slate-400 block uppercase">Couleur perso</span>
+                    <span className="text-[9px] font-bold text-indigo-700 block uppercase truncate">
+                      {selectedStrokePaletteId
+                        ? `Modifier ${projectPalette.find((p) => p.id === selectedStrokePaletteId)?.name || 'slot'} (Projet)`
+                        : 'Couleur libre'}
+                    </span>
                     <input
                       type="text"
                       value={strokeColor}
                       onChange={(e) => {
                         const val = e.target.value;
                         setStrokeColor(val);
-                        if (/^#[0-9A-Fa-f]{6}$/.test(val) && selectedPathIds.length > 0) {
-                          updateSelectedShapeProperties({ stroke: val });
+                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                          if (selectedStrokePaletteId) {
+                            handleModifyPaletteColor(selectedStrokePaletteId, val);
+                          } else if (selectedPathIds.length > 0) {
+                            updateSelectedShapeProperties({ stroke: val });
+                          }
                         }
                       }}
                       placeholder="#000000"
                       className="w-full text-xs font-mono font-bold text-slate-800 bg-transparent border-0 p-0 focus:outline-none"
                     />
                   </div>
-                  <Pipette className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <Pipette className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                 </div>
 
                 {/* Épaisseur du trait */}
@@ -2385,7 +2528,10 @@ export function DrawingCanvas({
                       type="button"
                       onClick={() => {
                         setFillColor('none');
-                        if (selectedPathIds.length > 0) updateSelectedShapeProperties({ fill: 'none' });
+                        setSelectedFillPaletteId(null);
+                        if (selectedPathIds.length > 0) {
+                          updateSelectedShapeProperties({ fill: 'none', fillColorId: undefined });
+                        }
                       }}
                       className={`text-[10px] font-bold px-2 py-0.5 rounded-md border cursor-pointer ${
                         fillColor === 'none'
@@ -2395,48 +2541,72 @@ export function DrawingCanvas({
                     >
                       Transparent
                     </button>
-                    <label className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 cursor-pointer">
-                      <Pipette className="w-3 h-3" />
-                      <input
-                        type="color"
-                        value={fillColor.startsWith('#') ? fillColor : '#000000'}
-                        onChange={(e) => {
-                          const c = e.target.value;
-                          setFillColor(c);
-                          if (selectedPathIds.length > 0) updateSelectedShapeProperties({ fill: c });
-                        }}
-                        className="sr-only"
-                      />
-                    </label>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-6 gap-1.5">
-                  {COLOR_PALETTE.map((c) => (
-                    <button
-                      key={`fill-${c}`}
-                      type="button"
-                      onClick={() => {
-                        setFillColor(c);
-                        if (selectedPathIds.length > 0) updateSelectedShapeProperties({ fill: c });
-                      }}
-                      className={`w-6 h-6 rounded-xl border transition-all cursor-pointer ${
-                        fillColor.toLowerCase() === c.toLowerCase()
-                          ? 'scale-110 ring-2 ring-indigo-500 ring-offset-1 z-10 shadow-sm'
-                          : 'hover:scale-105 border-slate-300'
-                      }`}
-                      style={{ backgroundColor: c }}
-                      title={c}
-                    />
-                  ))}
+                {/* Grille 16 couleurs partagées (8 colonnes x 2 lignes) avec sélecteur direct au clic */}
+                <div className="grid grid-cols-8 gap-1.5">
+                  {projectPalette.map((palItem, idx) => {
+                    const isSelected =
+                      fillColor !== 'none' &&
+                      (selectedFillPaletteId === palItem.id ||
+                        (!selectedFillPaletteId &&
+                          fillColor.toLowerCase() === palItem.color.toLowerCase()));
+                    const validHex =
+                      palItem.color.startsWith('#') && palItem.color.length === 7
+                        ? palItem.color
+                        : palItem.color.length === 4
+                        ? `#${palItem.color[1]}${palItem.color[1]}${palItem.color[2]}${palItem.color[2]}${palItem.color[3]}${palItem.color[3]}`
+                        : '#ffffff';
+                    return (
+                      <label
+                        key={`fill-${palItem.id}`}
+                        className={`w-6 h-6 rounded-lg border transition-all cursor-pointer relative overflow-hidden flex items-center justify-center ${
+                          isSelected
+                            ? 'scale-110 ring-2 ring-indigo-500 ring-offset-1 z-10 shadow-sm border-white'
+                            : 'hover:scale-105 border-slate-300'
+                        }`}
+                        style={{ backgroundColor: palItem.color }}
+                        title={`${palItem.name || `Couleur #${idx + 1}`} (${palItem.color}) — Appuyez directement pour choisir/modifier la couleur`}
+                      >
+                        <input
+                          type="color"
+                          value={validHex}
+                          onClick={() => {
+                            setSelectedFillPaletteId(palItem.id);
+                            setFillColor(palItem.color);
+                            if (selectedPathIds.length > 0) {
+                              updateSelectedShapeProperties({
+                                fill: palItem.color,
+                                fillColorId: palItem.id,
+                              });
+                            }
+                          }}
+                          onChange={(e) => {
+                            const newHex = e.target.value;
+                            setSelectedFillPaletteId(palItem.id);
+                            setFillColor(newHex);
+                            handleModifyPaletteColor(palItem.id, newHex);
+                            if (selectedPathIds.length > 0) {
+                              updateSelectedShapeProperties({
+                                fill: newHex,
+                                fillColorId: palItem.id,
+                              });
+                            }
+                          }}
+                          className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                        />
+                      </label>
+                    );
+                  })}
                 </div>
 
-                {/* Couleur personnalisée (Fill) */}
-                <div className="flex items-center gap-2 p-1.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                {/* Édition durable de la couleur active de la palette (Fill) */}
+                <div className="flex items-center gap-2 p-1.5 bg-indigo-50/40 rounded-xl border border-indigo-200/80 shadow-2xs">
                   <label
                     className="w-7 h-7 rounded-lg border border-slate-300 shadow-2xs cursor-pointer relative overflow-hidden flex items-center justify-center shrink-0"
                     style={{ backgroundColor: fillColor !== 'none' ? fillColor : '#ffffff' }}
-                    title="Cliquer pour choisir une couleur de remplissage personnalisée"
+                    title="Cliquer pour modifier cette couleur de la palette dans tout le projet"
                   >
                     <input
                       type="color"
@@ -2444,28 +2614,40 @@ export function DrawingCanvas({
                       onChange={(e) => {
                         const c = e.target.value;
                         setFillColor(c);
-                        if (selectedPathIds.length > 0) updateSelectedShapeProperties({ fill: c });
+                        if (selectedFillPaletteId) {
+                          handleModifyPaletteColor(selectedFillPaletteId, c);
+                        } else if (selectedPathIds.length > 0) {
+                          updateSelectedShapeProperties({ fill: c });
+                        }
                       }}
                       className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
                     />
                   </label>
                   <div className="flex-1 min-w-0">
-                    <span className="text-[9px] font-bold text-slate-400 block uppercase">Remplissage perso</span>
+                    <span className="text-[9px] font-bold text-indigo-700 block uppercase truncate">
+                      {selectedFillPaletteId
+                        ? `Modifier ${projectPalette.find((p) => p.id === selectedFillPaletteId)?.name || 'slot'} (Projet)`
+                        : 'Remplissage libre'}
+                    </span>
                     <input
                       type="text"
                       value={fillColor}
                       onChange={(e) => {
                         const val = e.target.value;
                         setFillColor(val);
-                        if (/^#[0-9A-Fa-f]{6}$/.test(val) && selectedPathIds.length > 0) {
-                          updateSelectedShapeProperties({ fill: val });
+                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                          if (selectedFillPaletteId) {
+                            handleModifyPaletteColor(selectedFillPaletteId, val);
+                          } else if (selectedPathIds.length > 0) {
+                            updateSelectedShapeProperties({ fill: val });
+                          }
                         }
                       }}
                       placeholder="#ffffff"
                       className="w-full text-xs font-mono font-bold text-slate-800 bg-transparent border-0 p-0 focus:outline-none"
                     />
                   </div>
-                  <Pipette className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <Pipette className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                 </div>
               </div>
             )}

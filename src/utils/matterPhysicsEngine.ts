@@ -13,6 +13,7 @@ import {
   PatrolBehaviorConfig,
   KeyboardControlBehaviorConfig,
   BoundaryBehaviorConfig,
+  AutoDestroyBehaviorConfig,
 } from '../types';
 import { getEntityColliderBounds } from './collider';
 
@@ -122,6 +123,7 @@ export function stopKeyboardListening() {
 }
 
 const activePhysicsCollisionPairs = new Set<string>();
+const autoDestroyTimers = new Map<string, number>();
 
 export function getActivePhysicsCollisionPairs(): Set<string> {
   return activePhysicsCollisionPairs;
@@ -140,6 +142,7 @@ export function resetMatterPhysicsRuntime() {
   patrolStates.clear();
   activeKeys.clear();
   activePhysicsCollisionPairs.clear();
+  autoDestroyTimers.clear();
 }
 
 /**
@@ -199,6 +202,7 @@ export function syncEntityDragPosition(
 
 export interface PhysicsTickResult {
   updatedTransforms: Record<string, { position: Position; rotation?: number }>;
+  entitiesToDestroy?: string[];
 }
 
 /**
@@ -344,7 +348,8 @@ function ensurePhysicsWorld(canvasBounds: { width: number; height: number }, ent
     const colliderHeight = Math.max(12, Math.round(geom.height * scaleY));
     const colliderRadius = Math.max(6, Math.round(geom.radius * Math.max(scaleX, scaleY)));
 
-    const signature = `${colliderType}_${colliderWidth}_${colliderHeight}_${colliderRadius}_${isStatic}_${isSensor}`;
+    const freezeRotation = physics?.freezeRotation === true;
+    const signature = `${colliderType}_${colliderWidth}_${colliderHeight}_${colliderRadius}_${isStatic}_${isSensor}_${freezeRotation}`;
     let body = bodyMap.get(entity.id);
 
     // Si le corps n'existe pas ou si la forme du collider a été modifiée dans le mode dessin, le recréer
@@ -365,6 +370,7 @@ function ensurePhysicsWorld(canvasBounds: { width: number; height: number }, ent
         friction,
         frictionAir: 0.02,
         mass: Math.max(0.1, physics?.mass || 1),
+        inertia: freezeRotation ? Infinity : undefined,
       };
 
       if (colliderType === 'circle') {
@@ -373,7 +379,11 @@ function ensurePhysicsWorld(canvasBounds: { width: number; height: number }, ent
         body = Bodies.rectangle(worldCenterX, worldCenterY, colliderWidth, colliderHeight, bodyOptions);
       }
 
-      if (currentState?.rotation) {
+      if (freezeRotation) {
+        Body.setInertia(body, Infinity);
+        Body.setAngle(body, 0);
+        Body.setAngularVelocity(body, 0);
+      } else if (currentState?.rotation) {
         Body.setAngle(body, (currentState.rotation * Math.PI) / 180);
       }
 
@@ -386,6 +396,11 @@ function ensurePhysicsWorld(canvasBounds: { width: number; height: number }, ent
       if (physics) {
         body.isSensor = physics.isTrigger === true;
         body.restitution = physics.bounce ?? 0.0;
+        if (physics.freezeRotation) {
+          Body.setInertia(body, Infinity);
+          Body.setAngle(body, 0);
+          Body.setAngularVelocity(body, 0);
+        }
       }
     }
   }
@@ -407,12 +422,24 @@ export function stepMatterPhysics(params: {
   if (!engine) return { updatedTransforms: {} };
 
   const updatedTransforms: Record<string, { position: Position; rotation?: number }> = {};
+  const entitiesToDestroy: string[] = [];
   const entityList = Object.values(entities);
 
   for (const entity of entityList) {
     const currentState = entity.states[entity.currentStateId];
     const effectiveBehaviors = getEffectiveBehaviors(entity, currentState);
     const body = bodyMap.get(entity.id);
+
+    // Vérifier l'autodestruction temporisée même sans corps physique dynamique
+    const autoDestroy = effectiveBehaviors.find((b) => b.type === 'auto_destroy') as AutoDestroyBehaviorConfig | undefined;
+    if (autoDestroy && autoDestroy.enabled !== false) {
+      const delay = Math.max(0.1, autoDestroy.delay ?? 3);
+      const elapsed = (autoDestroyTimers.get(entity.id) || 0) + dt;
+      autoDestroyTimers.set(entity.id, elapsed);
+      if (elapsed >= delay) {
+        entitiesToDestroy.push(entity.id);
+      }
+    }
 
     if (!body || effectiveBehaviors.length === 0) continue;
 
@@ -425,6 +452,12 @@ export function stepMatterPhysics(params: {
     const follow = effectiveBehaviors.find((b) => b.type === 'follow') as FollowBehaviorConfig | undefined;
     const lookAt = effectiveBehaviors.find((b) => b.type === 'look_at') as LookAtBehaviorConfig | undefined;
     const boundary = effectiveBehaviors.find((b) => b.type === 'boundary_behavior') as BoundaryBehaviorConfig | undefined;
+
+    // Figer la rotation si freezeRotation est activé (Rigidbody 2D Freeze Rotation)
+    if (physics?.freezeRotation) {
+      Body.setAngle(body, 0);
+      Body.setAngularVelocity(body, 0);
+    }
 
     // 0. Annulation de la gravité pour les entités sans composant 'physics' mais avec mouvement actif
     if (!physics && !body.isStatic) {
@@ -560,34 +593,86 @@ export function stepMatterPhysics(params: {
       }
     }
 
+    // Helper pour rechercher dynamiquement l'instance la plus proche par Type ou par Tag (Piste D)
+    const findNearestTarget = (
+      mode: 'nearest_type' | 'nearest_tag',
+      targetType?: string,
+      targetTag?: string
+    ): Entity | undefined => {
+      const cleanTag = targetTag ? targetTag.toLowerCase().trim().replace(/^#/, '') : '';
+      let nearest: Entity | undefined;
+      let minDistSq = Infinity;
+
+      for (const candidate of Object.values(entities)) {
+        if (candidate.id === entity.id) continue; // Ne pas se cibler soi-même
+        if (mode === 'nearest_type') {
+          if (!targetType || candidate.type !== targetType) continue;
+        } else if (mode === 'nearest_tag') {
+          if (!cleanTag || !candidate.tags?.includes(cleanTag)) continue;
+        }
+
+        const candOffset = colliderOffsets.get(candidate.id) || {
+          relCenterX: candidate.size.width / 2,
+          relCenterY: candidate.size.height / 2,
+        };
+        const candCenterX = candidate.position.x + candOffset.relCenterX;
+        const candCenterY = candidate.position.y + candOffset.relCenterY;
+        const dx = candCenterX - body.position.x;
+        const dy = candCenterY - body.position.y;
+        const distSq = dx * dx + dy * dy;
+
+        if (distSq < minDistSq) {
+          minDistSq = distSq;
+          nearest = candidate;
+        }
+      }
+      return nearest;
+    };
+
     // 5. Move To
     if (moveTo) {
       let targetX = entity.position.x;
       let targetY = entity.position.y;
+      let hasValidTarget = false;
 
       if (moveTo.targetType === 'position' && moveTo.targetPosition) {
         targetX = moveTo.targetPosition.x;
         targetY = moveTo.targetPosition.y;
+        hasValidTarget = true;
       } else if (moveTo.targetType === 'entity' && moveTo.targetEntityId) {
         const targetEntity = entities[moveTo.targetEntityId];
         if (targetEntity) {
           targetX = targetEntity.position.x;
           targetY = targetEntity.position.y;
+          hasValidTarget = true;
+        }
+      } else if (moveTo.targetType === 'nearest_type' || moveTo.targetType === 'nearest_tag') {
+        const nearestEntity = findNearestTarget(
+          moveTo.targetType,
+          moveTo.targetEntityType,
+          moveTo.targetTag
+        );
+        if (nearestEntity) {
+          targetX = nearestEntity.position.x;
+          targetY = nearestEntity.position.y;
+          hasValidTarget = true;
         }
       }
 
-      const offset = colliderOffsets.get(entity.id) || { relCenterX: entity.size.width / 2, relCenterY: entity.size.height / 2 };
-      const currentEntityX = body.position.x - offset.relCenterX;
-      const currentEntityY = body.position.y - offset.relCenterY;
-      const dx = targetX - currentEntityX;
-      const dy = targetY - currentEntityY;
-      const dist = Math.hypot(dx, dy);
+      if (hasValidTarget) {
+        const offset = colliderOffsets.get(entity.id) || { relCenterX: entity.size.width / 2, relCenterY: entity.size.height / 2 };
+        const currentEntityX = body.position.x - offset.relCenterX;
+        const currentEntityY = body.position.y - offset.relCenterY;
+        const dx = targetX - currentEntityX;
+        const dy = targetY - currentEntityY;
+        const dist = Math.hypot(dx, dy);
 
-      if (dist > 4) {
-        const speed = (moveTo.speed ?? 120) / 60; // px/s -> px/frame
-        Body.setVelocity(body, { x: (dx / dist) * speed, y: (dy / dist) * speed });
-      } else {
-        Body.setVelocity(body, { x: 0, y: 0 });
+        if (dist > 4) {
+          const speed = (moveTo.speed ?? 120) / 60; // px/s -> px/frame
+          Body.setVelocity(body, { x: (dx / dist) * speed, y: (dy / dist) * speed });
+        } else {
+          Body.setVelocity(body, { x: 0, y: 0 });
+        }
       }
     }
 
@@ -595,29 +680,46 @@ export function stepMatterPhysics(params: {
     if (follow) {
       let targetX = body.position.x;
       let targetY = body.position.y;
+      let hasValidTarget = false;
 
       if (follow.targetType === 'mouse' && mousePos) {
         targetX = mousePos.x;
         targetY = mousePos.y;
+        hasValidTarget = true;
       } else if (follow.targetType === 'entity' && follow.targetEntityId) {
         const targetEntity = entities[follow.targetEntityId];
         if (targetEntity) {
           const targetOffset = colliderOffsets.get(targetEntity.id) || { relCenterX: targetEntity.size.width / 2, relCenterY: targetEntity.size.height / 2 };
           targetX = targetEntity.position.x + targetOffset.relCenterX;
           targetY = targetEntity.position.y + targetOffset.relCenterY;
+          hasValidTarget = true;
+        }
+      } else if (follow.targetType === 'nearest_type' || follow.targetType === 'nearest_tag') {
+        const nearestEntity = findNearestTarget(
+          follow.targetType,
+          follow.targetEntityType,
+          follow.targetTag
+        );
+        if (nearestEntity) {
+          const targetOffset = colliderOffsets.get(nearestEntity.id) || { relCenterX: nearestEntity.size.width / 2, relCenterY: nearestEntity.size.height / 2 };
+          targetX = nearestEntity.position.x + targetOffset.relCenterX;
+          targetY = nearestEntity.position.y + targetOffset.relCenterY;
+          hasValidTarget = true;
         }
       }
 
-      const dx = targetX - body.position.x;
-      const dy = targetY - body.position.y;
-      const dist = Math.hypot(dx, dy);
-      const minDistance = follow.minDistance ?? 40;
+      if (hasValidTarget) {
+        const dx = targetX - body.position.x;
+        const dy = targetY - body.position.y;
+        const dist = Math.hypot(dx, dy);
+        const minDistance = follow.minDistance ?? 40;
 
-      if (dist > minDistance) {
-        const speed = (follow.speed ?? 150) / 60; // px/s -> px/frame
-        Body.setVelocity(body, { x: (dx / dist) * speed, y: (dy / dist) * speed });
-      } else {
-        Body.setVelocity(body, { x: body.velocity.x * 0.8, y: body.velocity.y * 0.8 });
+        if (dist > minDistance) {
+          const speed = (follow.speed ?? 150) / 60; // px/s -> px/frame
+          Body.setVelocity(body, { x: (dx / dist) * speed, y: (dy / dist) * speed });
+        } else {
+          Body.setVelocity(body, { x: body.velocity.x * 0.8, y: body.velocity.y * 0.8 });
+        }
       }
     }
 
@@ -625,35 +727,52 @@ export function stepMatterPhysics(params: {
     if (lookAt) {
       let targetX = body.position.x;
       let targetY = body.position.y;
+      let hasValidTarget = false;
 
       if (lookAt.targetType === 'mouse' && mousePos) {
         targetX = mousePos.x;
         targetY = mousePos.y;
+        hasValidTarget = true;
       } else if (lookAt.targetType === 'entity' && lookAt.targetEntityId) {
         const targetEntity = entities[lookAt.targetEntityId];
         if (targetEntity) {
           const targetOffset = colliderOffsets.get(targetEntity.id) || { relCenterX: targetEntity.size.width / 2, relCenterY: targetEntity.size.height / 2 };
           targetX = targetEntity.position.x + targetOffset.relCenterX;
           targetY = targetEntity.position.y + targetOffset.relCenterY;
+          hasValidTarget = true;
+        }
+      } else if (lookAt.targetType === 'nearest_type' || lookAt.targetType === 'nearest_tag') {
+        const nearestEntity = findNearestTarget(
+          lookAt.targetType,
+          lookAt.targetEntityType,
+          lookAt.targetTag
+        );
+        if (nearestEntity) {
+          const targetOffset = colliderOffsets.get(nearestEntity.id) || { relCenterX: nearestEntity.size.width / 2, relCenterY: nearestEntity.size.height / 2 };
+          targetX = nearestEntity.position.x + targetOffset.relCenterX;
+          targetY = nearestEntity.position.y + targetOffset.relCenterY;
+          hasValidTarget = true;
         }
       }
 
-      const dx = targetX - body.position.x;
-      const dy = targetY - body.position.y;
-      const targetAngleRad = Math.atan2(dy, dx) + ((lookAt.rotationOffset || 0) * Math.PI) / 180;
+      if (hasValidTarget) {
+        const dx = targetX - body.position.x;
+        const dy = targetY - body.position.y;
+        const targetAngleRad = Math.atan2(dy, dx) + ((lookAt.rotationOffset || 0) * Math.PI) / 180;
 
-      const smoothSpeed = lookAt.smoothSpeed ?? 0;
-      if (smoothSpeed > 0) {
-        let diff = (targetAngleRad - body.angle + Math.PI) % (Math.PI * 2) - Math.PI;
-        if (diff < -Math.PI) diff += Math.PI * 2;
-        const maxStep = ((smoothSpeed * Math.PI) / 180) * dt;
-        if (Math.abs(diff) <= maxStep) {
-          Body.setAngle(body, targetAngleRad);
+        const smoothSpeed = lookAt.smoothSpeed ?? 0;
+        if (smoothSpeed > 0) {
+          let diff = (targetAngleRad - body.angle + Math.PI) % (Math.PI * 2) - Math.PI;
+          if (diff < -Math.PI) diff += Math.PI * 2;
+          const maxStep = ((smoothSpeed * Math.PI) / 180) * dt;
+          if (Math.abs(diff) <= maxStep) {
+            Body.setAngle(body, targetAngleRad);
+          } else {
+            Body.setAngle(body, body.angle + Math.sign(diff) * maxStep);
+          }
         } else {
-          Body.setAngle(body, body.angle + Math.sign(diff) * maxStep);
+          Body.setAngle(body, targetAngleRad);
         }
-      } else {
-        Body.setAngle(body, targetAngleRad);
       }
     }
 
@@ -715,20 +834,28 @@ export function stepMatterPhysics(params: {
       relCenterY: entity.size.height / 2,
     };
 
+    const currentState = entity.states[entity.currentStateId];
+    const effectiveBehaviors = getEffectiveBehaviors(entity, currentState);
+    const physics = effectiveBehaviors.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
+    const isRotFrozen = physics?.freezeRotation === true;
+
     const newX = Math.round((body.position.x - offset.relCenterX) * 10) / 10;
     const newY = Math.round((body.position.y - offset.relCenterY) * 10) / 10;
-    const newRot = Math.round(((body.angle * 180) / Math.PI) * 10) / 10;
+    const newRot = isRotFrozen ? 0 : Math.round(((body.angle * 180) / Math.PI) * 10) / 10;
 
     const posChanged = Math.abs(newX - entity.position.x) > 0.05 || Math.abs(newY - entity.position.y) > 0.05;
-    const rotChanged = Math.abs(newRot - (entity.states[entity.currentStateId]?.rotation || 0)) > 0.1;
+    const rotChanged = !isRotFrozen && Math.abs(newRot - (entity.states[entity.currentStateId]?.rotation || 0)) > 0.1;
 
     if (posChanged || rotChanged) {
       updatedTransforms[entity.id] = {
         position: { x: newX, y: newY },
-        ...(rotChanged ? { rotation: newRot } : {}),
+        ...(rotChanged ? { rotation: newRot } : isRotFrozen ? { rotation: 0 } : {}),
       };
     }
   }
 
-  return { updatedTransforms };
+  return {
+    updatedTransforms,
+    ...(entitiesToDestroy.length > 0 ? { entitiesToDestroy } : {}),
+  };
 }

@@ -13,6 +13,7 @@ import {
   KeyboardControlBehaviorConfig,
   BoundaryBehaviorConfig,
   BehaviorOverride,
+  AutoDestroyBehaviorConfig,
 } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
 import {
@@ -32,6 +33,8 @@ import {
   Sparkles,
   Undo2,
   X,
+  Clock,
+  RotateCcw,
 } from 'lucide-react';
 
 interface BehaviorManagerProps {
@@ -44,6 +47,8 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
   const updateStateBehaviorOverride = useSceneStore((state) => state.updateStateBehaviorOverride);
   const removeStateBehaviorOverride = useSceneStore((state) => state.removeStateBehaviorOverride);
   const entities = useSceneStore((state) => state.entities);
+  const customArchetypes = useSceneStore((state) => state.customArchetypes);
+  const rules = useSceneStore((state) => state.rules);
 
   const baseBehaviors = entity.behaviors || [];
   const stateList = Object.values(entity.states);
@@ -63,6 +68,38 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
 
   const targetState = entity.states[activeStateId] || stateList[0];
   const targetEntityOptions = Object.values(entities).filter((e) => e.id !== entity.id);
+
+  // Options dynamiques de Types et de Tags pour les comportements autonomes (Piste D)
+  const entityTypeOptions = React.useMemo(() => {
+    const map = new Map<string, string>();
+    Object.values(entities).forEach((e) => {
+      if (!map.has(e.type)) {
+        map.set(e.type, e.name.replace(/\s+\d+$/, ''));
+      }
+    });
+    Object.values(customArchetypes || {}).forEach((arch) => {
+      if (!map.has(arch.type)) {
+        map.set(arch.type, arch.name);
+      }
+    });
+    return Array.from(map.entries()).map(([type, label]) => ({ type, label }));
+  }, [entities, customArchetypes]);
+
+  const availableTags = React.useMemo(() => {
+    const tagSet = new Set<string>();
+    Object.values(entities).forEach((e) => {
+      e.tags?.forEach((t) => tagSet.add(t));
+    });
+    (rules || []).forEach((r) => {
+      if (r.trigger?.subjectTag) tagSet.add(r.trigger.subjectTag);
+      if (r.trigger?.targetTag) tagSet.add(r.trigger.targetTag);
+      r.actions.forEach((a) => {
+        if (a.targetTag) tagSet.add(a.targetTag);
+        a.spawnTags?.forEach((t) => tagSet.add(t));
+      });
+    });
+    return Array.from(tagSet);
+  }, [entities, rules]);
 
   const generateBehaviorId = (type: BehaviorType) => {
     return `${type}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
@@ -92,7 +129,16 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
           bounce: 0.4,
           friction: 0.98,
           mass: 1,
+          freezeRotation: false,
         } as PhysicsBehaviorConfig;
+        break;
+      case 'auto_destroy':
+        newBehavior = {
+          id: generateBehaviorId('auto_destroy'),
+          type: 'auto_destroy',
+          enabled: true,
+          delay: 3,
+        } as AutoDestroyBehaviorConfig;
         break;
       case 'constant_velocity':
         newBehavior = {
@@ -228,6 +274,8 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
         return <Gamepad2 className="w-4 h-4 text-rose-600" />;
       case 'boundary_behavior':
         return <Shield className="w-4 h-4 text-teal-600" />;
+      case 'auto_destroy':
+        return <Clock className="w-4 h-4 text-orange-600" />;
     }
   };
 
@@ -237,6 +285,8 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
         return 'Déplaçable à la souris';
       case 'physics':
         return 'Physique & Gravité';
+      case 'auto_destroy':
+        return 'Autodestruction (Lifespan)';
       case 'constant_velocity':
         return 'Vitesse Continue';
       case 'look_at':
@@ -261,9 +311,6 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
         <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
           <Activity className="w-4 h-4 text-indigo-600" />
           <span>Composants & Physique</span>
-          <span className="text-[11px] font-normal text-slate-400">
-            ({baseBehaviors.length})
-          </span>
         </div>
 
         <button
@@ -464,6 +511,8 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
                       onUpdateBase: (partial) => handleUpdateBaseBehavior(behavior.id, partial),
                       onUpdateOverride: (partial) => handleUpdateOverride(behavior.id, partial),
                       targetEntityOptions,
+                      entityTypeOptions,
+                      availableTags,
                     })}
                   </div>
                 )}
@@ -656,6 +705,26 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
                   </button>
                 </div>
               </div>
+
+              {/* Catégorie 6: Cycle de Vie & Nettoyage */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                  Cycle de Vie & Nettoyage
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleAddBehavior('auto_destroy')}
+                  className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-orange-400 hover:bg-orange-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                >
+                  <div className="w-8 h-8 rounded-xl bg-orange-100 text-orange-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                    <Clock className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-800 text-xs">Autodestruction (Lifespan)</div>
+                    <div className="text-[11px] text-slate-500">Détruit automatiquement l'entité après un délai défini (en secondes).</div>
+                  </div>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -672,6 +741,8 @@ function renderBehaviorControls({
   onUpdateBase,
   onUpdateOverride,
   targetEntityOptions,
+  entityTypeOptions,
+  availableTags,
 }: {
   behavior: EntityBehavior;
   override?: BehaviorOverride;
@@ -679,6 +750,8 @@ function renderBehaviorControls({
   onUpdateBase: (partial: Partial<EntityBehavior>) => void;
   onUpdateOverride: (partial: BehaviorOverride) => void;
   targetEntityOptions: Entity[];
+  entityTypeOptions: { type: string; label: string }[];
+  availableTags: string[];
 }) {
   const update = (partial: any) => {
     if (isOverridden) {
@@ -857,6 +930,57 @@ function renderBehaviorControls({
               />
             </div>
           )}
+
+          {/* Ligne 7: Figer la rotation (Freeze Rotation) */}
+          {!b.isStatic && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+              <div>
+                <div className="font-bold text-slate-700 text-xs flex items-center gap-1.5">
+                  <RotateCcw className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Figer la rotation (Freeze Rotation)</span>
+                </div>
+                <div className="text-[10px] text-slate-400">
+                  {b.freezeRotation ? 'Rotation bloquée (l\'objet reste droit sans basculer)' : 'Rotation libre sous l\'effet des chocs'}
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={b.freezeRotation === true}
+                onChange={(e) => update({ freezeRotation: e.target.checked })}
+                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+                title="Empêche l'objet de pivoter lors des collisions physiques"
+              />
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    case 'auto_destroy': {
+      const b = { ...behavior, ...(override || {}) } as AutoDestroyBehaviorConfig;
+      return (
+        <div className="space-y-1.5">
+          {/* Ligne 1: Durée de vie avant autodestruction */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <div>
+                <span className="font-bold">Durée de vie (Délai)</span>
+                <span className="text-[10px] text-slate-400 block">Délai avant suppression automatique</span>
+              </div>
+              <span className="font-mono font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.delay ?? 3} s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0.2"
+              max="20"
+              step="0.2"
+              value={b.delay ?? 3}
+              onChange={(e) => update({ delay: parseFloat(e.target.value) })}
+              className="w-full accent-orange-600"
+            />
+          </div>
         </div>
       );
     }
@@ -1080,14 +1204,16 @@ function renderBehaviorControls({
             <select
               value={b.targetType}
               onChange={(e) => update({ targetType: e.target.value as any })}
-              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[190px]"
             >
               <option value="position">Position fixe (X, Y)</option>
-              <option value="entity">Autre Entité de la scène</option>
+              <option value="entity">Entité précise de la scène</option>
+              <option value="nearest_type">Type d'objet le plus proche</option>
+              <option value="nearest_tag">Tag le plus proche (#tag)</option>
             </select>
           </div>
 
-          {/* Ligne 2: Entité cible ou Coordonnées X, Y */}
+          {/* Ligne 2: Entité cible, Type, Tag ou Coordonnées X, Y */}
           {b.targetType === 'entity' ? (
             <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
               <span className="font-bold text-slate-700 text-xs">Entité visée</span>
@@ -1103,6 +1229,41 @@ function renderBehaviorControls({
                   </option>
                 ))}
               </select>
+            </div>
+          ) : b.targetType === 'nearest_type' ? (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Type recherché</span>
+              <select
+                value={b.targetEntityType || ''}
+                onChange={(e) => update({ targetEntityType: e.target.value })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[160px]"
+              >
+                <option value="">-- Choisir un type --</option>
+                {entityTypeOptions.map((opt) => (
+                  <option key={opt.type} value={opt.type}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : b.targetType === 'nearest_tag' ? (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Tag recherché</span>
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  list={`tags-moveto-${b.id}`}
+                  placeholder="ex: cible, piece..."
+                  value={b.targetTag || ''}
+                  onChange={(e) => update({ targetTag: e.target.value.replace(/^#/, '') })}
+                  className="w-32 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                />
+                <datalist id={`tags-moveto-${b.id}`}>
+                  {availableTags.map((t) => (
+                    <option key={t} value={t} />
+                  ))}
+                </datalist>
+              </div>
             </div>
           ) : (
             <>
@@ -1173,14 +1334,16 @@ function renderBehaviorControls({
             <select
               value={b.targetType}
               onChange={(e) => update({ targetType: e.target.value as any })}
-              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[190px]"
             >
               <option value="mouse">Curseur / Souris</option>
-              <option value="entity">Autre Entité</option>
+              <option value="entity">Entité précise</option>
+              <option value="nearest_type">Type d'objet le plus proche</option>
+              <option value="nearest_tag">Tag le plus proche (#tag)</option>
             </select>
           </div>
 
-          {/* Ligne 2: Entité cible si applicable */}
+          {/* Ligne 2: Entité cible, Type ou Tag si applicable */}
           {b.targetType === 'entity' && (
             <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
               <span className="font-bold text-slate-700 text-xs">Entité visée</span>
@@ -1196,6 +1359,43 @@ function renderBehaviorControls({
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {b.targetType === 'nearest_type' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Type recherché</span>
+              <select
+                value={b.targetEntityType || ''}
+                onChange={(e) => update({ targetEntityType: e.target.value })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[160px]"
+              >
+                <option value="">-- Choisir un type --</option>
+                {entityTypeOptions.map((opt) => (
+                  <option key={opt.type} value={opt.type}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {b.targetType === 'nearest_tag' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Tag recherché</span>
+              <input
+                type="text"
+                list={`tags-lookat-${b.id}`}
+                placeholder="ex: ennemi, joueur..."
+                value={b.targetTag || ''}
+                onChange={(e) => update({ targetTag: e.target.value.replace(/^#/, '') })}
+                className="w-32 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+              />
+              <datalist id={`tags-lookat-${b.id}`}>
+                {availableTags.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
             </div>
           )}
 
@@ -1253,14 +1453,16 @@ function renderBehaviorControls({
             <select
               value={b.targetType}
               onChange={(e) => update({ targetType: e.target.value as any })}
-              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[190px]"
             >
               <option value="mouse">Curseur / Souris</option>
-              <option value="entity">Autre Entité</option>
+              <option value="entity">Entité précise</option>
+              <option value="nearest_type">Type d'objet le plus proche</option>
+              <option value="nearest_tag">Tag le plus proche (#tag)</option>
             </select>
           </div>
 
-          {/* Ligne 2: Entité cible si applicable */}
+          {/* Ligne 2: Entité cible, Type ou Tag si applicable */}
           {b.targetType === 'entity' && (
             <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
               <span className="font-bold text-slate-700 text-xs">Entité suivie</span>
@@ -1276,6 +1478,43 @@ function renderBehaviorControls({
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {b.targetType === 'nearest_type' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Type recherché</span>
+              <select
+                value={b.targetEntityType || ''}
+                onChange={(e) => update({ targetEntityType: e.target.value })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[160px]"
+              >
+                <option value="">-- Choisir un type --</option>
+                {entityTypeOptions.map((opt) => (
+                  <option key={opt.type} value={opt.type}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {b.targetType === 'nearest_tag' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Tag recherché</span>
+              <input
+                type="text"
+                list={`tags-follow-${b.id}`}
+                placeholder="ex: joueur, proie..."
+                value={b.targetTag || ''}
+                onChange={(e) => update({ targetTag: e.target.value.replace(/^#/, '') })}
+                className="w-32 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+              />
+              <datalist id={`tags-follow-${b.id}`}>
+                {availableTags.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
             </div>
           )}
 

@@ -1,5 +1,5 @@
-import React from 'react';
-import { useSceneStore } from '../store/useSceneStore';
+import React, { useState } from 'react';
+import { useSceneStore, DEFAULT_PROJECT_PALETTE } from '../store/useSceneStore';
 import {
   Pencil,
   GitCommit,
@@ -12,12 +12,8 @@ import {
   Check,
   Layers,
   Palette,
+  RotateCcw,
 } from 'lucide-react';
-
-const COLOR_PALETTE = [
-  '#000000', '#ffffff', '#64748b', '#ef4444', '#f97316', '#f59e0b',
-  '#10b981', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#ec4899',
-];
 
 interface DrawingToolsPanelProps {
   onClose?: () => void;
@@ -37,6 +33,21 @@ export function DrawingToolsPanel({ onClose, onUndo, onClearLayer }: DrawingTool
   const setDrawingFillColor = useSceneStore((state) => state.setDrawingFillColor);
   const setDrawingStrokeWidth = useSceneStore((state) => state.setDrawingStrokeWidth);
   const selectLayer = useSceneStore((state) => state.selectLayer);
+
+  const projectPalette = useSceneStore((state) => state.projectPalette || DEFAULT_PROJECT_PALETTE);
+  const updateProjectPaletteColor = useSceneStore((state) => state.updateProjectPaletteColor);
+  const resetProjectPalette = useSceneStore((state) => state.resetProjectPalette);
+
+  const [selectedStrokePaletteId, setSelectedStrokePaletteId] = useState<string | undefined>(() => {
+    const match = projectPalette.find((p) => p.color.toLowerCase() === drawingStrokeColor.toLowerCase());
+    return match?.id;
+  });
+
+  const [selectedFillPaletteId, setSelectedFillPaletteId] = useState<string | undefined>(() => {
+    if (!drawingFillColor || drawingFillColor === 'none') return undefined;
+    const match = projectPalette.find((p) => p.color.toLowerCase() === drawingFillColor.toLowerCase());
+    return match?.id;
+  });
 
   // Find active layer object
   let activeLayerName = 'Calque Sélectionné';
@@ -130,34 +141,84 @@ export function DrawingToolsPanel({ onClose, onUndo, onClearLayer }: DrawingTool
         <div className="flex items-center justify-between">
           <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
             <Palette className="w-3.5 h-3.5 text-indigo-600" />
-            2. Couleur du trait
+            2. Couleur du trait (Palette Projet)
           </label>
-          <div
-            className="w-5 h-5 rounded-lg border border-slate-300 shadow-2xs"
-            style={{ backgroundColor: drawingStrokeColor }}
-          />
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={resetProjectPalette}
+              title="Réinitialiser les 16 couleurs de la palette du projet"
+              className="text-[10px] font-semibold text-slate-400 hover:text-indigo-600 flex items-center gap-0.5 cursor-pointer"
+            >
+              <RotateCcw className="w-3 h-3" />
+            </button>
+            <div
+              className="w-5 h-5 rounded-lg border border-slate-300 shadow-2xs"
+              style={{ backgroundColor: drawingStrokeColor }}
+            />
+          </div>
         </div>
 
-        <div className="flex flex-wrap gap-1.5 p-2 bg-slate-50 rounded-2xl border border-slate-200">
-          {COLOR_PALETTE.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setDrawingStrokeColor(c)}
-              className={`w-7 h-7 rounded-xl border-2 transition-transform cursor-pointer shadow-2xs ${
-                drawingStrokeColor === c
-                  ? 'border-indigo-600 scale-115 ring-2 ring-indigo-300/50'
-                  : 'border-white hover:scale-105'
-              }`}
-              style={{ backgroundColor: c }}
-            />
-          ))}
+        <div className="grid grid-cols-8 gap-1.5 p-2 bg-slate-50 rounded-2xl border border-slate-200">
+          {projectPalette.map((palItem, idx) => {
+            const isSelectedSlot =
+              selectedStrokePaletteId === palItem.id ||
+              (!selectedStrokePaletteId && drawingStrokeColor.toLowerCase() === palItem.color.toLowerCase());
+            const validHex =
+              palItem.color.startsWith('#') && palItem.color.length === 7
+                ? palItem.color
+                : palItem.color.length === 4
+                ? `#${palItem.color[1]}${palItem.color[1]}${palItem.color[2]}${palItem.color[2]}${palItem.color[3]}${palItem.color[3]}`
+                : '#6366f1';
+            return (
+              <label
+                key={palItem.id}
+                className={`w-7 h-7 rounded-xl border-2 transition-transform cursor-pointer shadow-2xs relative overflow-hidden flex items-center justify-center ${
+                  isSelectedSlot
+                    ? 'border-indigo-600 scale-115 ring-2 ring-indigo-300/50 z-10'
+                    : 'border-white hover:scale-105'
+                }`}
+                style={{ backgroundColor: palItem.color }}
+                title={`${palItem.name || `Couleur #${idx + 1}`} (${palItem.color}) — Appuyez directement pour choisir/modifier la couleur`}
+              >
+                <input
+                  type="color"
+                  value={validHex}
+                  onClick={() => {
+                    setSelectedStrokePaletteId(palItem.id);
+                    setDrawingStrokeColor(palItem.color);
+                  }}
+                  onChange={(e) => {
+                    const nextHex = e.target.value;
+                    setSelectedStrokePaletteId(palItem.id);
+                    setDrawingStrokeColor(nextHex);
+                    updateProjectPaletteColor(palItem.id, nextHex);
+                  }}
+                  className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                />
+              </label>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center justify-between gap-2 px-2 py-1.5 bg-indigo-50/50 rounded-xl border border-indigo-100">
+          <span className="text-[10px] font-bold text-indigo-700 truncate">
+            {selectedStrokePaletteId
+              ? `Modifier ${projectPalette.find((p) => p.id === selectedStrokePaletteId)?.name || 'ce slot'} (partagé)`
+              : 'Couleur libre :'}
+          </span>
           <input
             type="color"
             value={drawingStrokeColor.startsWith('#') ? drawingStrokeColor : '#6366f1'}
-            onChange={(e) => setDrawingStrokeColor(e.target.value)}
-            className="w-7 h-7 rounded-xl border-0 p-0 cursor-pointer overflow-hidden shadow-2xs"
-            title="Sélecteur de couleur personnalisé"
+            onChange={(e) => {
+              const nextHex = e.target.value;
+              setDrawingStrokeColor(nextHex);
+              if (selectedStrokePaletteId) {
+                updateProjectPaletteColor(selectedStrokePaletteId, nextHex);
+              }
+            }}
+            className="w-6 h-6 rounded-lg border border-slate-300 p-0 cursor-pointer overflow-hidden shadow-2xs shrink-0"
+            title="Modifier cette couleur de la palette pour tout le projet"
           />
         </div>
       </div>
@@ -171,7 +232,10 @@ export function DrawingToolsPanel({ onClose, onUndo, onClearLayer }: DrawingTool
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={() => setDrawingFillColor('none')}
+              onClick={() => {
+                setSelectedFillPaletteId(undefined);
+                setDrawingFillColor('none');
+              }}
               className={`px-2 py-0.5 text-[10px] font-bold rounded-md border transition-all cursor-pointer ${
                 drawingFillColor === 'none'
                   ? 'bg-rose-100 text-rose-700 border-rose-200 font-black'
@@ -189,26 +253,67 @@ export function DrawingToolsPanel({ onClose, onUndo, onClearLayer }: DrawingTool
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-1.5 p-2 bg-slate-50 rounded-2xl border border-slate-200">
-          {COLOR_PALETTE.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setDrawingFillColor(c)}
-              className={`w-7 h-7 rounded-xl border-2 transition-transform cursor-pointer shadow-2xs ${
-                drawingFillColor === c
-                  ? 'border-indigo-600 scale-115 ring-2 ring-indigo-300/50'
-                  : 'border-white hover:scale-105'
-              }`}
-              style={{ backgroundColor: c }}
-            />
-          ))}
+        <div className="grid grid-cols-8 gap-1.5 p-2 bg-slate-50 rounded-2xl border border-slate-200">
+          {projectPalette.map((palItem, idx) => {
+            const isSelectedSlot =
+              drawingFillColor !== 'none' &&
+              (selectedFillPaletteId === palItem.id ||
+                (!selectedFillPaletteId && drawingFillColor.toLowerCase() === palItem.color.toLowerCase()));
+            const validHex =
+              palItem.color.startsWith('#') && palItem.color.length === 7
+                ? palItem.color
+                : palItem.color.length === 4
+                ? `#${palItem.color[1]}${palItem.color[1]}${palItem.color[2]}${palItem.color[2]}${palItem.color[3]}${palItem.color[3]}`
+                : '#6366f1';
+            return (
+              <label
+                key={palItem.id}
+                className={`w-7 h-7 rounded-xl border-2 transition-transform cursor-pointer shadow-2xs relative overflow-hidden flex items-center justify-center ${
+                  isSelectedSlot
+                    ? 'border-indigo-600 scale-115 ring-2 ring-indigo-300/50 z-10'
+                    : 'border-white hover:scale-105'
+                }`}
+                style={{ backgroundColor: palItem.color }}
+                title={`${palItem.name || `Couleur #${idx + 1}`} (${palItem.color}) — Appuyez directement pour choisir/modifier la couleur`}
+              >
+                <input
+                  type="color"
+                  value={validHex}
+                  onClick={() => {
+                    setSelectedFillPaletteId(palItem.id);
+                    setDrawingFillColor(palItem.color);
+                  }}
+                  onChange={(e) => {
+                    const nextHex = e.target.value;
+                    setSelectedFillPaletteId(palItem.id);
+                    setDrawingFillColor(nextHex);
+                    updateProjectPaletteColor(palItem.id, nextHex);
+                  }}
+                  className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                />
+              </label>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center justify-between gap-2 px-2 py-1.5 bg-indigo-50/50 rounded-xl border border-indigo-100">
+          <span className="text-[10px] font-bold text-indigo-700 truncate">
+            {selectedFillPaletteId && drawingFillColor !== 'none'
+              ? `Modifier ${projectPalette.find((p) => p.id === selectedFillPaletteId)?.name || 'ce slot'} (partagé)`
+              : 'Remplissage personnalisé :'}
+          </span>
           <input
             type="color"
             value={drawingFillColor.startsWith('#') ? drawingFillColor : '#6366f1'}
-            onChange={(e) => setDrawingFillColor(e.target.value)}
-            className="w-7 h-7 rounded-xl border-0 p-0 cursor-pointer overflow-hidden shadow-2xs"
-            title="Sélecteur de couleur personnalisé"
+            onChange={(e) => {
+              const nextHex = e.target.value;
+              setDrawingFillColor(nextHex);
+              if (selectedFillPaletteId) {
+                updateProjectPaletteColor(selectedFillPaletteId, nextHex);
+              }
+            }}
+            className="w-6 h-6 rounded-lg border border-slate-300 p-0 cursor-pointer overflow-hidden shadow-2xs shrink-0"
+            title="Modifier cette couleur de la palette pour tout le projet"
           />
         </div>
       </div>

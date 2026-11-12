@@ -1,3 +1,45 @@
+## [Phase 10.6] - 2026-11-11
+### Ajouté & Amélioré
+- **Système Unifié de Ciblage Dynamique d'Instances en Mode Play (Compatibilité des 4 Pistes A, B, C et D)** :
+  - **Piste A — Ciblage par Tags (`#tag`) & Attribution de Tags au Spawn (`spawnTags`)** :
+    - Ajout d'un champ d'attribution de Tags optionnels dans `SpawnLocationPicker` (avec boutons rapides `+#projectile`, `+#piece`, `+#ennemi`, `+#cible`) permettant de tagger automatiquement toute nouvelle instance créée en cours de jeu.
+    - Ajout du mode de ciblage **"Par Tag (`#tag`)"** dans les actions sur objets tiers du `RuleBook`, agissant dynamiquement sur toutes les instances actives portant ce tag.
+  - **Piste B — Ciblage Contextuel de l'Instance en Contact (`targetMode: 'target'`)** :
+    - Résolution directe de l'identifiant unique (`targetInstanceId`) de l'objet touché lors d'une collision, même lorsque la règle de collision est définie par *Type d'archétype* ou par *Tag*.
+  - **Piste C — Référence Dynamique au Dernier Objet Créé (`targetMode: 'last_spawned'`)** :
+    - Mémorisation de l'`EntityId` retourné par `spawnEntity` au sein de la séquence d'exécution de la règle (`lastSpawnedEntityId`).
+    - Nouvelle cible **"Dernier objet créé"** permettant d'enchaîner dans une même règle la création d'une instance puis la modification de son état ou sa destruction après un délai.
+  - **Piste D — Requête Spatiale Dynamique dans les Comportements Autonomes (`nearest_type` & `nearest_tag`)** :
+    - Enrichissement des comportements **Aller vers (`move_to`)**, **Regarder vers (`look_at`)** et **Suivre (`follow`)** avec deux nouveaux modes : *Type d'objet le plus proche* et *Tag le plus proche (`#tag`)*.
+    - Calcul spatial euclidien temps réel à 60 FPS (`findNearestTarget`) dans `matterPhysicsEngine.ts` permettant de poursuivre ou viser automatiquement les instances créées à la volée.
+- **Palette Personnalisée Partagée par Projet (16 Couleurs avec IDs Durables & Sélecteur Direct au Clic)** :
+  - Extension de la palette de dessin de 12 à **16 couleurs** (`pal-1` à `pal-16`) stockée au niveau du projet (`projectPalette`) et persistée dans les sauvegardes/exports.
+  - **Sélecteur de couleur personnalisé directement sur la palette** : Appuyer directement sur n'importe quel emplacement de couleur dans la grille de la palette ouvre immédiatement le sélecteur de couleur natif et applique le choix à tout le projet.
+  - Liaison par identifiant (`strokeColorId`, `fillColorId`) sur chaque tracé vectoriel (`VectorPath`).
+  - Modification en direct d'une couleur de la palette (`updateProjectPaletteColor`) répercutée instantanément et durablement sur tous les dessins d'entités, états, archétypes personnalisés et calques de scène du projet qui utilisent ce slot.
+
+## [Phase 10.5] - 2026-11-11
+### Ajouté & Corrigé
+- **Option Freeze Rotation pour le Rigidbody 2D (`freezeRotation`)** :
+  - Ajout du paramètre `freezeRotation` dans la configuration physique (`PhysicsBehaviorConfig`) et dans l'interface de l'Inspecteur avec un switch clair.
+  - Définition de l'inertie infinie dans Matter.js (`inertia: Infinity`) et verrouillage à 0° de l'angle et de la vélocité angulaire à chaque itération. L'objet ne bascule plus et reste droit lors des chocs et glissements.
+- **Composant Modulaire d'Autodestruction Temporisée (`auto_destroy`)** :
+  - Nouveau composant disponible dans l'Inspecteur (Catégorie *Cycle de Vie & Nettoyage*) permettant de définir une durée de vie en secondes (`delay`) avant suppression automatique de l'objet.
+  - Décompte autonome géré frame par frame par la simulation physique, nettoyé proprement lors de l'arrêt du mode Play.
+- **Correction Complète des Événements avec Auto-remise (Hover Enter/Exit & Collision Enter/Exit)** :
+  - **Survol (Hover)** : suppression du cooldown parasite de 350ms sur les événements de sortie (`hover_exit`) et levée du filtre d'état strict sur la phase de sortie avec `autoRevert` actif, garantissant un retour immédiat à l'état initial.
+  - **Collision** : maintien de l'état de collision actif (`nextCollisions[collisionKey] = true`) même après changement d'état par la règle d'entrée, évitant l'interruption prématurée du contact. Séparation du cooldown `enter` vs `exit` pour que la séparation (`isExiting`) et l'auto-remise s'exécutent instantanément.
+- **Bascule d'État Avancée (Toggle State)** :
+  - Enrichissement du sélecteur d'action dans le Wizard et dans la modale d'actions :
+    1. Basculer entre 2 états précis choisis par l'utilisateur (menus déroulants avec aperçu).
+    2. Basculer entre l'état actuel et un état cible (aller-retour binaire mémorisant l'état d'origine).
+    3. Cycler séquentiellement entre tous les états de l'entité.
+  - Résumé lisible et détaillé affiché directement dans le RuleBook (`(État A ⇄ État B)` ou `(Actuel ⇄ Cible)`).
+- **Mode Dessin : Couleur Noire par Défaut** :
+  - Initialisation rigoureuse de `initialStrokeColor="#000000"` à l'ouverture du mode plein écran (`FullScreenDrawingModal.tsx`) et remplacement des couleurs de repli par le noir `#000000`.
+- **Nettoyage UX Inspecteur** :
+  - Retrait du badge numérique compteur de comportements à côté du bouton "Ajouter".
+
 ## [Phase 10.4] - 2026-11-11
 ### Amélioré & Refactorisé
 - **Inspecteur de Composants Style Unity (Attributs Empilés Ligne par Ligne)** :

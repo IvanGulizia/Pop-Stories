@@ -38,14 +38,22 @@ export interface VectorPath {
   id: string;
   d: string;
   stroke: string;
+  strokeColorId?: string;
   strokeWidth: number;
   fill?: string;
+  fillColorId?: string;
   transform?: string;
   // Metadata for geometric manipulation & interpolation
   type?: 'freehand' | 'polyline' | 'rectangle' | 'circle' | 'straight' | 'fill_bucket';
   points?: VectorPoint[];
   rect?: VectorRect;
   layerId?: string;
+}
+
+export interface ProjectPaletteColor {
+  id: string;
+  name?: string;
+  color: string; // hex color ex: '#000000'
 }
 
 export type ColliderType = 'box' | 'circle' | 'polygon';
@@ -66,6 +74,7 @@ export interface ColliderBounds {
 export type BehaviorType =
   | 'physics'
   | 'draggable'
+  | 'auto_destroy'
   | 'constant_velocity'
   | 'look_at'
   | 'follow'
@@ -88,6 +97,12 @@ export interface PhysicsBehaviorConfig extends BaseBehaviorConfig {
   mass: number;      // default 1
   isTrigger?: boolean; // false = solide avec rebond/blocage physique, true = trigger/fantôme
   isStatic?: boolean;  // true = obstacle fixe infranchissable
+  freezeRotation?: boolean; // Rigidbody2D Freeze Rotation (empêche la rotation sous les chocs)
+}
+
+export interface AutoDestroyBehaviorConfig extends BaseBehaviorConfig {
+  type: 'auto_destroy';
+  delay: number; // Durée de vie en secondes avant destruction automatique (ex: 3s)
 }
 
 export interface DraggableBehaviorConfig extends BaseBehaviorConfig {
@@ -105,16 +120,20 @@ export interface ConstantVelocityBehaviorConfig extends BaseBehaviorConfig {
 
 export interface LookAtBehaviorConfig extends BaseBehaviorConfig {
   type: 'look_at';
-  targetType: 'mouse' | 'entity';
+  targetType: 'mouse' | 'entity' | 'nearest_type' | 'nearest_tag';
   targetEntityId?: string;
+  targetEntityType?: EntityType;
+  targetTag?: string;
   rotationOffset: number; // degrees, default 0
   smoothSpeed: number;    // 0 = instant, >0 = smooth lerp speed
 }
 
 export interface FollowBehaviorConfig extends BaseBehaviorConfig {
   type: 'follow';
-  targetType: 'mouse' | 'entity';
+  targetType: 'mouse' | 'entity' | 'nearest_type' | 'nearest_tag';
   targetEntityId?: string;
+  targetEntityType?: EntityType;
+  targetTag?: string;
   speed: number;       // px/s, default 150
   minDistance: number; // stop distance, default 40
   smoothing: number;   // lerp factor 0..1, default 0.1
@@ -122,9 +141,11 @@ export interface FollowBehaviorConfig extends BaseBehaviorConfig {
 
 export interface MoveToBehaviorConfig extends BaseBehaviorConfig {
   type: 'move_to';
-  targetType: 'position' | 'entity';
+  targetType: 'position' | 'entity' | 'nearest_type' | 'nearest_tag';
   targetPosition?: { x: number; y: number };
   targetEntityId?: string;
+  targetEntityType?: EntityType;
+  targetTag?: string;
   speed: number;       // px/s, default 120
   stopOnArrival: boolean;
 }
@@ -154,6 +175,7 @@ export interface BoundaryBehaviorConfig extends BaseBehaviorConfig {
 export type EntityBehavior =
   | PhysicsBehaviorConfig
   | DraggableBehaviorConfig
+  | AutoDestroyBehaviorConfig
   | ConstantVelocityBehaviorConfig
   | LookAtBehaviorConfig
   | FollowBehaviorConfig
@@ -283,7 +305,7 @@ export interface RuleTrigger {
   variableValue?: number;
 }
 
-export type ActionTargetMode = 'subject' | 'target' | 'type' | 'tag' | 'instance';
+export type ActionTargetMode = 'subject' | 'target' | 'type' | 'tag' | 'instance' | 'last_spawned';
 
 export type ActionType = 'change_state' | 'toggle_state' | 'toggle_draggable' | 'delete_entity' | 'spawn_entity' | 'play_sound' | 'add_score' | 'delay';
 
@@ -310,13 +332,15 @@ export interface RuleFolder {
 export interface RuleAction {
   id: string;
   type: ActionType;
-  targetMode?: ActionTargetMode; // 'subject' (le sujet), 'target' (la cible), 'type', 'tag'
+  targetMode?: ActionTargetMode; // 'subject' (le sujet), 'target' (la cible), 'type', 'tag', 'last_spawned'
   targetId?: EntityId;
   targetType?: EntityType;
   targetTag?: string;
   targetStateId?: StateId;
+  toggleMode?: 'two_states' | 'current_and_target' | 'cycle_all';
   toggleStateAId?: StateId;
   toggleStateBId?: StateId;
+  toggleTargetStateId?: StateId;
   onlyInStateId?: StateId; // Condition optionnelle sur l'état actuel pour appliquer l'action
 
   // Champs pour 'delay' (Attendre / Pause)
@@ -325,6 +349,7 @@ export interface RuleAction {
   // Champs pour 'spawn_entity'
   spawnEntityType?: EntityType;
   spawnInitialStateId?: StateId;
+  spawnTags?: string[]; // Tags supplémentaires attribués à l'instance créée
   spawnLocation?: SpawnLocationMode; // 'at_subject', 'at_target', 'offset_subject', 'offset_target', 'random', 'absolute'
   spawnLocationMode?: SpawnLocationMode;
   spawnPosition?: Position;
@@ -384,6 +409,7 @@ export interface AppSettings {
   aspectRatio?: SceneAspectRatio;
   showRuleFolders?: boolean;
   entityFilterDisplayMode?: 'icon_only' | 'icon_and_text' | 'text_only';
+  projectPalette?: ProjectPaletteColor[];
 }
 
 export interface CursorPackExportData {
@@ -429,6 +455,7 @@ export interface ProjectExportData {
   customSounds?: CustomSound[];
   layerGroups?: SceneLayerGroup[];
   settings?: AppSettings;
+  projectPalette?: ProjectPaletteColor[];
 }
 
 

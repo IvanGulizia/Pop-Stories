@@ -80,9 +80,12 @@ type ActiveModal =
       pendingSpawnType?: EntityType;
       toggleStateA?: string;
       toggleStateB?: string;
+      toggleTargetStateId?: string;
+      toggleMode?: 'two_states' | 'current_and_target' | 'cycle_all';
       delayDuration?: number;
       spawnOffset?: { x: number; y: number };
       spawnAbsoluteCoords?: { x: number; y: number };
+      targetTag?: string;
     }
   | null;
 
@@ -124,6 +127,9 @@ interface WizardData {
   actionSoundType?: SoundType;
   toggleStateA?: string;
   toggleStateB?: string;
+  toggleTargetStateId?: string;
+  toggleMode?: 'two_states' | 'current_and_target' | 'cycle_all';
+  actionTargetTag?: string;
 
   // Configuration Minuteurs, Clavier, Proximité, Bords, Score
   timerInterval?: number;
@@ -253,7 +259,12 @@ export function RuleBook() {
 
       const targetEntObj = getEntityObj(targetType);
       const humanStateName = formatStateName(act.targetStateId, targetEntObj);
-      const targetLabel = targetEntObj?.name || targetType || 'Objet';
+      const targetLabel =
+        act.targetMode === 'last_spawned'
+          ? 'Dernier créé'
+          : act.targetMode === 'tag' && act.targetTag
+          ? `#${act.targetTag}`
+          : targetEntObj?.name || targetType || 'Objet';
 
       return (
         <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
@@ -270,7 +281,23 @@ export function RuleBook() {
     if (act.type === 'toggle_state') {
       const targetType = act.targetMode === 'subject' ? trigger.subjectType : (act.targetType || trigger.targetType || trigger.subjectType);
       const targetEntObj = getEntityObj(targetType);
-      const targetLabel = targetEntObj?.name || targetType || 'Objet';
+      const targetLabel =
+        act.targetMode === 'last_spawned'
+          ? 'Dernier créé'
+          : act.targetMode === 'tag' && act.targetTag
+          ? `#${act.targetTag}`
+          : targetEntObj?.name || targetType || 'Objet';
+
+      let detail = 'Cycle tous les états';
+      if (act.toggleStateAId && act.toggleStateBId && targetEntObj) {
+        const nameA = targetEntObj.states[act.toggleStateAId]?.name || act.toggleStateAId;
+        const nameB = targetEntObj.states[act.toggleStateBId]?.name || act.toggleStateBId;
+        detail = `${nameA} ⇄ ${nameB}`;
+      } else if (act.toggleTargetStateId && targetEntObj) {
+        const nameT = targetEntObj.states[act.toggleTargetStateId]?.name || act.toggleTargetStateId;
+        detail = `Actuel ⇄ ${nameT}`;
+      }
+
       return (
         <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
           <div className="w-5 h-5 rounded-md bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] shrink-0 font-black">
@@ -278,7 +305,7 @@ export function RuleBook() {
           </div>
           <span className="text-xs truncate">{targetLabel}</span>
           <span className="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.2 rounded font-medium truncate">
-            (Bascule d'état)
+            ({detail})
           </span>
         </div>
       );
@@ -286,7 +313,12 @@ export function RuleBook() {
     if (act.type === 'delete_entity') {
       const targetType = act.targetMode === 'subject' ? trigger.subjectType : (act.targetType || trigger.targetType || trigger.subjectType);
       const targetEntObj = getEntityObj(targetType);
-      const targetLabel = targetEntObj?.name || targetType || 'Objet';
+      const targetLabel =
+        act.targetMode === 'last_spawned'
+          ? 'Dernier créé'
+          : act.targetMode === 'tag' && act.targetTag
+          ? `#${act.targetTag}`
+          : targetEntObj?.name || targetType || 'Objet';
       return (
         <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
           <div className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center text-[10px] shrink-0 font-black">
@@ -305,6 +337,7 @@ export function RuleBook() {
       const spawnStateObj = spawnEntObj?.states[act.spawnInitialStateId || spawnEntObj?.currentStateId || ''];
       const humanStateName = spawnStateObj?.name || 'Normal';
       const spawnLabel = spawnEntObj?.name || spawnType;
+      const tagsBadge = act.spawnTags && act.spawnTags.length > 0 ? ` #${act.spawnTags[0]}` : '';
       return (
         <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
           <div className="w-5 h-5 rounded-md bg-slate-50 border border-slate-200 flex items-center justify-center p-0.5 shrink-0 overflow-hidden">
@@ -312,7 +345,7 @@ export function RuleBook() {
           </div>
           <span className="text-xs truncate">{spawnLabel}</span>
           <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded font-medium truncate">
-            (Créer - {humanStateName})
+            (Créer - {humanStateName}{tagsBadge})
           </span>
         </div>
       );
@@ -1530,6 +1563,10 @@ export function RuleBook() {
                               ? `Sujet (${subjectOpt?.label || subjectType})`
                               : act.targetMode === 'target'
                               ? `Cible (${targetOpt?.label || targetType})`
+                              : act.targetMode === 'last_spawned'
+                              ? 'Dernier créé'
+                              : act.targetMode === 'tag' && act.targetTag
+                              ? `#${act.targetTag}`
                               : getEntityObj(act.targetType)?.name || act.targetType || 'Objet';
                           actionDetail = `${targetLabel} → ${actStateObj?.name || 'État ' + (act.targetStateId || '...')}`;
                         } else if (act.type === 'delete_entity') {
@@ -1539,6 +1576,10 @@ export function RuleBook() {
                               ? `Sujet (${subjectOpt?.label || subjectType})`
                               : act.targetMode === 'target'
                               ? `Cible (${targetOpt?.label || targetType})`
+                              : act.targetMode === 'last_spawned'
+                              ? 'Dernier créé'
+                              : act.targetMode === 'tag' && act.targetTag
+                              ? `#${act.targetTag}`
                               : getEntityObj(act.targetType)?.name || act.targetType || 'Objet';
                           actionDetail = `Supprimer ${targetLabel}`;
                         } else if (act.type === 'spawn_entity') {
@@ -1665,6 +1706,10 @@ export function RuleBook() {
                                     ? `Sujet (${subjectOpt?.label || 'Objet'})`
                                     : act.targetMode === 'target'
                                     ? `Cible (${targetOpt?.label || 'Objet'})`
+                                    : act.targetMode === 'last_spawned'
+                                    ? '✨ Dernier objet créé'
+                                    : act.targetMode === 'tag' && act.targetTag
+                                    ? `🏷️ Tag #${act.targetTag}`
                                     : actEntity?.name || act.targetType || 'Autre Objet'}
                                 </div>
                                 <div className="text-[9px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md font-medium truncate mt-0.5">
@@ -3496,8 +3541,59 @@ export function RuleBook() {
                   {activeWizard.actionSubStep === 'third_party_destroy_picker' && (
                     <div className="space-y-4">
                       <div className="text-xs font-bold text-slate-600">
-                        Choisissez quel autre objet vous souhaitez détruire :
+                        Choisissez quel objet (ou groupe d'instances dynamiques) détruire :
                       </div>
+
+                      {/* Pistes C & A : Dernier objet créé ou Tag dynamique */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-indigo-50/50 p-3 rounded-2xl border border-indigo-200/80">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            completeWizardWithAction({
+                              type: 'delete_entity',
+                              targetMode: 'last_spawned',
+                            });
+                          }}
+                          className="p-3 bg-white hover:bg-indigo-50 border border-indigo-200 hover:border-indigo-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-2xs"
+                        >
+                          <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-lg shrink-0">
+                            ✨
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-800">Dernier objet créé</div>
+                            <div className="text-[10px] text-slate-500">Cible la dernière instance apparue en jeu</div>
+                          </div>
+                        </button>
+
+                        <div className="p-2.5 bg-white border border-indigo-200 rounded-2xl flex items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[11px] font-black text-slate-800">🏷️ Par Tag (#tag)</div>
+                            <input
+                              type="text"
+                              value={activeWizard.actionTargetTag || ''}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, actionTargetTag: e.target.value.replace(/^#/, '') })}
+                              placeholder="ex: projectile, piece..."
+                              className="w-full mt-1 px-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            disabled={!activeWizard.actionTargetTag?.trim()}
+                            onClick={() => {
+                              if (!activeWizard.actionTargetTag?.trim()) return;
+                              completeWizardWithAction({
+                                type: 'delete_entity',
+                                targetMode: 'tag',
+                                targetTag: activeWizard.actionTargetTag.trim().replace(/^#/, ''),
+                              });
+                            }}
+                            className="px-3 py-1.5 bg-rose-600 disabled:bg-slate-200 text-white disabled:text-slate-400 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                          >
+                            Détruire
+                          </button>
+                        </div>
+                      </div>
+
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
                         {availableEntityOptions.map((opt) => {
                           const ent = getEntityObj(opt.type);
@@ -3579,14 +3675,148 @@ export function RuleBook() {
                     const relevantType = activeWizard.actionTargetType || availableEntityOptions[0]?.type || 'apple';
                     const ent = getEntityObj(relevantType);
                     const states = ent ? Object.values(ent.states) : [];
+                    const stateA = activeWizard.toggleStateA || states[0]?.id || '';
+                    const stateB = activeWizard.toggleStateB || (states[1]?.id || states[0]?.id || '');
+                    const targetState = activeWizard.toggleTargetStateId || (states[1]?.id || states[0]?.id || '');
 
                     return (
                       <div className="space-y-4">
                         <div className="text-xs font-bold text-slate-600">
                           Comment faire basculer {ent?.name || relevantType} ?
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                          {/* Option 1: Cycler tous les états */}
+
+                        <div className="space-y-3">
+                          {/* Option 1: Basculer spécifiquement entre 2 états précis */}
+                          {states.length >= 2 && (
+                            <div className="p-4 bg-white border-2 border-violet-200 rounded-3xl space-y-3 shadow-xs">
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center font-bold text-sm shrink-0">
+                                  ⇄
+                                </div>
+                                <div>
+                                  <div className="text-xs font-black text-slate-900">
+                                    Basculer entre 2 états précis
+                                  </div>
+                                  <div className="text-[11px] text-slate-500">
+                                    Passe alternativement de l'état A à l'état B à chaque déclenchement
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                                <div>
+                                  <label className="text-[10px] font-bold text-slate-500 block mb-1">
+                                    Premier état (A) :
+                                  </label>
+                                  <select
+                                    value={stateA}
+                                    onChange={(e) =>
+                                      setActiveWizard({ ...activeWizard, toggleStateA: e.target.value })
+                                    }
+                                    className="w-full text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl p-2 focus:outline-violet-500 cursor-pointer"
+                                  >
+                                    {states.map((st) => (
+                                      <option key={st.id} value={st.id}>
+                                        {st.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                <div>
+                                  <label className="text-[10px] font-bold text-slate-500 block mb-1">
+                                    Deuxième état (B) :
+                                  </label>
+                                  <select
+                                    value={stateB}
+                                    onChange={(e) =>
+                                      setActiveWizard({ ...activeWizard, toggleStateB: e.target.value })
+                                    }
+                                    className="w-full text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl p-2 focus:outline-violet-500 cursor-pointer"
+                                  >
+                                    {states.map((st) => (
+                                      <option key={st.id} value={st.id}>
+                                        {st.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  completeWizardWithAction({
+                                    type: 'toggle_state',
+                                    targetMode: 'type',
+                                    targetType: relevantType,
+                                    toggleMode: 'two_states',
+                                    toggleStateAId: stateA,
+                                    toggleStateBId: stateB,
+                                  });
+                                }}
+                                className="w-full py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs active:scale-98 cursor-pointer"
+                              >
+                                Valider la bascule ({ent?.states[stateA]?.name || 'A'} ⇄ {ent?.states[stateB]?.name || 'B'})
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Option 2: Basculer entre l'état actuel et un autre état */}
+                          {states.length >= 2 && (
+                            <div className="p-4 bg-white border-2 border-indigo-200 rounded-3xl space-y-3 shadow-xs">
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm shrink-0">
+                                  ⚡
+                                </div>
+                                <div>
+                                  <div className="text-xs font-black text-slate-900">
+                                    Basculer entre l'état actuel et un état cible
+                                  </div>
+                                  <div className="text-[11px] text-slate-500">
+                                    Passe à l'état cible, puis revient à l'état précédent au clic suivant
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-500 block mb-1">
+                                  État cible à activer/désactiver :
+                                </label>
+                                <select
+                                  value={targetState}
+                                  onChange={(e) =>
+                                    setActiveWizard({ ...activeWizard, toggleTargetStateId: e.target.value })
+                                  }
+                                  className="w-full text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl p-2 focus:outline-indigo-500 cursor-pointer"
+                                >
+                                  {states.map((st) => (
+                                    <option key={st.id} value={st.id}>
+                                      {st.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  completeWizardWithAction({
+                                    type: 'toggle_state',
+                                    targetMode: 'type',
+                                    targetType: relevantType,
+                                    toggleMode: 'current_and_target',
+                                    toggleTargetStateId: targetState,
+                                  });
+                                }}
+                                className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs active:scale-98 cursor-pointer"
+                              >
+                                Valider la bascule (Actuel ⇄ {ent?.states[targetState]?.name || 'Cible'})
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Option 3: Cycler tous les états */}
                           <button
                             type="button"
                             onClick={() => {
@@ -3594,51 +3824,23 @@ export function RuleBook() {
                                 type: 'toggle_state',
                                 targetMode: 'type',
                                 targetType: relevantType,
+                                toggleMode: 'cycle_all',
                               });
                             }}
-                            className="p-4 bg-slate-50 hover:bg-violet-50 border-2 border-slate-200 hover:border-violet-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                            className="w-full p-3.5 bg-slate-50 hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-300 rounded-3xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-2xs group active:scale-98"
                           >
-                            <div className="w-14 h-14 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
+                            <div className="w-10 h-10 rounded-2xl bg-slate-200 text-slate-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-105 transition-transform">
                               🔄
                             </div>
                             <div>
-                              <div className="text-xs font-black text-slate-900 group-hover:text-violet-700">
-                                Cycler entre tous les états ({states.length} états)
+                              <div className="text-xs font-black text-slate-800">
+                                Cycler séquentiellement entre tous les états ({states.length} états)
                               </div>
-                              <div className="text-[11px] text-slate-500 mt-0.5">
-                                Passe au suivant séquentiellement à chaque événement
+                              <div className="text-[11px] text-slate-500">
+                                Fait défiler les états 1 → 2 → 3... en boucle
                               </div>
                             </div>
                           </button>
-
-                          {/* Option 2: Basculer spécifiquement entre État 1 et État 2 */}
-                          {states.length >= 2 && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                completeWizardWithAction({
-                                  type: 'toggle_state',
-                                  targetMode: 'type',
-                                  targetType: relevantType,
-                                  toggleStateAId: states[0].id,
-                                  toggleStateBId: states[1].id,
-                                });
-                              }}
-                              className="p-4 bg-slate-50 hover:bg-violet-50 border-2 border-slate-200 hover:border-violet-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                            >
-                              <div className="w-14 h-14 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                                ⇄
-                              </div>
-                              <div>
-                                <div className="text-xs font-black text-slate-900 group-hover:text-violet-700">
-                                  Basculer : {states[0].name} ⇄ {states[1].name}
-                                </div>
-                                <div className="text-[11px] text-slate-500 mt-0.5">
-                                  Aller-retour binaire entre ces 2 états
-                                </div>
-                              </div>
-                            </button>
-                          )}
                         </div>
                       </div>
                     );
@@ -3803,6 +4005,7 @@ export function RuleBook() {
                             spawnSizeMode: data.spawnSizeMode,
                             spawnScaleMultiplier: data.spawnScaleMultiplier,
                             spawnCustomSize: data.spawnCustomSize,
+                            spawnTags: data.spawnTags,
                           });
                         }}
                         onCancel={() => {
@@ -5032,8 +5235,59 @@ export function RuleBook() {
                     {activeModal.subStep === 'choose_third_party_destroy' && (
                       <div className="space-y-4">
                         <div className="text-xs font-bold text-slate-600">
-                          Cliquez sur l'objet à détruire / faire disparaître de la scène :
+                          Cliquez sur l'objet (ou groupe d'instances dynamiques) à détruire :
                         </div>
+
+                        {/* Pistes C & A : Dernier objet créé ou Tag dynamique */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-indigo-50/50 p-3 rounded-2xl border border-indigo-200/80">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              applyAction({
+                                type: 'delete_entity',
+                                targetMode: 'last_spawned',
+                              });
+                            }}
+                            className="p-3 bg-white hover:bg-indigo-50 border border-indigo-200 hover:border-indigo-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-2xs"
+                          >
+                            <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-lg shrink-0">
+                              ✨
+                            </div>
+                            <div>
+                              <div className="text-xs font-black text-slate-800">Dernier objet créé</div>
+                              <div className="text-[10px] text-slate-500">Cible la dernière instance apparue en jeu</div>
+                            </div>
+                          </button>
+
+                          <div className="p-2.5 bg-white border border-indigo-200 rounded-2xl flex items-center justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[11px] font-black text-slate-800">🏷️ Par Tag (#tag)</div>
+                              <input
+                                type="text"
+                                value={activeModal.targetTag || ''}
+                                onChange={(e) => setActiveModal({ ...activeModal, targetTag: e.target.value.replace(/^#/, '') })}
+                                placeholder="ex: projectile, piece..."
+                                className="w-full mt-1 px-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              disabled={!activeModal.targetTag?.trim()}
+                              onClick={() => {
+                                if (!activeModal.targetTag?.trim()) return;
+                                applyAction({
+                                  type: 'delete_entity',
+                                  targetMode: 'tag',
+                                  targetTag: activeModal.targetTag.trim().replace(/^#/, ''),
+                                });
+                              }}
+                              className="px-3 py-1.5 bg-rose-600 disabled:bg-slate-200 text-white disabled:text-slate-400 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                            >
+                              Détruire
+                            </button>
+                          </div>
+                        </div>
+
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
                           {availableEntityOptions.map((opt) => {
                             const ent = getEntityObj(opt.type);
@@ -5117,13 +5371,148 @@ export function RuleBook() {
                       const ent = getEntityObj(relevantType);
                       const states = ent ? Object.values(ent.states) : [];
 
+                      const stateA = activeModal.toggleStateA || states[0]?.id || '';
+                      const stateB = activeModal.toggleStateB || (states[1]?.id || states[0]?.id || '');
+                      const targetState = activeModal.toggleTargetStateId || (states[1]?.id || states[0]?.id || '');
+
                       return (
                         <div className="space-y-4">
                           <div className="text-xs font-bold text-slate-600">
                             Comment faire basculer {ent?.name || relevantType} ?
                           </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                            {/* Option 1: Cycler tous les états */}
+
+                          <div className="space-y-3">
+                            {/* Option 1: Basculer spécifiquement entre 2 états précis */}
+                            {states.length >= 2 && (
+                              <div className="p-4 bg-white border-2 border-violet-200 rounded-3xl space-y-3 shadow-xs">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-8 h-8 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center font-bold text-sm shrink-0">
+                                    ⇄
+                                  </div>
+                                  <div>
+                                    <div className="text-xs font-black text-slate-900">
+                                      Basculer entre 2 états précis
+                                    </div>
+                                    <div className="text-[11px] text-slate-500">
+                                      Passe alternativement de l'état A à l'état B à chaque déclenchement
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                                  <div>
+                                    <label className="text-[10px] font-bold text-slate-500 block mb-1">
+                                      Premier état (A) :
+                                    </label>
+                                    <select
+                                      value={stateA}
+                                      onChange={(e) =>
+                                        setActiveModal({ ...activeModal, toggleStateA: e.target.value })
+                                      }
+                                      className="w-full text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl p-2 focus:outline-violet-500 cursor-pointer"
+                                    >
+                                      {states.map((st) => (
+                                        <option key={st.id} value={st.id}>
+                                          {st.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <div>
+                                    <label className="text-[10px] font-bold text-slate-500 block mb-1">
+                                      Deuxième état (B) :
+                                    </label>
+                                    <select
+                                      value={stateB}
+                                      onChange={(e) =>
+                                        setActiveModal({ ...activeModal, toggleStateB: e.target.value })
+                                      }
+                                      className="w-full text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl p-2 focus:outline-violet-500 cursor-pointer"
+                                    >
+                                      {states.map((st) => (
+                                        <option key={st.id} value={st.id}>
+                                          {st.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    applyAction({
+                                      type: 'toggle_state',
+                                      targetMode: 'type',
+                                      targetType: relevantType,
+                                      toggleMode: 'two_states',
+                                      toggleStateAId: stateA,
+                                      toggleStateBId: stateB,
+                                    });
+                                  }}
+                                  className="w-full py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs active:scale-98 cursor-pointer"
+                                >
+                                  Valider la bascule ({ent?.states[stateA]?.name || 'A'} ⇄ {ent?.states[stateB]?.name || 'B'})
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Option 2: Basculer entre l'état actuel et un autre état */}
+                            {states.length >= 2 && (
+                              <div className="p-4 bg-white border-2 border-indigo-200 rounded-3xl space-y-3 shadow-xs">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm shrink-0">
+                                    ⚡
+                                  </div>
+                                  <div>
+                                    <div className="text-xs font-black text-slate-900">
+                                      Basculer entre l'état actuel et un état cible
+                                    </div>
+                                    <div className="text-[11px] text-slate-500">
+                                      Passe à l'état cible, puis revient à l'état précédent au clic suivant
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <label className="text-[10px] font-bold text-slate-500 block mb-1">
+                                    État cible à activer/désactiver :
+                                  </label>
+                                  <select
+                                    value={targetState}
+                                    onChange={(e) =>
+                                      setActiveModal({ ...activeModal, toggleTargetStateId: e.target.value })
+                                    }
+                                    className="w-full text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl p-2 focus:outline-indigo-500 cursor-pointer"
+                                  >
+                                    {states.map((st) => (
+                                      <option key={st.id} value={st.id}>
+                                        {st.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    applyAction({
+                                      type: 'toggle_state',
+                                      targetMode: 'type',
+                                      targetType: relevantType,
+                                      toggleMode: 'current_and_target',
+                                      toggleTargetStateId: targetState,
+                                    });
+                                  }}
+                                  className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs active:scale-98 cursor-pointer"
+                                >
+                                  Valider la bascule (Actuel ⇄ {ent?.states[targetState]?.name || 'Cible'})
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Option 3: Cycler tous les états */}
                             <button
                               type="button"
                               onClick={() => {
@@ -5131,51 +5520,23 @@ export function RuleBook() {
                                   type: 'toggle_state',
                                   targetMode: 'type',
                                   targetType: relevantType,
+                                  toggleMode: 'cycle_all',
                                 });
                               }}
-                              className="p-4 bg-slate-50 hover:bg-violet-50 border-2 border-slate-200 hover:border-violet-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                              className="w-full p-3.5 bg-slate-50 hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-300 rounded-3xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-2xs group active:scale-98"
                             >
-                              <div className="w-14 h-14 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
+                              <div className="w-10 h-10 rounded-2xl bg-slate-200 text-slate-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-105 transition-transform">
                                 🔄
                               </div>
                               <div>
-                                <div className="text-xs font-black text-slate-900 group-hover:text-violet-700">
-                                  Cycler entre tous les états
+                                <div className="text-xs font-black text-slate-800">
+                                  Cycler séquentiellement entre tous les états ({states.length} états)
                                 </div>
-                                <div className="text-[11px] text-slate-500 mt-0.5">
-                                  Passe au suivant à chaque événement
+                                <div className="text-[11px] text-slate-500">
+                                  Fait défiler les états 1 → 2 → 3... en boucle
                                 </div>
                               </div>
                             </button>
-
-                            {/* Option 2: Basculer spécifiquement entre État 1 et État 2 */}
-                            {states.length >= 2 && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  applyAction({
-                                    type: 'toggle_state',
-                                    targetMode: 'type',
-                                    targetType: relevantType,
-                                    toggleStateAId: states[0].id,
-                                    toggleStateBId: states[1].id,
-                                  });
-                                }}
-                                className="p-4 bg-slate-50 hover:bg-violet-50 border-2 border-slate-200 hover:border-violet-500 rounded-3xl flex items-center gap-3.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                              >
-                                <div className="w-14 h-14 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform">
-                                  ⇄
-                                </div>
-                                <div>
-                                  <div className="text-xs font-black text-slate-900 group-hover:text-violet-700">
-                                    Basculer : {states[0].name} ⇄ {states[1].name}
-                                  </div>
-                                  <div className="text-[11px] text-slate-500 mt-0.5">
-                                    Aller-retour binaire entre 2 états
-                                  </div>
-                                </div>
-                              </button>
-                            )}
                           </div>
                         </div>
                       );
@@ -5234,6 +5595,7 @@ export function RuleBook() {
                               spawnSizeMode: data.spawnSizeMode,
                               spawnScaleMultiplier: data.spawnScaleMultiplier,
                               spawnCustomSize: data.spawnCustomSize,
+                              spawnTags: data.spawnTags,
                             });
                           }}
                           onCancel={() => {

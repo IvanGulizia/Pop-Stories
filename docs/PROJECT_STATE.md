@@ -1,6 +1,23 @@
 # État du Projet
 
 ## Complété
+- **Ciblage Dynamique d'Instances en Mode Play (Pistes A, B, C, D) & Palette Projet Partagée 16 Couleurs (Phase 10.6)** :
+  - **Compatibilité totale des 4 pistes de ciblage d'instances** :
+    - **Piste A (Tags `#tag` + `spawnTags`)** : Attribution de tags à la création d'un objet (`SpawnLocationPicker`) et ciblage de groupe par tag dans les actions et déclencheurs.
+    - **Piste B (Cible de collision `target`)** : Ciblage isolé de l'instance exacte impliquée dans le contact physique, même sur une règle filtrée par type ou tag.
+    - **Piste C (`last_spawned`)** : Référence chainée au dernier objet apparu dans la séquence d'actions d'une règle.
+    - **Piste D (`nearest_type` / `nearest_tag`)** : Ciblage spatial dynamique à 60 FPS de l'instance la plus proche par type ou par tag dans les comportements `Move To`, `Look At` et `Follow`.
+  - **Palette personnalisée de 16 couleurs partagée au niveau du projet (Sélecteur direct au clic)** :
+    - Grille de 16 slots (`pal-1` à `pal-16`) partagée entre tous les dessins du projet.
+    - Appuyer directement sur n'importe quel carreau de la palette ouvre immédiatement le sélecteur de couleur et propage la modification dans tout le projet.
+    - Chaque tracé mémorise l'ID de son slot couleur (`strokeColorId`, `fillColorId`). Modifier la couleur d'un slot met à jour automatiquement tous les dessins existants du projet qui utilisent cette couleur.
+- **Freeze Rotation, Autodestruction (Lifespan), Auto-remise Fiabilisée, Toggle Avancé & Finitions UI (Phase 10.5)** :
+  - **Figer la rotation (`freezeRotation`)** : Option directe dans le composant Physique verrouillant l'inertie (`inertia: Infinity`) et forçant l'angle à 0° dans Matter.js pour conserver l'orientation verticale sous les chocs.
+  - **Composant Autodestruction (`auto_destroy`)** : Timer frame-par-frame autonome géré dans la boucle physique avec suppression automatique après le délai spécifié en secondes.
+  - **Auto-remise fiabilisée (Hover & Collision)** : Élimination des cooldowns résiduels bloquants et préservation de l'état de collision active pour permettre la restauration systématique à la sortie.
+  - **Bascule d'état paramétrable (Toggle State)** : Support complet du toggle entre 2 états choisis, entre état actuel et cible, ou en cycle continu, avec interface dédiée dans le Wizard et la modale d'actions.
+  - **Mode dessin initialisé en noir** : Couleur par défaut `#000000` appliquée à chaque ouverture.
+  - **Nettoyage Inspecteur** : Retrait du badge numérique compteur de comportements.
 - **Inspecteur de Composants Unity-Style, Override Unifié & Calibrage Physique Fina (Phase 10.4)** :
   - **Mise en page des attributs style Unity** : Chaque propriété d'un composant est empilée verticalement sur sa propre ligne pleine dans `BehaviorManager.tsx`, avec labels clairs, badges de valeurs et entrées aérées.
   - **Terminologie et ligne dédiée d'Override** : Abandon de "surcharge" au profit d'"Override", avec un bandeau dédié en tête de composant indiquant le contexte actif (`Partagé` ou `Override actif pour [État]`) et un bouton de création/suppression instantané.

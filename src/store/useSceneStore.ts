@@ -25,11 +25,31 @@ import {
   SceneLayerKind,
   EntityBehavior,
   BehaviorOverride,
+  ProjectPaletteColor,
 } from '../types';
 import { soundSynth } from '../utils/sound';
 import { getEntityColliderBounds } from '../utils/collider';
 import { resetMatterPhysicsRuntime, getActivePhysicsCollisionPairs } from '../utils/matterPhysicsEngine';
 import defaultCursorPack from '../data/defaultCursorPack.json';
+
+export const DEFAULT_PROJECT_PALETTE: ProjectPaletteColor[] = [
+  { id: 'pal-1', name: 'Noir encre', color: '#000000' },
+  { id: 'pal-2', name: 'Blanc pur', color: '#ffffff' },
+  { id: 'pal-3', name: 'Gris ardoise', color: '#475569' },
+  { id: 'pal-4', name: 'Gris perle', color: '#94a3b8' },
+  { id: 'pal-5', name: 'Rouge vif', color: '#ef4444' },
+  { id: 'pal-6', name: 'Orange ambré', color: '#f97316' },
+  { id: 'pal-7', name: 'Jaune or', color: '#f59e0b' },
+  { id: 'pal-8', name: 'Citron vert', color: '#84cc16' },
+  { id: 'pal-9', name: 'Émeraude', color: '#10b981' },
+  { id: 'pal-10', name: 'Sarcelle', color: '#14b8a6' },
+  { id: 'pal-11', name: 'Cyan azur', color: '#06b6d4' },
+  { id: 'pal-12', name: 'Bleu océan', color: '#3b82f6' },
+  { id: 'pal-13', name: 'Indigo', color: '#6366f1' },
+  { id: 'pal-14', name: 'Violet', color: '#8b5cf6' },
+  { id: 'pal-15', name: 'Rose vif', color: '#ec4899' },
+  { id: 'pal-16', name: 'Terre de Sienne', color: '#92400e' },
+];
 
 // Groupes de calques initiaux de la scène
 export const initialSceneLayerGroups: SceneLayerGroup[] = [
@@ -96,6 +116,9 @@ interface SceneState {
   folders: RuleFolder[];
   customSounds: CustomSound[];
   layerGroups: SceneLayerGroup[];
+  projectPalette: ProjectPaletteColor[];
+  updateProjectPaletteColor: (paletteId: string, newHexColor: string) => void;
+  resetProjectPalette: () => void;
   activeCollisions: Record<string, boolean>; // Trace l'état de collision pour chaque pair (ruleId_subId_tarId)
   selectedEntityId: EntityId | null;
   selectedLayerId: string | null;
@@ -115,11 +138,13 @@ interface SceneState {
   // Direct scene canvas drawing tools state
   drawingTool: 'pencil' | 'line' | 'rectangle' | 'circle' | 'bucket' | 'eraser_stroke' | 'eraser_partial' | 'select';
   drawingStrokeColor: string;
+  drawingStrokeColorId?: string;
   drawingFillColor: string;
+  drawingFillColorId?: string;
   drawingStrokeWidth: number;
   setDrawingTool: (tool: 'pencil' | 'line' | 'rectangle' | 'circle' | 'bucket' | 'eraser_stroke' | 'eraser_partial' | 'select') => void;
-  setDrawingStrokeColor: (color: string) => void;
-  setDrawingFillColor: (color: string) => void;
+  setDrawingStrokeColor: (color: string, colorId?: string) => void;
+  setDrawingFillColor: (color: string, colorId?: string) => void;
   setDrawingStrokeWidth: (width: number) => void;
 
   updateSettings: (partial: Partial<AppSettings>) => void;
@@ -176,7 +201,8 @@ interface SceneState {
     position: Position;
     initialStateId?: StateId;
     size?: Size;
-  }) => void;
+    tags?: string[];
+  }) => EntityId;
   deleteEntity: (id: EntityId) => void;
   clearAllEntities: () => void;
   clearProject: () => void;
@@ -689,12 +715,125 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   drawingTool: 'pencil',
   drawingStrokeColor: '#000000',
+  drawingStrokeColorId: 'pal-1',
   drawingFillColor: 'none',
+  drawingFillColorId: undefined,
   drawingStrokeWidth: 6,
   setDrawingTool: (tool) => set({ drawingTool: tool }),
-  setDrawingStrokeColor: (color) => set({ drawingStrokeColor: color }),
-  setDrawingFillColor: (color) => set({ drawingFillColor: color }),
+  setDrawingStrokeColor: (color, colorId) =>
+    set((state) => ({
+      drawingStrokeColor: color,
+      drawingStrokeColorId:
+        colorId !== undefined
+          ? colorId
+          : state.projectPalette.find((p) => p.color.toLowerCase() === color.toLowerCase())?.id,
+    })),
+  setDrawingFillColor: (color, colorId) =>
+    set((state) => ({
+      drawingFillColor: color,
+      drawingFillColorId:
+        colorId !== undefined
+          ? colorId
+          : color === 'none'
+          ? undefined
+          : state.projectPalette.find((p) => p.color.toLowerCase() === color.toLowerCase())?.id,
+    })),
   setDrawingStrokeWidth: (width) => set({ drawingStrokeWidth: width }),
+
+  projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
+
+  updateProjectPaletteColor: (paletteId, newHexColor) => {
+    set((state) => {
+      const oldColorObj = state.projectPalette.find((p) => p.id === paletteId);
+      const oldHex = oldColorObj?.color?.toLowerCase();
+      const updatedPalette = state.projectPalette.map((p) =>
+        p.id === paletteId ? { ...p, color: newHexColor } : p
+      );
+
+      const syncPathColor = (p: VectorPath): VectorPath => {
+        let nextStroke = p.stroke;
+        let nextStrokeId = p.strokeColorId;
+        let nextFill = p.fill;
+        let nextFillId = p.fillColorId;
+
+        if (p.strokeColorId === paletteId || (!p.strokeColorId && oldHex && p.stroke?.toLowerCase() === oldHex)) {
+          nextStroke = newHexColor;
+          nextStrokeId = paletteId;
+        }
+        if (p.fillColorId === paletteId || (!p.fillColorId && oldHex && p.fill && p.fill !== 'none' && p.fill.toLowerCase() === oldHex)) {
+          nextFill = newHexColor;
+          nextFillId = paletteId;
+        }
+        if (nextStroke !== p.stroke || nextFill !== p.fill || nextStrokeId !== p.strokeColorId || nextFillId !== p.fillColorId) {
+          return { ...p, stroke: nextStroke, strokeColorId: nextStrokeId, fill: nextFill, fillColorId: nextFillId };
+        }
+        return p;
+      };
+
+      const syncEntityColors = (ent: Entity): Entity => {
+        const nextStates: Record<StateId, EntityState> = {};
+        Object.entries(ent.states).forEach(([stId, st]) => {
+          nextStates[stId] = {
+            ...st,
+            vectorPaths: st.vectorPaths ? st.vectorPaths.map(syncPathColor) : st.vectorPaths,
+          };
+        });
+        return {
+          ...ent,
+          vectorPaths: ent.vectorPaths ? ent.vectorPaths.map(syncPathColor) : ent.vectorPaths,
+          states: nextStates,
+        };
+      };
+
+      const nextEntities: Record<EntityId, Entity> = {};
+      Object.entries(state.entities).forEach(([id, ent]) => {
+        nextEntities[id] = syncEntityColors(ent);
+      });
+
+      const nextArchetypes: Record<string, Entity> = {};
+      Object.entries(state.customArchetypes).forEach(([type, arch]) => {
+        nextArchetypes[type] = syncEntityColors(arch);
+      });
+
+      const nextLayerGroups = state.layerGroups.map((g) => ({
+        ...g,
+        layers: g.layers.map((l) => ({
+          ...l,
+          vectorPaths: l.vectorPaths ? l.vectorPaths.map(syncPathColor) : [],
+        })),
+      }));
+
+      return {
+        projectPalette: updatedPalette,
+        entities: nextEntities,
+        customArchetypes: nextArchetypes,
+        layerGroups: nextLayerGroups,
+        drawingStrokeColor:
+          state.drawingStrokeColorId === paletteId || (oldHex && state.drawingStrokeColor.toLowerCase() === oldHex)
+            ? newHexColor
+            : state.drawingStrokeColor,
+        drawingFillColor:
+          state.drawingFillColorId === paletteId || (oldHex && state.drawingFillColor.toLowerCase() === oldHex)
+            ? newHexColor
+            : state.drawingFillColor,
+        settings: {
+          ...state.settings,
+          projectPalette: updatedPalette,
+        },
+      };
+    });
+  },
+
+  resetProjectPalette: () => {
+    const fresh = JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE));
+    set((state) => ({
+      projectPalette: fresh,
+      settings: {
+        ...state.settings,
+        projectPalette: fresh,
+      },
+    }));
+  },
 
   settings: {
     aspectRatio: '1:1',
@@ -713,6 +852,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     playModeDimOpacity: 'light',
     showRuleFolders: false,
     entityFilterDisplayMode: 'icon_and_text',
+    projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
   },
 
   updateSettings: (partial) => {
@@ -1713,7 +1853,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     get().evaluateRules();
   },
 
-  spawnEntity: ({ type, position, initialStateId, size }) => {
+  spawnEntity: ({ type, position, initialStateId, size, tags }) => {
     const currentEntities = Object.values(get().entities);
     const archetype = get().customArchetypes[type] || currentEntities.find((e) => e.type === type);
 
@@ -1780,6 +1920,15 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       };
     }
 
+    // Fusionner les tags additionnels attribués au spawn (Piste A)
+    if (tags && tags.length > 0) {
+      const mergedTags = new Set([
+        ...(newEntity.tags || []),
+        ...tags.map((t) => t.toLowerCase().trim().replace(/^#/, '')).filter(Boolean),
+      ]);
+      newEntity.tags = Array.from(mergedTags);
+    }
+
     set((state) => {
       const order = state.entityOrder && state.entityOrder.length > 0
         ? [...state.entityOrder]
@@ -1794,6 +1943,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       };
     });
     get().evaluateRules();
+    return id;
   },
 
   deleteEntity: (id) => {
@@ -1834,6 +1984,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       folders: initialFolders,
       customSounds: [],
       layerGroups: JSON.parse(JSON.stringify(initialSceneLayerGroups)),
+      projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
       selectedEntityId: null,
       selectedLayerId: 'layer-bg-1',
       activeCollisions: {},
@@ -1851,6 +2002,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       folders: JSON.parse(JSON.stringify(initialFolders)),
       customSounds: [],
       layerGroups: JSON.parse(JSON.stringify(initialSceneLayerGroups)),
+      projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
       snapshotEntities: null,
       snapshotEntityOrder: null,
       selectedEntityId: 'plant-1',
@@ -1862,7 +2014,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   exportProject: () => {
-    const { entities, customArchetypes, rules, folders, customSounds, layerGroups, settings } = get();
+    const { entities, customArchetypes, rules, folders, customSounds, layerGroups, settings, projectPalette } = get();
     return {
       version: 1,
       name: 'Projet Atelier Vivant',
@@ -1873,7 +2025,11 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       folders,
       customSounds,
       layerGroups,
-      settings,
+      settings: {
+        ...settings,
+        projectPalette,
+      },
+      projectPalette,
     };
   },
 
@@ -1909,6 +2065,11 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         ? data.layerGroups
         : JSON.parse(JSON.stringify(initialSceneLayerGroups));
       const importedSettings = data.settings && typeof data.settings === 'object' ? data.settings : undefined;
+      const importedPalette: ProjectPaletteColor[] = Array.isArray(data.projectPalette) && data.projectPalette.length > 0
+        ? data.projectPalette
+        : Array.isArray(importedSettings?.projectPalette) && importedSettings.projectPalette.length > 0
+        ? importedSettings.projectPalette
+        : JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE));
 
       set((state) => ({
         entities: importedEntities,
@@ -1917,7 +2078,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         folders: importedFolders,
         customSounds: importedCustomSounds,
         layerGroups: importedLayerGroups,
-        settings: importedSettings ? { ...state.settings, ...importedSettings } : state.settings,
+        projectPalette: importedPalette,
+        settings: importedSettings
+          ? { ...state.settings, ...importedSettings, projectPalette: importedPalette }
+          : { ...state.settings, projectPalette: importedPalette },
         selectedEntityId: Object.keys(importedEntities)[0] || null,
         selectedLayerId: null,
         activeCollisions: {},
@@ -2327,9 +2491,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
       if (!phaseMatch) return false;
 
-      // Lors de la phase de relâchement/sortie avec autoRevert, ne pas filtrer par état initial
-      // car l'état de l'entité a déjà changé pendant la phase d'appui/entrée !
-      if (!isReleasePhase || !r.trigger.autoRevert) {
+      // Lors de la phase de relâchement/sortie avec autoRevert (ou phase de sortie explicite hover_exit/exit),
+      // ne pas bloquer si l'état a déjà changé suite à l'entrée !
+      const isExplicitExitRule = r.trigger.phase === 'exit' || r.trigger.phase === 'hover_exit';
+      if (!isReleasePhase || (!r.trigger.autoRevert && !isExplicitExitRule)) {
         if (
           r.trigger.subjectStateId &&
           r.trigger.subjectStateId !== '' &&
@@ -2343,8 +2508,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
     activePointerRules.forEach((rule) => {
       const cooldownKey = `ptr_${rule.id}_${subject.id}_${phase}`;
+      const isHoverType = phase === 'enter' || phase === 'hover_enter' || phase === 'exit' || phase === 'hover_exit';
       const isClickType = phase === 'click' || phase === 'down' || phase === 'up' || phase === 'mouse_down' || phase === 'mouse_up';
-      const cooldownMs = (phase === 'up' || phase === 'mouse_up') ? 50 : (phase === 'down' || phase === 'mouse_down') ? 0 : isClickType ? 20 : RULE_COOLDOWN_MS;
+      const cooldownMs = (phase === 'up' || phase === 'mouse_up' || isHoverType) ? 0 : (phase === 'down' || phase === 'mouse_down') ? 0 : isClickType ? 20 : RULE_COOLDOWN_MS;
 
       if (now - (ruleCooldowns[cooldownKey] || 0) < cooldownMs) {
         return;
@@ -2752,6 +2918,9 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
   },
 }));
 
+// Dernière instance créée dynamiquement en mode Play (Piste C : Référence "Dernier objet apparu")
+let lastSpawnedEntityId: EntityId | null = null;
+
 // Helper pour traiter les paires de collision avec anti-boucle
 function handleCollisionPair(
   rule: DynamicRule,
@@ -2766,56 +2935,61 @@ function handleCollisionPair(
     updateEntityState: (id: EntityId, stateId: StateId) => void;
     updateEntityDetails: (id: EntityId, partial: Partial<Entity>) => void;
     deleteEntity: (id: EntityId) => void;
-    spawnEntity: (params: { type: EntityType; position: Position; initialStateId?: StateId }) => void;
+    spawnEntity: (params: { type: EntityType; position: Position; initialStateId?: StateId; size?: Size; tags?: string[] }) => EntityId;
   }
 ) {
   const collisionKey = `${rule.id}_${subject.id}_${target.id}`;
   const wasColliding = !!activeCollisions[collisionKey];
   const isExiting = !isColliding && wasColliding;
 
-  // Filtrer par état spécifique du sujet (seulement sur l'entrée ou pendant le contact, pas sur la sortie quand l'état a déjà changé)
-  if (
-    !isExiting &&
-    rule.trigger.subjectStateId &&
-    rule.trigger.subjectStateId !== '' &&
-    subject.currentStateId !== rule.trigger.subjectStateId
-  ) {
+  // IMPORTANT: Si la collision physique est active, maintenir nextCollisions[collisionKey] = true
+  // pour que la sortie de collision et l'auto-remise puissent fonctionner même si l'état a été changé
+  // par la règle d'entrée !
+  if (isColliding) {
+    nextCollisions[collisionKey] = true;
+  } else {
     nextCollisions[collisionKey] = false;
-    return;
   }
 
-  // Filtrer par état spécifique de la cible
-  if (
-    !isExiting &&
-    rule.trigger.targetStateId &&
-    rule.trigger.targetStateId !== '' &&
-    target.currentStateId !== rule.trigger.targetStateId
-  ) {
-    nextCollisions[collisionKey] = false;
-    return;
+  // Filtrer par état spécifique uniquement lors du tout premier contact (On Enter)
+  // Ne pas filtrer pendant le contact continu (stay) ni lors de la séparation (isExiting)
+  if (!wasColliding && isColliding) {
+    if (
+      rule.trigger.subjectStateId &&
+      rule.trigger.subjectStateId !== '' &&
+      subject.currentStateId !== rule.trigger.subjectStateId
+    ) {
+      nextCollisions[collisionKey] = false;
+      return;
+    }
+    if (
+      rule.trigger.targetStateId &&
+      rule.trigger.targetStateId !== '' &&
+      target.currentStateId !== rule.trigger.targetStateId
+    ) {
+      nextCollisions[collisionKey] = false;
+      return;
+    }
   }
 
   const rulePhase = rule.trigger.phase || 'enter';
   let shouldExecute = false;
 
   if (isColliding && !wasColliding) {
-    // Enregistrer les états précédents pour le mode stay / autoRevert
+    // Premier contact (On Enter)
     preCollisionStates[collisionKey] = {
       subjectState: subject.currentStateId,
       targetState: target.currentStateId,
     };
 
-    // Premier contact (On Enter)
     if (rulePhase === 'enter' || rulePhase === 'stay') {
       shouldExecute = true;
     }
-    nextCollisions[collisionKey] = true;
   } else if (isColliding && wasColliding) {
     // Contact continu (Stay)
     if (rulePhase === 'stay') {
       shouldExecute = true;
     }
-    nextCollisions[collisionKey] = true;
   } else if (isExiting) {
     // Sortie / Séparation (Release / Exit)
     if (rulePhase === 'release' || rulePhase === 'exit') {
@@ -2836,13 +3010,13 @@ function handleCollisionPair(
     }
 
     delete preCollisionStates[collisionKey];
-    nextCollisions[collisionKey] = false;
   }
 
   if (shouldExecute) {
-    // Anti-loop cooldown debounce
-    const cooldownKey = `collision_${rule.id}_${subject.id}_${target.id}`;
-    if (now - (ruleCooldowns[cooldownKey] || 0) < RULE_COOLDOWN_MS) {
+    // Cooldown séparé enter vs exit pour réactivité immédiate à la séparation
+    const cooldownKey = `collision_${rule.id}_${subject.id}_${target.id}_${isExiting ? 'exit' : 'enter'}`;
+    const cooldownDuration = isExiting ? 0 : RULE_COOLDOWN_MS;
+    if (now - (ruleCooldowns[cooldownKey] || 0) < cooldownDuration) {
       return;
     }
     ruleCooldowns[cooldownKey] = now;
@@ -2869,7 +3043,7 @@ function executeRuleActions(
     updateEntityState: (id: EntityId, stateId: StateId) => void;
     updateEntityDetails: (id: EntityId, partial: Partial<Entity>) => void;
     deleteEntity: (id: EntityId) => void;
-    spawnEntity: (params: { type: EntityType; position: Position; initialStateId?: StateId; size?: Size }) => void;
+    spawnEntity: (params: { type: EntityType; position: Position; initialStateId?: StateId; size?: Size; tags?: string[] }) => EntityId;
   }
 ) {
   let accumulatedDelay = 0;
@@ -2900,7 +3074,7 @@ function executeAction(
     updateEntityState: (id: EntityId, stateId: StateId) => void;
     updateEntityDetails: (id: EntityId, partial: Partial<Entity>) => void;
     deleteEntity: (id: EntityId) => void;
-    spawnEntity: (params: { type: EntityType; position: Position; initialStateId?: StateId; size?: Size }) => void;
+    spawnEntity: (params: { type: EntityType; position: Position; initialStateId?: StateId; size?: Size; tags?: string[] }) => EntityId;
   }
 ) {
   if (act.type === 'add_score') {
@@ -2924,12 +3098,15 @@ function executeAction(
     return;
   }
 
+  // Toujours lire l'état à jour des entités (utile après un spawn ou un délai)
+  const liveEntities = useSceneStore.getState().entities || helpers.allEntities;
+
   if (act.type === 'spawn_entity') {
     const spawnType = act.spawnEntityType || 'custom';
     const locMode = act.spawnLocationMode || act.spawnLocation || (helpers.target ? 'at_target' : 'at_subject');
 
     // Find default archetype dimensions
-    const sampleEntity = Object.values(helpers.allEntities).find((e) => e.type === spawnType);
+    const sampleEntity = Object.values(liveEntities).find((e) => e.type === spawnType);
     const defaultW = sampleEntity?.size.width || 256;
     const defaultH = sampleEntity?.size.height || 256;
 
@@ -2999,12 +3176,16 @@ function executeAction(
       }
     }
 
-    helpers.spawnEntity({
+    const spawnedId = helpers.spawnEntity({
       type: spawnType,
       position: { x: Math.max(10, spawnX), y: Math.max(10, spawnY) },
       initialStateId: act.spawnInitialStateId,
       size: spawnSize,
+      tags: act.spawnTags,
     });
+    if (spawnedId) {
+      lastSpawnedEntityId = spawnedId;
+    }
     return;
   }
 
@@ -3013,38 +3194,45 @@ function executeAction(
   const targetMode: ActionTargetMode = act.targetMode || 'subject';
 
   if (targetMode === 'subject' && helpers.subject) {
-    targetEntities.push(helpers.subject);
+    const liveSubject = liveEntities[helpers.subject.id] || helpers.subject;
+    targetEntities.push(liveSubject);
   } else if (targetMode === 'target') {
     if (helpers.target) {
-      targetEntities.push(helpers.target);
+      const liveTarget = liveEntities[helpers.target.id] || helpers.target;
+      targetEntities.push(liveTarget);
     } else if (act.targetType) {
-      Object.values(helpers.allEntities).forEach((e) => {
+      Object.values(liveEntities).forEach((e) => {
         if (e.type === act.targetType) targetEntities.push(e);
       });
     } else if (helpers.subject) {
       // Pour les événements au clic (pas de collision/cible), fallback vers le sujet cliqué
-      targetEntities.push(helpers.subject);
+      const liveSubject = liveEntities[helpers.subject.id] || helpers.subject;
+      targetEntities.push(liveSubject);
+    }
+  } else if (targetMode === 'last_spawned') {
+    if (lastSpawnedEntityId && liveEntities[lastSpawnedEntityId]) {
+      targetEntities.push(liveEntities[lastSpawnedEntityId]);
     }
   } else if (targetMode === 'instance' && act.targetId) {
-    const e = helpers.allEntities[act.targetId];
+    const e = liveEntities[act.targetId];
     if (e) targetEntities.push(e);
   } else if (targetMode === 'type' && act.targetType) {
-    Object.values(helpers.allEntities).forEach((e) => {
+    Object.values(liveEntities).forEach((e) => {
       if (e.type === act.targetType) targetEntities.push(e);
     });
   } else if (targetMode === 'tag' && act.targetTag) {
     const cleanTag = act.targetTag.toLowerCase().trim().replace(/^#/, '');
-    Object.values(helpers.allEntities).forEach((e) => {
+    Object.values(liveEntities).forEach((e) => {
       if (e.tags?.includes(cleanTag)) targetEntities.push(e);
     });
   } else if (act.targetType && act.targetType !== helpers.subject?.type) {
     // Si l'action cible explicitement un type d'entité distinct
-    Object.values(helpers.allEntities).forEach((e) => {
+    Object.values(liveEntities).forEach((e) => {
       if (e.type === act.targetType) targetEntities.push(e);
     });
   } else if (act.targetId) {
     // Fallback
-    const e = helpers.allEntities[act.targetId];
+    const e = liveEntities[act.targetId];
     if (e) targetEntities.push(e);
   }
 
@@ -3076,16 +3264,30 @@ function executeAction(
 
       const stateA = act.toggleStateAId || (act as any).toggleStateA;
       const stateB = act.toggleStateBId || (act as any).toggleStateB;
+      const targetState = act.toggleTargetStateId;
 
-      // Mode 1 : Bascule binaire explicite entre A et B
-      if (stateA && stateB) {
+      // Mode 1 : Bascule binaire explicite entre 2 états précis A et B
+      if (act.toggleMode === 'two_states' || (stateA && stateB)) {
         if (entity.currentStateId === stateA) {
           nextStateId = stateB;
         } else {
           nextStateId = stateA;
         }
-      } else if (stateKeys.length > 1) {
-        // Mode 2 : Cycle ordonné complet entre TOUS les états
+      }
+      // Mode 2 : Bascule entre l'état actuel et un état cible
+      else if (act.toggleMode === 'current_and_target' || targetState) {
+        const dest = targetState || stateB || stateKeys[0];
+        const prevKey = `_prev_toggle_state_${entity.id}`;
+        if (entity.currentStateId === dest) {
+          const fallback = (entity as any)[prevKey] || stateKeys.find((s) => s !== dest) || stateKeys[0];
+          nextStateId = fallback;
+        } else {
+          (entity as any)[prevKey] = entity.currentStateId;
+          nextStateId = dest;
+        }
+      }
+      // Mode 3 : Cycle ordonné complet entre TOUS les états
+      else if (stateKeys.length > 1) {
         const currentIndex = stateKeys.indexOf(entity.currentStateId);
         const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % stateKeys.length : 0;
         nextStateId = stateKeys[nextIndex];

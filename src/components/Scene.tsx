@@ -116,6 +116,12 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           batchUpdateEntityTransforms(result.updatedTransforms);
         }
 
+        // Suppression automatique des entités expirées (Composant Auto-Destroy)
+        if (result.entitiesToDestroy && result.entitiesToDestroy.length > 0) {
+          const deleteEntity = useSceneStore.getState().deleteEntity;
+          result.entitiesToDestroy.forEach((id) => deleteEntity(id));
+        }
+
         // Évaluation systématique des règles de collision et capteurs à 60 FPS
         useSceneStore.getState().evaluateRules();
       }

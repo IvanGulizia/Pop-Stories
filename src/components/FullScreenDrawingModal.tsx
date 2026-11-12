@@ -146,6 +146,7 @@ export function FullScreenDrawingModal({
             initialLayers={initialLayers}
             onLayersChange={setCurrentLayers}
             initialColliderType={initialColliderType}
+            initialStrokeColor="#000000"
             onionStates={onionStates}
             currentEditingStateName={currentEditingStateName}
             onVectorChange={handleVectorChange}

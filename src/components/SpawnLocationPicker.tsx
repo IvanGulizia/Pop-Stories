@@ -26,6 +26,7 @@ export interface SpawnConfigData {
   spawnSizeMode?: 'default' | 'match_target' | 'match_subject' | 'custom';
   spawnScaleMultiplier?: number;
   spawnCustomSize?: Size;
+  spawnTags?: string[];
 }
 
 interface SpawnLocationPickerProps {
@@ -40,6 +41,7 @@ interface SpawnLocationPickerProps {
   initialSizeMode?: 'default' | 'match_target' | 'match_subject' | 'custom';
   initialScaleMultiplier?: number;
   initialCustomSize?: Size;
+  initialTags?: string[];
   onConfirm: (data: SpawnConfigData) => void;
   onCancel?: () => void;
 }
@@ -56,6 +58,7 @@ export function SpawnLocationPicker({
   initialSizeMode = 'default',
   initialScaleMultiplier = 1,
   initialCustomSize,
+  initialTags,
   onConfirm,
   onCancel,
 }: SpawnLocationPickerProps) {
@@ -72,6 +75,10 @@ export function SpawnLocationPicker({
   const [scaleMultiplier, setScaleMultiplier] = useState<number>(initialScaleMultiplier);
   const [customSize, setCustomSize] = useState<Size>(
     initialCustomSize || spawnEntity?.size || { width: 256, height: 256 }
+  );
+  // Tags attribués à l'instance générée (Piste A)
+  const [tagsInput, setTagsInput] = useState<string>(
+    (initialTags || spawnEntity?.tags || []).join(', ')
   );
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -141,6 +148,11 @@ export function SpawnLocationPicker({
   };
 
   const handleApply = () => {
+    const parsedTags = tagsInput
+      .split(',')
+      .map((t) => t.toLowerCase().trim().replace(/^#/, ''))
+      .filter(Boolean);
+
     onConfirm({
       spawnLocationMode: mode,
       spawnInitialStateId: selectedStateId,
@@ -150,6 +162,7 @@ export function SpawnLocationPicker({
       spawnSizeMode: sizeMode,
       spawnScaleMultiplier: scaleMultiplier,
       spawnCustomSize: sizeMode === 'custom' ? customSize : undefined,
+      spawnTags: parsedTags.length > 0 ? parsedTags : undefined,
     });
   };
 
@@ -707,6 +720,42 @@ export function SpawnLocationPicker({
           </div>
         </div>
       )}
+
+      {/* Attribution de Tags optionnels à l'instance créée (Piste A : Ciblage par Tag) */}
+      <div className="p-3 bg-indigo-50/50 border border-indigo-200/80 rounded-2xl space-y-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <label className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+            <span>🏷️ Tags attribués à l'objet créé (Optionnel) :</span>
+          </label>
+          <div className="flex items-center gap-1 flex-wrap">
+            {['projectile', 'piece', 'ennemi', 'cible'].map((presetTag) => (
+              <button
+                key={presetTag}
+                type="button"
+                onClick={() => {
+                  const current = tagsInput
+                    .split(',')
+                    .map((t) => t.trim().replace(/^#/, ''))
+                    .filter(Boolean);
+                  if (!current.includes(presetTag)) {
+                    setTagsInput([...current, presetTag].join(', '));
+                  }
+                }}
+                className="px-2 py-0.5 text-[10px] font-bold bg-white hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg cursor-pointer transition-colors"
+              >
+                +#{presetTag}
+              </button>
+            ))}
+          </div>
+        </div>
+        <input
+          type="text"
+          value={tagsInput}
+          onChange={(e) => setTagsInput(e.target.value)}
+          placeholder="Ex: projectile, ennemi (séparés par une virgule)"
+          className="w-full px-3 py-1.5 text-xs font-medium bg-white border border-indigo-200 rounded-xl focus:border-indigo-500 outline-none text-slate-800"
+        />
+      </div>
 
       {/* Confirm & Cancel Actions */}
       <div className="flex items-center justify-between gap-2.5 pt-3 border-t border-slate-100">
