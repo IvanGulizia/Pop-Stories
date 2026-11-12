@@ -1,6 +1,35 @@
 # État du Projet
 
 ## Complété
+- **Inspecteur de Composants Unity-Style, Override Unifié & Calibrage Physique Fina (Phase 10.4)** :
+  - **Mise en page des attributs style Unity** : Chaque propriété d'un composant est empilée verticalement sur sa propre ligne pleine dans `BehaviorManager.tsx`, avec labels clairs, badges de valeurs et entrées aérées.
+  - **Terminologie et ligne dédiée d'Override** : Abandon de "surcharge" au profit d'"Override", avec un bandeau dédié en tête de composant indiquant le contexte actif (`Partagé` ou `Override actif pour [État]`) et un bouton de création/suppression instantané.
+  - **Calibration du rebond (Restitution)** : Découplage strict entre rebond inter-objets (`physics.bounce`) et rebond sur les bordures de scène (`boundary_behavior.bounciness`), avec zéro rebond forcé par les murs.
+  - **Suppression d'offset sur les bords** : Parois physiques de 100px d'épaisseur calées strictement en dehors des limites `[0, w]` et `[0, h]`, assurant un contact au pixel près sur la bordure visible.
+  - **Détection des collisions fiabilisée** : Intégration en temps réel des paires de contact actives Matter.js (`getActivePhysicsCollisionPairs`), tolérance géométrique de 3px pour les contacts lents/statiques, et évaluation des règles à 60 FPS dans la boucle d'animation.
+- **Calibrage & Intégration Fidèle des Colliders du Mode Dessin (Phase 10.3)** :
+  - **Physique par défaut désactivée** : les entités sans composant `physics` sont strictement immobiles et statiques (`isStatic: true`), sans gravité ni dérive.
+  - **Élimination de l'hyper-accélération au lancer** : conversion exacte de la vitesse du drag (px/s) en pas de simulation Matter.js (~60Hz), annulation du lancer si l'utilisateur s'arrête avant de relâcher (`> 90ms`), et plafonnement sécurisé de la vitesse de projection.
+  - **Colliders 100% fidèles au mode dessin** : calcul de la forme (cercle, boîte, polygone), de l'échelle, du décalage de centre et des dimensions via `getEntityColliderBounds`. Les chocs physiques Matter.js coïncident au pixel près avec le rectangle/cercle vert pointillé dessiné.
+- **Moteur Physique Réaliste 2D Matter.js (`src/utils/matterPhysicsEngine.ts`)** :
+  - Remplacement intégral de l'ancien moteur arcade : simulation par corps rigides avec masse, inertie, friction, amortissement de l'air et restitution (rebond élastique).
+  - Gestion native des corps solides avec résolution d'impulsion continue, des obstacles statiques infranchissables (`isStatic: true`), et des capteurs/triggers (`isSensor: true` pour le mode `isTrigger`).
+  - Délimitation de la scène par des bordures physiques infranchissables.
+  - Déplacement cinématique en temps réel lors du glisser-déposer (`syncEntityDragPosition`) et projection avec inertie de lancer fluide (`setEntityRuntimeVelocity`).
+- **Inertie et Lancer Physique au Relâchement (Throw / Fling Momentum)** : Échantillonnage de la trajectoire durant le glissement et injection de la vitesse instantanée $(\Delta X/\Delta t, \Delta Y/\Delta t)$ dans le corps physique Matter.js à la fin du drag, avec simulation naturelle de la trajectoire balistique.
+- **Refonte de l'Override par Composant (1-Click Localisé)** : Badge visuel clair sur chaque composant (`Partagé` vs `Surcharge active pour [État]`), bouton instantané de surcharge ou d'annulation, et modification directe de la portée appropriée.
+- **Composant Modulaire "Déplaçable à la souris" (`draggable`)** : Intégration complète dans la liste des composants avec option `throwable` (inertie) et plafond de vitesse, éliminant la case à cocher isolée.
+- **Collisions Solides & Triggers (`isTrigger` & `isStatic`)** : Séparation physique et rebond élastique entre entités solides, avec support des obstacles fixes et des triggers fantômes.
+- **Éradication Définitive du Scintillement du Curseur sur Chrome** : Utilisation d'une texture PNG 19×19 Base64 matérielle éliminant le re-parsing SVG de Blink sur Chrome et Edge.
+- **Architecture de Comportements Modulaires (Entity-Component System) & Moteur Arcade 2D** :
+  - Bibliothèque complète de 8 composants inspirée de *Unity Playground*, *Ready Maker* et *Dan.TwoDManipulation* :
+    1. *Bordures de scène* : Rebond élastique, Wrap (téléportation continue), Clamp (butée).
+    2. *Contrôles joueur* : Flèches / ZQSD en mode Top-down 8 directions ou Plateforme avec saut.
+    3. *Physique de base* : Gravité réglable, vitesse continue ($V_x, V_y$, rotation continue), rebond, friction.
+    4. *Déplacements autonomes* : Patrouille (axe H/V, portée, pause aux bornes), Aller vers (Move To).
+    5. *Orientation & Suivi* : Look At (souris ou entité avec lissage angulaire), Follow (suivi de cible avec distance d'arrêt).
+  - Héritage et surcharges par état (`behaviorOverrides`) avec résolution pure (`getEffectiveBehaviors`).
+  - Interface dédiée dans l'Inspecteur (`BehaviorManager`) avec sélecteur de portée (Base vs État) et modale de sélection catégorisée.
 - **Gestionnaire Complet de Calques de Dessin (Drawing Layers)** : Chaque état d'objet intègre son propre système de calques (pile ordonnée, calque actif, visibilité œil, verrouillage cadenas, réglage d'opacité, réordonnancement premier-plan/arrière-plan, suppression et réassignation des tracés sélectionnés).
 - **Pot de Peinture Hybride Haute Fidélité (Option B)** : Remplissage vectoriel direct 100% pur sur les formes fermées (`fill: couleur` sans polygone créé) et détection à 1000×1000 px pour les croisements de traits multiples (préservant les segments droits sans déformation).
 - **Éradication Définitive du Scintillement du Curseur** : Mise en cache statique du curseur via `.atelier-fine-crosshair` dans `index.css` et arrêt des re-renders React à 120Hz sur le simple survol du pointeur.

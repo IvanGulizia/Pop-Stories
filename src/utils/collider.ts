@@ -22,21 +22,22 @@ export function extractPathsBounds(paths: VectorPath[]): { minX: number; maxX: n
   let hasBounds = false;
 
   paths.forEach((p) => {
+    const halfStroke = (p.strokeWidth || 2) / 2;
     if (p.rect) {
       hasBounds = true;
       const rx = p.rect.width < 0 ? p.rect.x + p.rect.width : p.rect.x;
       const ry = p.rect.height < 0 ? p.rect.y + p.rect.height : p.rect.y;
-      minX = Math.min(minX, rx);
-      maxX = Math.max(maxX, rx + Math.abs(p.rect.width));
-      minY = Math.min(minY, ry);
-      maxY = Math.max(maxY, ry + Math.abs(p.rect.height));
+      minX = Math.min(minX, rx - halfStroke);
+      maxX = Math.max(maxX, rx + Math.abs(p.rect.width) + halfStroke);
+      minY = Math.min(minY, ry - halfStroke);
+      maxY = Math.max(maxY, ry + Math.abs(p.rect.height) + halfStroke);
     } else if (p.points && p.points.length > 0) {
       hasBounds = true;
       p.points.forEach((pt) => {
-        minX = Math.min(minX, pt.x);
-        maxX = Math.max(maxX, pt.x);
-        minY = Math.min(minY, pt.y);
-        maxY = Math.max(maxY, pt.y);
+        minX = Math.min(minX, pt.x - halfStroke);
+        maxX = Math.max(maxX, pt.x + halfStroke);
+        minY = Math.min(minY, pt.y - halfStroke);
+        maxY = Math.max(maxY, pt.y + halfStroke);
       });
     } else if (p.d) {
       // Fallback: parse numbers from SVG path string
@@ -47,10 +48,10 @@ export function extractPathsBounds(paths: VectorPath[]): { minX: number; maxX: n
           const px = parseFloat(numbers[i]);
           const py = i + 1 < numbers.length ? parseFloat(numbers[i + 1]) : px;
           if (!isNaN(px) && !isNaN(py)) {
-            minX = Math.min(minX, px);
-            maxX = Math.max(maxX, px);
-            minY = Math.min(minY, py);
-            maxY = Math.max(maxY, py);
+            minX = Math.min(minX, px - halfStroke);
+            maxX = Math.max(maxX, px + halfStroke);
+            minY = Math.min(minY, py - halfStroke);
+            maxY = Math.max(maxY, py + halfStroke);
           }
         }
       }
@@ -74,11 +75,11 @@ export function getEntityColliderBounds(entity: Entity, currentState?: EntitySta
     const { minX, maxX, minY, maxY, hasBounds } = extractPathsBounds(paths);
 
     if (hasBounds && maxX > minX && maxY > minY) {
-      const padding = 4; // Exact padding used in DrawingCanvas
-      const x = Math.max(0, minX - padding);
-      const y = Math.max(0, minY - padding);
-      const width = Math.min(200, maxX - minX + padding * 2);
-      const height = Math.min(200, maxY - minY + padding * 2);
+      // Ajustement serré au tracé pour éliminer tout offset ou flottement visuel
+      const x = Math.max(0, Math.round(minX));
+      const y = Math.max(0, Math.round(minY));
+      const width = Math.min(200, Math.max(8, Math.round(maxX - minX)));
+      const height = Math.min(200, Math.max(8, Math.round(maxY - minY)));
       const centerX = x + width / 2;
       const centerY = y + height / 2;
       const radius = Math.max(width, height) / 2;
@@ -96,15 +97,24 @@ export function getEntityColliderBounds(entity: Entity, currentState?: EntitySta
     }
   }
 
-  // Fallback for icons or default procedural entities (centered 100x100 zone in 200x200 canvas)
-  const fallbackSize = 100;
-  const x = (200 - fallbackSize) / 2;
-  const y = (200 - fallbackSize) / 2;
-  const width = fallbackSize;
-  const height = fallbackSize;
+  // Fallback procédural calibré sur les proportions de rendu réelles
+  let fbWidth = 160;
+  let fbHeight = 160;
+  if (entity.type === 'apple') {
+    fbWidth = 170; // 85% du conteneur
+    fbHeight = 170;
+  } else if (entity.type === 'plant') {
+    fbWidth = 150;
+    fbHeight = 170;
+  }
+
+  const x = (200 - fbWidth) / 2;
+  const y = (200 - fbHeight) / 2;
+  const width = fbWidth;
+  const height = fbHeight;
   const centerX = 100;
   const centerY = 100;
-  const radius = fallbackSize / 2;
+  const radius = Math.max(width, height) / 2;
 
   return {
     x,

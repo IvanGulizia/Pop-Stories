@@ -1,3 +1,94 @@
+## [Phase 10.4] - 2026-11-11
+### Amélioré & Refactorisé
+- **Inspecteur de Composants Style Unity (Attributs Empilés Ligne par Ligne)** :
+  - Restructuration intégrale de `BehaviorManager.tsx` : suppression de toutes les grilles denses et étriquées.
+  - Chaque variable/attribut est désormais isolé dans sa propre ligne pleine et empilé verticalement de façon aérée et lisible, identique à l'Inspecteur d'Unity.
+  - Rendu visuel propre en cartes blanches légères avec label typographique, badges de valeurs temps réel et contrôles intuitifs (sliders, selects, inputs, boutons-bascules).
+- **Terminologie et Ligne Dédiée pour l'Override** :
+  - Remplacement systématique du terme "Surcharge" par **"Override"** dans l'ensemble de l'interface.
+  - Ajout d'une ligne d'en-tête dédiée au sommet de chaque composant déplié affichant l'état (`Override actif pour l'état [X]` ou `Valeur partagée (tous les états)`) avec bouton d'action direct (`+ Créer un override` / `Annuler l'override`).
+- **Calibration Différenciée du Rebond (Bounciness & Restitution)** :
+  - Décorrélation nette entre le rebond contre les autres entités physiques (`physics.bounce`) et le rebond contre les bords de la scène (`boundary_behavior.bounciness`).
+  - Murs et limites calibrés avec restitution neutre (0.0) et ajustement dynamique via l'écouteur `collisionStart` de Matter.js (`pair.restitution = boundaryBeh?.bounciness ?? physics?.bounce ?? 0.0`).
+  - Si `bounce = 0`, l'objet s'arrête net sans aucun rebond artificiel.
+- **Suppression Rigoureuse de l'Offset des Bords Invisibles** :
+  - Placement de l'épaisseur des parois (`wallThickness = 100`) strictement à l'extérieur des limites `[0, w]` et `[0, h]`.
+  - Élimination des décalages et paddings parasites dans `extractPathsBounds` et calibrage exact des fallbacks pour que les objets viennent buter et s'aligner précisément au pixel près sur la bordure visible du canvas.
+- **Fiabilisation de la Détection de Collisions (Lentes et Instantanées)** :
+  - Interrogation directe du solveur SAT/GJK de Matter.js via `getActivePhysicsCollisionPairs()` dans `checkCollision` pour une vérité terrain immédiate.
+  - Ajout d'une tolérance de contact de 3px dans le test géométrique AABB/cercle pour les corps au repos ou à très faible vitesse.
+  - Évaluation continue des règles à 60 FPS dans la boucle d'animation (`Scene.tsx`) réagissant instantanément aux trajectoires physiques autonomes (gravité, impulsions, patrouilles).
+
+## [Phase 10.3] - 2026-11-11
+### Corrigé & Calibré
+- **Désactivation de la physique par défaut pour les entités sans composant** :
+  - Les entités sans composant `physics` explicite sont désormais strictement statiques (`isStatic: true`), sans aucune gravité ni dérive.
+  - Seules les entités disposant du composant `physics` (avec `isStatic: false`) sont soumises à la gravité et aux forces dynamiques.
+  - Neutralisation de l'inertie de lancer au relâchement (`throwable`) pour les entités dépourvues de physique dynamique.
+- **Calibrage de la vitesse de lancer (Élimination de l'hyper-accélération)** :
+  - Conversion rigoureuse des vitesses du DOM (pixels/seconde) vers les unités de pas de Matter.js (pixels/trame à ~60Hz, soit division par 60), supprimant le facteur d'accélération intempestif ×60.
+  - Détection d'immobilité avant relâchement (`now - last.time <= 90ms`) : si le curseur s'arrête avant de lâcher, aucun lancer résiduel n'est appliqué.
+  - Double plafond de sécurité sur la vélocité maximale au lâcher et en vol (`maxSpeedPerTick = 25`, `maxVelocity = 30`).
+- **Détection exacte des Colliders du Mode Dessin pour Matter.js** :
+  - Extraction directe de la géométrie de collision (`getEntityColliderBounds`) issue du mode dessin (cercle, boîte, polygone).
+  - Calcul et calage des dimensions réelles (`scaleX`, `scaleY`), des décalages d'ancrage (`relCenterX`, `relCenterY`) et des rayons dans le repère de la scène.
+  - Recréation dynamique du corps Matter.js dès que la forme ou les dimensions du collider sont éditées dans l'atelier de dessin.
+  - Les collisions physiques et rebonds coïncident désormais avec une exactitude sub-pixel sur le contour vert en pointillés défini par l'utilisateur.
+
+## [Phase 10.2] - 2026-11-11
+### Ajouté & Remplacé
+- **Migration Intégrale vers le Moteur Physique Matter.js (`src/utils/matterPhysicsEngine.ts`)** :
+  - Remplacement complet et définitif de l'ancien moteur arcade par un moteur 2D standard de corps rigides (*Matter.js Engine, World, Bodies, Body, Composite*).
+  - Suppression intégrale de tous les fichiers et références à l'ancien moteur arcade.
+  - Simulation réaliste par corps rigides avec masse dynamique, inertie angulaire, friction, amortissement de l'air (`frictionAir`), et coefficient de restitution (rebond élastique).
+  - Murs et sol statiques infranchissables délimitant précisément la zone du canvas (`isStatic: true`).
+  - Prise en charge native des collisions solides entre objets avec résolution d'impulsion, des obstacles inamovibles (`isStatic`), et des zones de passage fantômes / détecteurs d'événements (`isSensor: true` pour le mode `isTrigger`).
+  - Synchronisation cinématique en direct lors du glisser-déposer (`syncEntityDragPosition`) garantissant que les objets bousculent physiquement leur environnement même lorsqu'ils sont tenus par le curseur.
+  - Calcul de l'inertie de lâcher (Throw / Fling Momentum) avec injection immédiate de la vitesse vectorielle $(V_x, V_y)$ dans le corps physique Matter.js (`setEntityRuntimeVelocity`).
+  - Intégration harmonieuse des comportements autonomes avec la simulation physique : contrôles joueur clavier (Top-down & Plateforme avec saut), vitesse continue, patrouille, Aller vers (Move To), Visée (Look At) et Suivi (Follow).
+
+## [Phase 10.1] - 2026-11-11
+### Ajouté & Optimisé
+- **Inertie et Lancer Physique au Glisser-Déposer (Throw / Fling Velocity)** :
+  - Échantillonnage de la trajectoire et du temps lors du drag (`handleDrag` avec mémoire glissante sur les dernières trames).
+  - Calcul du vecteur vitesse instantané $(\Delta X/\Delta t, \Delta Y/\Delta t)$ et injection directe dans le moteur physique via `setEntityRuntimeVelocity`.
+  - Continuation naturelle du mouvement avec gravité, rebond et friction lors du lâcher.
+- **Refonte de l'Override de Composants par État (1-Click Localisé)** :
+  - Suppression de l'onglet global déroutant : chaque composant affiche son statut direct (`Partagé (tous les états)` ou `Surcharge active pour [État]`).
+  - Bouton dédié sur chaque composant pour activer une surcharge (`+ Surcharger`) ou l'annuler (`Annuler la surcharge`).
+  - Modification transparente : agir sur les sliders modifie soit la surcharge si active, soit la valeur partagée pour tous les états.
+- **Composant Modulaire "Déplaçable à la souris" (`draggable`)** :
+  - Intégration de `draggable` dans la liste des composants avec option `throwable` (inertie) et plafond de vitesse.
+  - Suppression de la case à cocher redondante dans l'Inspecteur au profit du système de composants unifié.
+- **Collisions Solides & Triggers (`isTrigger` & `isStatic`)** :
+  - Séparation spatiale et impulsion de rebond élastique entre entités physiques solides (`isTrigger: false`).
+  - Prise en charge des obstacles statiques infranchissables (`isStatic: true`).
+- **Éradication Définitive du Scintillement du Curseur sur Chrome / Blink** :
+  - Remplacement de l'URL SVG dynamique par une texture 19×19 Base64 PNG matérielle avec point chaud centré `9 9`.
+  - Cache matériel immédiat par le composant GPU de Chrome, supprimant le re-parsing SVG de Blink lors des déplacements.
+- **Nettoyage UX** : Suppression du cadre/texte "aucun comportement attaché".
+
+## [Phase 10] - 2026-11-10
+### Ajouté & Optimisé
+- **Architecture de Comportements Modulaires (Entity-Component System)** :
+  - Ajout des composants de comportements sur les entités (`entity.behaviors`) et surcharges fines par état (`state.behaviorOverrides`).
+  - Moteur de résolution pur `getEffectiveBehaviors(entity, currentState)` permettant l'héritage d'entité et la surcharge sélective par état (ex: désactiver la gravité sur un état pomme sur l'arbre, activer sur l'état tombée).
+- **Moteur Physique Arcade 2D Réactif (`src/utils/arcadePhysicsEngine.ts`)** :
+  - Boucle d'animation fluide à 60 FPS en mode Play via `requestAnimationFrame` avec pas de temps dynamique protégé contre les saccades d'horloge.
+  - **Physique & Gravité** : Chute libre réglable (px/s²), masse, restitution/rebond élastique (0..1) et frottement de l'air/sol.
+  - **Vitesse continue (Projectile & Rotation)** : Déplacement continu vectoriel ($V_x, V_y$) et vitesse angulaire continue (°/s).
+  - **Contrôles Joueur (Clavier)** : Gestion fluide des flèches et touches ZQSD/WASD en mode *Vue de dessus (8 directions)* ou mode *Plateforme (gauche/droite + impulsion de saut avec gestion du sol)*.
+  - **Patrouille (Aller-retour autonome)** : Déplacement oscillatoire sur axe horizontal ou vertical, portée paramétrable et temps de pause aux extrémités.
+  - **Aller vers (Move To)** : Ralliement direct d'une position fixe $(X, Y)$ ou d'une autre entité de la scène à vitesse paramétrable.
+  - **Orientation & Visée (Look At)** : Alignement angulaire direct ou lissé (`smoothSpeed`) vers le curseur de souris ou une entité cible avec décalage angulaire.
+  - **Suivi (Follow)** : Poursuite de la souris ou d'une entité avec distance d'arrêt minimale et vitesse réglable.
+  - **Gestion des Bords de Scène (Boundaries)** : Rebond élastique, téléportation continue (Wrap style Asteroids) et butée infranchissable (Clamp).
+- **Interface Inspecteur & Gestionnaire de Composants (`BehaviorManager.tsx`)** :
+  - Panneau accordéon dédié avec sélecteur de portée instantané ("Base de l'objet" vs "Surcharges pour l'état X").
+  - Modale catégorisée d'ajout de composants selon les 5 univers fonctionnels.
+  - Sliders, inputs numériques et dropdowns pour tous les paramètres de comportement.
+  - Sauvegarde et restauration automatique des positions et rotations à la sortie du mode Play.
+
 ## [Phase 9.1] - 2026-11-10
 ### Ajouté & Perfectionné
 - **Élimination Définitive du Scintillement du Curseur** :

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { OnionStateOption } from './DrawingCanvas';
+import { BehaviorManager } from './BehaviorManager';
 
 export function Inspector() {
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
@@ -211,22 +212,8 @@ export function Inspector() {
         </div>
       )}
 
-      {/* Interaction */}
-      <div className="space-y-2">
-        <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-          <Hand className="w-3.5 h-3.5 text-indigo-600" /> Comportement
-        </label>
-        
-        <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-2xl border border-slate-200">
-          <span className="text-xs font-bold text-slate-700">Déplaçable à la souris</span>
-          <input
-            type="checkbox"
-            checked={selectedEntity.isDraggable}
-            onChange={(e) => updateEntityDetails(selectedEntity.id, { isDraggable: e.target.checked })}
-            className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
-          />
-        </div>
-      </div>
+      {/* Moteur Physique Arcade 2D & Composants modulaires */}
+      <BehaviorManager entity={selectedEntity} selectedStateId={selectedEntity.currentStateId} />
 
       {/* Liste des États (A, B, C...) */}
       <div className="space-y-3">

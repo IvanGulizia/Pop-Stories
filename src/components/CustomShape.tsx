@@ -4,6 +4,7 @@ import { useSceneStore } from '../store/useSceneStore';
 import { useEffect, useRef, useState } from 'react';
 import { isPointInsideEntityCollider, getEntityColliderBounds, getEntityColliderClipPath } from '../utils/collider';
 import { useAppCursor } from '../context/CursorContext';
+import { isEntityDraggable, setEntityRuntimeVelocity, syncEntityDragPosition } from '../utils/matterPhysicsEngine';
 
 interface CustomShapeProps {
   entity: Entity;
@@ -42,7 +43,9 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
     vectorPaths: [],
   };
 
-  const canDrag = !isResizing && (appMode !== 'play' || entity.isDraggable);
+  const { canDrag: canDragFromBehavior, throwable, maxThrowSpeed } = isEntityDraggable(entity, currentState);
+  const canDrag = !isResizing && (appMode !== 'play' || canDragFromBehavior);
+  const dragSamplesRef = useRef<{ x: number; y: number; time: number }[]>([]);
   const rules = useSceneStore((state) => state.rules);
 
   const hasClickRules = rules.some(
@@ -82,6 +85,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
 
   const handleDragStart = () => {
     isDraggingRef.current = true;
+    dragSamplesRef.current = [{ x: entity.position.x, y: entity.position.y, time: performance.now() }];
     setIsDragging(true);
     setCursorState('drag');
   };
@@ -102,10 +106,20 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
       hasMovedBeyondDragThresholdRef.current = true;
     }
 
+    // Échantillonnage de la trajectoire pour le calcul d'inertie de lancer
+    const now = performance.now();
+    dragSamplesRef.current.push({ x: numX, y: numY, time: now });
+    if (dragSamplesRef.current.length > 5) {
+      dragSamplesRef.current.shift();
+    }
+
     isDraggingRef.current = true;
     setCursorState('drag');
 
     if (!isNaN(numX) && !isNaN(numY)) {
+      if (appMode === 'play') {
+        syncEntityDragPosition(entity.id, numX, numY, entity.size.width, entity.size.height);
+      }
       evaluateRulesWithTemp({
         [entity.id]: { x: numX, y: numY },
       });
@@ -126,6 +140,37 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
       evaluateRulesWithTemp();
       if (hasMovedBeyondDragThresholdRef.current) {
         triggerDragRelease(entity.id);
+      }
+
+      // Injection de l'élan physique au lancer en mode Play
+      if (appMode === 'play' && throwable && dragSamplesRef.current.length >= 2) {
+        const samples = dragSamplesRef.current;
+        const now = performance.now();
+        const last = samples[samples.length - 1];
+
+        // Si la main s'est arrêtée plus de 90ms avant de relâcher le bouton, annuler le lancer
+        if (now - last.time <= 90) {
+          let first = samples[0];
+          for (let i = samples.length - 2; i >= 0; i--) {
+            if (last.time - samples[i].time >= 35) {
+              first = samples[i];
+              break;
+            }
+          }
+          const dt = (last.time - first.time) / 1000;
+          if (dt > 0.01 && dt < 0.3) {
+            let vx = (last.x - first.x) / dt;
+            let vy = (last.y - first.y) / dt;
+            const speed = Math.hypot(vx, vy);
+            if (speed > maxThrowSpeed) {
+              vx = (vx / speed) * maxThrowSpeed;
+              vy = (vy / speed) * maxThrowSpeed;
+            }
+            if (speed > 40) {
+              setEntityRuntimeVelocity(entity.id, Math.round(vx), Math.round(vy));
+            }
+          }
+        }
       }
     }
 

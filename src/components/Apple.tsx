@@ -4,6 +4,7 @@ import { useSceneStore } from '../store/useSceneStore';
 import { useEffect, useRef, useState } from 'react';
 import { isPointInsideEntityCollider, getColliderClipPath, getEntityColliderBounds, getEntityColliderClipPath } from '../utils/collider';
 import { useAppCursor } from '../context/CursorContext';
+import { isEntityDraggable, setEntityRuntimeVelocity, syncEntityDragPosition } from '../utils/matterPhysicsEngine';
 
 interface AppleProps {
   entity: Entity;
@@ -21,6 +22,7 @@ export function Apple({ entity, style }: AppleProps) {
 
   const showCanvasLabels = useSceneStore((state) => state.settings.showCanvasLabels);
   const enableHoverScaleAnimation = useSceneStore((state) => state.settings.enableHoverScaleAnimation);
+  const showColliderDebugGizmos = useSceneStore((state) => state.settings.showColliderDebugGizmos);
   const appMode = useSceneStore((state) => state.appMode);
 
   const [isResizing, setIsResizing] = useState(false);
@@ -37,7 +39,9 @@ export function Apple({ entity, style }: AppleProps) {
     rotation: 0,
   };
 
-  const canDrag = !isResizing && (appMode !== 'play' || entity.isDraggable);
+  const { canDrag: canDragFromBehavior, throwable, maxThrowSpeed } = isEntityDraggable(entity, currentState);
+  const canDrag = !isResizing && (appMode !== 'play' || canDragFromBehavior);
+  const dragSamplesRef = useRef<{ x: number; y: number; time: number }[]>([]);
 
   const x = useMotionValue(entity.position.x);
   const y = useMotionValue(entity.position.y);
@@ -51,6 +55,7 @@ export function Apple({ entity, style }: AppleProps) {
 
   const handleDragStart = () => {
     isDraggingRef.current = true;
+    dragSamplesRef.current = [{ x: entity.position.x, y: entity.position.y, time: performance.now() }];
     setIsDragging(true);
     setCursorState('drag');
   };
@@ -64,7 +69,16 @@ export function Apple({ entity, style }: AppleProps) {
     const numX = typeof currentX === 'string' ? parseFloat(currentX) : currentX;
     const numY = typeof currentY === 'string' ? parseFloat(currentY) : currentY;
 
+    const now = performance.now();
+    dragSamplesRef.current.push({ x: numX, y: numY, time: now });
+    if (dragSamplesRef.current.length > 5) {
+      dragSamplesRef.current.shift();
+    }
+
     if (!isNaN(numX) && !isNaN(numY)) {
+      if (appMode === 'play') {
+        syncEntityDragPosition(entity.id, numX, numY, entity.size.width, entity.size.height);
+      }
       evaluateRulesWithTemp({
         [entity.id]: { x: numX, y: numY },
       });
@@ -85,6 +99,36 @@ export function Apple({ entity, style }: AppleProps) {
       });
       evaluateRulesWithTemp();
       triggerDragRelease(entity.id);
+
+      // Injection de l'élan physique au lâcher en mode Play
+      if (appMode === 'play' && throwable && dragSamplesRef.current.length >= 2) {
+        const samples = dragSamplesRef.current;
+        const now = performance.now();
+        const last = samples[samples.length - 1];
+
+        if (now - last.time <= 90) {
+          let first = samples[0];
+          for (let i = samples.length - 2; i >= 0; i--) {
+            if (last.time - samples[i].time >= 35) {
+              first = samples[i];
+              break;
+            }
+          }
+          const dt = (last.time - first.time) / 1000;
+          if (dt > 0.01 && dt < 0.3) {
+            let vx = (last.x - first.x) / dt;
+            let vy = (last.y - first.y) / dt;
+            const speed = Math.hypot(vx, vy);
+            if (speed > maxThrowSpeed) {
+              vx = (vx / speed) * maxThrowSpeed;
+              vy = (vy / speed) * maxThrowSpeed;
+            }
+            if (speed > 40) {
+              setEntityRuntimeVelocity(entity.id, Math.round(vx), Math.round(vy));
+            }
+          }
+        }
+      }
     }
 
     setIsDragging(false);
@@ -311,6 +355,41 @@ export function Apple({ entity, style }: AppleProps) {
           }
         }}
       />
+      {/* Gizmo Debug des Colliders (si activé dans les réglages) */}
+      {showColliderDebugGizmos && (
+        <div className="absolute inset-0 pointer-events-none z-50">
+          <svg viewBox="0 0 200 200" className="w-full h-full overflow-visible">
+            {colliderType === 'circle' ? (
+              <circle
+                cx="100"
+                cy="100"
+                r="50"
+                fill="rgba(16, 185, 129, 0.15)"
+                stroke="#10b981"
+                strokeWidth="2"
+                strokeDasharray="4 3"
+              />
+            ) : (
+              <rect
+                x="50"
+                y="50"
+                width="100"
+                height="100"
+                fill="rgba(16, 185, 129, 0.15)"
+                stroke="#10b981"
+                strokeWidth="2"
+                strokeDasharray="4 3"
+                rx="4"
+              />
+            )}
+          </svg>
+          <div className="absolute -top-3.5 -left-3.5 bg-emerald-700 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs flex items-center gap-1 whitespace-nowrap">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-ping" />
+            <span>Zone : {colliderType}</span>
+          </div>
+        </div>
+      )}
+
       {/* Selection Ring & Resize Handle */}
       {isSelected && appMode !== 'play' && (
         <>

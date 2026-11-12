@@ -69,7 +69,7 @@ interface DrawingCanvasProps {
 }
 
 export const FINE_CROSSHAIR_CURSOR =
-  'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'19\' height=\'19\' viewBox=\'0 0 19 19\'%3E%3Cpath d=\'M9.5 1v17M1 9.5h17\' stroke=\'%23ffffff\' stroke-width=\'2.5\' stroke-linecap=\'round\'/%3E%3Cpath d=\'M9.5 1v17M1 9.5h17\' stroke=\'%230f172a\' stroke-width=\'1.2\' stroke-linecap=\'round\'/%3E%3C/svg%3E") 9 9, crosshair';
+  'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABMAAAATCAYAAAByUDbMAAAAN0lEQVR4nGNgIAD+IwFCagkCkCH84lqjho08w/4TAWCGEQJwmynFcMOo5rLBGwGjhg0Bw4hNRwArM0of2vmpUwAAAABJRU5ErkJggg==") 9 9, crosshair';
 
 const COLOR_PALETTE = [
   '#000000', '#ffffff', '#475569', '#ef4444', '#f97316', '#f59e0b',

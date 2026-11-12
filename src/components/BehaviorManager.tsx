@@ -1,0 +1,1368 @@
+import React, { useState } from 'react';
+import {
+  Entity,
+  EntityBehavior,
+  BehaviorType,
+  PhysicsBehaviorConfig,
+  DraggableBehaviorConfig,
+  ConstantVelocityBehaviorConfig,
+  LookAtBehaviorConfig,
+  FollowBehaviorConfig,
+  MoveToBehaviorConfig,
+  PatrolBehaviorConfig,
+  KeyboardControlBehaviorConfig,
+  BoundaryBehaviorConfig,
+  BehaviorOverride,
+} from '../types';
+import { useSceneStore } from '../store/useSceneStore';
+import {
+  Activity,
+  Hand,
+  ArrowRight,
+  Repeat,
+  Compass,
+  Move,
+  Gamepad2,
+  Shield,
+  Plus,
+  Trash2,
+  ChevronDown,
+  ChevronRight,
+  Layers,
+  Sparkles,
+  Undo2,
+  X,
+} from 'lucide-react';
+
+interface BehaviorManagerProps {
+  entity: Entity;
+  selectedStateId?: string;
+}
+
+export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProps) {
+  const updateEntityBehaviors = useSceneStore((state) => state.updateEntityBehaviors);
+  const updateStateBehaviorOverride = useSceneStore((state) => state.updateStateBehaviorOverride);
+  const removeStateBehaviorOverride = useSceneStore((state) => state.removeStateBehaviorOverride);
+  const entities = useSceneStore((state) => state.entities);
+
+  const baseBehaviors = entity.behaviors || [];
+  const stateList = Object.values(entity.states);
+
+  const [activeStateId, setActiveStateId] = useState<string>(
+    selectedStateId || entity.currentStateId
+  );
+  const [expandedBehaviorId, setExpandedBehaviorId] = useState<string | null>(baseBehaviors[0]?.id || null);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
+  // Sync with selectedStateId if it changes from parent Inspector
+  React.useEffect(() => {
+    if (selectedStateId && entity.states[selectedStateId]) {
+      setActiveStateId(selectedStateId);
+    }
+  }, [selectedStateId, entity.states]);
+
+  const targetState = entity.states[activeStateId] || stateList[0];
+  const targetEntityOptions = Object.values(entities).filter((e) => e.id !== entity.id);
+
+  const generateBehaviorId = (type: BehaviorType) => {
+    return `${type}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  };
+
+  const handleAddBehavior = (type: BehaviorType) => {
+    let newBehavior: EntityBehavior;
+
+    switch (type) {
+      case 'draggable':
+        newBehavior = {
+          id: generateBehaviorId('draggable'),
+          type: 'draggable',
+          enabled: true,
+          throwable: true,
+          maxThrowSpeed: 1500,
+        } as DraggableBehaviorConfig;
+        break;
+      case 'physics':
+        newBehavior = {
+          id: generateBehaviorId('physics'),
+          type: 'physics',
+          enabled: true,
+          isTrigger: false,
+          isStatic: false,
+          gravity: 400,
+          bounce: 0.4,
+          friction: 0.98,
+          mass: 1,
+        } as PhysicsBehaviorConfig;
+        break;
+      case 'constant_velocity':
+        newBehavior = {
+          id: generateBehaviorId('constant_velocity'),
+          type: 'constant_velocity',
+          enabled: true,
+          vx: 80,
+          vy: 0,
+          angularVelocity: 0,
+        } as ConstantVelocityBehaviorConfig;
+        break;
+      case 'look_at':
+        newBehavior = {
+          id: generateBehaviorId('look_at'),
+          type: 'look_at',
+          enabled: true,
+          targetType: 'mouse',
+          rotationOffset: 0,
+          smoothSpeed: 0,
+        } as LookAtBehaviorConfig;
+        break;
+      case 'follow':
+        newBehavior = {
+          id: generateBehaviorId('follow'),
+          type: 'follow',
+          enabled: true,
+          targetType: 'mouse',
+          speed: 120,
+          minDistance: 40,
+        } as FollowBehaviorConfig;
+        break;
+      case 'move_to':
+        newBehavior = {
+          id: generateBehaviorId('move_to'),
+          type: 'move_to',
+          enabled: true,
+          targetType: 'position',
+          targetPosition: { x: 200, y: 200 },
+          speed: 100,
+        } as MoveToBehaviorConfig;
+        break;
+      case 'patrol':
+        newBehavior = {
+          id: generateBehaviorId('patrol'),
+          type: 'patrol',
+          enabled: true,
+          axis: 'horizontal',
+          range: 120,
+          speed: 100,
+          pauseDuration: 0.5,
+        } as PatrolBehaviorConfig;
+        break;
+      case 'keyboard_control':
+        newBehavior = {
+          id: generateBehaviorId('keyboard_control'),
+          type: 'keyboard_control',
+          enabled: true,
+          layout: 'both',
+          speed: 180,
+          mode: 'top_down',
+          jumpForce: 450,
+        } as KeyboardControlBehaviorConfig;
+        break;
+      case 'boundary_behavior':
+        newBehavior = {
+          id: generateBehaviorId('boundary_behavior'),
+          type: 'boundary_behavior',
+          enabled: true,
+          mode: 'bounce',
+          bounciness: 0.8,
+        } as BoundaryBehaviorConfig;
+        break;
+    }
+
+    const updated = [...baseBehaviors, newBehavior];
+    updateEntityBehaviors(entity.id, updated);
+    setExpandedBehaviorId(newBehavior.id);
+    setIsAddModalOpen(false);
+  };
+
+  const handleDeleteBehavior = (behaviorId: string) => {
+    const updated = baseBehaviors.filter((b) => b.id !== behaviorId);
+    updateEntityBehaviors(entity.id, updated);
+    if (expandedBehaviorId === behaviorId) setExpandedBehaviorId(null);
+  };
+
+  const handleUpdateBaseBehavior = (behaviorId: string, partial: Partial<EntityBehavior>) => {
+    const updated = baseBehaviors.map((b) => {
+      if (b.id === behaviorId) {
+        return { ...b, ...partial } as EntityBehavior;
+      }
+      return b;
+    });
+    updateEntityBehaviors(entity.id, updated);
+  };
+
+  const handleToggleOverride = (behavior: EntityBehavior) => {
+    if (!targetState) return;
+    const currentOverride = targetState.behaviorOverrides?.[behavior.id];
+    if (currentOverride) {
+      // Annuler l'override et revenir au composant partagé
+      removeStateBehaviorOverride(entity.id, targetState.id, behavior.id);
+    } else {
+      // Cloner la configuration actuelle dans l'override de cet état
+      updateStateBehaviorOverride(entity.id, targetState.id, behavior.id, {
+        ...JSON.parse(JSON.stringify(behavior)),
+      });
+    }
+  };
+
+  const handleUpdateOverride = (behaviorId: string, partial: BehaviorOverride) => {
+    if (!targetState) return;
+    updateStateBehaviorOverride(entity.id, targetState.id, behaviorId, partial);
+  };
+
+  const getBehaviorIcon = (type: BehaviorType) => {
+    switch (type) {
+      case 'draggable':
+        return <Hand className="w-4 h-4 text-indigo-600" />;
+      case 'physics':
+        return <Activity className="w-4 h-4 text-emerald-600" />;
+      case 'constant_velocity':
+        return <ArrowRight className="w-4 h-4 text-cyan-600" />;
+      case 'look_at':
+        return <Compass className="w-4 h-4 text-indigo-600" />;
+      case 'follow':
+        return <Move className="w-4 h-4 text-violet-600" />;
+      case 'move_to':
+        return <Move className="w-4 h-4 text-amber-600" />;
+      case 'patrol':
+        return <Repeat className="w-4 h-4 text-blue-600" />;
+      case 'keyboard_control':
+        return <Gamepad2 className="w-4 h-4 text-rose-600" />;
+      case 'boundary_behavior':
+        return <Shield className="w-4 h-4 text-teal-600" />;
+    }
+  };
+
+  const getBehaviorTitle = (type: BehaviorType) => {
+    switch (type) {
+      case 'draggable':
+        return 'Déplaçable à la souris';
+      case 'physics':
+        return 'Physique & Gravité';
+      case 'constant_velocity':
+        return 'Vitesse Continue';
+      case 'look_at':
+        return 'Orientation (Look At)';
+      case 'follow':
+        return 'Suivre (Follow)';
+      case 'move_to':
+        return 'Aller vers (Move To)';
+      case 'patrol':
+        return 'Patrouille';
+      case 'keyboard_control':
+        return 'Contrôles Joueur';
+      case 'boundary_behavior':
+        return 'Bords de Scène';
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* En-tête de section */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+          <Activity className="w-4 h-4 text-indigo-600" />
+          <span>Composants & Physique</span>
+          <span className="text-[11px] font-normal text-slate-400">
+            ({baseBehaviors.length})
+          </span>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setIsAddModalOpen(true)}
+          className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 cursor-pointer shadow-2xs transition-all active:scale-95"
+          title="Ajouter un composant à cet objet"
+        >
+          <Plus className="w-3.5 h-3.5" /> Ajouter
+        </button>
+      </div>
+
+      {/* Sélecteur d'état inspecté si plusieurs états existent */}
+      {stateList.length > 1 && (
+        <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl p-1.5 overflow-x-auto scrollbar-thin">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1 shrink-0">
+            État inspecté :
+          </span>
+          {stateList.map((st) => {
+            const isTarget = st.id === activeStateId;
+            const overrideCount = st.behaviorOverrides ? Object.keys(st.behaviorOverrides).length : 0;
+            return (
+              <button
+                key={st.id}
+                type="button"
+                onClick={() => setActiveStateId(st.id)}
+                className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1 ${
+                  isTarget
+                    ? 'bg-indigo-600 text-white shadow-2xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                <span>{st.name}</span>
+                {overrideCount > 0 && (
+                  <span className={`text-[9px] px-1 rounded-full ${isTarget ? 'bg-indigo-400 text-white' : 'bg-amber-100 text-amber-800'}`}>
+                    {overrideCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Liste des Composants attachés */}
+      {baseBehaviors.length > 0 && (
+        <div className="space-y-2">
+          {baseBehaviors.map((behavior) => {
+            const isExpanded = expandedBehaviorId === behavior.id;
+            const overrides = targetState?.behaviorOverrides || {};
+            const override = overrides[behavior.id];
+            const hasOverride = Boolean(override);
+
+            const isEffectiveEnabled = hasOverride && override?.enabled !== undefined
+              ? override.enabled
+              : behavior.enabled;
+
+            return (
+              <div
+                key={behavior.id}
+                className={`bg-white rounded-2xl border transition-all shadow-2xs overflow-hidden ${
+                  hasOverride
+                    ? 'border-amber-300 ring-2 ring-amber-100/80'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                {/* Carte En-tête */}
+                <div
+                  onClick={() => setExpandedBehaviorId(isExpanded ? null : behavior.id)}
+                  className="p-2.5 flex items-center justify-between gap-2 cursor-pointer select-none"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <button
+                      type="button"
+                      className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      {isExpanded ? (
+                        <ChevronDown className="w-4 h-4" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4" />
+                      )}
+                    </button>
+                    <div className="w-7 h-7 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0">
+                      {getBehaviorIcon(behavior.type)}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 truncate">
+                        <span>{getBehaviorTitle(behavior.type)}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 flex items-center gap-1 truncate">
+                        {hasOverride ? (
+                          <span className="text-amber-700 font-semibold flex items-center gap-0.5">
+                            <Sparkles className="w-2.5 h-2.5 text-amber-500" /> Override {targetState?.name}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">Partagé</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    {/* Toggle activation on/off */}
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isEffectiveEnabled}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          if (hasOverride) {
+                            handleUpdateOverride(behavior.id, { enabled: checked });
+                          } else {
+                            handleUpdateBaseBehavior(behavior.id, { enabled: checked });
+                          }
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3.5 after:transition-all peer-checked:bg-indigo-600"></div>
+                    </label>
+
+                    {/* Supprimer le composant de l'entité */}
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteBehavior(behavior.id)}
+                      className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                      title="Supprimer ce composant"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Tiroir de Réglages du Composant */}
+                {isExpanded && (
+                  <div className="px-3 pb-3 pt-1 border-t border-slate-100 bg-slate-50/50 space-y-2 text-xs">
+                    {/* Ligne dédiée : Mention et action d'Override (Point 2) */}
+                    <div
+                      className={`p-2 rounded-xl flex items-center justify-between text-xs border ${
+                        hasOverride
+                          ? 'bg-amber-50 border-amber-300 text-amber-950 shadow-2xs'
+                          : 'bg-slate-100/80 border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {hasOverride ? (
+                          <>
+                            <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span className="truncate">
+                              <strong className="text-amber-950 font-bold">Override actif</strong> pour l'état{' '}
+                              <strong className="text-amber-800 underline decoration-amber-400">
+                                {targetState?.name}
+                              </strong>
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <Layers className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="truncate text-slate-600">Valeur partagée (tous les états)</span>
+                          </>
+                        )}
+                      </div>
+
+                      {stateList.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleOverride(behavior)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0 ml-2 ${
+                            hasOverride
+                              ? 'bg-amber-200 hover:bg-amber-300 text-amber-950 border border-amber-300 shadow-2xs'
+                              : 'bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 border border-slate-300 shadow-2xs'
+                          }`}
+                          title={
+                            hasOverride
+                              ? `Annuler l'override pour l'état ${targetState?.name} (revenir au composant partagé)`
+                              : `Créer un override spécifique pour l'état ${targetState?.name}`
+                          }
+                        >
+                          {hasOverride ? (
+                            <>
+                              <Undo2 className="w-3 h-3 text-amber-800" />
+                              <span>Annuler l'override</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3 h-3 text-indigo-500" />
+                              <span>Créer un override</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Formulaire des attributs empilés ligne par ligne (Point 1 - Style Unity Inspector) */}
+                    {renderBehaviorControls({
+                      behavior,
+                      override,
+                      isOverridden: hasOverride,
+                      onUpdateBase: (partial) => handleUpdateBaseBehavior(behavior.id, partial),
+                      onUpdateOverride: (partial) => handleUpdateOverride(behavior.id, partial),
+                      targetEntityOptions,
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Modal / Sélecteur d'Ajout de Composant */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-150">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center">
+                  <Plus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm">Ajouter un composant</h3>
+                  <p className="text-[11px] text-slate-500">Comportements et physique pour cet objet</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 max-h-[70vh] overflow-y-auto space-y-4">
+              {/* Catégorie 1: Manipulation à la Souris */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                  Manipulation à la Souris
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleAddBehavior('draggable')}
+                  className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                >
+                  <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                    <Hand className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-800 text-xs">Déplaçable à la souris (Drag & Throw)</div>
+                    <div className="text-[11px] text-slate-500">Permet d'attraper l'objet et de le projeter avec élan et inertie.</div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Catégorie 2: Bords de scène */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                  Bords de Scène
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleAddBehavior('boundary_behavior')}
+                  className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-teal-400 hover:bg-teal-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                >
+                  <div className="w-8 h-8 rounded-xl bg-teal-100 text-teal-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                    <Shield className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-800 text-xs">Gestion des Bords de Scène</div>
+                    <div className="text-[11px] text-slate-500">Rebond élastique, téléportation (Wrap) ou butée infranchissable.</div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Catégorie 3: Contrôles Joueur */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                  Contrôles Joueur
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleAddBehavior('keyboard_control')}
+                  className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-rose-400 hover:bg-rose-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                >
+                  <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                    <Gamepad2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-800 text-xs">Contrôles Clavier (Flèches / ZQSD)</div>
+                    <div className="text-[11px] text-slate-500">Pilotage direct en vue de dessus ou mode plateforme avec saut.</div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Catégorie 4: Physique & Vitesse */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                  Physique & Vitesse
+                </span>
+                <div className="space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleAddBehavior('physics')}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <Activity className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-800 text-xs">Gravité & Chute (RigidBody 2D)</div>
+                      <div className="text-[11px] text-slate-500">Masse, rebond élastique, obstacle fixe ou capteur trigger.</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleAddBehavior('constant_velocity')}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-cyan-400 hover:bg-cyan-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-cyan-100 text-cyan-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <ArrowRight className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-800 text-xs">Vitesse Continue (Projectile & Rotation)</div>
+                      <div className="text-[11px] text-slate-500">Propulsion vectorielle et rotation angulaire constante.</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Catégorie 5: Déplacements autonomes */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                  Déplacements Autonomes & Visée
+                </span>
+                <div className="space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleAddBehavior('patrol')}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <Repeat className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-800 text-xs">Patrouille (Va-et-vient)</div>
+                      <div className="text-[11px] text-slate-500">Mouvement oscillatoire horizontal ou vertical avec pause.</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleAddBehavior('move_to')}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <Move className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-800 text-xs">Aller vers (Move To)</div>
+                      <div className="text-[11px] text-slate-500">Ralliement automatique d'une coordonnée ou d'une autre entité.</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleAddBehavior('look_at')}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <Compass className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-800 text-xs">Orientation (Look At)</div>
+                      <div className="text-[11px] text-slate-500">Visée continue vers la souris ou une entité cible.</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleAddBehavior('follow')}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-violet-400 hover:bg-violet-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <Move className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-800 text-xs">Suivre (Follow)</div>
+                      <div className="text-[11px] text-slate-500">Poursuite continue avec distance minimale de sécurité.</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Formulaires dynamiques de configuration : Style Unity Inspector (Chaque attribut sur sa propre ligne empilée)
+function renderBehaviorControls({
+  behavior,
+  override,
+  isOverridden,
+  onUpdateBase,
+  onUpdateOverride,
+  targetEntityOptions,
+}: {
+  behavior: EntityBehavior;
+  override?: BehaviorOverride;
+  isOverridden: boolean;
+  onUpdateBase: (partial: Partial<EntityBehavior>) => void;
+  onUpdateOverride: (partial: BehaviorOverride) => void;
+  targetEntityOptions: Entity[];
+}) {
+  const update = (partial: any) => {
+    if (isOverridden) {
+      onUpdateOverride(partial);
+    } else {
+      onUpdateBase(partial);
+    }
+  };
+
+  switch (behavior.type) {
+    case 'draggable': {
+      const b = { ...behavior, ...(override || {}) } as DraggableBehaviorConfig;
+      return (
+        <div className="space-y-1.5">
+          {/* Ligne 1: Inertie au lancer */}
+          <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+            <div>
+              <div className="font-bold text-slate-700 text-xs">Inertie au lancer (Throw)</div>
+              <div className="text-[10px] text-slate-400">Projette l'objet selon la vitesse du geste au lâcher</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={b.throwable !== false}
+              onChange={(e) => update({ throwable: e.target.checked })}
+              className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+            />
+          </div>
+
+          {/* Ligne 2: Plafond de vitesse */}
+          {b.throwable !== false && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200">
+              <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                <span className="font-bold">Plafond de projection</span>
+                <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                  {b.maxThrowSpeed || 1500} px/s
+                </span>
+              </div>
+              <input
+                type="range"
+                min="300"
+                max="3000"
+                step="100"
+                value={b.maxThrowSpeed || 1500}
+                onChange={(e) => update({ maxThrowSpeed: parseFloat(e.target.value) })}
+                className="w-full accent-indigo-600"
+              />
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    case 'physics': {
+      const b = { ...behavior, ...(override || {}) } as PhysicsBehaviorConfig;
+      return (
+        <div className="space-y-1.5">
+          {/* Ligne 1: Collider Solide vs Trigger */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+            <div>
+              <div className="font-bold text-slate-700 text-xs">Collider Solide</div>
+              <div className="text-[10px] text-slate-400">
+                {b.isTrigger ? 'Zone fantôme / Capteur (traverse sans bloquer)' : 'Corps solide (bloque et repousse)'}
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={b.isTrigger !== true}
+              onChange={(e) => update({ isTrigger: !e.target.checked })}
+              className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+              title="Décocher pour en faire un Trigger (capteur sans collision physique)"
+            />
+          </div>
+
+          {/* Ligne 2: Obstacle Fixe */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+            <div>
+              <div className="font-bold text-slate-700 text-xs">Obstacle Fixe (Inamovible)</div>
+              <div className="text-[10px] text-slate-400">
+                {b.isStatic ? 'Immobile / Solide fixe (Masse infinie)' : 'Corps physique mobile (Dynamique)'}
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={b.isStatic === true}
+              onChange={(e) => update({ isStatic: e.target.checked })}
+              className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+              title="Cocher pour un mur, un sol ou une plateforme infranchissable"
+            />
+          </div>
+
+          {/* Ligne 3: Gravité verticale (seulement si non statique) */}
+          {!b.isStatic && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200">
+              <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                <span className="font-bold">Gravité verticale</span>
+                <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                  {b.gravity ?? 400} px/s²
+                </span>
+              </div>
+              <input
+                type="range"
+                min="-800"
+                max="1200"
+                step="50"
+                value={b.gravity ?? 400}
+                onChange={(e) => update({ gravity: parseFloat(e.target.value) })}
+                className="w-full accent-indigo-600"
+              />
+            </div>
+          )}
+
+          {/* Ligne 4: Rebond sur les autres objets */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <div>
+                <span className="font-bold">Rebond (Restitution)</span>
+                <span className="text-[10px] text-slate-400 block">Élasticité du choc avec les autres objets</span>
+              </div>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {Math.round((b.bounce ?? 0.4) * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={b.bounce ?? 0.4}
+              onChange={(e) => update({ bounce: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 5: Friction au contact */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <div>
+                <span className="font-bold">Friction (Adhérence)</span>
+                <span className="text-[10px] text-slate-400 block">Frottement de surface lors du glissement</span>
+              </div>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.friction ?? 0.98}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0.8"
+              max="1"
+              step="0.01"
+              value={b.friction ?? 0.98}
+              onChange={(e) => update({ friction: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 6: Masse du corps */}
+          {!b.isStatic && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200">
+              <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                <div>
+                  <span className="font-bold">Masse</span>
+                  <span className="text-[10px] text-slate-400 block">Influence la résistance aux chocs</span>
+                </div>
+                <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                  {b.mass ?? 1} kg
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0.2"
+                max="10"
+                step="0.2"
+                value={b.mass ?? 1}
+                onChange={(e) => update({ mass: parseFloat(e.target.value) })}
+                className="w-full accent-indigo-600"
+              />
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    case 'constant_velocity': {
+      const b = { ...behavior, ...(override || {}) } as ConstantVelocityBehaviorConfig;
+      return (
+        <div className="space-y-1.5">
+          {/* Ligne 1: Vitesse X */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <div>
+              <span className="font-bold text-slate-700 text-xs block">Vitesse horizontale X</span>
+              <span className="text-[10px] text-slate-400">Négatif = gauche, Positif = droite</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                value={b.vx}
+                onChange={(e) => update({ vx: parseFloat(e.target.value) || 0 })}
+                className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
+              />
+              <span className="text-slate-400 text-xs">px/s</span>
+            </div>
+          </div>
+
+          {/* Ligne 2: Vitesse Y */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <div>
+              <span className="font-bold text-slate-700 text-xs block">Vitesse verticale Y</span>
+              <span className="text-[10px] text-slate-400">Négatif = haut, Positif = bas</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                value={b.vy}
+                onChange={(e) => update({ vy: parseFloat(e.target.value) || 0 })}
+                className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
+              />
+              <span className="text-slate-400 text-xs">px/s</span>
+            </div>
+          </div>
+
+          {/* Ligne 3: Rotation continue */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Rotation continue</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.angularVelocity || 0} °/s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="-360"
+              max="360"
+              step="10"
+              value={b.angularVelocity || 0}
+              onChange={(e) => update({ angularVelocity: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+        </div>
+      );
+    }
+
+    case 'keyboard_control': {
+      const b = { ...behavior, ...(override || {}) } as KeyboardControlBehaviorConfig;
+      return (
+        <div className="space-y-1.5">
+          {/* Ligne 1: Mode de jeu */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Mode de jeu</span>
+            <select
+              value={b.mode}
+              onChange={(e) => update({ mode: e.target.value as any })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              <option value="top_down">Vue de dessus (8 directions)</option>
+              <option value="platformer">Plateforme (Gauche/Droite + Saut)</option>
+            </select>
+          </div>
+
+          {/* Ligne 2: Type de touches */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Touches actives</span>
+            <select
+              value={b.layout}
+              onChange={(e) => update({ layout: e.target.value as any })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              <option value="both">Flèches & ZQSD / WASD</option>
+              <option value="arrows">Flèches uniquement</option>
+              <option value="wasd">Touches ZQSD / WASD</option>
+            </select>
+          </div>
+
+          {/* Ligne 3: Vitesse de déplacement */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Vitesse de course</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.speed} px/s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="50"
+              max="500"
+              step="10"
+              value={b.speed}
+              onChange={(e) => update({ speed: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 4: Force de saut (si mode plateforme) */}
+          {b.mode === 'platformer' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200">
+              <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                <span className="font-bold">Impulsion de saut</span>
+                <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                  {b.jumpForce || 450} px/s
+                </span>
+              </div>
+              <input
+                type="range"
+                min="200"
+                max="800"
+                step="25"
+                value={b.jumpForce || 450}
+                onChange={(e) => update({ jumpForce: parseFloat(e.target.value) })}
+                className="w-full accent-indigo-600"
+              />
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    case 'patrol': {
+      const b = { ...behavior, ...(override || {}) } as PatrolBehaviorConfig;
+      return (
+        <div className="space-y-1.5">
+          {/* Ligne 1: Axe de patrouille */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Axe d'oscillation</span>
+            <select
+              value={b.axis}
+              onChange={(e) => update({ axis: e.target.value as any })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              <option value="horizontal">Horizontal (Gauche - Droite)</option>
+              <option value="vertical">Vertical (Haut - Bas)</option>
+            </select>
+          </div>
+
+          {/* Ligne 2: Portée de patrouille */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Distance de patrouille</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.range} px
+              </span>
+            </div>
+            <input
+              type="range"
+              min="20"
+              max="400"
+              step="10"
+              value={b.range}
+              onChange={(e) => update({ range: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 3: Vitesse de patrouille */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Vitesse de marche</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.speed} px/s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="20"
+              max="300"
+              step="10"
+              value={b.speed}
+              onChange={(e) => update({ speed: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 4: Pause aux extrémités */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Pause aux bornes</span>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min="0"
+                max="10"
+                step="0.1"
+                value={b.pauseDuration}
+                onChange={(e) => update({ pauseDuration: parseFloat(e.target.value) || 0 })}
+                className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
+              />
+              <span className="text-slate-400 text-xs">sec</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    case 'move_to': {
+      const b = { ...behavior, ...(override || {}) } as MoveToBehaviorConfig;
+      return (
+        <div className="space-y-1.5">
+          {/* Ligne 1: Type de cible */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Type de cible</span>
+            <select
+              value={b.targetType}
+              onChange={(e) => update({ targetType: e.target.value as any })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              <option value="position">Position fixe (X, Y)</option>
+              <option value="entity">Autre Entité de la scène</option>
+            </select>
+          </div>
+
+          {/* Ligne 2: Entité cible ou Coordonnées X, Y */}
+          {b.targetType === 'entity' ? (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Entité visée</span>
+              <select
+                value={b.targetEntityId || ''}
+                onChange={(e) => update({ targetEntityId: e.target.value })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[160px]"
+              >
+                <option value="">-- Choisir une entité --</option>
+                {targetEntityOptions.map((ent) => (
+                  <option key={ent.id} value={ent.id}>
+                    {ent.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <>
+              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                <span className="font-bold text-slate-700 text-xs">Coordonnée X cible</span>
+                <input
+                  type="number"
+                  value={b.targetPosition?.x ?? 100}
+                  onChange={(e) =>
+                    update({
+                      targetPosition: {
+                        x: parseFloat(e.target.value) || 0,
+                        y: b.targetPosition?.y ?? 100,
+                      },
+                    })
+                  }
+                  className="w-24 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
+                />
+              </div>
+              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                <span className="font-bold text-slate-700 text-xs">Coordonnée Y cible</span>
+                <input
+                  type="number"
+                  value={b.targetPosition?.y ?? 100}
+                  onChange={(e) =>
+                    update({
+                      targetPosition: {
+                        x: b.targetPosition?.x ?? 100,
+                        y: parseFloat(e.target.value) || 0,
+                      },
+                    })
+                  }
+                  className="w-24 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
+                />
+              </div>
+            </>
+          )}
+
+          {/* Ligne 3: Vitesse */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Vitesse de ralliement</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.speed || 120} px/s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="10"
+              max="600"
+              step="10"
+              value={b.speed || 120}
+              onChange={(e) => update({ speed: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+        </div>
+      );
+    }
+
+    case 'look_at': {
+      const b = { ...behavior, ...(override || {}) } as LookAtBehaviorConfig;
+      return (
+        <div className="space-y-1.5">
+          {/* Ligne 1: Type de cible à regarder */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Cible à regarder</span>
+            <select
+              value={b.targetType}
+              onChange={(e) => update({ targetType: e.target.value as any })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              <option value="mouse">Curseur / Souris</option>
+              <option value="entity">Autre Entité</option>
+            </select>
+          </div>
+
+          {/* Ligne 2: Entité cible si applicable */}
+          {b.targetType === 'entity' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Entité visée</span>
+              <select
+                value={b.targetEntityId || ''}
+                onChange={(e) => update({ targetEntityId: e.target.value })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[160px]"
+              >
+                <option value="">-- Choisir une entité --</option>
+                {targetEntityOptions.map((ent) => (
+                  <option key={ent.id} value={ent.id}>
+                    {ent.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Ligne 3: Décalage angulaire */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Décalage d'angle</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.rotationOffset || 0}°
+              </span>
+            </div>
+            <input
+              type="range"
+              min="-180"
+              max="180"
+              step="5"
+              value={b.rotationOffset || 0}
+              onChange={(e) => update({ rotationOffset: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 4: Lissage angulaire */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <div>
+                <span className="font-bold">Lissage angulaire</span>
+                <span className="text-[10px] text-slate-400 block">0 = instantané, sinon vitesse de pivot</span>
+              </div>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.smoothSpeed || 0} °/s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="720"
+              step="30"
+              value={b.smoothSpeed || 0}
+              onChange={(e) => update({ smoothSpeed: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+        </div>
+      );
+    }
+
+    case 'follow': {
+      const b = { ...behavior, ...(override || {}) } as FollowBehaviorConfig;
+      return (
+        <div className="space-y-1.5">
+          {/* Ligne 1: Cible à suivre */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Cible à suivre</span>
+            <select
+              value={b.targetType}
+              onChange={(e) => update({ targetType: e.target.value as any })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              <option value="mouse">Curseur / Souris</option>
+              <option value="entity">Autre Entité</option>
+            </select>
+          </div>
+
+          {/* Ligne 2: Entité cible si applicable */}
+          {b.targetType === 'entity' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Entité suivie</span>
+              <select
+                value={b.targetEntityId || ''}
+                onChange={(e) => update({ targetEntityId: e.target.value })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[160px]"
+              >
+                <option value="">-- Choisir une entité --</option>
+                {targetEntityOptions.map((ent) => (
+                  <option key={ent.id} value={ent.id}>
+                    {ent.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Ligne 3: Distance minimale d'arrêt */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Distance minimale d'arrêt</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.minDistance} px
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="150"
+              step="5"
+              value={b.minDistance}
+              onChange={(e) => update({ minDistance: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 4: Vitesse de suivi */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Vitesse de poursuite</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.speed} px/s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="30"
+              max="400"
+              step="10"
+              value={b.speed}
+              onChange={(e) => update({ speed: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+        </div>
+      );
+    }
+
+    case 'boundary_behavior': {
+      const b = { ...behavior, ...(override || {}) } as BoundaryBehaviorConfig;
+      return (
+        <div className="space-y-1.5">
+          {/* Ligne 1: Comportement aux bords */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Comportement aux bords</span>
+            <select
+              value={b.mode}
+              onChange={(e) => update({ mode: e.target.value as any })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              <option value="bounce">Rebond élastique</option>
+              <option value="wrap">Téléportation continue (Wrap)</option>
+              <option value="clamp">Butée infranchissable (Clamp)</option>
+            </select>
+          </div>
+
+          {/* Ligne 2: Élasticité du rebond aux bords */}
+          {b.mode === 'bounce' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200">
+              <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                <div>
+                  <span className="font-bold">Rebond sur les bords</span>
+                  <span className="text-[10px] text-slate-400 block">Élasticité spécifique contre le cadre du canvas</span>
+                </div>
+                <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                  {Math.round((b.bounciness ?? 0.8) * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={b.bounciness ?? 0.8}
+                onChange={(e) => update({ bounciness: parseFloat(e.target.value) })}
+                className="w-full accent-indigo-600"
+              />
+            </div>
+          )}
+        </div>
+      );
+    }
+  }
+}

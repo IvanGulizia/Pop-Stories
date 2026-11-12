@@ -59,6 +59,115 @@ export interface ColliderBounds {
   radius?: number; // for circle
 }
 
+// ==========================================
+// COMPOSANTS & COMPORTEMENTS (BEHAVIORS)
+// ==========================================
+
+export type BehaviorType =
+  | 'physics'
+  | 'draggable'
+  | 'constant_velocity'
+  | 'look_at'
+  | 'follow'
+  | 'move_to'
+  | 'patrol'
+  | 'keyboard_control'
+  | 'boundary_behavior';
+
+export interface BaseBehaviorConfig {
+  id: string;
+  type: BehaviorType;
+  enabled: boolean;
+}
+
+export interface PhysicsBehaviorConfig extends BaseBehaviorConfig {
+  type: 'physics';
+  gravity: number;   // px/s^2, default 400
+  bounce: number;    // restitution 0..1, default 0.4
+  friction: number;  // 0..1, default 0.98
+  mass: number;      // default 1
+  isTrigger?: boolean; // false = solide avec rebond/blocage physique, true = trigger/fantôme
+  isStatic?: boolean;  // true = obstacle fixe infranchissable
+}
+
+export interface DraggableBehaviorConfig extends BaseBehaviorConfig {
+  type: 'draggable';
+  throwable: boolean;    // Inertie / élan au lâcher de la souris
+  maxThrowSpeed?: number; // Plafond de vitesse (défaut 1500 px/s)
+}
+
+export interface ConstantVelocityBehaviorConfig extends BaseBehaviorConfig {
+  type: 'constant_velocity';
+  vx: number;        // px/s
+  vy: number;        // px/s
+  angularVelocity?: number; // deg/s
+}
+
+export interface LookAtBehaviorConfig extends BaseBehaviorConfig {
+  type: 'look_at';
+  targetType: 'mouse' | 'entity';
+  targetEntityId?: string;
+  rotationOffset: number; // degrees, default 0
+  smoothSpeed: number;    // 0 = instant, >0 = smooth lerp speed
+}
+
+export interface FollowBehaviorConfig extends BaseBehaviorConfig {
+  type: 'follow';
+  targetType: 'mouse' | 'entity';
+  targetEntityId?: string;
+  speed: number;       // px/s, default 150
+  minDistance: number; // stop distance, default 40
+  smoothing: number;   // lerp factor 0..1, default 0.1
+}
+
+export interface MoveToBehaviorConfig extends BaseBehaviorConfig {
+  type: 'move_to';
+  targetType: 'position' | 'entity';
+  targetPosition?: { x: number; y: number };
+  targetEntityId?: string;
+  speed: number;       // px/s, default 120
+  stopOnArrival: boolean;
+}
+
+export interface PatrolBehaviorConfig extends BaseBehaviorConfig {
+  type: 'patrol';
+  axis: 'horizontal' | 'vertical';
+  range: number;       // px, default 120
+  speed: number;       // px/s, default 100
+  pauseDuration: number; // seconds, default 0.5
+}
+
+export interface KeyboardControlBehaviorConfig extends BaseBehaviorConfig {
+  type: 'keyboard_control';
+  layout: 'arrows' | 'wasd' | 'both';
+  speed: number;       // px/s, default 180
+  mode: 'top_down' | 'platformer';
+  jumpForce?: number;  // px/s, default 450
+}
+
+export interface BoundaryBehaviorConfig extends BaseBehaviorConfig {
+  type: 'boundary_behavior';
+  mode: 'bounce' | 'wrap' | 'clamp';
+  bounciness?: number; // 0..1, default 0.8
+}
+
+export type EntityBehavior =
+  | PhysicsBehaviorConfig
+  | DraggableBehaviorConfig
+  | ConstantVelocityBehaviorConfig
+  | LookAtBehaviorConfig
+  | FollowBehaviorConfig
+  | MoveToBehaviorConfig
+  | PatrolBehaviorConfig
+  | KeyboardControlBehaviorConfig
+  | BoundaryBehaviorConfig;
+
+export type BehaviorOverride = {
+  enabled?: boolean;
+  type?: BehaviorType;
+  [key: string]: any;
+};
+
 export interface EntityState {
   id: StateId;
   name: string;
@@ -71,6 +180,8 @@ export interface EntityState {
   vectorPaths?: VectorPath[];
   drawingLayers?: DrawingLayer[];
   drawingDataUrl?: string;
+  // Surcharges de comportements par état
+  behaviorOverrides?: Record<string, BehaviorOverride>;
   // Specific visual properties for drawing customization
   stemHeight?: number;
   flowerColor?: string;
@@ -93,6 +204,7 @@ export interface Entity {
   drawingDataUrl?: string;
   vectorPaths?: VectorPath[];
   drawingLayers?: DrawingLayer[];
+  behaviors?: EntityBehavior[];
   zIndex?: number;
 }
 

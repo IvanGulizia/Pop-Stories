@@ -1,12 +1,17 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useSceneStore } from '../store/useSceneStore';
 import { Apple } from './Apple';
 import { Plant } from './Plant';
 import { CustomShape } from './CustomShape';
 import { Sparkles, Paintbrush, PlayCircle } from 'lucide-react';
+import {
+  stepMatterPhysics,
+  startKeyboardListening,
+  stopKeyboardListening,
+} from '../utils/matterPhysicsEngine';
 
 export const FINE_CROSSHAIR_CURSOR =
-  'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'19\' height=\'19\' viewBox=\'0 0 19 19\'%3E%3Cpath d=\'M9.5 1v17M1 9.5h17\' stroke=\'%23ffffff\' stroke-width=\'2.5\' stroke-linecap=\'round\'/%3E%3Cpath d=\'M9.5 1v17M1 9.5h17\' stroke=\'%230f172a\' stroke-width=\'1.2\' stroke-linecap=\'round\'/%3E%3C/svg%3E") 9 9, crosshair';
+  'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABMAAAATCAYAAAByUDbMAAAAN0lEQVR4nGNgIAD+IwFCagkCkCH84lqjho08w/4TAWCGEQJwmynFcMOo5rLBGwGjhg0Bw4hNRwArM0of2vmpUwAAAABJRU5ErkJggg==") 9 9, crosshair';
 
 interface SceneProps {
   onOpenCreateModal?: () => void;
@@ -77,6 +82,54 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const isPlayMode = appMode === 'play';
   const isCustomCursorActive = isPlayMode && settings.useCustomCursors !== false;
   const ratio = settings.aspectRatio || 'free';
+  const batchUpdateEntityTransforms = useSceneStore((state) => state.batchUpdateEntityTransforms);
+
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const mousePosRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Boucle de simulation physique Matter.js & contrôles joueur en mode Play (60 FPS)
+  useEffect(() => {
+    if (!isPlayMode) {
+      stopKeyboardListening();
+      return;
+    }
+
+    startKeyboardListening();
+    let animId: number;
+    let lastTime = performance.now();
+
+    const tick = (currentTime: number) => {
+      const deltaTime = (currentTime - lastTime) / 1000;
+      lastTime = currentTime;
+
+      if (canvasContainerRef.current) {
+        const rect = canvasContainerRef.current.getBoundingClientRect();
+        const currentEntities = useSceneStore.getState().entities;
+        const result = stepMatterPhysics({
+          entities: currentEntities,
+          deltaTime,
+          canvasBounds: { width: rect.width, height: rect.height },
+          mousePos: mousePosRef.current,
+        });
+
+        if (Object.keys(result.updatedTransforms).length > 0) {
+          batchUpdateEntityTransforms(result.updatedTransforms);
+        }
+
+        // Évaluation systématique des règles de collision et capteurs à 60 FPS
+        useSceneStore.getState().evaluateRules();
+      }
+
+      animId = requestAnimationFrame(tick);
+    };
+
+    animId = requestAnimationFrame(tick);
+
+    return () => {
+      cancelAnimationFrame(animId);
+      stopKeyboardListening();
+    };
+  }, [isPlayMode, batchUpdateEntityTransforms]);
 
   // Calcul des styles d'aspect ratio pour ancrage en haut & centré horizontalement
   const getAspectRatioStyle = (): React.CSSProperties => {
@@ -168,8 +221,21 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
       {/* CADRE DE SCÈNE AVEC RESPECT DU FORMAT / RATIO */}
       <div
         id="scene-canvas-container"
+        ref={canvasContainerRef}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
+        onPointerMove={(e) => {
+          if (canvasContainerRef.current) {
+            const rect = canvasContainerRef.current.getBoundingClientRect();
+            mousePosRef.current = {
+              x: e.clientX - rect.left,
+              y: e.clientY - rect.top,
+            };
+          }
+        }}
+        onPointerLeave={() => {
+          mousePosRef.current = null;
+        }}
         className={`relative bg-white overflow-hidden select-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-all duration-300 ${
           !isPlayMode && !isCustomCursorActive ? 'atelier-fine-crosshair' : ''
         }`}

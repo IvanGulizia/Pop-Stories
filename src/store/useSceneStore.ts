@@ -23,9 +23,12 @@ import {
   SceneLayer,
   SceneLayerGroup,
   SceneLayerKind,
+  EntityBehavior,
+  BehaviorOverride,
 } from '../types';
 import { soundSynth } from '../utils/sound';
 import { getEntityColliderBounds } from '../utils/collider';
+import { resetMatterPhysicsRuntime, getActivePhysicsCollisionPairs } from '../utils/matterPhysicsEngine';
 import defaultCursorPack from '../data/defaultCursorPack.json';
 
 // Groupes de calques initiaux de la scène
@@ -151,6 +154,10 @@ interface SceneState {
   addTagToEntity: (id: EntityId, tag: string) => void;
   removeTagFromEntity: (id: EntityId, tag: string) => void;
   updateStateProperties: (entityId: EntityId, stateId: StateId, partial: Partial<EntityState>) => void;
+  updateEntityBehaviors: (entityId: EntityId, behaviors: EntityBehavior[]) => void;
+  updateStateBehaviorOverride: (entityId: EntityId, stateId: StateId, behaviorId: string, override: BehaviorOverride) => void;
+  removeStateBehaviorOverride: (entityId: EntityId, stateId: StateId, behaviorId: string) => void;
+  batchUpdateEntityTransforms: (updates: Record<EntityId, { position?: Position; rotation?: number }>) => void;
   addStateToEntity: (entityId: EntityId, name?: string) => string;
   removeStateFromEntity: (entityId: EntityId, stateId: StateId) => void;
   addEntity: (type: EntityType) => void;
@@ -428,8 +435,14 @@ const preEventAutoRevertStates: Record<string, string> = {};
 const RULE_COOLDOWN_MS = 350; // Minimum interval between identical rule trigger on same entities
 const ENTITY_STATE_COOLDOWN_MS = 250; // Prevents oscillating state ping-pong
 
-// Vérification de la collision avec support précis des Colliders (Boîte / Cercle / Polygone)
+// Vérification de la collision avec support précis des Colliders et écoute native Matter.js
 const checkCollision = (ent1: Entity, ent2: Entity) => {
+  // 1. Détection prioritaire directe depuis le moteur physique Matter.js
+  const activePairs = getActivePhysicsCollisionPairs();
+  if (activePairs.has(`${ent1.id}:::${ent2.id}`) || activePairs.has(`${ent2.id}:::${ent1.id}`)) {
+    return true;
+  }
+
   const currentState1 = ent1.states[ent1.currentStateId];
   const currentState2 = ent2.states[ent2.currentStateId];
 
@@ -448,6 +461,9 @@ const checkCollision = (ent1: Entity, ent2: Entity) => {
   const collider1 = geom1.colliderType;
   const collider2 = geom2.colliderType;
 
+  // Marge de contact (3px) garantissant la détection même à très faible vitesse ou au repos
+  const tol = 3;
+
   // Cercle vs Cercle
   if (collider1 === 'circle' && collider2 === 'circle') {
     const cx1 = ent1.position.x + geom1.centerX * scaleX1;
@@ -460,7 +476,8 @@ const checkCollision = (ent1: Entity, ent2: Entity) => {
 
     const dx = cx1 - cx2;
     const dy = cy1 - cy2;
-    return dx * dx + dy * dy <= (r1 + r2) * (r1 + r2);
+    const maxR = r1 + r2 + tol;
+    return dx * dx + dy * dy <= maxR * maxR;
   }
 
   // Cercle vs Boîte / Polygone
@@ -478,7 +495,8 @@ const checkCollision = (ent1: Entity, ent2: Entity) => {
     const closestY = Math.max(by2, Math.min(cy1, by2 + bh2));
     const dx = cx1 - closestX;
     const dy = cy1 - closestY;
-    return dx * dx + dy * dy <= r1 * r1;
+    const maxR = r1 + tol;
+    return dx * dx + dy * dy <= maxR * maxR;
   }
 
   if ((collider1 === 'box' || collider1 === 'polygon') && collider2 === 'circle') {
@@ -495,10 +513,11 @@ const checkCollision = (ent1: Entity, ent2: Entity) => {
     const closestY = Math.max(by1, Math.min(cy2, by1 + bh1));
     const dx = cx2 - closestX;
     const dy = cy2 - closestY;
-    return dx * dx + dy * dy <= r2 * r2;
+    const maxR = r2 + tol;
+    return dx * dx + dy * dy <= maxR * maxR;
   }
 
-  // Boîte AABB vs Boîte AABB
+  // Boîte AABB vs Boîte AABB avec tolérance
   const bx1 = ent1.position.x + geom1.x * scaleX1;
   const by1 = ent1.position.y + geom1.y * scaleY1;
   const bw1 = geom1.width * scaleX1;
@@ -510,10 +529,10 @@ const checkCollision = (ent1: Entity, ent2: Entity) => {
   const bh2 = geom2.height * scaleY2;
 
   return (
-    bx1 < bx2 + bw2 &&
-    bx1 + bw1 > bx2 &&
-    by1 < by2 + bh2 &&
-    by1 + bh1 > by2
+    bx1 <= bx2 + bw2 + tol &&
+    bx1 + bw1 + tol >= bx2 &&
+    by1 <= by2 + bh2 + tol &&
+    by1 + bh1 + tol >= by2
   );
 };
 
@@ -920,6 +939,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       });
     } else {
       // Quand on repasse en mode édition, restaurer fidèlement la scène d'avant-jeu
+      resetMatterPhysicsRuntime();
       const { snapshotEntities, snapshotEntityOrder } = get();
       if (snapshotEntities) {
         set({
@@ -935,6 +955,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   resetScene: () => {
+    resetMatterPhysicsRuntime();
     const { snapshotEntities, snapshotEntityOrder, entities } = get();
     if (snapshotEntities) {
       set({
@@ -1169,6 +1190,211 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       }
 
       return { entities: updatedEntities, customArchetypes: updatedArchetypes };
+    });
+  },
+
+  updateEntityBehaviors: (entityId, behaviors) => {
+    set((state) => {
+      const target =
+        state.entities[entityId] ||
+        state.customArchetypes[entityId] ||
+        Object.values(state.entities).find((e) => e.type === entityId) ||
+        Object.values(state.customArchetypes).find((a) => a.type === entityId);
+
+      if (!target) return state;
+      const targetType = target.type;
+
+      const updatedEntities = { ...state.entities };
+      Object.values(updatedEntities).forEach((e) => {
+        if (e.type === targetType) {
+          updatedEntities[e.id] = {
+            ...e,
+            behaviors: JSON.parse(JSON.stringify(behaviors)),
+          };
+        } else if (e.id === entityId) {
+          updatedEntities[e.id] = {
+            ...e,
+            behaviors: JSON.parse(JSON.stringify(behaviors)),
+          };
+        }
+      });
+
+      const updatedArchetypes = { ...state.customArchetypes };
+      if (updatedArchetypes[targetType]) {
+        updatedArchetypes[targetType] = {
+          ...updatedArchetypes[targetType],
+          behaviors: JSON.parse(JSON.stringify(behaviors)),
+        };
+      }
+
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
+    });
+  },
+
+  updateStateBehaviorOverride: (entityId, stateId, behaviorId, override) => {
+    set((state) => {
+      const target =
+        state.entities[entityId] ||
+        state.customArchetypes[entityId] ||
+        Object.values(state.entities).find((e) => e.type === entityId) ||
+        Object.values(state.customArchetypes).find((a) => a.type === entityId);
+
+      if (!target) return state;
+      const targetType = target.type;
+
+      const updatedEntities = { ...state.entities };
+      Object.values(updatedEntities).forEach((e) => {
+        if (e.type === targetType) {
+          const st = e.states[stateId];
+          if (st) {
+            const currentOverrides = st.behaviorOverrides || {};
+            const existingOverride = currentOverrides[behaviorId] || {};
+            const updatedOverrides = {
+              ...currentOverrides,
+              [behaviorId]: {
+                ...existingOverride,
+                ...override,
+              },
+            };
+            updatedEntities[e.id] = {
+              ...e,
+              states: {
+                ...e.states,
+                [stateId]: {
+                  ...st,
+                  behaviorOverrides: updatedOverrides,
+                },
+              },
+            };
+          }
+        }
+      });
+
+      const updatedArchetypes = { ...state.customArchetypes };
+      if (updatedArchetypes[targetType] && updatedArchetypes[targetType].states[stateId]) {
+        const st = updatedArchetypes[targetType].states[stateId];
+        const currentOverrides = st.behaviorOverrides || {};
+        const existingOverride = currentOverrides[behaviorId] || {};
+        updatedArchetypes[targetType] = {
+          ...updatedArchetypes[targetType],
+          states: {
+            ...updatedArchetypes[targetType].states,
+            [stateId]: {
+              ...st,
+              behaviorOverrides: {
+                ...currentOverrides,
+                [behaviorId]: {
+                  ...existingOverride,
+                  ...override,
+                },
+              },
+            },
+          },
+        };
+      }
+
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
+    });
+  },
+
+  removeStateBehaviorOverride: (entityId, stateId, behaviorId) => {
+    set((state) => {
+      const target =
+        state.entities[entityId] ||
+        state.customArchetypes[entityId] ||
+        Object.values(state.entities).find((e) => e.type === entityId) ||
+        Object.values(state.customArchetypes).find((a) => a.type === entityId);
+
+      if (!target) return state;
+      const targetType = target.type;
+
+      const updatedEntities = { ...state.entities };
+      Object.values(updatedEntities).forEach((e) => {
+        if (e.type === targetType) {
+          const st = e.states[stateId];
+          if (st && st.behaviorOverrides) {
+            const copy = { ...st.behaviorOverrides };
+            delete copy[behaviorId];
+            updatedEntities[e.id] = {
+              ...e,
+              states: {
+                ...e.states,
+                [stateId]: {
+                  ...st,
+                  behaviorOverrides: copy,
+                },
+              },
+            };
+          }
+        }
+      });
+
+      const updatedArchetypes = { ...state.customArchetypes };
+      if (updatedArchetypes[targetType] && updatedArchetypes[targetType].states[stateId]?.behaviorOverrides) {
+        const st = updatedArchetypes[targetType].states[stateId];
+        const copy = { ...st.behaviorOverrides };
+        delete copy[behaviorId];
+        updatedArchetypes[targetType] = {
+          ...updatedArchetypes[targetType],
+          states: {
+            ...updatedArchetypes[targetType].states,
+            [stateId]: {
+              ...st,
+              behaviorOverrides: copy,
+            },
+          },
+        };
+      }
+
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
+    });
+  },
+
+  batchUpdateEntityTransforms: (updates) => {
+    set((state) => {
+      let hasChanges = false;
+      const nextEntities = { ...state.entities };
+
+      Object.entries(updates).forEach(([id, transform]) => {
+        const entity = nextEntities[id];
+        if (!entity) return;
+
+        let modified = false;
+        let newPos = entity.position;
+        if (
+          transform.position &&
+          (transform.position.x !== entity.position.x || transform.position.y !== entity.position.y)
+        ) {
+          newPos = transform.position;
+          modified = true;
+        }
+
+        let newStates = entity.states;
+        if (transform.rotation !== undefined) {
+          const curState = entity.states[entity.currentStateId];
+          if (curState && curState.rotation !== transform.rotation) {
+            newStates = {
+              ...entity.states,
+              [entity.currentStateId]: {
+                ...curState,
+                rotation: transform.rotation,
+              },
+            };
+            modified = true;
+          }
+        }
+
+        if (modified) {
+          hasChanges = true;
+          nextEntities[id] = {
+            ...entity,
+            position: newPos,
+            states: newStates,
+          };
+        }
+      });
+
+      return hasChanges ? { entities: nextEntities } : state;
     });
   },
 
