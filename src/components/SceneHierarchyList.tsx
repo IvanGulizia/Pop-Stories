@@ -8,8 +8,10 @@ import {
   Layers,
   Sparkles,
   GripVertical,
+  Link2,
 } from 'lucide-react';
 import { EntityId, SceneLayer, SceneLayerGroup } from '../types';
+import { isEntityDraggable } from '../utils/matterPhysicsEngine';
 
 interface SceneHierarchyListProps {
   onOpenCreateModal?: () => void;
@@ -136,6 +138,8 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                 }}
                 onClick={() => selectEntity(entity.id)}
                 className={`p-2.5 bg-white border rounded-2xl transition-all cursor-pointer flex flex-col gap-2 group ${
+                  entity.parentId && entities[entity.parentId] ? 'ml-3 border-l-4 border-l-indigo-400' : ''
+                } ${
                   isTargeted && dragOverTarget?.position === 'above'
                     ? 'border-t-4 border-t-indigo-600 border-x-indigo-400 border-b-slate-200 bg-indigo-50/50 shadow-md scale-[1.01]'
                     : isTargeted && dragOverTarget?.position === 'below'
@@ -161,11 +165,20 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                     <p className="text-xs font-bold text-slate-800 truncate leading-snug">
                       {entity.name}
                     </p>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-[10px] text-slate-400 font-medium">
                         {currentState?.name || entity.currentStateId}
                       </span>
-                      {entity.isDraggable && (
+                      {entity.parentId && entities[entity.parentId] && (
+                        <span
+                          className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.2 bg-indigo-50 text-indigo-700 border border-indigo-200/70 font-bold rounded max-w-[110px] truncate"
+                          title={`Attaché à ${entities[entity.parentId].name}`}
+                        >
+                          <Link2 className="w-2.5 h-2.5 shrink-0" />
+                          <span className="truncate">{entities[entity.parentId].name}</span>
+                        </span>
+                      )}
+                      {isEntityDraggable(entity, currentState).canDrag && (
                         <span className="text-[9px] px-1 py-0.2 bg-emerald-50 text-emerald-600 font-semibold rounded">
                           Drag
                         </span>

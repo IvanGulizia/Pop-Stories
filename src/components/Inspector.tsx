@@ -12,6 +12,8 @@ import {
   Layers,
   Edit3,
   Check,
+  Link2,
+  Unlink,
 } from 'lucide-react';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { OnionStateOption } from './DrawingCanvas';
@@ -28,6 +30,9 @@ export function Inspector() {
   const deleteEntity = useSceneStore((state) => state.deleteEntity);
   const addTagToEntity = useSceneStore((state) => state.addTagToEntity);
   const removeTagFromEntity = useSceneStore((state) => state.removeTagFromEntity);
+  const setEntityParent = useSceneStore((state) => state.setEntityParent);
+  const updateEntityParentOffset = useSceneStore((state) => state.updateEntityParentOffset);
+  const detachEntity = useSceneStore((state) => state.detachEntity);
   const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
   const showTagsSystem = useSceneStore((state) => state.settings.showTagsSystem);
 
@@ -211,6 +216,162 @@ export function Inspector() {
           </div>
         </div>
       )}
+
+      {/* Parenting & Attachement (uniquement pour les instances sur la scène) */}
+      {Boolean(entities[selectedEntity.id]) && (() => {
+        const excludedIds = new Set<string>([selectedEntity.id]);
+        const stack = [selectedEntity.id];
+        while (stack.length > 0) {
+          const cur = stack.pop()!;
+          Object.values(entities).forEach((candidate) => {
+            if (candidate.parentId === cur && !excludedIds.has(candidate.id)) {
+              excludedIds.add(candidate.id);
+              stack.push(candidate.id);
+            }
+          });
+        }
+        const parentCandidates = Object.values(entities).filter((e) => !excludedIds.has(e.id));
+        const activeParent = selectedEntity.parentId ? entities[selectedEntity.parentId] : undefined;
+        const offset = selectedEntity.parentOffset || {
+          x: 0,
+          y: 0,
+          rotationOffset: 0,
+          inheritRotation: true,
+          inheritFlip: true,
+        };
+
+        return (
+          <div className="space-y-2 bg-slate-50/70 p-3 rounded-2xl border border-slate-200">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                <Link2 className="w-3.5 h-3.5 text-indigo-600" /> Parenting & Attachement
+              </label>
+              {activeParent && (
+                <button
+                  type="button"
+                  onClick={() => detachEntity(selectedEntity.id)}
+                  className="text-[10px] font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2 py-0.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  <Unlink className="w-3 h-3" /> Détacher
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              {/* Ligne 1 : Objet Parent */}
+              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                <span className="font-bold text-slate-700 text-xs">Objet parent</span>
+                <select
+                  value={selectedEntity.parentId || ''}
+                  onChange={(e) => setEntityParent(selectedEntity.id, e.target.value || null)}
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[170px]"
+                >
+                  <option value="">Aucun (Indépendant)</option>
+                  {parentCandidates.map((cand) => (
+                    <option key={cand.id} value={cand.id}>
+                      {cand.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {activeParent && (
+                <>
+                  {/* Ligne 2 : Décalage X */}
+                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                    <span className="font-bold text-slate-700 text-xs">Décalage relatif X</span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        value={Math.round(offset.x)}
+                        onChange={(e) =>
+                          updateEntityParentOffset(selectedEntity.id, {
+                            x: parseFloat(e.target.value) || 0,
+                          })
+                        }
+                        className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
+                      />
+                      <span className="text-slate-400 text-xs">px</span>
+                    </div>
+                  </div>
+
+                  {/* Ligne 3 : Décalage Y */}
+                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                    <span className="font-bold text-slate-700 text-xs">Décalage relatif Y</span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        value={Math.round(offset.y)}
+                        onChange={(e) =>
+                          updateEntityParentOffset(selectedEntity.id, {
+                            y: parseFloat(e.target.value) || 0,
+                          })
+                        }
+                        className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
+                      />
+                      <span className="text-slate-400 text-xs">px</span>
+                    </div>
+                  </div>
+
+                  {/* Ligne 4 : Angle relatif */}
+                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                    <span className="font-bold text-slate-700 text-xs">Angle relatif</span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        value={Math.round(offset.rotationOffset ?? 0)}
+                        onChange={(e) =>
+                          updateEntityParentOffset(selectedEntity.id, {
+                            rotationOffset: parseFloat(e.target.value) || 0,
+                          })
+                        }
+                        className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
+                      />
+                      <span className="text-slate-400 text-xs">°</span>
+                    </div>
+                  </div>
+
+                  {/* Ligne 5 : Hériter de la rotation */}
+                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+                    <div>
+                      <div className="font-bold text-slate-700 text-xs">Suivre la rotation du parent</div>
+                      <div className="text-[10px] text-slate-400">Orbite et pivote avec « {activeParent.name} »</div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={offset.inheritRotation !== false}
+                      onChange={(e) =>
+                        updateEntityParentOffset(selectedEntity.id, {
+                          inheritRotation: e.target.checked,
+                        })
+                      }
+                      className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+                    />
+                  </div>
+
+                  {/* Ligne 6 : Hériter du Flip horizontal */}
+                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+                    <div>
+                      <div className="font-bold text-slate-700 text-xs">Suivre le Flip horizontal</div>
+                      <div className="text-[10px] text-slate-400">Inverse le côté et le dessin quand le parent se retourne</div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={offset.inheritFlip !== false}
+                      onChange={(e) =>
+                        updateEntityParentOffset(selectedEntity.id, {
+                          inheritFlip: e.target.checked,
+                        })
+                      }
+                      className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Moteur Physique Arcade 2D & Composants modulaires */}
       <BehaviorManager entity={selectedEntity} selectedStateId={selectedEntity.currentStateId} />

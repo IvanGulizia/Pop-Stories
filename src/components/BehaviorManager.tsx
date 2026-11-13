@@ -10,12 +10,18 @@ import {
   FollowBehaviorConfig,
   MoveToBehaviorConfig,
   PatrolBehaviorConfig,
+  WanderingBehaviorConfig,
   KeyboardControlBehaviorConfig,
   BoundaryBehaviorConfig,
   BehaviorOverride,
   AutoDestroyBehaviorConfig,
+  ParticleEmitterBehaviorConfig,
+  ParticleShape,
+  CustomParticlePreset,
 } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
+import { FullScreenDrawingModal } from './FullScreenDrawingModal';
+import { invalidateCustomParticleSprite } from '../utils/particleSystem';
 import {
   Activity,
   Hand,
@@ -35,6 +41,9 @@ import {
   X,
   Clock,
   RotateCcw,
+  Shuffle,
+  Paintbrush,
+  Pencil,
 } from 'lucide-react';
 
 interface BehaviorManagerProps {
@@ -49,6 +58,10 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
   const entities = useSceneStore((state) => state.entities);
   const customArchetypes = useSceneStore((state) => state.customArchetypes);
   const rules = useSceneStore((state) => state.rules);
+  const customParticles = useSceneStore((state) => state.customParticles || []);
+  const addCustomParticle = useSceneStore((state) => state.addCustomParticle);
+  const updateCustomParticle = useSceneStore((state) => state.updateCustomParticle);
+  const deleteCustomParticle = useSceneStore((state) => state.deleteCustomParticle);
 
   const baseBehaviors = entity.behaviors || [];
   const stateList = Object.values(entity.states);
@@ -58,6 +71,11 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
   );
   const [expandedBehaviorId, setExpandedBehaviorId] = useState<string | null>(baseBehaviors[0]?.id || null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [particleDrawerState, setParticleDrawerState] = useState<{
+    behaviorId: string;
+    isOverridden: boolean;
+    editingPreset?: CustomParticlePreset;
+  } | null>(null);
 
   // Sync with selectedStateId if it changes from parent Inspector
   React.useEffect(() => {
@@ -191,6 +209,20 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
           pauseDuration: 0.5,
         } as PatrolBehaviorConfig;
         break;
+      case 'wandering':
+        newBehavior = {
+          id: generateBehaviorId('wandering'),
+          type: 'wandering',
+          enabled: true,
+          mode: 'free_2d',
+          radius: 160,
+          speed: 90,
+          randomness: 65,
+          changeInterval: 1.5,
+          pauseDuration: 0.8,
+          orientToMovement: false,
+        } as WanderingBehaviorConfig;
+        break;
       case 'keyboard_control':
         newBehavior = {
           id: generateBehaviorId('keyboard_control'),
@@ -200,6 +232,9 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
           speed: 180,
           mode: 'top_down',
           jumpForce: 450,
+          allowHorizontal: true,
+          allowVertical: true,
+          allowJump: true,
         } as KeyboardControlBehaviorConfig;
         break;
       case 'boundary_behavior':
@@ -210,6 +245,25 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
           mode: 'bounce',
           bounciness: 0.8,
         } as BoundaryBehaviorConfig;
+        break;
+      case 'particle_emitter':
+        newBehavior = {
+          id: generateBehaviorId('particle_emitter'),
+          type: 'particle_emitter',
+          enabled: true,
+          rate: 14,
+          color: '#f59e0b',
+          color2: '#ef4444',
+          shape: 'circle',
+          speed: 140,
+          size: 6,
+          lifetime: 0.8,
+          gravity: 160,
+          spread: 60,
+          angle: -90,
+          offsetX: 0,
+          offsetY: 0,
+        } as ParticleEmitterBehaviorConfig;
         break;
     }
 
@@ -270,12 +324,16 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
         return <Move className="w-4 h-4 text-amber-600" />;
       case 'patrol':
         return <Repeat className="w-4 h-4 text-blue-600" />;
+      case 'wandering':
+        return <Shuffle className="w-4 h-4 text-emerald-600" />;
       case 'keyboard_control':
         return <Gamepad2 className="w-4 h-4 text-rose-600" />;
       case 'boundary_behavior':
         return <Shield className="w-4 h-4 text-teal-600" />;
       case 'auto_destroy':
         return <Clock className="w-4 h-4 text-orange-600" />;
+      case 'particle_emitter':
+        return <Sparkles className="w-4 h-4 text-amber-500" />;
     }
   };
 
@@ -297,10 +355,14 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
         return 'Aller vers (Move To)';
       case 'patrol':
         return 'Patrouille';
+      case 'wandering':
+        return 'Balade Aléatoire (Wandering)';
       case 'keyboard_control':
         return 'Contrôles Joueur';
       case 'boundary_behavior':
         return 'Bords de Scène';
+      case 'particle_emitter':
+        return 'Émetteur de Particules';
     }
   };
 
@@ -513,6 +575,17 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
                       targetEntityOptions,
                       entityTypeOptions,
                       availableTags,
+                      customParticles,
+                      onOpenParticleDrawer: (editingPreset) =>
+                        setParticleDrawerState({
+                          behaviorId: behavior.id,
+                          isOverridden: hasOverride,
+                          editingPreset,
+                        }),
+                      onDeleteCustomParticle: (presetId) => {
+                        deleteCustomParticle(presetId);
+                        invalidateCustomParticleSprite(presetId);
+                      },
                     })}
                   </div>
                 )}
@@ -664,6 +737,20 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
 
                   <button
                     type="button"
+                    onClick={() => handleAddBehavior('wandering')}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <Shuffle className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-800 text-xs">Balade Aléatoire (Wandering)</div>
+                      <div className="text-[11px] text-slate-500">Déplacement autonome et organique dans une zone paramétrable.</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => handleAddBehavior('move_to')}
                     className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
                   >
@@ -706,7 +793,27 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
                 </div>
               </div>
 
-              {/* Catégorie 6: Cycle de Vie & Nettoyage */}
+              {/* Catégorie 6: Effets Visuels & Particules */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                  Effets Visuels & Particules
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleAddBehavior('particle_emitter')}
+                  className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                >
+                  <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-800 text-xs">Émetteur de Particules</div>
+                    <div className="text-[11px] text-slate-500">Flux léger de particules (étincelles, fumée, traînée) en Canvas 2D.</div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Catégorie 7: Cycle de Vie & Nettoyage */}
               <div className="space-y-1.5">
                 <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
                   Cycle de Vie & Nettoyage
@@ -729,6 +836,50 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
           </div>
         </div>
       )}
+
+      {/* Atelier de dessin plein écran pour particule personnalisée */}
+      {particleDrawerState && (
+        <FullScreenDrawingModal
+          title={
+            particleDrawerState.editingPreset
+              ? `Modifier particule : ${particleDrawerState.editingPreset.name}`
+              : 'Dessiner une particule'
+          }
+          subtitle="Dessinez votre particule personnalisée"
+          initialPaths={particleDrawerState.editingPreset?.vectorPaths || []}
+          currentEditingStateName={
+            particleDrawerState.editingPreset?.name || `Particule ${customParticles.length + 1}`
+          }
+          onSave={(paths, _dataUrl, _colliderType, customName) => {
+            const finalName = (customName || '').trim() || `Particule ${customParticles.length + 1}`;
+            let targetPresetId = particleDrawerState.editingPreset?.id;
+            if (targetPresetId) {
+              updateCustomParticle(targetPresetId, {
+                name: finalName,
+                vectorPaths: paths,
+              });
+              invalidateCustomParticleSprite(targetPresetId);
+            } else {
+              targetPresetId = addCustomParticle({
+                name: finalName,
+                vectorPaths: paths,
+                useTint: false,
+              });
+            }
+            const patch: Partial<ParticleEmitterBehaviorConfig> = {
+              shape: 'custom',
+              customParticleId: targetPresetId,
+            };
+            if (particleDrawerState.isOverridden) {
+              handleUpdateOverride(particleDrawerState.behaviorId, patch);
+            } else {
+              handleUpdateBaseBehavior(particleDrawerState.behaviorId, patch);
+            }
+            setParticleDrawerState(null);
+          }}
+          onClose={() => setParticleDrawerState(null)}
+        />
+      )}
     </div>
   );
 }
@@ -743,6 +894,9 @@ function renderBehaviorControls({
   targetEntityOptions,
   entityTypeOptions,
   availableTags,
+  customParticles,
+  onOpenParticleDrawer,
+  onDeleteCustomParticle,
 }: {
   behavior: EntityBehavior;
   override?: BehaviorOverride;
@@ -752,6 +906,9 @@ function renderBehaviorControls({
   targetEntityOptions: Entity[];
   entityTypeOptions: { type: string; label: string }[];
   availableTags: string[];
+  customParticles: CustomParticlePreset[];
+  onOpenParticleDrawer: (editingPreset?: CustomParticlePreset) => void;
+  onDeleteCustomParticle: (presetId: string) => void;
 }) {
   const update = (partial: any) => {
     if (isOverridden) {
@@ -760,6 +917,36 @@ function renderBehaviorControls({
       onUpdateBase(partial);
     }
   };
+
+  const renderFlipControls = (b: { flipOnMove?: boolean; flipInvert?: boolean }) => (
+    <>
+      <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+        <div>
+          <div className="font-bold text-slate-700 text-xs">Flip horizontal (Sens du déplacement)</div>
+          <div className="text-[10px] text-slate-400">Retourne l'objet horizontalement vers l'avant</div>
+        </div>
+        <input
+          type="checkbox"
+          checked={b.flipOnMove === true}
+          onChange={(e) => update({ flipOnMove: e.target.checked })}
+          className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+        />
+      </div>
+      {b.flipOnMove === true && (
+        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+          <span className="font-bold text-slate-700 text-xs">Sens du dessin d'origine</span>
+          <select
+            value={b.flipInvert ? 'left' : 'right'}
+            onChange={(e) => update({ flipInvert: e.target.value === 'left' })}
+            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+          >
+            <option value="right">Regarde vers la droite (Défaut)</option>
+            <option value="left">Regarde vers la gauche (Inversé)</option>
+          </select>
+        </div>
+      )}
+    </>
+  );
 
   switch (behavior.type) {
     case 'draggable': {
@@ -1041,6 +1228,8 @@ function renderBehaviorControls({
               className="w-full accent-indigo-600"
             />
           </div>
+
+          {renderFlipControls(b)}
         </div>
       );
     }
@@ -1076,7 +1265,53 @@ function renderBehaviorControls({
             </select>
           </div>
 
-          {/* Ligne 3: Vitesse de déplacement */}
+          {/* Ligne 3: Restriction Axe Horizontal */}
+          <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+            <div>
+              <div className="font-bold text-slate-700 text-xs">Mouvement horizontal (Gauche / Droite)</div>
+              <div className="text-[10px] text-slate-400">Autorise le déplacement sur l'axe X</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={b.allowHorizontal !== false}
+              onChange={(e) => update({ allowHorizontal: e.target.checked })}
+              className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+            />
+          </div>
+
+          {/* Ligne 4: Restriction Axe Vertical (si mode Vue de dessus) */}
+          {b.mode === 'top_down' && (
+            <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+              <div>
+                <div className="font-bold text-slate-700 text-xs">Mouvement vertical (Haut / Bas)</div>
+                <div className="text-[10px] text-slate-400">Autorise le déplacement sur l'axe Y</div>
+              </div>
+              <input
+                type="checkbox"
+                checked={b.allowVertical !== false}
+                onChange={(e) => update({ allowVertical: e.target.checked })}
+                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+              />
+            </div>
+          )}
+
+          {/* Ligne 5: Autoriser le saut (si mode Plateforme) */}
+          {b.mode === 'platformer' && (
+            <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+              <div>
+                <div className="font-bold text-slate-700 text-xs">Autoriser le saut</div>
+                <div className="text-[10px] text-slate-400">Active l'impulsion verticale (Haut / Espace)</div>
+              </div>
+              <input
+                type="checkbox"
+                checked={b.allowJump !== false}
+                onChange={(e) => update({ allowJump: e.target.checked })}
+                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+              />
+            </div>
+          )}
+
+          {/* Ligne 6: Vitesse de déplacement */}
           <div className="p-2 bg-white rounded-xl border border-slate-200">
             <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
               <span className="font-bold">Vitesse de course</span>
@@ -1095,8 +1330,8 @@ function renderBehaviorControls({
             />
           </div>
 
-          {/* Ligne 4: Force de saut (si mode plateforme) */}
-          {b.mode === 'platformer' && (
+          {/* Ligne 7: Force de saut (si mode plateforme et saut autorisé) */}
+          {b.mode === 'platformer' && b.allowJump !== false && (
             <div className="p-2 bg-white rounded-xl border border-slate-200">
               <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
                 <span className="font-bold">Impulsion de saut</span>
@@ -1115,6 +1350,8 @@ function renderBehaviorControls({
               />
             </div>
           )}
+
+          {renderFlipControls(b)}
         </div>
       );
     }
@@ -1190,6 +1427,150 @@ function renderBehaviorControls({
               <span className="text-slate-400 text-xs">sec</span>
             </div>
           </div>
+
+          {renderFlipControls(b)}
+        </div>
+      );
+    }
+
+    case 'wandering': {
+      const b = { ...behavior, ...(override || {}) } as WanderingBehaviorConfig;
+      return (
+        <div className="space-y-1.5">
+          {/* Ligne 1: Mode de déplacement */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Type de déplacement</span>
+            <select
+              value={b.mode || 'free_2d'}
+              onChange={(e) => update({ mode: e.target.value as any })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[180px]"
+            >
+              <option value="free_2d">Zone 2D (Toutes directions)</option>
+              <option value="horizontal">Horizontal (Sol / Plateforme)</option>
+            </select>
+          </div>
+
+          {/* Ligne 2: Rayon de la zone */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Rayon de la zone</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.radius ?? 160} px
+              </span>
+            </div>
+            <input
+              type="range"
+              min="40"
+              max="600"
+              step="10"
+              value={b.radius ?? 160}
+              onChange={(e) => update({ radius: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 3: Vitesse */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Vitesse de déplacement</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.speed ?? 90} px/s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="10"
+              max="400"
+              step="10"
+              value={b.speed ?? 90}
+              onChange={(e) => update({ speed: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 4: Niveau d'aléatoire (errance) */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <div>
+                <span className="font-bold">Aléatoire des virages</span>
+                <span className="text-[10px] text-slate-400 block">
+                  {(b.randomness ?? 65) < 35
+                    ? 'Trajectoires douces et progressives'
+                    : (b.randomness ?? 65) > 70
+                    ? 'Changements de cap brusques et vifs'
+                    : 'Exploration naturelle équilibrée'}
+                </span>
+              </div>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.randomness ?? 65}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              value={b.randomness ?? 65}
+              onChange={(e) => update({ randomness: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 5: Fréquence de changement de direction */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Intervalle de décision</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {(b.changeInterval ?? 1.5).toFixed(1)} s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0.3"
+              max="5"
+              step="0.1"
+              value={b.changeInterval ?? 1.5}
+              onChange={(e) => update({ changeInterval: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 6: Pause aléatoire max */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Pause aléatoire max</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {(b.pauseDuration ?? 0.8).toFixed(1)} s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="4"
+              step="0.2"
+              value={b.pauseDuration ?? 0.8}
+              onChange={(e) => update({ pauseDuration: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 7: Orienter dans le sens du mouvement (uniquement mode 2D) */}
+          {(b.mode || 'free_2d') === 'free_2d' && (
+            <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+              <div>
+                <div className="font-bold text-slate-700 text-xs">Orienter vers le trajet</div>
+                <div className="text-[10px] text-slate-400">Fait pivoter l'objet face à sa direction</div>
+              </div>
+              <input
+                type="checkbox"
+                checked={b.orientToMovement === true}
+                onChange={(e) => update({ orientToMovement: e.target.checked })}
+                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+              />
+            </div>
+          )}
+
+          {renderFlipControls(b)}
         </div>
       );
     }
@@ -1320,6 +1701,8 @@ function renderBehaviorControls({
               className="w-full accent-indigo-600"
             />
           </div>
+
+          {renderFlipControls(b)}
         </div>
       );
     }
@@ -1555,6 +1938,8 @@ function renderBehaviorControls({
               className="w-full accent-indigo-600"
             />
           </div>
+
+          {renderFlipControls(b)}
         </div>
       );
     }
@@ -1600,6 +1985,319 @@ function renderBehaviorControls({
               />
             </div>
           )}
+        </div>
+      );
+    }
+
+    case 'particle_emitter': {
+      const b = { ...behavior, ...(override || {}) } as ParticleEmitterBehaviorConfig;
+      return (
+        <div className="space-y-1.5">
+          {/* Ligne 1: Forme des particules */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Forme des particules</span>
+            <select
+              value={b.shape || 'circle'}
+              onChange={(e) => {
+                const nextShape = e.target.value as ParticleShape;
+                if (nextShape === 'custom' && !b.customParticleId && customParticles.length > 0) {
+                  update({ shape: nextShape, customParticleId: customParticles[0].id });
+                } else {
+                  update({ shape: nextShape });
+                }
+              }}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              <option value="circle">Rond (Bulle / Fumée)</option>
+              <option value="square">Carré (Confetti / Pixel)</option>
+              <option value="spark">Étincelle (Trait)</option>
+              <option value="star">Étoile</option>
+              <option value="custom">Particule dessinée ✨</option>
+            </select>
+          </div>
+
+          {/* Galerie de particules dessinées si shape === 'custom' */}
+          {b.shape === 'custom' && (
+            <div className="p-2.5 bg-amber-50/60 rounded-xl border border-amber-200 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-amber-950">Particule vectorielle :</span>
+                <button
+                  type="button"
+                  onClick={() => onOpenParticleDrawer(undefined)}
+                  className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
+                >
+                  <Paintbrush className="w-3 h-3" />
+                  <span>+ Dessiner</span>
+                </button>
+              </div>
+
+              {customParticles.length === 0 ? (
+                <div className="text-[11px] text-amber-800 bg-white/80 rounded-lg p-2 border border-amber-200/80 text-center">
+                  Aucune particule dessinée pour le moment. Cliquez sur <strong>+ Dessiner</strong> ci-dessus.
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-1.5">
+                  {customParticles.map((preset) => {
+                    const isSel = b.customParticleId === preset.id;
+                    return (
+                      <div
+                        key={preset.id}
+                        className={`relative group p-1.5 rounded-xl border flex flex-col items-center gap-1 cursor-pointer transition-all ${
+                          isSel
+                            ? 'bg-white border-amber-500 ring-2 ring-amber-300/60 shadow-xs'
+                            : 'bg-white/80 border-slate-200 hover:border-amber-300'
+                        }`}
+                        onClick={() => update({ customParticleId: preset.id })}
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden">
+                          <svg viewBox="0 0 100 100" className="w-7 h-7">
+                            {preset.vectorPaths.map((p) => (
+                              <path
+                                key={p.id}
+                                d={p.d}
+                                stroke={p.stroke}
+                                strokeWidth={p.strokeWidth}
+                                fill={p.fill || 'none'}
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            ))}
+                          </svg>
+                        </div>
+                        <span className="text-[9px] font-bold text-slate-700 truncate w-full text-center">
+                          {preset.name}
+                        </span>
+                        <div className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenParticleDrawer(preset);
+                            }}
+                            className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
+                            title="Modifier ce dessin"
+                          >
+                            <Pencil className="w-2.5 h-2.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteCustomParticle(preset.id);
+                              if (isSel) update({ customParticleId: undefined });
+                            }}
+                            className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
+                            title="Supprimer ce preset"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-1 border-t border-amber-200/70">
+                <span className="text-[11px] font-bold text-slate-700">Teinter avec les couleurs d'émission</span>
+                <input
+                  type="checkbox"
+                  checked={b.useParticleTint === true}
+                  onChange={(e) => update({ useParticleTint: e.target.checked })}
+                  className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Ligne 2: Débit d'émission */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Débit d'émission</span>
+              <span className="font-mono font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.rate ?? 14} part/s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="1"
+              max="40"
+              step="1"
+              value={b.rate ?? 14}
+              onChange={(e) => update({ rate: parseInt(e.target.value, 10) })}
+              className="w-full accent-amber-500"
+            />
+          </div>
+
+          {/* Ligne 3: Couleur Principale */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Couleur principale</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono text-slate-500">{b.color || '#f59e0b'}</span>
+              <input
+                type="color"
+                value={b.color || '#f59e0b'}
+                onChange={(e) => update({ color: e.target.value })}
+                className="w-8 h-6 rounded border border-slate-300 cursor-pointer"
+              />
+            </div>
+          </div>
+
+          {/* Ligne 4: Couleur Secondaire */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Couleur secondaire (Mix)</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono text-slate-500">{b.color2 || b.color || '#ef4444'}</span>
+              <input
+                type="color"
+                value={b.color2 || b.color || '#ef4444'}
+                onChange={(e) => update({ color2: e.target.value })}
+                className="w-8 h-6 rounded border border-slate-300 cursor-pointer"
+              />
+            </div>
+          </div>
+
+          {/* Ligne 5: Vitesse initiale */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Vitesse d'éjection</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.speed ?? 140} px/s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="10"
+              max="500"
+              step="10"
+              value={b.speed ?? 140}
+              onChange={(e) => update({ speed: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 6: Taille */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Taille des particules</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.size ?? 6} px
+              </span>
+            </div>
+            <input
+              type="range"
+              min="2"
+              max="20"
+              step="1"
+              value={b.size ?? 6}
+              onChange={(e) => update({ size: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 7: Durée de vie */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Durée de vie</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {(b.lifetime ?? 0.8).toFixed(1)} s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0.2"
+              max="3.0"
+              step="0.1"
+              value={b.lifetime ?? 0.8}
+              onChange={(e) => update({ lifetime: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 8: Gravité des particules */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Gravité / Flottaison</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.gravity ?? 160} px/s²
+              </span>
+            </div>
+            <input
+              type="range"
+              min="-300"
+              max="600"
+              step="20"
+              value={b.gravity ?? 160}
+              onChange={(e) => update({ gravity: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 9: Direction */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Direction d'émission</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.angle ?? -90}°
+              </span>
+            </div>
+            <input
+              type="range"
+              min="-180"
+              max="180"
+              step="5"
+              value={b.angle ?? -90}
+              onChange={(e) => update({ angle: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 10: Cône de dispersion */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Cône de dispersion</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.spread ?? 60}°
+              </span>
+            </div>
+            <input
+              type="range"
+              min="5"
+              max="360"
+              step="5"
+              value={b.spread ?? 60}
+              onChange={(e) => update({ spread: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Ligne 11: Décalage d'émission X */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Point d'émission ΔX</span>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                value={b.offsetX ?? 0}
+                onChange={(e) => update({ offsetX: parseFloat(e.target.value) || 0 })}
+                className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
+              />
+              <span className="text-slate-400 text-xs">px</span>
+            </div>
+          </div>
+
+          {/* Ligne 12: Décalage d'émission Y */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Point d'émission ΔY</span>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                value={b.offsetY ?? 0}
+                onChange={(e) => update({ offsetY: parseFloat(e.target.value) || 0 })}
+                className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
+              />
+              <span className="text-slate-400 text-xs">px</span>
+            </div>
+          </div>
         </div>
       );
     }

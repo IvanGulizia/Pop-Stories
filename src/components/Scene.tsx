@@ -4,6 +4,7 @@ import { Apple } from './Apple';
 import { Plant } from './Plant';
 import { CustomShape } from './CustomShape';
 import { Sparkles, Paintbrush, PlayCircle } from 'lucide-react';
+import { ParticleCanvasOverlay } from './ParticleCanvasOverlay';
 import {
   stepMatterPhysics,
   startKeyboardListening,
@@ -86,6 +87,23 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
 
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const mousePosRef = useRef<{ x: number; y: number } | null>(null);
+  const setSceneBounds = useSceneStore((state) => state.setSceneBounds);
+
+  // Synchronisation dynamique des dimensions réelles du canvas vers le store (Boundary & Spawn aléatoire)
+  useEffect(() => {
+    const el = canvasContainerRef.current;
+    if (!el) return;
+    const updateBounds = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setSceneBounds({ width: rect.width, height: rect.height });
+      }
+    };
+    updateBounds();
+    const ro = new ResizeObserver(updateBounds);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [setSceneBounds, ratio]);
 
   // Boucle de simulation physique Matter.js & contrôles joueur en mode Play (60 FPS)
   useEffect(() => {
@@ -360,6 +378,9 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
             });
         })()}
 
+        {/* 2.5. SYSTÈME DE PARTICULES 2D LÉGER (Canvas Overlay 60 FPS, Mode Play) */}
+        <ParticleCanvasOverlay active={isPlayMode} />
+
         {/* 3. CALQUES DE PREMIER-PLAN DESSINÉS (FOREGROUND & AUTRES: z-40) */}
         <div className="absolute inset-0 pointer-events-none z-40">
           {[...otherGroups, ...foregroundGroups].flatMap((g) => g.layers).map((layer) => {
@@ -406,7 +427,9 @@ function DirectCanvasDrawingOverlay({
 }) {
   const drawingTool = useSceneStore((state) => state.drawingTool);
   const strokeColor = useSceneStore((state) => state.drawingStrokeColor);
+  const strokeColorId = useSceneStore((state) => state.drawingStrokeColorId);
   const fillColor = useSceneStore((state) => state.drawingFillColor);
+  const fillColorId = useSceneStore((state) => state.drawingFillColorId);
   const strokeWidth = useSceneStore((state) => state.drawingStrokeWidth);
   const selectLayer = useSceneStore((state) => state.selectLayer);
 
@@ -439,6 +462,7 @@ function DirectCanvasDrawingOverlay({
 
   const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     e.stopPropagation();
+    if (layer.locked) return;
     try {
       (e.target as Element).setPointerCapture?.(e.pointerId);
     } catch (_) {}
@@ -464,7 +488,7 @@ function DirectCanvasDrawingOverlay({
   };
 
   const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (!isDrawing) return;
+    if (!isDrawing || layer.locked) return;
     const pt = getSvgCoordinates(e);
     setCurrentPt(pt);
 
@@ -499,6 +523,13 @@ function DirectCanvasDrawingOverlay({
       (e.target as Element).releasePointerCapture?.(e.pointerId);
     } catch (_) {}
 
+    if (layer.locked) {
+      setPoints([]);
+      setStartPt(null);
+      setCurrentPt(null);
+      return;
+    }
+
     const pt = getSvgCoordinates(e);
     const existingPaths = layer.vectorPaths || [];
     let newPath: any = null;
@@ -508,8 +539,10 @@ function DirectCanvasDrawingOverlay({
         id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         d: pointsToPath(points),
         stroke: strokeColor,
+        strokeColorId,
         strokeWidth,
         fill: fillColor,
+        fillColorId,
         points,
       };
     } else if (drawingTool === 'line' && startPt) {
@@ -517,6 +550,7 @@ function DirectCanvasDrawingOverlay({
         id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         d: `M ${startPt.x} ${startPt.y} L ${pt.x} ${pt.y}`,
         stroke: strokeColor,
+        strokeColorId,
         strokeWidth,
         fill: 'none',
         points: [startPt, pt],
@@ -531,8 +565,10 @@ function DirectCanvasDrawingOverlay({
           id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
           d: `M ${rx} ${ry} h ${rw} v ${rh} h ${-rw} Z`,
           stroke: strokeColor,
+          strokeColorId,
           strokeWidth,
           fill: fillColor,
+          fillColorId,
           rect: { x: rx, y: ry, width: rw, height: rh },
           points: [{ x: rx, y: ry }, { x: rx + rw, y: ry }, { x: rx + rw, y: ry + rh }, { x: rx, y: ry + rh }],
         };
@@ -545,8 +581,10 @@ function DirectCanvasDrawingOverlay({
         id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         d: `M ${cx - r} ${cy} a ${r} ${r} 0 1 0 ${r * 2} 0 a ${r} ${r} 0 1 0 ${-r * 2} 0 Z`,
         stroke: strokeColor,
+        strokeColorId,
         strokeWidth,
         fill: fillColor,
+        fillColorId,
       };
     }
 
@@ -563,8 +601,11 @@ function DirectCanvasDrawingOverlay({
     <div className="absolute inset-0 z-50 flex flex-col items-center justify-center">
       {/* Top Banner indicating active layer drawing mode */}
       <div className="absolute top-3 left-3 z-50 bg-slate-900/90 text-white text-xs font-bold px-3 py-1.5 rounded-2xl shadow-lg border border-slate-700 flex items-center gap-2 backdrop-blur-xs">
-        <span className="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-ping" />
-        <span>Dessin Direct sur : <strong>{layer.name}</strong></span>
+        <span className={`w-2.5 h-2.5 rounded-full ${layer.locked ? 'bg-amber-400' : 'bg-indigo-400 animate-ping'}`} />
+        <span>
+          {layer.locked ? 'Calque verrouillé : ' : 'Dessin Direct sur : '}
+          <strong>{layer.name}</strong>
+        </span>
         <button
           type="button"
           onClick={() => selectLayer(null)}

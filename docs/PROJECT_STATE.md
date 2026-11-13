@@ -1,6 +1,24 @@
 # État du Projet
 
 ## Complété
+- **Audit Fiabilité (Lot 1) & Spawn/Particules au Point Exact, Tags sur Déclencheurs, État Initial & Particules Dessinées (Phase 10.10)** :
+  - **Audit & Correctifs Moteur (Lot 1)** : Alignement exact des colliders avec `scale` et `flipX` (`getEntityWorldColliderBounds`), nettoyage complet de l'état runtime au Stop (`clearPlayRuntimeState` + annulation des timers), nettoyage `collisionEnd` Matter.js, `sceneBounds` réactifs via `ResizeObserver` partout (bordures, spawn aléatoire, `SpawnLocationPicker`), correction `evaluateRulesWithTemp` & `DirectCanvasDrawingOverlay` (`strokeColorId` + `layer.locked`).
+  - **Position exacte d'événement (`eventPosition`)** : Capture des coordonnées de contact physique/AABB ou de pointeur pour spawner (`at_event_point` / `offset_event_point`) ou émettre des particules (`event_point`) exactement à l'endroit de la collision ou du clic.
+  - **État initial au Spawn restauré** : Sélecteur d'état initial directement dans `SpawnLocationPicker`, étape dédiée dans le `RuleBook` et rendu de la miniature exacte dans les cartes.
+  - **Ciblage `#Tag` & `Instance précise` sur les déclencheurs** : Support complet Sujet & Cible par Type, `#Tag` ou Instance dans la création, l'édition et le Storyboard du `RuleBook`.
+  - **Particules dessinées personnalisées (`CustomParticlePreset`)** : Création/édition via `<FullScreenDrawingModal />`, cache sprite `Path2D` canvas dans `particleSystem.ts`, persistance projet et réutilisation dans `particle_emitter` (`BehaviorManager`) et `emit_particles` (`RuleBook`) avec option de teinte dynamique.
+- **Référence de Spawn, Contrôles Clavier Granulaires, Parenting d'Entités & Particules 2D Légères (Phase 10.9)** :
+  - **Action `spawn_entity` avec Objet de Référence & Taille Calquée** : Choix complet du référent (*Sujet*, *Cible*, *Entité*, *Type*, *Tag*, *Dernier objet créé*) dans `SpawnLocationPicker` et option *Même taille que la référence* (`match_reference`).
+  - **Contrôles Clavier (`keyboard_control`) modulaires** : Activation/désactivation indépendante du mouvement horizontal (`allowHorizontal`), du mouvement vertical (`allowVertical` en Top-Down) et du saut (`allowJump` en Plateforme).
+  - **Parenting & Détachement en Cours de Jeu** : Support complet `parentId` + `parentOffset` (`x`, `y`, `rotationOffset`, `inheritRotation`, `inheritFlip`), synchronisation Edit-mode WYSIWYG, résolution topologique 60 FPS dans Matter.js avec `collisionFilter.group` négatif partagé anti-auto-collision, section dédiée dans l'Inspecteur, indentation dans la Hiérarchie et actions `attach_to_parent` / `detach_parent` dans le `RuleBook`.
+  - **Système de Particules 2D Poolé (`MAX_PARTICLES = 280`)** : Overlay `<canvas>` 2D pur sans nœuds DOM ni physique Matter.js, composant continu `particle_emitter` (attributs empilés style Unity) et action ponctuelle `emit_particles` avec présets dans le `RuleBook`.
+- **Flip Horizontal sur Déplacement, Capteurs Non-Solides sans Physique & Correction Look At (Phase 10.8)** :
+  - **Option Flip (`flipOnMove` / `flipInvert`)** : Retournement horizontal automatique vers la direction de marche sur tous les comportements de déplacement (`keyboard_control`, `patrol`, `wandering`, `move_to`, `follow`, `constant_velocity`).
+  - **Objets sans Physique strictement Trigger (`isSensor: true`)** : Aucun objet sans composant `physics` ne bloque physiquement les autres corps ; seul `physics` avec `Collider Solide` activé crée un corps solide.
+  - **Look At par plus court chemin (`shortestAngleDiffRad`)** : Suppression totale des tours de 360° inverses au passage des ±180° via accumulation angulaire continue et `duration: 0` en Mode Play.
+- **Drag désactivé par défaut en Mode Play & Comportement Balade Aléatoire (`wandering`) (Phase 10.7)** :
+  - **Drag strictement piloté par composant en Mode Play** : Plus aucune entité n'est déplaçable par défaut en Mode Play sans avoir explicitement le composant `draggable` actif (`isEntityDraggable` strict, `isDraggable: false` par défaut).
+  - **Comportement `wandering` paramétrable** : Déplacement aléatoire naturel dans une zone paramétrable (mode 2D libre ou horizontal plateforme, rayon de zone, vitesse, pourcentage d'aléatoire des virages, intervalle de décision, pause aléatoire max, et orientation automatique).
 - **Ciblage Dynamique d'Instances en Mode Play (Pistes A, B, C, D) & Palette Projet Partagée 16 Couleurs (Phase 10.6)** :
   - **Compatibilité totale des 4 pistes de ciblage d'instances** :
     - **Piste A (Tags `#tag` + `spawnTags`)** : Attribution de tags à la création d'un objet (`SpawnLocationPicker`) et ciblage de groupe par tag dans les actions et déclencheurs.

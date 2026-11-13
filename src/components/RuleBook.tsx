@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useSceneStore } from '../store/useSceneStore';
 import {
   TriggerType,
@@ -7,15 +7,23 @@ import {
   RuleAction,
   RuleTrigger,
   EntityType,
+  EntityId,
+  SelectionMode,
   DynamicRule,
   ActionTargetMode,
   SoundType,
   RuleFolder,
   CustomSound,
+  SpawnReferenceMode,
+  ParticleShape,
+  ParentOffset,
+  CustomParticlePreset,
 } from '../types';
 import { EntityMiniPreview } from './EntityMiniPreview';
 import { SpawnLocationPicker } from './SpawnLocationPicker';
 import { SoundRecorderModal } from './SoundRecorderModal';
+import { FullScreenDrawingModal } from './FullScreenDrawingModal';
+import { invalidateCustomParticleSprite } from '../utils/particleSystem';
 import {
   Plus,
   Trash2,
@@ -40,6 +48,9 @@ import {
   Edit2,
   Check,
   GripVertical,
+  Paintbrush,
+  Pencil,
+  Tag,
 } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
 
@@ -49,12 +60,18 @@ type ActiveModal =
       ruleId: string;
       subStep?: 'choose_object' | 'choose_state';
       selectedEntityType?: EntityType;
+      selectionMode?: SelectionMode;
+      selectedEntityId?: EntityId;
+      tagInput?: string;
     }
   | {
       type: 'target';
       ruleId: string;
       subStep?: 'choose_object' | 'choose_state';
       selectedEntityType?: EntityType;
+      selectionMode?: SelectionMode;
+      selectedEntityId?: EntityId;
+      tagInput?: string;
     }
   | { type: 'event'; ruleId: string }
   | {
@@ -71,13 +88,18 @@ type ActiveModal =
         | 'choose_toggle_entity'
         | 'choose_toggle_states'
         | 'choose_spawn_entity'
+        | 'choose_spawn_state'
         | 'choose_spawn_location'
         | 'choose_sound'
-        | 'choose_delay_duration';
+        | 'choose_delay_duration'
+        | 'choose_particles'
+        | 'choose_attach_parent'
+        | 'choose_detach_parent';
       actionType?: ActionType;
       targetMode?: ActionTargetMode;
       selectedTargetType?: EntityType;
       pendingSpawnType?: EntityType;
+      pendingSpawnInitialStateId?: string;
       toggleStateA?: string;
       toggleStateB?: string;
       toggleTargetStateId?: string;
@@ -86,6 +108,32 @@ type ActiveModal =
       spawnOffset?: { x: number; y: number };
       spawnAbsoluteCoords?: { x: number; y: number };
       targetTag?: string;
+      // Particles config
+      particleOriginMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'event_point';
+      particleOriginEntityId?: string;
+      particleOriginEntityType?: EntityType;
+      particleOriginTag?: string;
+      particleCount?: number;
+      particleColor?: string;
+      particleColor2?: string;
+      particleShape?: ParticleShape;
+      customParticleId?: string;
+      useParticleTint?: boolean;
+      particleSpeed?: number;
+      particleSize?: number;
+      particleLifetime?: number;
+      particleGravity?: number;
+      particleSpread?: number;
+      particleAngle?: number;
+      // Parenting config
+      parentChildMode?: ActionTargetMode;
+      parentChildType?: EntityType;
+      parentChildTag?: string;
+      parentTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned';
+      parentEntityId?: string;
+      parentEntityType?: EntityType;
+      parentEntityTag?: string;
+      parentOffset?: ParentOffset;
     }
   | null;
 
@@ -107,14 +155,23 @@ interface WizardData {
     | 'spawn_location_picker'
     | 'sound_picker'
     | 'key_picker'
-    | 'delay_duration_picker';
+    | 'delay_duration_picker'
+    | 'particle_picker'
+    | 'attach_parent_picker'
+    | 'detach_parent_picker';
   delayDuration?: number;
   name: string;
+  subjectMode?: SelectionMode;
+  subjectId?: EntityId;
   subjectType: EntityType;
+  subjectTag?: string;
   subjectStateId?: string;
   triggerType: TriggerType;
   triggerPhase?: TriggerPhase;
+  targetMode?: SelectionMode;
+  targetId?: EntityId;
   targetType: EntityType;
+  targetTag?: string;
   targetStateId?: string;
   actionType?: ActionType;
   actionTargetMode?: ActionTargetMode;
@@ -123,13 +180,51 @@ interface WizardData {
   pendingSpawnType?: EntityType;
   actionSpawnEntityType?: EntityType;
   actionSpawnInitialStateId?: string;
-  actionSpawnLocationMode?: 'at_subject' | 'at_target' | 'offset_subject' | 'offset_target' | 'random' | 'absolute';
+  actionSpawnLocationMode?:
+    | 'at_subject'
+    | 'at_target'
+    | 'at_entity'
+    | 'at_event_point'
+    | 'offset_subject'
+    | 'offset_target'
+    | 'offset_entity'
+    | 'offset_event_point'
+    | 'random'
+    | 'absolute';
   actionSoundType?: SoundType;
   toggleStateA?: string;
   toggleStateB?: string;
   toggleTargetStateId?: string;
   toggleMode?: 'two_states' | 'current_and_target' | 'cycle_all';
   actionTargetTag?: string;
+
+  // Particles config
+  particleOriginMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'event_point';
+  particleOriginEntityId?: string;
+  particleOriginEntityType?: EntityType;
+  particleOriginTag?: string;
+  particleCount?: number;
+  particleColor?: string;
+  particleColor2?: string;
+  particleShape?: ParticleShape;
+  customParticleId?: string;
+  useParticleTint?: boolean;
+  particleSpeed?: number;
+  particleSize?: number;
+  particleLifetime?: number;
+  particleGravity?: number;
+  particleSpread?: number;
+  particleAngle?: number;
+
+  // Parenting config
+  parentChildMode?: ActionTargetMode;
+  parentChildType?: EntityType;
+  parentChildTag?: string;
+  parentTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned';
+  parentEntityId?: string;
+  parentEntityType?: EntityType;
+  parentEntityTag?: string;
+  parentOffset?: ParentOffset;
 
   // Configuration Minuteurs, Clavier, Proximité, Bords, Score
   timerInterval?: number;
@@ -138,7 +233,7 @@ interface WizardData {
   proximityDistance?: number;
   boundaryEdge?: 'any' | 'top' | 'bottom' | 'left' | 'right';
   variableName?: string;
-  variableOperator?: '>=' | '==';
+  variableOperator?: '>=' | '==' | '<=';
   variableValue?: number;
   autoRevert?: boolean;
 }
@@ -158,6 +253,10 @@ export function RuleBook() {
   const addFolder = useSceneStore((state) => state.addFolder);
   const deleteFolder = useSceneStore((state) => state.deleteFolder);
   const settings = useSceneStore((state) => state.settings);
+  const customParticles = useSceneStore((state) => state.customParticles || []);
+  const addCustomParticle = useSceneStore((state) => state.addCustomParticle);
+  const updateCustomParticle = useSceneStore((state) => state.updateCustomParticle);
+  const deleteCustomParticle = useSceneStore((state) => state.deleteCustomParticle);
 
   // Pagination & Rule Drag-and-Drop state
   const currentPage = useSceneStore((state) => state.ruleBookPage || 1);
@@ -172,6 +271,10 @@ export function RuleBook() {
   const [activeWizard, setActiveWizard] = useState<WizardData | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
   const [wizardEntryTab, setWizardEntryTab] = useState<'subject' | 'global_event'>('subject');
+  const [particleDrawingTarget, setParticleDrawingTarget] = useState<{
+    context: 'wizard' | 'modal';
+    editingPreset?: CustomParticlePreset;
+  } | null>(null);
 
   // Folder & Search state
   const [selectedFolderId, setSelectedFolderId] = useState<string | 'all'>('all');
@@ -214,6 +317,25 @@ export function RuleBook() {
   };
 
   const entityList = Object.values(entities);
+
+  // Tous les #tags utilisés dans le projet (entités, archétypes, règles)
+  const allProjectTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    entityList.forEach((e) => e.tags?.forEach((t) => tagSet.add(t)));
+    Object.values(customArchetypes).forEach((a) => a.tags?.forEach((t) => tagSet.add(t)));
+    rules.forEach((r) => {
+      if (r.trigger.subjectTag) tagSet.add(r.trigger.subjectTag);
+      if (r.trigger.targetTag) tagSet.add(r.trigger.targetTag);
+      r.actions.forEach((a) => {
+        a.spawnTags?.forEach((t) => tagSet.add(t));
+        if (a.targetTag) tagSet.add(a.targetTag);
+        if (a.spawnReferenceTag) tagSet.add(a.spawnReferenceTag);
+        if (a.particleOriginTag) tagSet.add(a.particleOriginTag);
+        if (a.parentEntityTag) tagSet.add(a.parentEntityTag);
+      });
+    });
+    return Array.from(tagSet).sort();
+  }, [entityList, customArchetypes, rules]);
 
   // Helper to find representative entity from canvas or archetype library
   const getEntityObj = (type?: string) => {
@@ -338,6 +460,18 @@ export function RuleBook() {
       const humanStateName = spawnStateObj?.name || 'Normal';
       const spawnLabel = spawnEntObj?.name || spawnType;
       const tagsBadge = act.spawnTags && act.spawnTags.length > 0 ? ` #${act.spawnTags[0]}` : '';
+      const refBadge =
+        act.spawnLocationMode === 'at_event_point' || act.spawnLocationMode === 'offset_event_point'
+          ? ' @Point exact'
+          : act.spawnReferenceMode === 'last_spawned'
+          ? ' @Dernier'
+          : act.spawnReferenceMode === 'tag' && act.spawnReferenceTag
+          ? ` @#${act.spawnReferenceTag}`
+          : act.spawnReferenceMode === 'entity' && act.spawnReferenceEntityId
+          ? ` @${entities[act.spawnReferenceEntityId]?.name || 'Entité'}`
+          : act.spawnReferenceMode === 'type' && act.spawnReferenceEntityType
+          ? ` @${getEntityObj(act.spawnReferenceEntityType)?.name || act.spawnReferenceEntityType}`
+          : '';
       return (
         <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
           <div className="w-5 h-5 rounded-md bg-slate-50 border border-slate-200 flex items-center justify-center p-0.5 shrink-0 overflow-hidden">
@@ -345,7 +479,88 @@ export function RuleBook() {
           </div>
           <span className="text-xs truncate">{spawnLabel}</span>
           <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded font-medium truncate">
-            (Créer - {humanStateName}{tagsBadge})
+            (Créer - {humanStateName}{tagsBadge}{refBadge})
+          </span>
+        </div>
+      );
+    }
+    if (act.type === 'emit_particles') {
+      const originBadge =
+        act.particleOriginMode === 'event_point'
+          ? ' @Point exact'
+          : act.particleOriginMode === 'tag' && act.particleOriginTag
+          ? ` @#${act.particleOriginTag}`
+          : '';
+      const shapeBadge =
+        act.particleShape === 'custom' && act.customParticleId
+          ? customParticles.find((p) => p.id === act.customParticleId)?.name || 'Dessin'
+          : `${act.particleCount ?? 18}x`;
+      return (
+        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+          <div className="w-5 h-5 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+            ✨
+          </div>
+          <span className="text-xs truncate">Particules</span>
+          <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded font-medium truncate">
+            ({shapeBadge}{originBadge})
+          </span>
+        </div>
+      );
+    }
+    if (act.type === 'attach_to_parent') {
+      const childLabel =
+        act.targetMode === 'subject'
+          ? 'Sujet'
+          : act.targetMode === 'target'
+          ? 'Cible'
+          : act.targetMode === 'last_spawned'
+          ? 'Dernier créé'
+          : act.targetMode === 'tag' && act.targetTag
+          ? `#${act.targetTag}`
+          : getEntityObj(act.targetType)?.name || 'Enfant';
+      const parentLabel =
+        act.parentTargetMode === 'subject'
+          ? 'Sujet'
+          : act.parentTargetMode === 'target'
+          ? 'Cible'
+          : act.parentTargetMode === 'last_spawned'
+          ? 'Dernier créé'
+          : act.parentTargetMode === 'tag' && act.parentEntityTag
+          ? `#${act.parentEntityTag}`
+          : act.parentTargetMode === 'entity' && act.parentEntityId
+          ? entities[act.parentEntityId]?.name || 'Entité'
+          : getEntityObj(act.parentEntityType)?.name || 'Parent';
+      return (
+        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+          <div className="w-5 h-5 rounded-md bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+            🔗
+          </div>
+          <span className="text-xs truncate">{childLabel}</span>
+          <span className="text-[10px] text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded font-medium truncate">
+            (➔ {parentLabel})
+          </span>
+        </div>
+      );
+    }
+    if (act.type === 'detach_parent') {
+      const targetLabel =
+        act.targetMode === 'subject'
+          ? 'Sujet'
+          : act.targetMode === 'target'
+          ? 'Cible'
+          : act.targetMode === 'last_spawned'
+          ? 'Dernier créé'
+          : act.targetMode === 'tag' && act.targetTag
+          ? `#${act.targetTag}`
+          : getEntityObj(act.targetType)?.name || 'Objet';
+      return (
+        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+          <div className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+            ✂️
+          </div>
+          <span className="text-xs truncate">{targetLabel}</span>
+          <span className="text-[10px] text-rose-700 bg-rose-50 px-1.5 py-0.2 rounded font-medium truncate">
+            (Détacher)
           </span>
         </div>
       );
@@ -432,10 +647,12 @@ export function RuleBook() {
       step: 1,
       subjectSubStep: 'choose_object',
       name: `Règle #${rules.length + 1}`,
+      subjectMode: 'type',
       subjectType: defaultSub,
       subjectStateId: undefined,
       triggerType: 'collision',
       triggerPhase: 'enter',
+      targetMode: 'type',
       targetType: defaultTar,
       targetStateId: undefined,
       actionSubStep: 'main',
@@ -447,6 +664,17 @@ export function RuleBook() {
     if (!activeWizard) return;
 
     const needsTarget = activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity';
+    const subMode: SelectionMode = activeWizard.subjectMode || 'type';
+    const tarMode: SelectionMode = activeWizard.targetMode || 'type';
+    const resolvedSubType =
+      subMode === 'instance' && activeWizard.subjectId
+        ? entities[activeWizard.subjectId]?.type || activeWizard.subjectType
+        : activeWizard.subjectType;
+    const resolvedTarType =
+      tarMode === 'instance' && activeWizard.targetId
+        ? entities[activeWizard.targetId]?.type || activeWizard.targetType
+        : activeWizard.targetType;
+
     const actions: RuleAction[] = [];
 
     if (actionData && actionData.type) {
@@ -454,7 +682,9 @@ export function RuleBook() {
         id: `act-${Date.now()}`,
         type: actionData.type,
         targetMode: actionData.targetMode || (needsTarget ? 'target' : 'subject'),
-        targetType: actionData.targetType || (actionData.targetMode === 'subject' ? activeWizard.subjectType : activeWizard.targetType),
+        targetType:
+          actionData.targetType ||
+          (actionData.targetMode === 'subject' ? resolvedSubType : resolvedTarType),
         spawnLocationMode: actionData.spawnLocationMode || (needsTarget ? 'at_target' : 'at_subject'),
         spawnSizeMode: actionData.spawnSizeMode || 'default',
         ...actionData,
@@ -467,11 +697,15 @@ export function RuleBook() {
       trigger: {
         type: activeWizard.triggerType,
         phase: activeWizard.triggerPhase || 'enter',
-        subjectMode: 'type',
-        subjectType: activeWizard.subjectType,
+        subjectMode: subMode,
+        subjectType: subMode === 'type' ? resolvedSubType : undefined,
+        subjectId: subMode === 'instance' ? activeWizard.subjectId : undefined,
+        subjectTag: subMode === 'tag' ? activeWizard.subjectTag : undefined,
         subjectStateId: activeWizard.subjectStateId,
-        targetMode: needsTarget ? 'type' : undefined,
-        targetType: needsTarget ? activeWizard.targetType : undefined,
+        targetMode: needsTarget ? tarMode : undefined,
+        targetType: needsTarget && tarMode === 'type' ? resolvedTarType : undefined,
+        targetId: needsTarget && tarMode === 'instance' ? activeWizard.targetId : undefined,
+        targetTag: needsTarget && tarMode === 'tag' ? activeWizard.targetTag : undefined,
         targetStateId: needsTarget ? activeWizard.targetStateId : undefined,
         timerInterval: activeWizard.timerInterval,
         timerType: activeWizard.timerType,
@@ -958,18 +1192,34 @@ export function RuleBook() {
           paginatedRules.map((rule) => {
             const isCollision = rule.trigger.type === 'collision' || rule.trigger.type === 'proximity';
 
-            // Find subject display info
-            const subjectType = rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
+            // Find subject display info (Type / #Tag / Instance)
+            const subjectMode = rule.trigger.subjectMode || 'type';
+            const subjectInst = subjectMode === 'instance' && rule.trigger.subjectId ? entities[rule.trigger.subjectId] : undefined;
+            const subjectType = subjectInst?.type || rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
             const subjectOpt = availableEntityOptions.find((o) => o.type === subjectType);
-            const subjectEntity = getEntityObj(subjectType);
+            const subjectEntity = subjectInst || getEntityObj(subjectType);
+            const subjectDisplayLabel =
+              subjectMode === 'tag'
+                ? `#${rule.trigger.subjectTag || 'tag'}`
+                : subjectMode === 'instance'
+                ? subjectInst?.name || 'Instance précise'
+                : subjectOpt?.label || subjectType;
             const subjectStateName = rule.trigger.subjectStateId
               ? subjectEntity?.states[rule.trigger.subjectStateId]?.name || rule.trigger.subjectStateId
               : 'Tous les états';
 
-            // Find target display info
-            const targetType = rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
+            // Find target display info (Type / #Tag / Instance)
+            const targetMode = rule.trigger.targetMode || 'type';
+            const targetInst = targetMode === 'instance' && rule.trigger.targetId ? entities[rule.trigger.targetId] : undefined;
+            const targetType = targetInst?.type || rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
             const targetOpt = availableEntityOptions.find((o) => o.type === targetType);
-            const targetEntity = getEntityObj(targetType);
+            const targetEntity = targetInst || getEntityObj(targetType);
+            const targetDisplayLabel =
+              targetMode === 'tag'
+                ? `#${rule.trigger.targetTag || 'tag'}`
+                : targetMode === 'instance'
+                ? targetInst?.name || 'Instance précise'
+                : targetOpt?.label || targetType;
             const targetStateName = rule.trigger.targetStateId
               ? targetEntity?.states[rule.trigger.targetStateId]?.name || rule.trigger.targetStateId
               : 'Tous les états';
@@ -1225,10 +1475,18 @@ export function RuleBook() {
                         </div>
                       ) : (
                         <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                          <div className="w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center p-0.5 shadow-2xs">
-                            <EntityMiniPreview entity={subjectEntity} type={subjectType} stateId={rule.trigger.subjectStateId} size={20} />
-                          </div>
-                          <span>{subjectOpt?.label || subjectType}</span>
+                          {subjectMode === 'tag' ? (
+                            <span className="px-2 py-0.5 rounded-lg bg-purple-100 text-purple-800 border border-purple-200 font-black">
+                              🏷️ {subjectDisplayLabel}
+                            </span>
+                          ) : (
+                            <>
+                              <div className="w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center p-0.5 shadow-2xs">
+                                <EntityMiniPreview entity={subjectEntity} type={subjectType} stateId={rule.trigger.subjectStateId} size={20} />
+                              </div>
+                              <span>{subjectDisplayLabel}</span>
+                            </>
+                          )}
                           {rule.trigger.subjectStateId && (
                             <span className="text-[10px] text-indigo-700 bg-indigo-50 px-1 py-0.2 rounded font-medium">({subjectStateName})</span>
                           )}
@@ -1246,10 +1504,18 @@ export function RuleBook() {
                         <>
                           <span className="text-slate-400">➔</span>
                           <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                            <div className="w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center p-0.5 shadow-2xs">
-                              <EntityMiniPreview entity={targetEntity} type={targetType} stateId={rule.trigger.targetStateId} size={20} />
-                            </div>
-                            <span>{targetOpt?.label || targetType}</span>
+                            {targetMode === 'tag' ? (
+                              <span className="px-2 py-0.5 rounded-lg bg-purple-100 text-purple-800 border border-purple-200 font-black">
+                                🏷️ {targetDisplayLabel}
+                              </span>
+                            ) : (
+                              <>
+                                <div className="w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center p-0.5 shadow-2xs">
+                                  <EntityMiniPreview entity={targetEntity} type={targetType} stateId={rule.trigger.targetStateId} size={20} />
+                                </div>
+                                <span>{targetDisplayLabel}</span>
+                              </>
+                            )}
                             {rule.trigger.targetStateId && (
                               <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded font-medium">({targetStateName})</span>
                             )}
@@ -1327,33 +1593,55 @@ export function RuleBook() {
                           </>
                         ) : (
                           <>
-                            <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
-                              <EntityMiniPreview
-                                entity={subjectEntity}
-                                type={subjectType}
-                                stateId={rule.trigger.subjectStateId}
-                                size={48}
-                              />
-                            </div>
+                            {subjectMode === 'tag' ? (
+                              <div className="w-14 h-14 rounded-xl bg-purple-100 text-purple-700 border border-purple-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                🏷️
+                              </div>
+                            ) : (
+                              <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
+                                <EntityMiniPreview
+                                  entity={subjectEntity}
+                                  type={subjectType}
+                                  stateId={rule.trigger.subjectStateId}
+                                  size={48}
+                                />
+                              </div>
+                            )}
 
                             <div className="w-full">
                               <div className="text-xs font-bold text-slate-800 truncate">
-                                {subjectOpt?.label || subjectType}
+                                {subjectDisplayLabel}
                               </div>
                               <div
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  if (subjectMode === 'tag') {
+                                    setActiveModal({
+                                      type: 'subject',
+                                      ruleId: rule.id,
+                                      subStep: 'choose_object',
+                                      selectionMode: 'tag',
+                                      tagInput: rule.trigger.subjectTag || '',
+                                    });
+                                    return;
+                                  }
                                   setActiveModal({
                                     type: 'subject',
                                     ruleId: rule.id,
                                     subStep: 'choose_state',
+                                    selectionMode: subjectMode,
                                     selectedEntityType: subjectType,
+                                    selectedEntityId: rule.trigger.subjectId,
                                   });
                                 }}
                                 className="text-[9px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer"
-                                title="Cliquer pour changer l'état requis"
+                                title={subjectMode === 'tag' ? 'Cliquer pour modifier le tag' : "Cliquer pour changer l'état requis"}
                               >
-                                {subjectStateName}
+                                {subjectMode === 'tag'
+                                  ? 'Filtre #Tag'
+                                  : subjectMode === 'instance'
+                                  ? `Instance • ${subjectStateName}`
+                                  : subjectStateName}
                               </div>
                             </div>
                           </>
@@ -1481,6 +1769,9 @@ export function RuleBook() {
                               type: 'target',
                               ruleId: rule.id,
                               subStep: 'choose_object',
+                              selectionMode: targetMode,
+                              selectedEntityId: rule.trigger.targetId,
+                              tagInput: rule.trigger.targetTag || '',
                             })
                           }
                           onDragOver={(e) => {
@@ -1494,39 +1785,61 @@ export function RuleBook() {
                               ? 'border-indigo-500 ring-4 ring-indigo-300/50 bg-indigo-50/40 scale-105'
                               : 'border-slate-200 hover:border-slate-400'
                           }`}
-                          title="Cliquer pour changer la cible ou son état requis"
+                          title="Cliquer pour changer la cible, son tag ou son état requis"
                         >
                           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600">
                             Cible touchée
                           </div>
 
-                          <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
-                            <EntityMiniPreview
-                              entity={targetEntity}
-                              type={targetType}
-                              stateId={rule.trigger.targetStateId}
-                              size={48}
-                            />
-                          </div>
+                          {targetMode === 'tag' ? (
+                            <div className="w-14 h-14 rounded-xl bg-purple-100 text-purple-700 border border-purple-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                              🏷️
+                            </div>
+                          ) : (
+                            <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
+                              <EntityMiniPreview
+                                entity={targetEntity}
+                                type={targetType}
+                                stateId={rule.trigger.targetStateId}
+                                size={48}
+                              />
+                            </div>
+                          )}
 
                           <div className="w-full">
                             <div className="text-xs font-bold text-slate-800 truncate">
-                              {targetOpt?.label || targetType}
+                              {targetDisplayLabel}
                             </div>
                             <div
                               onClick={(e) => {
                                 e.stopPropagation();
+                                if (targetMode === 'tag') {
+                                  setActiveModal({
+                                    type: 'target',
+                                    ruleId: rule.id,
+                                    subStep: 'choose_object',
+                                    selectionMode: 'tag',
+                                    tagInput: rule.trigger.targetTag || '',
+                                  });
+                                  return;
+                                }
                                 setActiveModal({
                                   type: 'target',
                                   ruleId: rule.id,
                                   subStep: 'choose_state',
+                                  selectionMode: targetMode,
                                   selectedEntityType: targetType,
+                                  selectedEntityId: rule.trigger.targetId,
                                 });
                               }}
                               className="text-[9px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer"
-                              title="Cliquer pour changer l'état requis de la cible"
+                              title={targetMode === 'tag' ? 'Cliquer pour modifier le tag' : "Cliquer pour changer l'état requis de la cible"}
                             >
-                              {targetStateName}
+                              {targetMode === 'tag'
+                                ? 'Filtre #Tag'
+                                : targetMode === 'instance'
+                                ? `Instance • ${targetStateName}`
+                                : targetStateName}
                             </div>
                           </div>
                         </button>
@@ -1585,7 +1898,17 @@ export function RuleBook() {
                         } else if (act.type === 'spawn_entity') {
                           actionBadge = 'Créer Entité';
                           const locLabel =
-                            act.spawnLocationMode === 'at_target'
+                            act.spawnLocationMode === 'at_event_point'
+                              ? 'Point exact'
+                              : act.spawnLocationMode === 'offset_event_point'
+                              ? 'Décalé (Point exact)'
+                              : act.spawnReferenceMode === 'last_spawned'
+                              ? 'Sur Dernier créé'
+                              : act.spawnReferenceMode === 'tag' && act.spawnReferenceTag
+                              ? `Sur #${act.spawnReferenceTag}`
+                              : act.spawnReferenceMode === 'entity' && act.spawnReferenceEntityId
+                              ? `Sur ${entities[act.spawnReferenceEntityId]?.name || 'Entité'}`
+                              : act.spawnLocationMode === 'at_target'
                               ? 'Sur Cible'
                               : act.spawnLocationMode === 'at_subject'
                               ? 'Sur Sujet'
@@ -1594,7 +1917,37 @@ export function RuleBook() {
                               : act.spawnLocationMode?.startsWith('offset')
                               ? 'Décalé'
                               : 'Fixe';
-                          actionDetail = `+ ${act.spawnEntityType || 'Objet'} • ${locLabel}`;
+                          const spawnEntForState = getEntityObj(act.spawnEntityType);
+                          const initStName = act.spawnInitialStateId
+                            ? spawnEntForState?.states[act.spawnInitialStateId]?.name
+                            : undefined;
+                          actionDetail = `+ ${act.spawnEntityType || 'Objet'}${initStName ? ` (${initStName})` : ''} • ${locLabel}`;
+                        } else if (act.type === 'emit_particles') {
+                          actionBadge = 'Particules';
+                          const customP = act.customParticleId
+                            ? customParticles.find((p) => p.id === act.customParticleId)?.name
+                            : undefined;
+                          actionDetail = `${act.particleCount ?? 18}x ${
+                            act.particleShape === 'custom' && customP ? `✨ ${customP}` : act.particleShape || 'circle'
+                          }${act.particleOriginMode === 'event_point' ? ' • Point exact' : ''}`;
+                        } else if (act.type === 'attach_to_parent') {
+                          actionBadge = 'Attacher Parent';
+                          actionDetail = `Lier à ${
+                            act.parentTargetMode === 'subject'
+                              ? 'Sujet'
+                              : act.parentTargetMode === 'target'
+                              ? 'Cible'
+                              : act.parentTargetMode === 'last_spawned'
+                              ? 'Dernier créé'
+                              : act.parentTargetMode === 'tag' && act.parentEntityTag
+                              ? `#${act.parentEntityTag}`
+                              : act.parentTargetMode === 'entity' && act.parentEntityId
+                              ? entities[act.parentEntityId]?.name || 'Entité'
+                              : act.parentEntityType || 'Parent'
+                          }`;
+                        } else if (act.type === 'detach_parent') {
+                          actionBadge = 'Détacher Parent';
+                          actionDetail = 'Libérer du parent';
                         } else if (act.type === 'play_sound') {
                           actionBadge = 'Jouer Son';
                           actionDetail = customSound ? `Son vocal : ${customSound.name}` : act.soundType ? `Son ${act.soundType}` : 'Effet sonore';
@@ -1631,8 +1984,41 @@ export function RuleBook() {
                                   actionId: act.id,
                                   actionType: act.type,
                                   targetMode: act.targetMode || 'target',
-                                  subStep: act.type === 'delay' ? 'choose_delay_duration' : 'main',
+                                  subStep:
+                                    act.type === 'delay'
+                                      ? 'choose_delay_duration'
+                                      : act.type === 'emit_particles'
+                                      ? 'choose_particles'
+                                      : act.type === 'attach_to_parent'
+                                      ? 'choose_attach_parent'
+                                      : act.type === 'detach_parent'
+                                      ? 'choose_detach_parent'
+                                      : 'main',
                                   delayDuration: act.delayDuration || 1,
+                                  particleOriginMode: act.particleOriginMode,
+                                  particleOriginEntityId: act.particleOriginEntityId,
+                                  particleOriginEntityType: act.particleOriginEntityType,
+                                  particleOriginTag: act.particleOriginTag,
+                                  particleCount: act.particleCount,
+                                  particleColor: act.particleColor,
+                                  particleColor2: act.particleColor2,
+                                  particleShape: act.particleShape,
+                                  customParticleId: act.customParticleId,
+                                  useParticleTint: act.useParticleTint,
+                                  particleSpeed: act.particleSpeed,
+                                  particleSize: act.particleSize,
+                                  particleLifetime: act.particleLifetime,
+                                  particleGravity: act.particleGravity,
+                                  particleSpread: act.particleSpread,
+                                  particleAngle: act.particleAngle,
+                                  parentChildMode: act.targetMode,
+                                  parentChildType: act.targetType,
+                                  parentChildTag: act.targetTag,
+                                  parentTargetMode: act.parentTargetMode,
+                                  parentEntityId: act.parentEntityId,
+                                  parentEntityType: act.parentEntityType,
+                                  parentEntityTag: act.parentEntityTag,
+                                  parentOffset: act.parentOffset,
                                 })
                               }
                               onDragOver={(e) => {
@@ -1656,6 +2042,18 @@ export function RuleBook() {
                                 <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
                                   💥
                                 </div>
+                              ) : act.type === 'emit_particles' ? (
+                                <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                  ✨
+                                </div>
+                              ) : act.type === 'attach_to_parent' ? (
+                                <div className="w-14 h-14 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                  🔗
+                                </div>
+                              ) : act.type === 'detach_parent' ? (
+                                <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                  ✂️
+                                </div>
                               ) : act.type === 'play_sound' ? (
                                 <div className="relative w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
                                   🔊
@@ -1675,6 +2073,7 @@ export function RuleBook() {
                                   <EntityMiniPreview
                                     entity={getEntityObj(act.spawnEntityType || 'custom')}
                                     type={act.spawnEntityType || 'custom'}
+                                    stateId={act.spawnInitialStateId}
                                     size={44}
                                   />
                                   <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white rounded-full p-0.5 shadow-xs text-[10px]">
@@ -1700,6 +2099,8 @@ export function RuleBook() {
                                 <div className="text-[11px] font-bold text-slate-800 truncate">
                                   {act.type === 'spawn_entity'
                                     ? `Créer ${act.spawnEntityType || 'Objet'}`
+                                    : act.type === 'emit_particles'
+                                    ? 'Salve de particules'
                                     : act.type === 'play_sound'
                                     ? customSound?.name || `Son ${act.soundType || ''}`
                                     : act.targetMode === 'subject'
@@ -1807,6 +2208,13 @@ export function RuleBook() {
                       if (activeWizard.actionSubStep === 'toggle_states_picker') {
                         setActiveWizard({ ...activeWizard, actionSubStep: 'toggle_entity_picker' });
                       } else if (activeWizard.actionSubStep === 'spawn_location_picker') {
+                        const spEnt = getEntityObj(activeWizard.pendingSpawnType);
+                        const hasMultiStates = Object.keys(spEnt?.states || {}).length > 1;
+                        setActiveWizard({
+                          ...activeWizard,
+                          actionSubStep: hasMultiStates ? 'spawn_state_picker' : 'spawn_entity_picker',
+                        });
+                      } else if (activeWizard.actionSubStep === 'spawn_state_picker') {
                         setActiveWizard({ ...activeWizard, actionSubStep: 'spawn_entity_picker' });
                       } else if (activeWizard.actionSubStep === 'third_party_state_picker') {
                         setActiveWizard({ ...activeWizard, actionSubStep: 'third_party_entity_picker' });
@@ -2106,46 +2514,194 @@ export function RuleBook() {
                       </div>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                      {availableEntityOptions.map((opt) => {
-                        const ent = getEntityObj(opt.type);
-                        const statesCount = Object.keys(ent?.states || {}).length;
-                        return (
-                          <button
-                            key={opt.type}
-                            type="button"
-                            onClick={() => {
-                              if (statesCount > 1) {
+                    <div className="space-y-4">
+                      {/* Sélecteur Type / #Tag / Instance précise (Sujet) */}
+                      <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                        <button
+                          type="button"
+                          onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'type' })}
+                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            (activeWizard.subjectMode || 'type') === 'type'
+                              ? 'bg-white text-indigo-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          🧩 Par Type
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'tag' })}
+                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            activeWizard.subjectMode === 'tag'
+                              ? 'bg-white text-purple-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          🏷️ Par #Tag
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'instance' })}
+                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            activeWizard.subjectMode === 'instance'
+                              ? 'bg-white text-cyan-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          📍 Instance précise
+                        </button>
+                      </div>
+
+                      {activeWizard.subjectMode === 'tag' ? (
+                        <div className="p-4 bg-purple-50/50 border-2 border-purple-200 rounded-3xl space-y-3">
+                          <div className="text-xs font-bold text-purple-950">
+                            Cibler toutes les entités (existantes ou créées en jeu) portant un #Tag :
+                          </div>
+                          {allProjectTags.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {allProjectTags.map((tag) => (
+                                <button
+                                  key={tag}
+                                  type="button"
+                                  onClick={() =>
+                                    setActiveWizard({
+                                      ...activeWizard,
+                                      subjectMode: 'tag',
+                                      subjectTag: tag,
+                                      subjectStateId: undefined,
+                                      step: 2,
+                                    })
+                                  }
+                                  className="px-3 py-1.5 bg-white hover:bg-purple-600 hover:text-white text-purple-800 border border-purple-300 rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs"
+                                >
+                                  #{tag} →
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={activeWizard.subjectTag || ''}
+                              onChange={(e) =>
+                                setActiveWizard({ ...activeWizard, subjectTag: e.target.value.replace(/^#/, '') })
+                              }
+                              placeholder="Ou saisir un tag (ex: ennemi, piece...)"
+                              className="flex-1 px-3 py-2 text-xs font-bold bg-white border border-purple-300 rounded-xl outline-none focus:border-purple-600"
+                            />
+                            <button
+                              type="button"
+                              disabled={!activeWizard.subjectTag?.trim()}
+                              onClick={() => {
+                                if (!activeWizard.subjectTag?.trim()) return;
                                 setActiveWizard({
                                   ...activeWizard,
-                                  subjectType: opt.type,
-                                  subjectSubStep: 'choose_state',
-                                });
-                              } else {
-                                setActiveWizard({
-                                  ...activeWizard,
-                                  subjectType: opt.type,
+                                  subjectMode: 'tag',
+                                  subjectTag: activeWizard.subjectTag.trim().replace(/^#/, ''),
                                   subjectStateId: undefined,
                                   step: 2,
                                 });
-                              }
-                            }}
-                            className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3.5 cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                          >
-                            <div className="w-20 h-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-2 shadow-2xs group-hover:scale-110 transition-transform">
-                              <EntityMiniPreview entity={ent} type={opt.type} size={64} />
+                              }}
+                              className="px-4 py-2 bg-purple-600 disabled:bg-slate-200 text-white disabled:text-slate-400 text-xs font-bold rounded-xl cursor-pointer"
+                            >
+                              Valider →
+                            </button>
+                          </div>
+                        </div>
+                      ) : activeWizard.subjectMode === 'instance' ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+                          {entityList.length === 0 ? (
+                            <div className="col-span-full text-center text-xs text-slate-500 py-6">
+                              Aucune entité posée sur la scène.
                             </div>
-                            <div className="text-center w-full">
-                              <div className="text-sm font-black text-slate-800 group-hover:text-indigo-700 truncate">
-                                {opt.label}
-                              </div>
-                              <div className="text-[11px] text-slate-400 mt-0.5">
-                                {statesCount > 1 ? `${statesCount} états disponibles →` : 'Choisir comme Sujet →'}
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
+                          ) : (
+                            entityList.map((inst) => {
+                              const statesCount = Object.keys(inst.states || {}).length;
+                              return (
+                                <button
+                                  key={inst.id}
+                                  type="button"
+                                  onClick={() => {
+                                    if (statesCount > 1) {
+                                      setActiveWizard({
+                                        ...activeWizard,
+                                        subjectMode: 'instance',
+                                        subjectId: inst.id,
+                                        subjectType: inst.type,
+                                        subjectSubStep: 'choose_state',
+                                      });
+                                    } else {
+                                      setActiveWizard({
+                                        ...activeWizard,
+                                        subjectMode: 'instance',
+                                        subjectId: inst.id,
+                                        subjectType: inst.type,
+                                        subjectStateId: undefined,
+                                        step: 2,
+                                      });
+                                    }
+                                  }}
+                                  className="p-4 bg-slate-50 hover:bg-cyan-50 border-2 border-slate-200 hover:border-cyan-500 rounded-3xl flex flex-col items-center justify-center gap-2.5 cursor-pointer transition-all shadow-xs group active:scale-95"
+                                >
+                                  <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs">
+                                    <EntityMiniPreview entity={inst} type={inst.type} size={52} />
+                                  </div>
+                                  <div className="text-center w-full">
+                                    <div className="text-xs font-black text-slate-800 truncate">{inst.name}</div>
+                                    <div className="text-[10px] text-slate-400">
+                                      ({Math.round(inst.position.x)}, {Math.round(inst.position.y)})
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                          {availableEntityOptions.map((opt) => {
+                            const ent = getEntityObj(opt.type);
+                            const statesCount = Object.keys(ent?.states || {}).length;
+                            return (
+                              <button
+                                key={opt.type}
+                                type="button"
+                                onClick={() => {
+                                  if (statesCount > 1) {
+                                    setActiveWizard({
+                                      ...activeWizard,
+                                      subjectMode: 'type',
+                                      subjectType: opt.type,
+                                      subjectSubStep: 'choose_state',
+                                    });
+                                  } else {
+                                    setActiveWizard({
+                                      ...activeWizard,
+                                      subjectMode: 'type',
+                                      subjectType: opt.type,
+                                      subjectStateId: undefined,
+                                      step: 2,
+                                    });
+                                  }
+                                }}
+                                className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3.5 cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
+                              >
+                                <div className="w-20 h-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-2 shadow-2xs group-hover:scale-110 transition-transform">
+                                  <EntityMiniPreview entity={ent} type={opt.type} size={64} />
+                                </div>
+                                <div className="text-center w-full">
+                                  <div className="text-sm font-black text-slate-800 group-hover:text-indigo-700 truncate">
+                                    {opt.label}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 mt-0.5">
+                                    {statesCount > 1 ? `${statesCount} états disponibles →` : 'Choisir comme Sujet →'}
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2963,47 +3519,198 @@ export function RuleBook() {
                       </div>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                      {availableEntityOptions.map((opt) => {
-                        const ent = getEntityObj(opt.type);
-                        const statesCount = Object.keys(ent?.states || {}).length;
-                        return (
-                          <button
-                            key={opt.type}
-                            type="button"
-                            onClick={() => {
-                              if (statesCount > 1) {
+                    <div className="space-y-4">
+                      {/* Sélecteur Type / #Tag / Instance précise (Cible) */}
+                      <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                        <button
+                          type="button"
+                          onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'type' })}
+                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            (activeWizard.targetMode || 'type') === 'type'
+                              ? 'bg-white text-indigo-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          🧩 Par Type
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'tag' })}
+                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            activeWizard.targetMode === 'tag'
+                              ? 'bg-white text-purple-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          🏷️ Par #Tag
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'instance' })}
+                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            activeWizard.targetMode === 'instance'
+                              ? 'bg-white text-cyan-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          📍 Instance précise
+                        </button>
+                      </div>
+
+                      {activeWizard.targetMode === 'tag' ? (
+                        <div className="p-4 bg-purple-50/50 border-2 border-purple-200 rounded-3xl space-y-3">
+                          <div className="text-xs font-bold text-purple-950">
+                            Déclencher lorsque le Sujet touche n'importe quel objet portant ce #Tag (ex: projectiles, ennemis créés en jeu) :
+                          </div>
+                          {allProjectTags.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {allProjectTags.map((tag) => (
+                                <button
+                                  key={tag}
+                                  type="button"
+                                  onClick={() =>
+                                    setActiveWizard({
+                                      ...activeWizard,
+                                      targetMode: 'tag',
+                                      targetTag: tag,
+                                      targetStateId: undefined,
+                                      step: 4,
+                                      actionSubStep: 'main',
+                                    })
+                                  }
+                                  className="px-3 py-1.5 bg-white hover:bg-purple-600 hover:text-white text-purple-800 border border-purple-300 rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs"
+                                >
+                                  #{tag} →
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={activeWizard.targetTag || ''}
+                              onChange={(e) =>
+                                setActiveWizard({ ...activeWizard, targetTag: e.target.value.replace(/^#/, '') })
+                              }
+                              placeholder="Ou saisir un tag cible (ex: projectile, mur...)"
+                              className="flex-1 px-3 py-2 text-xs font-bold bg-white border border-purple-300 rounded-xl outline-none focus:border-purple-600"
+                            />
+                            <button
+                              type="button"
+                              disabled={!activeWizard.targetTag?.trim()}
+                              onClick={() => {
+                                if (!activeWizard.targetTag?.trim()) return;
                                 setActiveWizard({
                                   ...activeWizard,
-                                  targetType: opt.type,
-                                  targetSubStep: 'choose_state',
-                                });
-                              } else {
-                                setActiveWizard({
-                                  ...activeWizard,
-                                  targetType: opt.type,
+                                  targetMode: 'tag',
+                                  targetTag: activeWizard.targetTag.trim().replace(/^#/, ''),
                                   targetStateId: undefined,
                                   step: 4,
                                   actionSubStep: 'main',
                                 });
-                              }
-                            }}
-                            className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3.5 cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                          >
-                            <div className="w-20 h-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-2 shadow-2xs group-hover:scale-110 transition-transform">
-                              <EntityMiniPreview entity={ent} type={opt.type} size={64} />
+                              }}
+                              className="px-4 py-2 bg-purple-600 disabled:bg-slate-200 text-white disabled:text-slate-400 text-xs font-bold rounded-xl cursor-pointer"
+                            >
+                              Valider →
+                            </button>
+                          </div>
+                        </div>
+                      ) : activeWizard.targetMode === 'instance' ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+                          {entityList.length === 0 ? (
+                            <div className="col-span-full text-center text-xs text-slate-500 py-6">
+                              Aucune entité posée sur la scène.
                             </div>
-                            <div className="text-center w-full">
-                              <div className="text-sm font-black text-slate-800 group-hover:text-indigo-700 truncate">
-                                {opt.label}
-                              </div>
-                              <div className="text-[11px] text-slate-400 mt-0.5">
-                                {statesCount > 1 ? `${statesCount} états disponibles →` : 'Choisir comme Cible →'}
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
+                          ) : (
+                            entityList.map((inst) => {
+                              const statesCount = Object.keys(inst.states || {}).length;
+                              return (
+                                <button
+                                  key={inst.id}
+                                  type="button"
+                                  onClick={() => {
+                                    if (statesCount > 1) {
+                                      setActiveWizard({
+                                        ...activeWizard,
+                                        targetMode: 'instance',
+                                        targetId: inst.id,
+                                        targetType: inst.type,
+                                        targetSubStep: 'choose_state',
+                                      });
+                                    } else {
+                                      setActiveWizard({
+                                        ...activeWizard,
+                                        targetMode: 'instance',
+                                        targetId: inst.id,
+                                        targetType: inst.type,
+                                        targetStateId: undefined,
+                                        step: 4,
+                                        actionSubStep: 'main',
+                                      });
+                                    }
+                                  }}
+                                  className="p-4 bg-slate-50 hover:bg-cyan-50 border-2 border-slate-200 hover:border-cyan-500 rounded-3xl flex flex-col items-center justify-center gap-2.5 cursor-pointer transition-all shadow-xs group active:scale-95"
+                                >
+                                  <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs">
+                                    <EntityMiniPreview entity={inst} type={inst.type} size={52} />
+                                  </div>
+                                  <div className="text-center w-full">
+                                    <div className="text-xs font-black text-slate-800 truncate">{inst.name}</div>
+                                    <div className="text-[10px] text-slate-400">
+                                      ({Math.round(inst.position.x)}, {Math.round(inst.position.y)})
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                          {availableEntityOptions.map((opt) => {
+                            const ent = getEntityObj(opt.type);
+                            const statesCount = Object.keys(ent?.states || {}).length;
+                            return (
+                              <button
+                                key={opt.type}
+                                type="button"
+                                onClick={() => {
+                                  if (statesCount > 1) {
+                                    setActiveWizard({
+                                      ...activeWizard,
+                                      targetMode: 'type',
+                                      targetType: opt.type,
+                                      targetSubStep: 'choose_state',
+                                    });
+                                  } else {
+                                    setActiveWizard({
+                                      ...activeWizard,
+                                      targetMode: 'type',
+                                      targetType: opt.type,
+                                      targetStateId: undefined,
+                                      step: 4,
+                                      actionSubStep: 'main',
+                                    });
+                                  }
+                                }}
+                                className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3.5 cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
+                              >
+                                <div className="w-20 h-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-2 shadow-2xs group-hover:scale-110 transition-transform">
+                                  <EntityMiniPreview entity={ent} type={opt.type} size={64} />
+                                </div>
+                                <div className="text-center w-full">
+                                  <div className="text-sm font-black text-slate-800 group-hover:text-indigo-700 truncate">
+                                    {opt.label}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 mt-0.5">
+                                    {statesCount > 1 ? `${statesCount} états disponibles →` : 'Choisir comme Cible →'}
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -3392,6 +4099,94 @@ export function RuleBook() {
                                   </div>
                                   <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                                     Supprimer une entité C à distance
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 5. Émettre des Particules */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    actionSubStep: 'particle_picker',
+                                    particleOriginMode: isCollision ? 'target' : 'subject',
+                                    particleCount: 20,
+                                    particleColor: '#f59e0b',
+                                    particleColor2: '#ef4444',
+                                    particleShape: 'circle',
+                                    particleSpeed: 180,
+                                    particleSize: 6,
+                                    particleLifetime: 0.7,
+                                    particleGravity: 220,
+                                    particleSpread: 360,
+                                    particleAngle: -90,
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-amber-50/70 border-2 border-slate-200 hover:border-amber-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🎆
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-amber-700 truncate">
+                                    Émettre des Particules
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Étincelles, explosion ou confettis légers
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 6. Attacher à un Parent (Parenting) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    actionSubStep: 'attach_parent_picker',
+                                    parentChildMode: 'subject',
+                                    parentTargetMode: isCollision ? 'target' : 'entity',
+                                    parentEntityId: Object.keys(entities)[0] || '',
+                                    parentOffset: { x: 0, y: 0, rotationOffset: 0, inheritRotation: true, inheritFlip: true },
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-indigo-50/70 border-2 border-slate-200 hover:border-indigo-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🔗
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-indigo-700 truncate">
+                                    Attacher à un Parent
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Solidariser une entité (arme, accessoire)
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 7. Détacher du Parent */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    actionSubStep: 'detach_parent_picker',
+                                    actionTargetMode: 'subject',
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-rose-50/70 border-2 border-slate-200 hover:border-rose-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  ✂️
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-rose-700 truncate">
+                                    Détacher du Parent
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Désolidariser en cours de partie
                                   </div>
                                 </div>
                               </button>
@@ -3999,6 +4794,10 @@ export function RuleBook() {
                             spawnEntityType: activeWizard.pendingSpawnType,
                             spawnInitialStateId: data.spawnInitialStateId || activeWizard.actionSpawnInitialStateId,
                             spawnLocationMode: data.spawnLocationMode,
+                            spawnReferenceMode: data.spawnReferenceMode,
+                            spawnReferenceEntityId: data.spawnReferenceEntityId,
+                            spawnReferenceEntityType: data.spawnReferenceEntityType,
+                            spawnReferenceTag: data.spawnReferenceTag,
                             spawnOffset: data.spawnOffset,
                             spawnPosition: data.spawnPosition,
                             spawnAbsoluteCoords: data.spawnAbsoluteCoords,
@@ -4202,6 +5001,575 @@ export function RuleBook() {
                       </button>
                     </div>
                   )}
+
+                  {/* Sous-étape Wizard : Émettre des Particules */}
+                  {activeWizard.actionSubStep === 'particle_picker' && (
+                    <div className="space-y-4 max-w-xl mx-auto py-2">
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { label: '🔥 Étincelles', count: 16, color: '#f59e0b', color2: '#ef4444', shape: 'spark' as ParticleShape, speed: 220, gravity: 280, spread: 140 },
+                          { label: '💥 Explosion', count: 28, color: '#ef4444', color2: '#fbbf24', shape: 'circle' as ParticleShape, speed: 260, gravity: 180, spread: 360 },
+                          { label: '✨ Magie', count: 20, color: '#8b5cf6', color2: '#ec4899', shape: 'star' as ParticleShape, speed: 140, gravity: -60, spread: 360 },
+                          { label: '🎉 Confettis', count: 32, color: '#10b981', color2: '#3b82f6', shape: 'square' as ParticleShape, speed: 210, gravity: 240, spread: 180 },
+                        ].map((preset) => (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() =>
+                              setActiveWizard({
+                                ...activeWizard,
+                                particleCount: preset.count,
+                                particleColor: preset.color,
+                                particleColor2: preset.color2,
+                                particleShape: preset.shape,
+                                particleSpeed: preset.speed,
+                                particleGravity: preset.gravity,
+                                particleSpread: preset.spread,
+                              })
+                            }
+                            className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl text-xs font-bold text-amber-900 cursor-pointer transition-colors"
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="space-y-1.5 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Source d'émission</span>
+                          <select
+                            value={activeWizard.particleOriginMode || 'subject'}
+                            onChange={(e) => setActiveWizard({ ...activeWizard, particleOriginMode: e.target.value as any })}
+                            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                          >
+                            <option value="subject">Sujet</option>
+                            {(activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity') && (
+                              <option value="target">Cible touchée</option>
+                            )}
+                            <option value="event_point">💥 Point exact (Collision / Clic)</option>
+                            <option value="entity">Entité de la scène</option>
+                            <option value="type">Par Type d'objet</option>
+                            <option value="tag">Par #Tag</option>
+                            <option value="last_spawned">Dernier objet créé</option>
+                          </select>
+                        </div>
+
+                        {activeWizard.particleOriginMode === 'entity' && (
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Entité source</span>
+                            <select
+                              value={activeWizard.particleOriginEntityId || Object.keys(entities)[0] || ''}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, particleOriginEntityId: e.target.value })}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            >
+                              {Object.values(entities).map((ent) => (
+                                <option key={ent.id} value={ent.id}>{ent.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {activeWizard.particleOriginMode === 'type' && (
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Type source</span>
+                            <select
+                              value={activeWizard.particleOriginEntityType || availableEntityOptions[0]?.type || ''}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, particleOriginEntityType: e.target.value })}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            >
+                              {availableEntityOptions.map((opt) => (
+                                <option key={opt.type} value={opt.type}>{opt.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {activeWizard.particleOriginMode === 'tag' && (
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Tag source (#tag)</span>
+                            <input
+                              type="text"
+                              list="wizard-particle-tags"
+                              value={activeWizard.particleOriginTag || ''}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, particleOriginTag: e.target.value.replace(/^#/, '') })}
+                              placeholder="ex: joueur, ennemi..."
+                              className="w-44 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            />
+                            <datalist id="wizard-particle-tags">
+                              {allProjectTags.map((t) => (
+                                <option key={t} value={t} />
+                              ))}
+                            </datalist>
+                          </div>
+                        )}
+
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Forme</span>
+                          <select
+                            value={activeWizard.particleShape || 'circle'}
+                            onChange={(e) => {
+                              const nextShape = e.target.value as ParticleShape;
+                              setActiveWizard({
+                                ...activeWizard,
+                                particleShape: nextShape,
+                                customParticleId:
+                                  nextShape === 'custom' && !activeWizard.customParticleId && customParticles.length > 0
+                                    ? customParticles[0].id
+                                    : activeWizard.customParticleId,
+                              });
+                            }}
+                            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                          >
+                            <option value="circle">Rond</option>
+                            <option value="square">Carré</option>
+                            <option value="spark">Étincelle</option>
+                            <option value="star">Étoile</option>
+                            <option value="custom">Particule dessinée ✨</option>
+                          </select>
+                        </div>
+
+                        {activeWizard.particleShape === 'custom' && (
+                          <div className="p-2.5 bg-amber-50/70 rounded-xl border border-amber-200 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-bold text-amber-950">Particule vectorielle :</span>
+                              <button
+                                type="button"
+                                onClick={() => setParticleDrawingTarget({ context: 'wizard' })}
+                                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
+                              >
+                                <Paintbrush className="w-3 h-3" />
+                                <span>+ Dessiner une particule</span>
+                              </button>
+                            </div>
+                            {customParticles.length === 0 ? (
+                              <div className="text-[11px] text-amber-800 bg-white/80 rounded-lg p-2 border border-amber-200 text-center">
+                                Aucune particule dessinée. Cliquez sur <strong>+ Dessiner une particule</strong>.
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-4 gap-1.5">
+                                {customParticles.map((preset) => {
+                                  const isSel = activeWizard.customParticleId === preset.id;
+                                  return (
+                                    <div
+                                      key={preset.id}
+                                      onClick={() => setActiveWizard({ ...activeWizard, customParticleId: preset.id })}
+                                      className={`relative group p-1.5 rounded-xl border flex flex-col items-center gap-1 cursor-pointer transition-all ${
+                                        isSel
+                                          ? 'bg-white border-amber-500 ring-2 ring-amber-300/60 shadow-xs'
+                                          : 'bg-white/80 border-slate-200 hover:border-amber-300'
+                                      }`}
+                                    >
+                                      <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden">
+                                        <svg viewBox="0 0 100 100" className="w-7 h-7">
+                                          {preset.vectorPaths.map((p) => (
+                                            <path
+                                              key={p.id}
+                                              d={p.d}
+                                              stroke={p.stroke}
+                                              strokeWidth={p.strokeWidth}
+                                              fill={p.fill || 'none'}
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                            />
+                                          ))}
+                                        </svg>
+                                      </div>
+                                      <span className="text-[9px] font-bold text-slate-700 truncate w-full text-center">
+                                        {preset.name}
+                                      </span>
+                                      <div className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center gap-0.5">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setParticleDrawingTarget({ context: 'wizard', editingPreset: preset });
+                                          }}
+                                          className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
+                                          title="Modifier"
+                                        >
+                                          <Pencil className="w-2.5 h-2.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            deleteCustomParticle(preset.id);
+                                            invalidateCustomParticleSprite(preset.id);
+                                            if (isSel) setActiveWizard({ ...activeWizard, customParticleId: undefined });
+                                          }}
+                                          className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
+                                          title="Supprimer"
+                                        >
+                                          <X className="w-2.5 h-2.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            <div className="flex items-center justify-between pt-1 border-t border-amber-200/70">
+                              <span className="text-[11px] font-bold text-slate-700">Teinter avec les couleurs d'émission</span>
+                              <input
+                                type="checkbox"
+                                checked={activeWizard.useParticleTint === true}
+                                onChange={(e) => setActiveWizard({ ...activeWizard, useParticleTint: e.target.checked })}
+                                className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Nombre ({activeWizard.particleCount ?? 20})</span>
+                          <input
+                            type="range"
+                            min="4"
+                            max="50"
+                            step="2"
+                            value={activeWizard.particleCount ?? 20}
+                            onChange={(e) => setActiveWizard({ ...activeWizard, particleCount: parseInt(e.target.value, 10) })}
+                            className="w-40 accent-amber-500"
+                          />
+                        </div>
+
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Couleurs (Mix)</span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={activeWizard.particleColor || '#f59e0b'}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, particleColor: e.target.value })}
+                              className="w-8 h-6 rounded border border-slate-300 cursor-pointer"
+                            />
+                            <input
+                              type="color"
+                              value={activeWizard.particleColor2 || '#ef4444'}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, particleColor2: e.target.value })}
+                              className="w-8 h-6 rounded border border-slate-300 cursor-pointer"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Taille ({activeWizard.particleSize ?? 6} px)</span>
+                          <input
+                            type="range"
+                            min="2"
+                            max="24"
+                            step="1"
+                            value={activeWizard.particleSize ?? 6}
+                            onChange={(e) => setActiveWizard({ ...activeWizard, particleSize: parseFloat(e.target.value) })}
+                            className="w-40 accent-indigo-600"
+                          />
+                        </div>
+
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Vitesse ({activeWizard.particleSpeed ?? 180} px/s)</span>
+                          <input
+                            type="range"
+                            min="40"
+                            max="450"
+                            step="10"
+                            value={activeWizard.particleSpeed ?? 180}
+                            onChange={(e) => setActiveWizard({ ...activeWizard, particleSpeed: parseFloat(e.target.value) })}
+                            className="w-40 accent-indigo-600"
+                          />
+                        </div>
+
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Gravité ({activeWizard.particleGravity ?? 220})</span>
+                          <input
+                            type="range"
+                            min="-200"
+                            max="500"
+                            step="20"
+                            value={activeWizard.particleGravity ?? 220}
+                            onChange={(e) => setActiveWizard({ ...activeWizard, particleGravity: parseFloat(e.target.value) })}
+                            className="w-40 accent-indigo-600"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const pOriginMode = activeWizard.particleOriginMode || 'subject';
+                          completeWizardWithAction({
+                            type: 'emit_particles',
+                            particleOriginMode: pOriginMode,
+                            particleOriginEntityId:
+                              pOriginMode === 'entity'
+                                ? activeWizard.particleOriginEntityId || Object.keys(entities)[0]
+                                : undefined,
+                            particleOriginEntityType:
+                              pOriginMode === 'type'
+                                ? activeWizard.particleOriginEntityType || availableEntityOptions[0]?.type
+                                : undefined,
+                            particleOriginTag:
+                              pOriginMode === 'tag'
+                                ? (activeWizard.particleOriginTag || '').trim().replace(/^#/, '')
+                                : undefined,
+                            particleCount: activeWizard.particleCount ?? 20,
+                            particleColor: activeWizard.particleColor ?? '#f59e0b',
+                            particleColor2: activeWizard.particleColor2 ?? '#ef4444',
+                            particleShape: activeWizard.particleShape ?? 'circle',
+                            customParticleId:
+                              activeWizard.particleShape === 'custom' ? activeWizard.customParticleId : undefined,
+                            useParticleTint:
+                              activeWizard.particleShape === 'custom' ? Boolean(activeWizard.useParticleTint) : undefined,
+                            particleSpeed: activeWizard.particleSpeed ?? 180,
+                            particleSize: activeWizard.particleSize ?? 6,
+                            particleLifetime: activeWizard.particleLifetime ?? 0.7,
+                            particleGravity: activeWizard.particleGravity ?? 220,
+                            particleSpread: activeWizard.particleSpread ?? 360,
+                            particleAngle: activeWizard.particleAngle ?? -90,
+                          });
+                        }}
+                        className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>Valider l'effet de particules</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Sous-étape Wizard : Attacher à un Parent */}
+                  {activeWizard.actionSubStep === 'attach_parent_picker' && (
+                    <div className="space-y-4 max-w-xl mx-auto py-2">
+                      <div className="space-y-1.5 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Objet enfant à attacher</span>
+                          <select
+                            value={activeWizard.parentChildMode || 'subject'}
+                            onChange={(e) => setActiveWizard({ ...activeWizard, parentChildMode: e.target.value as any })}
+                            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                          >
+                            <option value="subject">Sujet</option>
+                            {activeWizard.triggerType === 'collision' && <option value="target">Cible touchée</option>}
+                            <option value="last_spawned">Dernier objet créé</option>
+                            <option value="tag">Par Tag (#tag)</option>
+                          </select>
+                        </div>
+
+                        {activeWizard.parentChildMode === 'tag' && (
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Tag enfant</span>
+                            <input
+                              type="text"
+                              value={activeWizard.parentChildTag || ''}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, parentChildTag: e.target.value.replace(/^#/, '') })}
+                              placeholder="ex: arme"
+                              className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            />
+                          </div>
+                        )}
+
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Objet parent (Porteur)</span>
+                          <select
+                            value={activeWizard.parentTargetMode || (activeWizard.triggerType === 'collision' ? 'target' : 'entity')}
+                            onChange={(e) => setActiveWizard({ ...activeWizard, parentTargetMode: e.target.value as any })}
+                            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                          >
+                            <option value="subject">Sujet</option>
+                            {activeWizard.triggerType === 'collision' && <option value="target">Cible touchée</option>}
+                            <option value="entity">Entité de la scène</option>
+                            <option value="type">Par Type</option>
+                            <option value="tag">Par Tag (#tag)</option>
+                            <option value="last_spawned">Dernier objet créé</option>
+                          </select>
+                        </div>
+
+                        {activeWizard.parentTargetMode === 'entity' && (
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Choisir parent</span>
+                            <select
+                              value={activeWizard.parentEntityId || Object.keys(entities)[0] || ''}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, parentEntityId: e.target.value })}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            >
+                              {Object.values(entities).map((ent) => (
+                                <option key={ent.id} value={ent.id}>{ent.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {activeWizard.parentTargetMode === 'type' && (
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Type parent</span>
+                            <select
+                              value={activeWizard.parentEntityType || availableEntityOptions[0]?.type || ''}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, parentEntityType: e.target.value })}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            >
+                              {availableEntityOptions.map((opt) => (
+                                <option key={opt.type} value={opt.type}>{opt.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {activeWizard.parentTargetMode === 'tag' && (
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Tag parent</span>
+                            <input
+                              type="text"
+                              value={activeWizard.parentEntityTag || ''}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, parentEntityTag: e.target.value.replace(/^#/, '') })}
+                              placeholder="ex: joueur"
+                              className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            />
+                          </div>
+                        )}
+
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Décalage ΔX / ΔY (px)</span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              value={activeWizard.parentOffset?.x ?? 0}
+                              onChange={(e) =>
+                                setActiveWizard({
+                                  ...activeWizard,
+                                  parentOffset: {
+                                    x: parseFloat(e.target.value) || 0,
+                                    y: activeWizard.parentOffset?.y ?? 0,
+                                    inheritRotation: activeWizard.parentOffset?.inheritRotation ?? true,
+                                    inheritFlip: activeWizard.parentOffset?.inheritFlip ?? true,
+                                  },
+                                })
+                              }
+                              className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                            />
+                            <input
+                              type="number"
+                              value={activeWizard.parentOffset?.y ?? 0}
+                              onChange={(e) =>
+                                setActiveWizard({
+                                  ...activeWizard,
+                                  parentOffset: {
+                                    x: activeWizard.parentOffset?.x ?? 0,
+                                    y: parseFloat(e.target.value) || 0,
+                                    inheritRotation: activeWizard.parentOffset?.inheritRotation ?? true,
+                                    inheritFlip: activeWizard.parentOffset?.inheritFlip ?? true,
+                                  },
+                                })
+                              }
+                              className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+                          <span className="font-bold text-slate-700 text-xs">Hériter rotation & Flip du parent</span>
+                          <input
+                            type="checkbox"
+                            checked={activeWizard.parentOffset?.inheritRotation !== false}
+                            onChange={(e) =>
+                              setActiveWizard({
+                                ...activeWizard,
+                                parentOffset: {
+                                  x: activeWizard.parentOffset?.x ?? 0,
+                                  y: activeWizard.parentOffset?.y ?? 0,
+                                  inheritRotation: e.target.checked,
+                                  inheritFlip: e.target.checked,
+                                },
+                              })
+                            }
+                            className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          completeWizardWithAction({
+                            type: 'attach_to_parent',
+                            targetMode: activeWizard.parentChildMode || 'subject',
+                            targetTag: activeWizard.parentChildMode === 'tag' ? activeWizard.parentChildTag : undefined,
+                            parentTargetMode: activeWizard.parentTargetMode || 'entity',
+                            parentEntityId: activeWizard.parentTargetMode === 'entity' ? activeWizard.parentEntityId || Object.keys(entities)[0] : undefined,
+                            parentEntityType: activeWizard.parentTargetMode === 'type' ? activeWizard.parentEntityType || availableEntityOptions[0]?.type : undefined,
+                            parentEntityTag: activeWizard.parentTargetMode === 'tag' ? activeWizard.parentEntityTag : undefined,
+                            parentOffset: activeWizard.parentOffset,
+                          });
+                        }}
+                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>Valider l'attachement</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Sous-étape Wizard : Détacher du Parent */}
+                  {activeWizard.actionSubStep === 'detach_parent_picker' && (
+                    <div className="space-y-4 max-w-xl mx-auto py-2">
+                      <div className="space-y-1.5 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Objet à détacher</span>
+                          <select
+                            value={activeWizard.actionTargetMode || 'subject'}
+                            onChange={(e) => setActiveWizard({ ...activeWizard, actionTargetMode: e.target.value as any })}
+                            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                          >
+                            <option value="subject">Sujet</option>
+                            {activeWizard.triggerType === 'collision' && <option value="target">Cible touchée</option>}
+                            <option value="last_spawned">Dernier objet créé</option>
+                            <option value="tag">Par Tag (#tag)</option>
+                            <option value="type">Par Type</option>
+                          </select>
+                        </div>
+
+                        {activeWizard.actionTargetMode === 'tag' && (
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Tag à détacher</span>
+                            <input
+                              type="text"
+                              value={activeWizard.actionTargetTag || ''}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, actionTargetTag: e.target.value.replace(/^#/, '') })}
+                              placeholder="ex: arme"
+                              className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            />
+                          </div>
+                        )}
+
+                        {activeWizard.actionTargetMode === 'type' && (
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Type à détacher</span>
+                            <select
+                              value={activeWizard.actionTargetType || availableEntityOptions[0]?.type || ''}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, actionTargetType: e.target.value })}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            >
+                              {availableEntityOptions.map((opt) => (
+                                <option key={opt.type} value={opt.type}>{opt.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          completeWizardWithAction({
+                            type: 'detach_parent',
+                            targetMode: activeWizard.actionTargetMode || 'subject',
+                            targetTag: activeWizard.actionTargetMode === 'tag' ? activeWizard.actionTargetTag : undefined,
+                            targetType: activeWizard.actionTargetMode === 'type' ? activeWizard.actionTargetType || availableEntityOptions[0]?.type : undefined,
+                          });
+                        }}
+                        className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>Valider le détachement</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -4223,6 +5591,10 @@ export function RuleBook() {
               if (!rule) return null;
 
               const isSubject = activeModal.type === 'subject';
+              const activeSelMode: SelectionMode =
+                activeModal.selectionMode ||
+                (isSubject ? rule.trigger.subjectMode : rule.trigger.targetMode) ||
+                'type';
               const currentType = isSubject ? rule.trigger.subjectType : rule.trigger.targetType;
               const relevantType = activeModal.selectedEntityType || currentType || availableEntityOptions[0]?.type || 'apple';
               const ent = getEntityObj(relevantType);
@@ -4268,7 +5640,10 @@ export function RuleBook() {
                             updateRule(rule.id, {
                               trigger: {
                                 ...rule.trigger,
-                                subjectType: relevantType,
+                                subjectMode: activeSelMode,
+                                subjectType: activeSelMode === 'type' ? relevantType : undefined,
+                                subjectId: activeSelMode === 'instance' ? activeModal.selectedEntityId : undefined,
+                                subjectTag: undefined,
                                 subjectStateId: undefined,
                               },
                             });
@@ -4276,7 +5651,10 @@ export function RuleBook() {
                             updateRule(rule.id, {
                               trigger: {
                                 ...rule.trigger,
-                                targetType: relevantType,
+                                targetMode: activeSelMode,
+                                targetType: activeSelMode === 'type' ? relevantType : undefined,
+                                targetId: activeSelMode === 'instance' ? activeModal.selectedEntityId : undefined,
+                                targetTag: undefined,
                                 targetStateId: undefined,
                               },
                             });
@@ -4304,7 +5682,10 @@ export function RuleBook() {
                               updateRule(rule.id, {
                                 trigger: {
                                   ...rule.trigger,
-                                  subjectType: relevantType,
+                                  subjectMode: activeSelMode,
+                                  subjectType: activeSelMode === 'type' ? relevantType : undefined,
+                                  subjectId: activeSelMode === 'instance' ? activeModal.selectedEntityId : undefined,
+                                  subjectTag: undefined,
                                   subjectStateId: st.id,
                                 },
                               });
@@ -4312,7 +5693,10 @@ export function RuleBook() {
                               updateRule(rule.id, {
                                 trigger: {
                                   ...rule.trigger,
-                                  targetType: relevantType,
+                                  targetMode: activeSelMode,
+                                  targetType: activeSelMode === 'type' ? relevantType : undefined,
+                                  targetId: activeSelMode === 'instance' ? activeModal.selectedEntityId : undefined,
+                                  targetTag: undefined,
                                   targetStateId: st.id,
                                 },
                               });
@@ -4332,28 +5716,112 @@ export function RuleBook() {
                       ))}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5 overflow-y-auto pr-1 flex-1 py-1">
-                      {availableEntityOptions.map((opt) => {
-                        const entObj = getEntityObj(opt.type);
-                        const statesCount = Object.keys(entObj?.states || {}).length;
+                    <div className="space-y-4 overflow-y-auto pr-1 flex-1 py-1">
+                      <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                        <button
+                          type="button"
+                          onClick={() => setActiveModal({ ...activeModal, selectionMode: 'type' })}
+                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            activeSelMode === 'type'
+                              ? 'bg-white text-indigo-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          🧩 Par Type
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveModal({ ...activeModal, selectionMode: 'tag' })}
+                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            activeSelMode === 'tag'
+                              ? 'bg-white text-purple-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          🏷️ Par #Tag
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveModal({ ...activeModal, selectionMode: 'instance' })}
+                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            activeSelMode === 'instance'
+                              ? 'bg-white text-cyan-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          📍 Instance précise
+                        </button>
+                      </div>
 
-                        return (
-                          <button
-                            key={opt.type}
-                            type="button"
-                            onClick={() => {
-                              if (statesCount > 1) {
-                                setActiveModal({
-                                  ...activeModal,
-                                  subStep: 'choose_state',
-                                  selectedEntityType: opt.type,
-                                });
-                              } else {
+                      {activeSelMode === 'tag' ? (
+                        <div className="p-4 bg-purple-50/50 border-2 border-purple-200 rounded-3xl space-y-3">
+                          <div className="text-xs font-bold text-purple-950">
+                            Cibler par #Tag (inclut les instances créées dynamiquement) :
+                          </div>
+                          {allProjectTags.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {allProjectTags.map((tag) => (
+                                <button
+                                  key={tag}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isSubject) {
+                                      updateRule(rule.id, {
+                                        trigger: {
+                                          ...rule.trigger,
+                                          subjectMode: 'tag',
+                                          subjectTag: tag,
+                                          subjectId: undefined,
+                                          subjectStateId: undefined,
+                                        },
+                                      });
+                                    } else {
+                                      updateRule(rule.id, {
+                                        trigger: {
+                                          ...rule.trigger,
+                                          targetMode: 'tag',
+                                          targetTag: tag,
+                                          targetId: undefined,
+                                          targetStateId: undefined,
+                                        },
+                                      });
+                                    }
+                                    setActiveModal(null);
+                                  }}
+                                  className="px-3 py-1.5 bg-white hover:bg-purple-600 hover:text-white text-purple-800 border border-purple-300 rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs"
+                                >
+                                  #{tag}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={activeModal.tagInput ?? (isSubject ? rule.trigger.subjectTag || '' : rule.trigger.targetTag || '')}
+                              onChange={(e) =>
+                                setActiveModal({ ...activeModal, tagInput: e.target.value.replace(/^#/, '') })
+                              }
+                              placeholder="Ex: projectile, ennemi..."
+                              className="flex-1 px-3 py-2 text-xs font-bold bg-white border border-purple-300 rounded-xl outline-none focus:border-purple-600"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const clean = (
+                                  activeModal.tagInput ??
+                                  (isSubject ? rule.trigger.subjectTag || '' : rule.trigger.targetTag || '')
+                                )
+                                  .trim()
+                                  .replace(/^#/, '');
+                                if (!clean) return;
                                 if (isSubject) {
                                   updateRule(rule.id, {
                                     trigger: {
                                       ...rule.trigger,
-                                      subjectType: opt.type,
+                                      subjectMode: 'tag',
+                                      subjectTag: clean,
+                                      subjectId: undefined,
                                       subjectStateId: undefined,
                                     },
                                   });
@@ -4361,28 +5829,141 @@ export function RuleBook() {
                                   updateRule(rule.id, {
                                     trigger: {
                                       ...rule.trigger,
-                                      targetType: opt.type,
+                                      targetMode: 'tag',
+                                      targetTag: clean,
+                                      targetId: undefined,
                                       targetStateId: undefined,
                                     },
                                   });
                                 }
                                 setActiveModal(null);
-                              }
-                            }}
-                            className="p-4 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all shadow-xs group active:scale-95"
-                          >
-                            <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs group-hover:scale-110 transition-transform">
-                              <EntityMiniPreview entity={entObj} type={opt.type} size={52} />
-                            </div>
-                            <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700 truncate w-full text-center">
-                              {opt.label}
-                            </div>
-                            <div className="text-[10px] text-slate-400">
-                              {statesCount > 1 ? `${statesCount} états →` : 'Sélectionner'}
-                            </div>
-                          </button>
-                        );
-                      })}
+                              }}
+                              className="px-4 py-2 bg-purple-600 text-white text-xs font-bold rounded-xl cursor-pointer"
+                            >
+                              Appliquer
+                            </button>
+                          </div>
+                        </div>
+                      ) : activeSelMode === 'instance' ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+                          {entityList.map((inst) => {
+                            const statesCount = Object.keys(inst.states || {}).length;
+                            return (
+                              <button
+                                key={inst.id}
+                                type="button"
+                                onClick={() => {
+                                  if (statesCount > 1) {
+                                    setActiveModal({
+                                      ...activeModal,
+                                      subStep: 'choose_state',
+                                      selectionMode: 'instance',
+                                      selectedEntityId: inst.id,
+                                      selectedEntityType: inst.type,
+                                    });
+                                  } else {
+                                    if (isSubject) {
+                                      updateRule(rule.id, {
+                                        trigger: {
+                                          ...rule.trigger,
+                                          subjectMode: 'instance',
+                                          subjectId: inst.id,
+                                          subjectType: inst.type,
+                                          subjectTag: undefined,
+                                          subjectStateId: undefined,
+                                        },
+                                      });
+                                    } else {
+                                      updateRule(rule.id, {
+                                        trigger: {
+                                          ...rule.trigger,
+                                          targetMode: 'instance',
+                                          targetId: inst.id,
+                                          targetType: inst.type,
+                                          targetTag: undefined,
+                                          targetStateId: undefined,
+                                        },
+                                      });
+                                    }
+                                    setActiveModal(null);
+                                  }
+                                }}
+                                className="p-4 bg-slate-50 hover:bg-cyan-50 border-2 border-slate-200 hover:border-cyan-500 rounded-3xl flex flex-col items-center justify-center gap-2.5 cursor-pointer transition-all shadow-xs group active:scale-95"
+                              >
+                                <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs">
+                                  <EntityMiniPreview entity={inst} type={inst.type} size={52} />
+                                </div>
+                                <div className="text-xs font-black text-slate-800 truncate w-full text-center">
+                                  {inst.name}
+                                </div>
+                                <div className="text-[10px] text-slate-400">
+                                  ({Math.round(inst.position.x)}, {Math.round(inst.position.y)})
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+                          {availableEntityOptions.map((opt) => {
+                            const entObj = getEntityObj(opt.type);
+                            const statesCount = Object.keys(entObj?.states || {}).length;
+
+                            return (
+                              <button
+                                key={opt.type}
+                                type="button"
+                                onClick={() => {
+                                  if (statesCount > 1) {
+                                    setActiveModal({
+                                      ...activeModal,
+                                      subStep: 'choose_state',
+                                      selectionMode: 'type',
+                                      selectedEntityType: opt.type,
+                                    });
+                                  } else {
+                                    if (isSubject) {
+                                      updateRule(rule.id, {
+                                        trigger: {
+                                          ...rule.trigger,
+                                          subjectMode: 'type',
+                                          subjectType: opt.type,
+                                          subjectId: undefined,
+                                          subjectTag: undefined,
+                                          subjectStateId: undefined,
+                                        },
+                                      });
+                                    } else {
+                                      updateRule(rule.id, {
+                                        trigger: {
+                                          ...rule.trigger,
+                                          targetMode: 'type',
+                                          targetType: opt.type,
+                                          targetId: undefined,
+                                          targetTag: undefined,
+                                          targetStateId: undefined,
+                                        },
+                                      });
+                                    }
+                                    setActiveModal(null);
+                                  }
+                                }}
+                                className="p-4 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all shadow-xs group active:scale-95"
+                              >
+                                <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs group-hover:scale-110 transition-transform">
+                                  <EntityMiniPreview entity={entObj} type={opt.type} size={52} />
+                                </div>
+                                <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700 truncate w-full text-center">
+                                  {opt.label}
+                                </div>
+                                <div className="text-[10px] text-slate-400">
+                                  {statesCount > 1 ? `${statesCount} états →` : 'Sélectionner'}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -4734,7 +6315,20 @@ export function RuleBook() {
                       {activeModal.subStep && activeModal.subStep !== 'main' && (
                         <button
                           type="button"
-                          onClick={() => setActiveModal({ ...activeModal, subStep: 'main' })}
+                          onClick={() => {
+                            if (activeModal.subStep === 'choose_spawn_location') {
+                              const spEnt = getEntityObj(activeModal.pendingSpawnType);
+                              const hasMulti = Object.keys(spEnt?.states || {}).length > 1;
+                              setActiveModal({
+                                ...activeModal,
+                                subStep: hasMulti ? 'choose_spawn_state' : 'choose_spawn_entity',
+                              });
+                            } else if (activeModal.subStep === 'choose_spawn_state') {
+                              setActiveModal({ ...activeModal, subStep: 'choose_spawn_entity' });
+                            } else {
+                              setActiveModal({ ...activeModal, subStep: 'main' });
+                            }
+                          }}
                           className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer"
                         >
                           <ChevronLeft className="w-4 h-4" />
@@ -5104,6 +6698,94 @@ export function RuleBook() {
                                   </div>
                                   <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                                     Incrémenter le score de jeu
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 6. Émettre des Particules */}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setActiveModal({
+                                    ...activeModal,
+                                    subStep: 'choose_particles',
+                                    particleOriginMode: isCollision ? 'target' : 'subject',
+                                    particleCount: 20,
+                                    particleColor: '#f59e0b',
+                                    particleColor2: '#ef4444',
+                                    particleShape: 'circle',
+                                    particleSpeed: 180,
+                                    particleSize: 6,
+                                    particleLifetime: 0.7,
+                                    particleGravity: 220,
+                                    particleSpread: 360,
+                                    particleAngle: -90,
+                                  })
+                                }
+                                className="w-full p-3.5 bg-white hover:bg-amber-50/70 border-2 border-slate-200 hover:border-amber-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🎆
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-amber-700 truncate">
+                                    Émettre des Particules
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Étincelles, explosion ou confettis légers
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 7. Attacher à un Parent (Parenting) */}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setActiveModal({
+                                    ...activeModal,
+                                    subStep: 'choose_attach_parent',
+                                    parentChildMode: 'subject',
+                                    parentTargetMode: isCollision ? 'target' : 'entity',
+                                    parentEntityId: Object.keys(entities)[0] || '',
+                                    parentOffset: { x: 0, y: 0, rotationOffset: 0, inheritRotation: true, inheritFlip: true },
+                                  })
+                                }
+                                className="w-full p-3.5 bg-white hover:bg-indigo-50/70 border-2 border-slate-200 hover:border-indigo-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🔗
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-indigo-700 truncate">
+                                    Attacher à un Parent
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Solidariser une entité (arme, accessoire)
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 8. Détacher du Parent */}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setActiveModal({
+                                    ...activeModal,
+                                    subStep: 'choose_detach_parent',
+                                    targetMode: 'subject',
+                                  })
+                                }
+                                className="w-full p-3.5 bg-white hover:bg-rose-50/70 border-2 border-slate-200 hover:border-rose-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  ✂️
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-rose-700 truncate">
+                                    Détacher du Parent
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Désolidariser en cours de partie
                                   </div>
                                 </div>
                               </button>
@@ -5543,67 +7225,173 @@ export function RuleBook() {
                     })()}
 
                     {/* Choix d'objet à spawner */}
-                    {activeModal.subStep === 'choose_spawn_entity' && (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
-                        {availableEntityOptions.map((opt) => {
-                          const ent = getEntityObj(opt.type);
-                          return (
-                            <button
-                              key={opt.type}
-                              type="button"
-                              onClick={() => {
-                                setActiveModal({
-                                  ...activeModal,
-                                  pendingSpawnType: opt.type,
-                                  subStep: 'choose_spawn_location',
-                                });
-                              }}
-                              className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-xs group active:scale-95"
-                            >
-                              <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs group-hover:scale-110 transition-transform">
-                                <EntityMiniPreview entity={ent} type={opt.type} size={52} />
-                              </div>
-                              <div className="text-xs font-black text-slate-800 group-hover:text-amber-700 truncate w-full text-center">
-                                + {opt.label}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+                    {activeModal.subStep === 'choose_spawn_entity' && (() => {
+                      const existingSpawnAct =
+                        activeModal.actionIndex !== undefined ? rule.actions[activeModal.actionIndex] : undefined;
+                      return (
+                        <div className="space-y-3">
+                          <div className="text-xs font-bold text-slate-600">
+                            Cliquez sur l'objet à faire apparaître :
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+                            {availableEntityOptions.map((opt) => {
+                              const ent = getEntityObj(opt.type);
+                              const statesList = ent ? Object.values(ent.states) : [];
+                              const preselectedStateId =
+                                existingSpawnAct?.type === 'spawn_entity' &&
+                                existingSpawnAct?.spawnEntityType === opt.type
+                                  ? existingSpawnAct.spawnInitialStateId
+                                  : undefined;
+                              return (
+                                <button
+                                  key={opt.type}
+                                  type="button"
+                                  onClick={() => {
+                                    if (statesList.length > 1) {
+                                      setActiveModal({
+                                        ...activeModal,
+                                        pendingSpawnType: opt.type,
+                                        pendingSpawnInitialStateId: preselectedStateId,
+                                        subStep: 'choose_spawn_state',
+                                      });
+                                    } else {
+                                      setActiveModal({
+                                        ...activeModal,
+                                        pendingSpawnType: opt.type,
+                                        pendingSpawnInitialStateId: undefined,
+                                        subStep: 'choose_spawn_location',
+                                      });
+                                    }
+                                  }}
+                                  className="p-4 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-xs group active:scale-95"
+                                >
+                                  <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs group-hover:scale-110 transition-transform">
+                                    <EntityMiniPreview entity={ent} type={opt.type} size={52} />
+                                  </div>
+                                  <div className="text-xs font-black text-slate-800 group-hover:text-amber-700 truncate w-full text-center">
+                                    + {opt.label}
+                                  </div>
+                                  {statesList.length > 1 && (
+                                    <div className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full font-bold">
+                                      {statesList.length} états →
+                                    </div>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Choix de l'état initial pour l'objet créé (Edit Modal) */}
+                    {activeModal.subStep === 'choose_spawn_state' && (() => {
+                      const spawnType = activeModal.pendingSpawnType || availableEntityOptions[0]?.type || 'apple';
+                      const ent = getEntityObj(spawnType);
+                      const states = ent ? Object.values(ent.states) : [];
+
+                      return (
+                        <div className="space-y-4">
+                          <div className="text-xs font-bold text-slate-600">
+                            Choisissez l'état initial dans lequel « {ent?.name || spawnType} » va apparaître :
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+                            {states.map((st) => {
+                              const isCurrentSel = activeModal.pendingSpawnInitialStateId === st.id;
+                              return (
+                                <button
+                                  key={st.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveModal({
+                                      ...activeModal,
+                                      pendingSpawnInitialStateId: st.id,
+                                      subStep: 'choose_spawn_location',
+                                    });
+                                  }}
+                                  className={`p-4 border-2 rounded-3xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-xs group active:scale-95 ${
+                                    isCurrentSel
+                                      ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-200'
+                                      : 'bg-slate-50 hover:bg-amber-50 border-slate-200 hover:border-amber-500'
+                                  }`}
+                                >
+                                  <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs group-hover:scale-110 transition-transform">
+                                    <EntityMiniPreview entity={ent} type={spawnType} stateId={st.id} size={52} />
+                                  </div>
+                                  <div className="text-xs font-black text-slate-800 group-hover:text-amber-700">
+                                    État {st.name}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Choix de l'emplacement de spawn avec SpawnLocationPicker */}
-                    {activeModal.subStep === 'choose_spawn_location' && (
-                      <div className="space-y-3">
-                        <div className="text-xs font-bold text-slate-600">
-                          Où faire apparaître {getEntityObj(activeModal.pendingSpawnType)?.name || activeModal.pendingSpawnType} ?
+                    {activeModal.subStep === 'choose_spawn_location' && (() => {
+                      const existingSpawnAct =
+                        activeModal.actionIndex !== undefined ? rule.actions[activeModal.actionIndex] : undefined;
+                      const isEditingSameSpawn = existingSpawnAct?.type === 'spawn_entity';
+                      return (
+                        <div className="space-y-3">
+                          <div className="text-xs font-bold text-slate-600">
+                            Où faire apparaître {getEntityObj(activeModal.pendingSpawnType)?.name || activeModal.pendingSpawnType} ?
+                          </div>
+                          <SpawnLocationPicker
+                            isCollision={isCollision}
+                            subjectEntity={getEntityObj(subjectType)}
+                            targetEntity={getEntityObj(targetType)}
+                            spawnEntity={getEntityObj(activeModal.pendingSpawnType)}
+                            initialMode={
+                              isEditingSameSpawn && existingSpawnAct?.spawnLocationMode
+                                ? existingSpawnAct.spawnLocationMode
+                                : isCollision
+                                ? 'at_target'
+                                : 'at_subject'
+                            }
+                            initialStateId={
+                              activeModal.pendingSpawnInitialStateId ||
+                              (isEditingSameSpawn ? existingSpawnAct?.spawnInitialStateId : undefined)
+                            }
+                            initialOffset={isEditingSameSpawn ? existingSpawnAct?.spawnOffset : undefined}
+                            initialAbsoluteCoords={isEditingSameSpawn ? existingSpawnAct?.spawnAbsoluteCoords : undefined}
+                            initialSizeMode={isEditingSameSpawn ? existingSpawnAct?.spawnSizeMode : undefined}
+                            initialScaleMultiplier={isEditingSameSpawn ? existingSpawnAct?.spawnScaleMultiplier : undefined}
+                            initialCustomSize={isEditingSameSpawn ? existingSpawnAct?.spawnCustomSize : undefined}
+                            initialTags={isEditingSameSpawn ? existingSpawnAct?.spawnTags : undefined}
+                            initialReferenceMode={isEditingSameSpawn ? existingSpawnAct?.spawnReferenceMode : undefined}
+                            initialReferenceEntityId={isEditingSameSpawn ? existingSpawnAct?.spawnReferenceEntityId : undefined}
+                            initialReferenceEntityType={isEditingSameSpawn ? existingSpawnAct?.spawnReferenceEntityType : undefined}
+                            initialReferenceTag={isEditingSameSpawn ? existingSpawnAct?.spawnReferenceTag : undefined}
+                            onConfirm={(data) => {
+                              applyAction({
+                                type: 'spawn_entity',
+                                spawnEntityType: activeModal.pendingSpawnType,
+                                spawnInitialStateId:
+                                  data.spawnInitialStateId || activeModal.pendingSpawnInitialStateId,
+                                spawnLocationMode: data.spawnLocationMode,
+                                spawnReferenceMode: data.spawnReferenceMode,
+                                spawnReferenceEntityId: data.spawnReferenceEntityId,
+                                spawnReferenceEntityType: data.spawnReferenceEntityType,
+                                spawnReferenceTag: data.spawnReferenceTag,
+                                spawnOffset: data.spawnOffset,
+                                spawnPosition: data.spawnPosition,
+                                spawnAbsoluteCoords: data.spawnAbsoluteCoords,
+                                spawnSizeMode: data.spawnSizeMode,
+                                spawnScaleMultiplier: data.spawnScaleMultiplier,
+                                spawnCustomSize: data.spawnCustomSize,
+                                spawnTags: data.spawnTags,
+                              });
+                            }}
+                            onCancel={() => {
+                              setActiveModal({ ...activeModal, subStep: 'choose_spawn_entity' });
+                            }}
+                          />
                         </div>
-                        <SpawnLocationPicker
-                          isCollision={isCollision}
-                          subjectEntity={getEntityObj(subjectType)}
-                          targetEntity={getEntityObj(targetType)}
-                          spawnEntity={getEntityObj(activeModal.pendingSpawnType)}
-                          initialMode={isCollision ? 'at_target' : 'at_subject'}
-                          onConfirm={(data) => {
-                            applyAction({
-                              type: 'spawn_entity',
-                              spawnEntityType: activeModal.pendingSpawnType,
-                              spawnLocationMode: data.spawnLocationMode,
-                              spawnOffset: data.spawnOffset,
-                              spawnPosition: data.spawnPosition,
-                              spawnAbsoluteCoords: data.spawnAbsoluteCoords,
-                              spawnSizeMode: data.spawnSizeMode,
-                              spawnScaleMultiplier: data.spawnScaleMultiplier,
-                              spawnCustomSize: data.spawnCustomSize,
-                              spawnTags: data.spawnTags,
-                            });
-                          }}
-                          onCancel={() => {
-                            setActiveModal({ ...activeModal, subStep: 'choose_spawn_entity' });
-                          }}
-                        />
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {/* Choix du son */}
                     {activeModal.subStep === 'choose_sound' && (
@@ -5792,6 +7580,575 @@ export function RuleBook() {
                         </button>
                       </div>
                     )}
+
+                    {/* Modal Action : Émettre des Particules */}
+                    {activeModal.subStep === 'choose_particles' && (
+                      <div className="space-y-4 max-w-xl mx-auto py-2">
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { label: '🔥 Étincelles', count: 16, color: '#f59e0b', color2: '#ef4444', shape: 'spark' as ParticleShape, speed: 220, gravity: 280, spread: 140 },
+                            { label: '💥 Explosion', count: 28, color: '#ef4444', color2: '#fbbf24', shape: 'circle' as ParticleShape, speed: 260, gravity: 180, spread: 360 },
+                            { label: '✨ Magie', count: 20, color: '#8b5cf6', color2: '#ec4899', shape: 'star' as ParticleShape, speed: 140, gravity: -60, spread: 360 },
+                            { label: '🎉 Confettis', count: 32, color: '#10b981', color2: '#3b82f6', shape: 'square' as ParticleShape, speed: 210, gravity: 240, spread: 180 },
+                          ].map((preset) => (
+                            <button
+                              key={preset.label}
+                              type="button"
+                              onClick={() =>
+                                setActiveModal({
+                                  ...activeModal,
+                                  particleCount: preset.count,
+                                  particleColor: preset.color,
+                                  particleColor2: preset.color2,
+                                  particleShape: preset.shape,
+                                  particleSpeed: preset.speed,
+                                  particleGravity: preset.gravity,
+                                  particleSpread: preset.spread,
+                                })
+                              }
+                              className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl text-xs font-bold text-amber-900 cursor-pointer transition-colors"
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-1.5 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Source d'émission</span>
+                            <select
+                              value={activeModal.particleOriginMode || 'subject'}
+                              onChange={(e) => setActiveModal({ ...activeModal, particleOriginMode: e.target.value as any })}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            >
+                              <option value="subject">Sujet</option>
+                              {(isCollision || rule.trigger.type === 'proximity') && (
+                                <option value="target">Cible touchée</option>
+                              )}
+                              <option value="event_point">💥 Point exact (Collision / Clic)</option>
+                              <option value="entity">Entité de la scène</option>
+                              <option value="type">Par Type d'objet</option>
+                              <option value="tag">Par #Tag</option>
+                              <option value="last_spawned">Dernier objet créé</option>
+                            </select>
+                          </div>
+
+                          {activeModal.particleOriginMode === 'entity' && (
+                            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-700 text-xs">Entité source</span>
+                              <select
+                                value={activeModal.particleOriginEntityId || Object.keys(entities)[0] || ''}
+                                onChange={(e) => setActiveModal({ ...activeModal, particleOriginEntityId: e.target.value })}
+                                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              >
+                                {Object.values(entities).map((ent) => (
+                                  <option key={ent.id} value={ent.id}>{ent.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
+                          {activeModal.particleOriginMode === 'type' && (
+                            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-700 text-xs">Type source</span>
+                              <select
+                                value={activeModal.particleOriginEntityType || availableEntityOptions[0]?.type || ''}
+                                onChange={(e) => setActiveModal({ ...activeModal, particleOriginEntityType: e.target.value })}
+                                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              >
+                                {availableEntityOptions.map((opt) => (
+                                  <option key={opt.type} value={opt.type}>{opt.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
+                          {activeModal.particleOriginMode === 'tag' && (
+                            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-700 text-xs">Tag source (#tag)</span>
+                              <input
+                                type="text"
+                                list="modal-particle-tags"
+                                value={activeModal.particleOriginTag || ''}
+                                onChange={(e) => setActiveModal({ ...activeModal, particleOriginTag: e.target.value.replace(/^#/, '') })}
+                                placeholder="ex: joueur, ennemi..."
+                                className="w-44 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              />
+                              <datalist id="modal-particle-tags">
+                                {allProjectTags.map((t) => (
+                                  <option key={t} value={t} />
+                                ))}
+                              </datalist>
+                            </div>
+                          )}
+
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Forme</span>
+                            <select
+                              value={activeModal.particleShape || 'circle'}
+                              onChange={(e) => {
+                                const nextShape = e.target.value as ParticleShape;
+                                setActiveModal({
+                                  ...activeModal,
+                                  particleShape: nextShape,
+                                  customParticleId:
+                                    nextShape === 'custom' && !activeModal.customParticleId && customParticles.length > 0
+                                      ? customParticles[0].id
+                                      : activeModal.customParticleId,
+                                });
+                              }}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            >
+                              <option value="circle">Rond</option>
+                              <option value="square">Carré</option>
+                              <option value="spark">Étincelle</option>
+                              <option value="star">Étoile</option>
+                              <option value="custom">Particule dessinée ✨</option>
+                            </select>
+                          </div>
+
+                          {activeModal.particleShape === 'custom' && (
+                            <div className="p-2.5 bg-amber-50/70 rounded-xl border border-amber-200 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-bold text-amber-950">Particule vectorielle :</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setParticleDrawingTarget({ context: 'modal' })}
+                                  className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
+                                >
+                                  <Paintbrush className="w-3 h-3" />
+                                  <span>+ Dessiner une particule</span>
+                                </button>
+                              </div>
+                              {customParticles.length === 0 ? (
+                                <div className="text-[11px] text-amber-800 bg-white/80 rounded-lg p-2 border border-amber-200 text-center">
+                                  Aucune particule dessinée. Cliquez sur <strong>+ Dessiner une particule</strong>.
+                                </div>
+                              ) : (
+                                <div className="grid grid-cols-4 gap-1.5">
+                                  {customParticles.map((preset) => {
+                                    const isSel = activeModal.customParticleId === preset.id;
+                                    return (
+                                      <div
+                                        key={preset.id}
+                                        onClick={() => setActiveModal({ ...activeModal, customParticleId: preset.id })}
+                                        className={`relative group p-1.5 rounded-xl border flex flex-col items-center gap-1 cursor-pointer transition-all ${
+                                          isSel
+                                            ? 'bg-white border-amber-500 ring-2 ring-amber-300/60 shadow-xs'
+                                            : 'bg-white/80 border-slate-200 hover:border-amber-300'
+                                        }`}
+                                      >
+                                        <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden">
+                                          <svg viewBox="0 0 100 100" className="w-7 h-7">
+                                            {preset.vectorPaths.map((p) => (
+                                              <path
+                                                key={p.id}
+                                                d={p.d}
+                                                stroke={p.stroke}
+                                                strokeWidth={p.strokeWidth}
+                                                fill={p.fill || 'none'}
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                              />
+                                            ))}
+                                          </svg>
+                                        </div>
+                                        <span className="text-[9px] font-bold text-slate-700 truncate w-full text-center">
+                                          {preset.name}
+                                        </span>
+                                        <div className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center gap-0.5">
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setParticleDrawingTarget({ context: 'modal', editingPreset: preset });
+                                            }}
+                                            className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
+                                            title="Modifier"
+                                          >
+                                            <Pencil className="w-2.5 h-2.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              deleteCustomParticle(preset.id);
+                                              invalidateCustomParticleSprite(preset.id);
+                                              if (isSel) setActiveModal({ ...activeModal, customParticleId: undefined });
+                                            }}
+                                            className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
+                                            title="Supprimer"
+                                          >
+                                            <X className="w-2.5 h-2.5" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              <div className="flex items-center justify-between pt-1 border-t border-amber-200/70">
+                                <span className="text-[11px] font-bold text-slate-700">Teinter avec les couleurs d'émission</span>
+                                <input
+                                  type="checkbox"
+                                  checked={activeModal.useParticleTint === true}
+                                  onChange={(e) => setActiveModal({ ...activeModal, useParticleTint: e.target.checked })}
+                                  className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Nombre ({activeModal.particleCount ?? 20})</span>
+                            <input
+                              type="range"
+                              min="4"
+                              max="50"
+                              step="2"
+                              value={activeModal.particleCount ?? 20}
+                              onChange={(e) => setActiveModal({ ...activeModal, particleCount: parseInt(e.target.value, 10) })}
+                              className="w-40 accent-amber-500"
+                            />
+                          </div>
+
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Couleurs (Mix)</span>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={activeModal.particleColor || '#f59e0b'}
+                                onChange={(e) => setActiveModal({ ...activeModal, particleColor: e.target.value })}
+                                className="w-8 h-6 rounded border border-slate-300 cursor-pointer"
+                              />
+                              <input
+                                type="color"
+                                value={activeModal.particleColor2 || '#ef4444'}
+                                onChange={(e) => setActiveModal({ ...activeModal, particleColor2: e.target.value })}
+                                className="w-8 h-6 rounded border border-slate-300 cursor-pointer"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Taille ({activeModal.particleSize ?? 6} px)</span>
+                            <input
+                              type="range"
+                              min="2"
+                              max="24"
+                              step="1"
+                              value={activeModal.particleSize ?? 6}
+                              onChange={(e) => setActiveModal({ ...activeModal, particleSize: parseFloat(e.target.value) })}
+                              className="w-40 accent-indigo-600"
+                            />
+                          </div>
+
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Vitesse ({activeModal.particleSpeed ?? 180} px/s)</span>
+                            <input
+                              type="range"
+                              min="40"
+                              max="450"
+                              step="10"
+                              value={activeModal.particleSpeed ?? 180}
+                              onChange={(e) => setActiveModal({ ...activeModal, particleSpeed: parseFloat(e.target.value) })}
+                              className="w-40 accent-indigo-600"
+                            />
+                          </div>
+
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Gravité ({activeModal.particleGravity ?? 220})</span>
+                            <input
+                              type="range"
+                              min="-200"
+                              max="500"
+                              step="20"
+                              value={activeModal.particleGravity ?? 220}
+                              onChange={(e) => setActiveModal({ ...activeModal, particleGravity: parseFloat(e.target.value) })}
+                              className="w-40 accent-indigo-600"
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const pOriginMode = activeModal.particleOriginMode || 'subject';
+                            applyAction({
+                              type: 'emit_particles',
+                              particleOriginMode: pOriginMode,
+                              particleOriginEntityId:
+                                pOriginMode === 'entity'
+                                  ? activeModal.particleOriginEntityId || Object.keys(entities)[0]
+                                  : undefined,
+                              particleOriginEntityType:
+                                pOriginMode === 'type'
+                                  ? activeModal.particleOriginEntityType || availableEntityOptions[0]?.type
+                                  : undefined,
+                              particleOriginTag:
+                                pOriginMode === 'tag'
+                                  ? (activeModal.particleOriginTag || '').trim().replace(/^#/, '')
+                                  : undefined,
+                              particleCount: activeModal.particleCount ?? 20,
+                              particleColor: activeModal.particleColor ?? '#f59e0b',
+                              particleColor2: activeModal.particleColor2 ?? '#ef4444',
+                              particleShape: activeModal.particleShape ?? 'circle',
+                              customParticleId:
+                                activeModal.particleShape === 'custom' ? activeModal.customParticleId : undefined,
+                              useParticleTint:
+                                activeModal.particleShape === 'custom' ? Boolean(activeModal.useParticleTint) : undefined,
+                              particleSpeed: activeModal.particleSpeed ?? 180,
+                              particleSize: activeModal.particleSize ?? 6,
+                              particleLifetime: activeModal.particleLifetime ?? 0.7,
+                              particleGravity: activeModal.particleGravity ?? 220,
+                              particleSpread: activeModal.particleSpread ?? 360,
+                              particleAngle: activeModal.particleAngle ?? -90,
+                            });
+                          }}
+                          className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>Valider l'effet de particules</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Modal Action : Attacher à un Parent */}
+                    {activeModal.subStep === 'choose_attach_parent' && (
+                      <div className="space-y-4 max-w-xl mx-auto py-2">
+                        <div className="space-y-1.5 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Objet enfant à attacher</span>
+                            <select
+                              value={activeModal.parentChildMode || 'subject'}
+                              onChange={(e) => setActiveModal({ ...activeModal, parentChildMode: e.target.value as any })}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            >
+                              <option value="subject">Sujet</option>
+                              {isCollision && <option value="target">Cible touchée</option>}
+                              <option value="last_spawned">Dernier objet créé</option>
+                              <option value="tag">Par Tag (#tag)</option>
+                            </select>
+                          </div>
+
+                          {activeModal.parentChildMode === 'tag' && (
+                            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-700 text-xs">Tag enfant</span>
+                              <input
+                                type="text"
+                                value={activeModal.parentChildTag || ''}
+                                onChange={(e) => setActiveModal({ ...activeModal, parentChildTag: e.target.value.replace(/^#/, '') })}
+                                placeholder="ex: arme"
+                                className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              />
+                            </div>
+                          )}
+
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Objet parent (Porteur)</span>
+                            <select
+                              value={activeModal.parentTargetMode || (isCollision ? 'target' : 'entity')}
+                              onChange={(e) => setActiveModal({ ...activeModal, parentTargetMode: e.target.value as any })}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            >
+                              <option value="subject">Sujet</option>
+                              {isCollision && <option value="target">Cible touchée</option>}
+                              <option value="entity">Entité de la scène</option>
+                              <option value="type">Par Type</option>
+                              <option value="tag">Par Tag (#tag)</option>
+                              <option value="last_spawned">Dernier objet créé</option>
+                            </select>
+                          </div>
+
+                          {activeModal.parentTargetMode === 'entity' && (
+                            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-700 text-xs">Choisir parent</span>
+                              <select
+                                value={activeModal.parentEntityId || Object.keys(entities)[0] || ''}
+                                onChange={(e) => setActiveModal({ ...activeModal, parentEntityId: e.target.value })}
+                                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              >
+                                {Object.values(entities).map((ent) => (
+                                  <option key={ent.id} value={ent.id}>{ent.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
+                          {activeModal.parentTargetMode === 'type' && (
+                            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-700 text-xs">Type parent</span>
+                              <select
+                                value={activeModal.parentEntityType || availableEntityOptions[0]?.type || ''}
+                                onChange={(e) => setActiveModal({ ...activeModal, parentEntityType: e.target.value })}
+                                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              >
+                                {availableEntityOptions.map((opt) => (
+                                  <option key={opt.type} value={opt.type}>{opt.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
+                          {activeModal.parentTargetMode === 'tag' && (
+                            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-700 text-xs">Tag parent</span>
+                              <input
+                                type="text"
+                                value={activeModal.parentEntityTag || ''}
+                                onChange={(e) => setActiveModal({ ...activeModal, parentEntityTag: e.target.value.replace(/^#/, '') })}
+                                placeholder="ex: joueur"
+                                className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              />
+                            </div>
+                          )}
+
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Décalage ΔX / ΔY (px)</span>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                value={activeModal.parentOffset?.x ?? 0}
+                                onChange={(e) =>
+                                  setActiveModal({
+                                    ...activeModal,
+                                    parentOffset: {
+                                      x: parseFloat(e.target.value) || 0,
+                                      y: activeModal.parentOffset?.y ?? 0,
+                                      inheritRotation: activeModal.parentOffset?.inheritRotation ?? true,
+                                      inheritFlip: activeModal.parentOffset?.inheritFlip ?? true,
+                                    },
+                                  })
+                                }
+                                className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                              />
+                              <input
+                                type="number"
+                                value={activeModal.parentOffset?.y ?? 0}
+                                onChange={(e) =>
+                                  setActiveModal({
+                                    ...activeModal,
+                                    parentOffset: {
+                                      x: activeModal.parentOffset?.x ?? 0,
+                                      y: parseFloat(e.target.value) || 0,
+                                      inheritRotation: activeModal.parentOffset?.inheritRotation ?? true,
+                                      inheritFlip: activeModal.parentOffset?.inheritFlip ?? true,
+                                    },
+                                  })
+                                }
+                                className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+                            <span className="font-bold text-slate-700 text-xs">Hériter rotation & Flip du parent</span>
+                            <input
+                              type="checkbox"
+                              checked={activeModal.parentOffset?.inheritRotation !== false}
+                              onChange={(e) =>
+                                setActiveModal({
+                                  ...activeModal,
+                                  parentOffset: {
+                                    x: activeModal.parentOffset?.x ?? 0,
+                                    y: activeModal.parentOffset?.y ?? 0,
+                                    inheritRotation: e.target.checked,
+                                    inheritFlip: e.target.checked,
+                                  },
+                                })
+                              }
+                              className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            applyAction({
+                              type: 'attach_to_parent',
+                              targetMode: activeModal.parentChildMode || 'subject',
+                              targetTag: activeModal.parentChildMode === 'tag' ? activeModal.parentChildTag : undefined,
+                              parentTargetMode: activeModal.parentTargetMode || 'entity',
+                              parentEntityId: activeModal.parentTargetMode === 'entity' ? activeModal.parentEntityId || Object.keys(entities)[0] : undefined,
+                              parentEntityType: activeModal.parentTargetMode === 'type' ? activeModal.parentEntityType || availableEntityOptions[0]?.type : undefined,
+                              parentEntityTag: activeModal.parentTargetMode === 'tag' ? activeModal.parentEntityTag : undefined,
+                              parentOffset: activeModal.parentOffset,
+                            });
+                          }}
+                          className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>Valider l'attachement</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Modal Action : Détacher du Parent */}
+                    {activeModal.subStep === 'choose_detach_parent' && (
+                      <div className="space-y-4 max-w-xl mx-auto py-2">
+                        <div className="space-y-1.5 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Objet à détacher</span>
+                            <select
+                              value={activeModal.targetMode || 'subject'}
+                              onChange={(e) => setActiveModal({ ...activeModal, targetMode: e.target.value as any })}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            >
+                              <option value="subject">Sujet</option>
+                              {isCollision && <option value="target">Cible touchée</option>}
+                              <option value="last_spawned">Dernier objet créé</option>
+                              <option value="tag">Par Tag (#tag)</option>
+                              <option value="type">Par Type</option>
+                            </select>
+                          </div>
+
+                          {activeModal.targetMode === 'tag' && (
+                            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-700 text-xs">Tag à détacher</span>
+                              <input
+                                type="text"
+                                value={activeModal.targetTag || ''}
+                                onChange={(e) => setActiveModal({ ...activeModal, targetTag: e.target.value.replace(/^#/, '') })}
+                                placeholder="ex: arme"
+                                className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              />
+                            </div>
+                          )}
+
+                          {activeModal.targetMode === 'type' && (
+                            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-700 text-xs">Type à détacher</span>
+                              <select
+                                value={activeModal.selectedTargetType || availableEntityOptions[0]?.type || ''}
+                                onChange={(e) => setActiveModal({ ...activeModal, selectedTargetType: e.target.value })}
+                                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              >
+                                {availableEntityOptions.map((opt) => (
+                                  <option key={opt.type} value={opt.type}>{opt.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            applyAction({
+                              type: 'detach_parent',
+                              targetMode: activeModal.targetMode || 'subject',
+                              targetTag: activeModal.targetMode === 'tag' ? activeModal.targetTag : undefined,
+                              targetType: activeModal.targetMode === 'type' ? activeModal.selectedTargetType || availableEntityOptions[0]?.type : undefined,
+                            });
+                          }}
+                          className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>Valider le détachement</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -5829,6 +8186,57 @@ export function RuleBook() {
           }
         }}
       />
+      {/* Atelier de dessin plein écran pour particule personnalisée */}
+      {particleDrawingTarget && (
+        <FullScreenDrawingModal
+          title={
+            particleDrawingTarget.editingPreset
+              ? `Modifier particule : ${particleDrawingTarget.editingPreset.name}`
+              : 'Dessiner une particule'
+          }
+          subtitle="Dessinez votre particule personnalisée"
+          initialPaths={particleDrawingTarget.editingPreset?.vectorPaths || []}
+          currentEditingStateName={
+            particleDrawingTarget.editingPreset?.name || `Particule ${customParticles.length + 1}`
+          }
+          onSave={(paths, _dataUrl, _colliderType, customName) => {
+            const finalName = (customName || '').trim() || `Particule ${customParticles.length + 1}`;
+            let targetPresetId = particleDrawingTarget.editingPreset?.id;
+            if (targetPresetId) {
+              updateCustomParticle(targetPresetId, {
+                name: finalName,
+                vectorPaths: paths,
+              });
+              invalidateCustomParticleSprite(targetPresetId);
+            } else {
+              targetPresetId = addCustomParticle({
+                name: finalName,
+                vectorPaths: paths,
+                useTint: false,
+              });
+            }
+            if (particleDrawingTarget.context === 'wizard' && activeWizard) {
+              setActiveWizard({
+                ...activeWizard,
+                particleShape: 'custom',
+                customParticleId: targetPresetId,
+              });
+            } else if (
+              particleDrawingTarget.context === 'modal' &&
+              activeModal &&
+              activeModal.type === 'action'
+            ) {
+              setActiveModal({
+                ...activeModal,
+                particleShape: 'custom',
+                customParticleId: targetPresetId,
+              });
+            }
+            setParticleDrawingTarget(null);
+          }}
+          onClose={() => setParticleDrawingTarget(null)}
+        />
+      )}
     </div>
   );
 }

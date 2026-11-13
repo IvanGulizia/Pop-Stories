@@ -2,7 +2,7 @@ import { motion, useMotionValue, useDragControls } from 'motion/react';
 import { Entity } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
 import { useEffect, useRef, useState } from 'react';
-import { isPointInsideEntityCollider, getColliderClipPath, getEntityColliderBounds, getEntityColliderClipPath } from '../utils/collider';
+import { isPointInsideEntityCollider, getEntityColliderBounds, getEntityColliderClipPath } from '../utils/collider';
 import { useAppCursor } from '../context/CursorContext';
 import { isEntityDraggable, setEntityRuntimeVelocity, syncEntityDragPosition } from '../utils/matterPhysicsEngine';
 
@@ -27,6 +27,10 @@ export function Apple({ entity, style }: AppleProps) {
 
   const [isResizing, setIsResizing] = useState(false);
   const isDraggingRef = useRef(false);
+  const hasMovedBeyondDragThresholdRef = useRef(false);
+  const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  const pointerDownTimeRef = useRef<number>(0);
+  const lastHandledClickTimeRef = useRef<number>(0);
   const dragControls = useDragControls();
   const { setCursorState, setIsDragging } = useAppCursor();
 
@@ -46,6 +50,16 @@ export function Apple({ entity, style }: AppleProps) {
   const x = useMotionValue(entity.position.x);
   const y = useMotionValue(entity.position.y);
   const isHoveringRef = useRef(false);
+
+  const getSceneEventPosition = (clientX: number, clientY: number) => {
+    const container = document.getElementById('scene-canvas-container');
+    if (!container) return undefined;
+    const rect = container.getBoundingClientRect();
+    return {
+      x: Math.round((clientX - rect.left) * 10) / 10,
+      y: Math.round((clientY - rect.top) * 10) / 10,
+    };
+  };
 
   // Sync external changes
   useEffect(() => {
@@ -68,6 +82,16 @@ export function Apple({ entity, style }: AppleProps) {
 
     const numX = typeof currentX === 'string' ? parseFloat(currentX) : currentX;
     const numY = typeof currentY === 'string' ? parseFloat(currentY) : currentY;
+
+    if (pointerDownPosRef.current) {
+      const dx = numX - entity.position.x;
+      const dy = numY - entity.position.y;
+      if (Math.hypot(dx, dy) > 4) {
+        hasMovedBeyondDragThresholdRef.current = true;
+      }
+    } else {
+      hasMovedBeyondDragThresholdRef.current = true;
+    }
 
     const now = performance.now();
     dragSamplesRef.current.push({ x: numX, y: numY, time: now });
@@ -98,7 +122,12 @@ export function Apple({ entity, style }: AppleProps) {
         y: numY,
       });
       evaluateRulesWithTemp();
-      triggerDragRelease(entity.id);
+      if (hasMovedBeyondDragThresholdRef.current) {
+        triggerDragRelease(entity.id, {
+          x: Math.round(numX + entity.size.width / 2),
+          y: Math.round(numY + entity.size.height / 2),
+        });
+      }
 
       // Injection de l'élan physique au lâcher en mode Play
       if (appMode === 'play' && throwable && dragSamplesRef.current.length >= 2) {
@@ -135,6 +164,7 @@ export function Apple({ entity, style }: AppleProps) {
     setCursorState('release');
     setTimeout(() => {
       isDraggingRef.current = false;
+      hasMovedBeyondDragThresholdRef.current = false;
       setCursorState(canDrag ? 'hover_drag' : 'hover_click');
     }, 120);
   };
@@ -177,8 +207,8 @@ export function Apple({ entity, style }: AppleProps) {
     window.addEventListener('pointercancel', handlePointerUp);
   };
 
-  const colliderType = currentState.colliderType || entity.colliderType || 'circle';
-
+  const colliderGeometry = getEntityColliderBounds(entity, currentState);
+  const colliderType = colliderGeometry.colliderType;
   const colliderClipPath = getEntityColliderClipPath(entity, currentState) || (colliderType === 'circle' ? 'circle(50% at 50% 50%)' : 'inset(0% round 16px)');
 
   return (
@@ -206,6 +236,7 @@ export function Apple({ entity, style }: AppleProps) {
         scale: currentState.scale,
         rotate: currentState.rotation,
       }}
+      transition={appMode === 'play' ? { duration: 0 } : undefined}
       whileHover={enableHoverScaleAnimation ? { scale: currentState.scale * (isSelected ? 1.0 : 1.03) } : undefined}
     >
       {/* Hitbox interactive délimitée par le collider vert */}
@@ -218,6 +249,7 @@ export function Apple({ entity, style }: AppleProps) {
         }}
         onPointerEnter={(e) => {
           if (isDraggingRef.current || appMode !== 'play') return;
+          const pt = getSceneEventPosition(e.clientX, e.clientY);
           const isInside = isPointInsideEntityCollider(
             e.clientX,
             e.clientY,
@@ -229,18 +261,19 @@ export function Apple({ entity, style }: AppleProps) {
             setCursorState(canDrag ? 'hover_drag' : 'hover_click');
             if (!isHoveringRef.current) {
               isHoveringRef.current = true;
-              triggerPointerEvent(entity.id, 'enter');
+              triggerPointerEvent(entity.id, 'enter', pt);
             }
           } else {
             setCursorState('idle');
             if (isHoveringRef.current) {
               isHoveringRef.current = false;
-              triggerPointerEvent(entity.id, 'exit');
+              triggerPointerEvent(entity.id, 'exit', pt);
             }
           }
         }}
         onPointerMove={(e) => {
           if (isDraggingRef.current || appMode !== 'play') return;
+          const pt = getSceneEventPosition(e.clientX, e.clientY);
           const isInside = isPointInsideEntityCollider(
             e.clientX,
             e.clientY,
@@ -252,21 +285,21 @@ export function Apple({ entity, style }: AppleProps) {
             setCursorState(canDrag ? 'hover_drag' : 'hover_click');
             if (!isHoveringRef.current) {
               isHoveringRef.current = true;
-              triggerPointerEvent(entity.id, 'enter');
+              triggerPointerEvent(entity.id, 'enter', pt);
             }
           } else {
             setCursorState('idle');
             if (isHoveringRef.current) {
               isHoveringRef.current = false;
-              triggerPointerEvent(entity.id, 'exit');
+              triggerPointerEvent(entity.id, 'exit', pt);
             }
           }
         }}
-        onPointerLeave={() => {
+        onPointerLeave={(e) => {
           if (appMode === 'play' && isHoveringRef.current) {
             isHoveringRef.current = false;
             setCursorState('idle');
-            triggerPointerEvent(entity.id, 'exit');
+            triggerPointerEvent(entity.id, 'exit', getSceneEventPosition(e.clientX, e.clientY));
           }
         }}
         onPointerDown={(e) => {
@@ -287,6 +320,11 @@ export function Apple({ entity, style }: AppleProps) {
             selectEntity(entity.id);
           }
 
+          pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
+          pointerDownTimeRef.current = Date.now();
+          hasMovedBeyondDragThresholdRef.current = false;
+          isDraggingRef.current = false;
+
           if (canDrag) {
             dragControls.start(e);
             if (appMode === 'play') setCursorState('drag');
@@ -294,13 +332,15 @@ export function Apple({ entity, style }: AppleProps) {
             if (appMode === 'play') setCursorState('click');
           }
           if (appMode === 'play') {
-            triggerPointerEvent(entity.id, 'mouse_down');
-            triggerPointerEvent(entity.id, 'down');
+            const pt = getSceneEventPosition(e.clientX, e.clientY);
+            triggerPointerEvent(entity.id, 'mouse_down', pt);
+            triggerPointerEvent(entity.id, 'down', pt);
 
-            const handleGlobalUp = () => {
+            const handleGlobalUp = (upEvent: PointerEvent) => {
               window.removeEventListener('pointerup', handleGlobalUp);
-              triggerPointerEvent(entity.id, 'mouse_up');
-              triggerPointerEvent(entity.id, 'up');
+              const upPt = getSceneEventPosition(upEvent.clientX, upEvent.clientY);
+              triggerPointerEvent(entity.id, 'mouse_up', upPt);
+              triggerPointerEvent(entity.id, 'up', upPt);
             };
             window.addEventListener('pointerup', handleGlobalUp, { once: true });
           }
@@ -315,16 +355,34 @@ export function Apple({ entity, style }: AppleProps) {
           );
 
           if (appMode !== 'play') {
-            selectEntity(entity.id);
+            if (!hasMovedBeyondDragThresholdRef.current && isInside) {
+              selectEntity(entity.id);
+            }
             isDraggingRef.current = false;
             setIsDragging(false);
             return;
           }
 
-          if (!isDraggingRef.current) {
+          const pt = getSceneEventPosition(e.clientX, e.clientY);
+          const duration = Date.now() - (pointerDownTimeRef.current || 0);
+          const dist = pointerDownPosRef.current
+            ? Math.hypot(e.clientX - pointerDownPosRef.current.x, e.clientY - pointerDownPosRef.current.y)
+            : 0;
+
+          const isPureClick = !hasMovedBeyondDragThresholdRef.current && dist < 6 && duration < 700;
+
+          if (isPureClick && isInside) {
+            lastHandledClickTimeRef.current = Date.now();
+            selectEntity(entity.id);
+            triggerPointerEvent(entity.id, 'click', pt);
+            triggerPointerEvent(entity.id, 'mouse_up', pt);
+            setCursorState(canDrag ? 'hover_drag' : 'hover_click');
+          } else if (!hasMovedBeyondDragThresholdRef.current) {
+            isDraggingRef.current = false;
+            setIsDragging(false);
             if (isInside) {
               setCursorState(canDrag ? 'hover_drag' : 'hover_click');
-              triggerPointerEvent(entity.id, 'mouse_up');
+              triggerPointerEvent(entity.id, 'mouse_up', pt);
             } else {
               setCursorState('idle');
             }
@@ -348,10 +406,15 @@ export function Apple({ entity, style }: AppleProps) {
             return;
           }
 
+          if (Date.now() - (lastHandledClickTimeRef.current || 0) < 350) {
+            return;
+          }
+
           selectEntity(entity.id);
-          if (!isDraggingRef.current) {
+          if (!hasMovedBeyondDragThresholdRef.current) {
+            lastHandledClickTimeRef.current = Date.now();
             setCursorState(canDrag ? 'hover_drag' : 'hover_click');
-            triggerPointerEvent(entity.id, 'click');
+            triggerPointerEvent(entity.id, 'click', getSceneEventPosition(e.clientX, e.clientY));
           }
         }}
       />
@@ -359,11 +422,11 @@ export function Apple({ entity, style }: AppleProps) {
       {showColliderDebugGizmos && (
         <div className="absolute inset-0 pointer-events-none z-50">
           <svg viewBox="0 0 200 200" className="w-full h-full overflow-visible">
-            {colliderType === 'circle' ? (
+            {colliderGeometry.colliderType === 'circle' ? (
               <circle
-                cx="100"
-                cy="100"
-                r="50"
+                cx={colliderGeometry.centerX}
+                cy={colliderGeometry.centerY}
+                r={colliderGeometry.radius}
                 fill="rgba(16, 185, 129, 0.15)"
                 stroke="#10b981"
                 strokeWidth="2"
@@ -371,10 +434,10 @@ export function Apple({ entity, style }: AppleProps) {
               />
             ) : (
               <rect
-                x="50"
-                y="50"
-                width="100"
-                height="100"
+                x={colliderGeometry.x}
+                y={colliderGeometry.y}
+                width={colliderGeometry.width}
+                height={colliderGeometry.height}
                 fill="rgba(16, 185, 129, 0.15)"
                 stroke="#10b981"
                 strokeWidth="2"
@@ -385,7 +448,7 @@ export function Apple({ entity, style }: AppleProps) {
           </svg>
           <div className="absolute -top-3.5 -left-3.5 bg-emerald-700 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs flex items-center gap-1 whitespace-nowrap">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-ping" />
-            <span>Zone : {colliderType}</span>
+            <span>Zone : {colliderGeometry.colliderType}</span>
           </div>
         </div>
       )}
@@ -416,7 +479,10 @@ export function Apple({ entity, style }: AppleProps) {
         </>
       )}
 
-      <div className="relative w-full h-full flex items-center justify-center">
+      <div
+        className="relative w-full h-full flex items-center justify-center"
+        style={{ transform: entity.flipX ? 'scaleX(-1)' : undefined }}
+      >
         {/* Corps de la pomme */}
         <div
           className="w-full h-full rounded-[2rem] border-2 border-black/20 transition-colors duration-300 max-w-[85%] max-h-[85%]"
@@ -437,7 +503,7 @@ export function Apple({ entity, style }: AppleProps) {
       {/* Comportement affiché seulement si activé dans les réglages et pas en mode play */}
       {showCanvasLabels && appMode !== 'play' && (
         <div className="absolute -bottom-7 pointer-events-none bg-white/90 backdrop-blur-xs px-2 py-0.5 rounded-md text-[11px] font-medium text-slate-700 shadow-xs border border-slate-200 flex items-center gap-1 whitespace-nowrap">
-          {entity.isDraggable && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />}
+          {canDragFromBehavior && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />}
           {currentState.name}
         </div>
       )}

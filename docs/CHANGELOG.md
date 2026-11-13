@@ -1,3 +1,76 @@
+## [Phase 10.10] - 2026-11-12
+### Corrigé (Audit Lot 1)
+- **Alignement strict des Colliders avec Scale & Flip horizontal (`flipX`)** :
+  - Correction dans `collider.ts`, `matterPhysicsEngine.ts`, `useSceneStore.ts`, `Apple.tsx` et `Plant.tsx` : calcul centralisé `getEntityWorldColliderBounds` tenant compte du `scale` (transform centré DOM) et du miroir horizontal `flipX`, préservation de la vélocité lors des changements d'offset ou de reconstruction du corps Matter.js, et correction de la conservation de vélocité orthogonale en pause de patrouille.
+- **Nettoyage complet du cycle Play/Stop & Évaluation des Règles** :
+  - Ajout de `clearPlayRuntimeState()` à l'arrêt du mode Play (annulation de tous les timers `setTimeout` de délai en attente, purge des cooldowns, `preCollisionStates`, `preEventAutoRevertStates`, contacts de collision et `lastSpawnedEntityId`).
+  - Nettoyage automatique de `activePhysicsCollisionPairs` et `activePhysicsCollisionContacts` sur événement `collisionEnd` de Matter.js.
+  - Suppression d'un blocage prématuré (`collisionRules.length === 0`) empêchant l'évaluation d'autres règles dépendantes dans `evaluateRulesWithTemp`, et ajout d'un garde différentiel sur `activeCollisions`.
+- **Dimensionnement dynamique de la Scène (`sceneBounds`)** :
+  - Suivi en temps réel du conteneur `<Scene />` via `ResizeObserver` (`setSceneBounds`), utilisé à la place des dimensions figées `800x500` dans les bordures (`boundary`), le spawn aléatoire (`spawn_entity`) et le sélecteur visuel `SpawnLocationPicker`.
+- **Calques verrouillés & Palette sur Dessin Direct (`DirectCanvasDrawingOverlay`)** :
+  - Propagation de `strokeColorId`/`fillColorId` pour les tracés directs sur canvas et respect strict du verrouillage de calque (`layer.locked`).
+- **Seuil Clic vs Drag unifié** :
+  - Harmonisation du seuil de détection clic vs glisser-déposer sur les composants `CustomShape`, `Apple` et `Plant`.
+
+### Ajouté & Amélioré (Lot 2)
+- **Position exacte d'événement (`eventPosition`) pour Spawn & Particules** :
+  - Capture des coordonnées exactes de collision (`getCollisionContactPoint` / `getPhysicsCollisionContact`) ou d'interaction souris (`getSceneEventPosition`) et propagation dans la séquence d'actions.
+  - Nouveaux modes de position dans `SpawnLocationPicker` (`at_event_point`, `offset_event_point` via le bouton *"Point exact (Collision / Clic)"*) et nouvelle origine `"Point exact"` (ainsi que `Par Type` et `Par Tag`) pour l'action `emit_particles` du `RuleBook`.
+- **Restauration complète du choix de l'État initial au Spawn (`spawnInitialStateId`)** :
+  - Ajout d'un bandeau sélecteur visuel *"État initial à l'apparition"* dans `SpawnLocationPicker` (avec aperçus `<EntityMiniPreview />`), restauration de l'étape `choose_spawn_state` dans le flux d'édition du `RuleBook` et affichage de l'état initial sur les cartes du Storyboard.
+- **Ciblage par `#Tag` et par `Instance précise` sur les Déclencheurs** :
+  - Ajout du sélecteur `Par Type | Par #Tag | Instance précise` pour le Sujet et la Cible dans l'assistant de création et la modale d'édition du `RuleBook`, avec affichage dédié sur les cartes du Storyboard.
+- **Particules Dessinées à la Main (`CustomParticlePreset`)** :
+  - Nouveau registre `customParticles` dans `useSceneStore` (persistance, import/export projet, CRUD complet) et cache sprite canvas `Path2D` haute netteté (`96x96`) dans `particleSystem.ts`.
+  - Intégration directe de la galerie de particules dessinées et du modal `<FullScreenDrawingModal />` (dessin libre, édition, suppression, et option `useParticleTint` pour colorer dynamiquement ou conserver les couleurs d'origine) à la fois dans `BehaviorManager` (`particle_emitter`) et dans le `RuleBook` (`emit_particles`).
+
+## [Phase 10.9] - 2026-11-12
+### Ajouté & Amélioré
+- **Action `spawn_entity` : Choix de l'objet de référence & Copie de taille (`match_reference`)** :
+  - Ajout dans `SpawnLocationPicker` d'une section dédiée **"Objet de référence"** permettant de baser le positionnement direct (`at_*`) ou relatif (`offset_*`) sur : *Sujet de la règle*, *Cible de la collision*, *Entité précise de la scène*, *Type d'objet*, *Tag (`#tag`)* ou *Dernier objet créé*.
+  - Ajout d'un mode de taille **"Même taille que la référence (`match_reference`)"** alignant automatiquement les dimensions de l'objet créé sur celles de son référent.
+  - Résolution centralisée dans `useSceneStore` (`resolveEntityReference`) et prévisualisation complète dans les cartes du `RuleBook`.
+- **Comportement `keyboard_control` : Restrictions d'axes & Activation du saut** :
+  - Ajout de trois interrupteurs empilés style Unity dans `BehaviorManager` : **Mouvement horizontal (Gauche / Droite)** (`allowHorizontal`), **Mouvement vertical (Haut / Bas)** (`allowVertical`, mode Top-Down) et **Autoriser le saut** (`allowJump`, mode Plateforme).
+  - Application stricte dans `matterPhysicsEngine.ts` (y compris neutralisation de l'impulsion de saut et de la vitesse verticale si désactivée).
+- **Parenting d'Entités & Détachement Dynamique en Cours de Jeu** :
+  - Ajout du lien hiérarchique (`parentId`, `parentOffset` avec `x`, `y`, `rotationOffset`, `inheritRotation`, `inheritFlip`) sur le modèle `Entity`.
+  - **Synchronisation en Mode Édition (WYSIWYG)** : déplacer un parent déplace automatiquement ses enfants ; déplacer un enfant met à jour son offset relatif.
+  - **Simulation Physique Matter.js** : résolution topologique parent → enfant à 60 FPS avec positionnement relatif pivoté autour du centre du parent, héritage de rotation et du retournement (`flipX`), et attribution d'un `collisionFilter.group` négatif partagé par famille (racine) pour empêcher les collisions internes entre un parent et ses enfants attachés tout en conservant leurs collisions avec le monde extérieur.
+  - **Détachement sécurisé** : suppression d'un parent libère proprement ses enfants sans les détruire ; séparation dynamique en Mode Play via deux nouvelles actions dans le `RuleBook` (*Attacher à un Parent* `attach_to_parent` et *Détacher du Parent* `detach_parent`, avec options *Conserver les coordonnées actuelles* ou offset manuel).
+  - **Interface Inspecteur & Hiérarchie** : bloc dédié *"Parenting & Attachement"* empilé dans `Inspector.tsx` et indentation visuelle avec badge `Link2` dans `SceneHierarchyList.tsx`.
+- **Système de Particules 2D Léger (Canvas Poolé Sans Surcharge DOM/Physique)** :
+  - Nouveau moteur `src/utils/particleSystem.ts` à pool fixe (`MAX_PARTICLES = 280` particules maximum simultanées), aucune création de nœud DOM ni de corps physique Matter.js.
+  - Calque `<ParticleCanvasOverlay />` (`ResizeObserver` + haute densité DPI) monté uniquement en Mode Play (`active={isPlayMode}`).
+  - **Composant continu `particle_emitter`** dans `BehaviorManager.tsx` (catégorie *Effets Visuels & Particules*) : émission continue personnalisable (fréquence/s, quantité/salve, forme cercle/carré/losange/étoile, direction, dispersion angulaire, vitesse, gravité, durée de vie, taille début/fin, couleurs début/fin).
+  - **Action ponctuelle `emit_particles`** dans le `RuleBook` (Wizard & Modale d'action) avec 5 présets rapides (*Explosion*, *Étincelles*, *Fumée*, *Pluie d'étoiles*, *Confettis*) et sélection de l'origine (*Sujet*, *Cible*, *Dernier objet créé*, *Type*, *Tag*).
+
+## [Phase 10.8] - 2026-11-12
+### Corrigé & Ajouté
+- **Option "Flip horizontal (Sens du déplacement)" (`flipOnMove` / `flipInvert`)** :
+  - Ajout de l'option dans tous les comportements de déplacement (`keyboard_control`, `patrol`, `wandering`, `move_to`, `follow`, `constant_velocity`) avec choix du sens du dessin d'origine (*Regarde vers la droite* ou *Regarde vers la gauche*).
+  - Retournement visuel `scaleX(-1)` appliqué uniquement au contenu graphique de l'entité (sans inverser ni le collider ni les libellés).
+- **Correction des objets sans composant Physique (`isSensor: true` par défaut)** :
+  - Correction critique dans `matterPhysicsEngine.ts` : une entité sans composant `physics` est désormais strictement configurée en tant que capteur non-bloquant (`isSensor: true`).
+  - Les objets dépourvus du composant Physique ne bloquent ni ne repoussent plus les autres entités tout en continuant de déclencher les règles de collision. Seul le composant `physics` avec `Collider Solide` activé rend l'objet matériellement solide.
+  - Ajout du rebond capteur sur les bords de scène lorsqu'un comportement `boundary_behavior` (mode `bounce`) est utilisé sans composant `physics`.
+- **Correction définitive du "Look At" (Élimination des tours complets inutiles)** :
+  - Implémentation de la fonction `shortestAngleDiffRad` par modulo euclidien strict dans `[-π, +π]` avec accumulation angulaire continue (`body.angle + diff`) sans saut de discontinuité autour de `±180°`.
+  - Désactivation de l'interpolation spring Framer Motion sur la rotation en Mode Play (`transition={{ duration: 0 }}`) dans `CustomShape.tsx` et `Apple.tsx` pour supprimer l'effet de rotation inverse de 350° au franchissement de ±180°.
+  - Prise en charge de la synchronisation de rotation pour les entités statiques équipées de `look_at` (tourelles fixes).
+
+## [Phase 10.7] - 2026-11-12
+### Corrigé & Ajouté
+- **Désactivation stricte du Drag par défaut en Mode Play (`isEntityDraggable`)** :
+  - Correction des entités initiales, archétypes et nouvelles entités/instances créées (`isDraggable: false` par défaut).
+  - Suppression du repli implicite `entity.isDraggable !== false` dans `matterPhysicsEngine.ts` : une entité n'est désormais déplaçable en mode Play que si elle possède explicitement le composant **"Déplaçable à la souris" (`draggable`)** activé (ou via une surcharge d'état active).
+  - Synchronisation du badge `Drag` dans la Hiérarchie et sur le canvas avec l'état réel du composant `draggable`, et mise à jour de l'action `toggle_draggable` sur le composant modulaire.
+- **Nouveau Comportement "Balade Aléatoire" (`wandering`)** :
+  - Ajout du composant modulaire `wandering` dans la catégorie *Déplacements Autonomes & Visée* avec inspecteur style Unity (attributs empilés ligne par ligne) et support complet des overrides par état.
+  - Paramètres configurables : **Type de déplacement** (`Zone 2D libre` ou `Horizontal Sol/Plateforme`), **Rayon de la zone** (`40–600 px`), **Vitesse de déplacement** (`10–400 px/s`), **Aléatoire des virages** (`0–100 %`), **Intervalle de décision** (`0.3–5.0 s`), **Pause aléatoire max** (`0–4.0 s`) et option **Orienter vers le trajet**.
+  - Confinement souple dans le rayon circulaire ou horizontal autour de la position initiale tout en respectant la gravité en mode plateforme et les bords du canvas.
+
 ## [Phase 10.6] - 2026-11-11
 ### Ajouté & Amélioré
 - **Système Unifié de Ciblage Dynamique d'Instances en Mode Play (Compatibilité des 4 Pistes A, B, C et D)** :

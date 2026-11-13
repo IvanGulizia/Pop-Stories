@@ -26,10 +26,22 @@ import {
   EntityBehavior,
   BehaviorOverride,
   ProjectPaletteColor,
+  ParentOffset,
+  SpawnReferenceMode,
+  CustomParticlePreset,
 } from '../types';
 import { soundSynth } from '../utils/sound';
-import { getEntityColliderBounds } from '../utils/collider';
-import { resetMatterPhysicsRuntime, getActivePhysicsCollisionPairs } from '../utils/matterPhysicsEngine';
+import { getEntityWorldColliderBounds } from '../utils/collider';
+import {
+  resetMatterPhysicsRuntime,
+  getActivePhysicsCollisionPairs,
+  getPhysicsCollisionContact,
+} from '../utils/matterPhysicsEngine';
+import {
+  clearParticles,
+  emitParticlesBurst,
+  invalidateCustomParticleSprite,
+} from '../utils/particleSystem';
 import defaultCursorPack from '../data/defaultCursorPack.json';
 
 export const DEFAULT_PROJECT_PALETTE: ProjectPaletteColor[] = [
@@ -115,6 +127,10 @@ interface SceneState {
   rules: DynamicRule[];
   folders: RuleFolder[];
   customSounds: CustomSound[];
+  customParticles: CustomParticlePreset[];
+  addCustomParticle: (preset: Omit<CustomParticlePreset, 'id' | 'createdAt'>) => string;
+  updateCustomParticle: (id: string, partial: Partial<CustomParticlePreset>) => void;
+  deleteCustomParticle: (id: string) => void;
   layerGroups: SceneLayerGroup[];
   projectPalette: ProjectPaletteColor[];
   updateProjectPaletteColor: (paletteId: string, newHexColor: string) => void;
@@ -123,9 +139,12 @@ interface SceneState {
   selectedEntityId: EntityId | null;
   selectedLayerId: string | null;
   appMode: AppMode;
+  sceneBounds: Size;
+  setSceneBounds: (bounds: Size) => void;
   entityOrder: EntityId[];
   snapshotEntities: Record<EntityId, Entity> | null;
   snapshotEntityOrder: EntityId[] | null;
+  snapshotRules: DynamicRule[] | null;
   settings: AppSettings;
   currentSlotId: string | null;
   collapsedRuleIds: Record<string, boolean>;
@@ -182,7 +201,10 @@ interface SceneState {
   updateEntityBehaviors: (entityId: EntityId, behaviors: EntityBehavior[]) => void;
   updateStateBehaviorOverride: (entityId: EntityId, stateId: StateId, behaviorId: string, override: BehaviorOverride) => void;
   removeStateBehaviorOverride: (entityId: EntityId, stateId: StateId, behaviorId: string) => void;
-  batchUpdateEntityTransforms: (updates: Record<EntityId, { position?: Position; rotation?: number }>) => void;
+  batchUpdateEntityTransforms: (updates: Record<EntityId, { position?: Position; rotation?: number; flipX?: boolean }>) => void;
+  setEntityParent: (childId: EntityId, parentId: EntityId | null, customOffset?: ParentOffset) => void;
+  updateEntityParentOffset: (childId: EntityId, partial: Partial<ParentOffset>) => void;
+  detachEntity: (childId: EntityId) => void;
   addStateToEntity: (entityId: EntityId, name?: string) => string;
   removeStateFromEntity: (entityId: EntityId, stateId: StateId) => void;
   addEntity: (type: EntityType) => void;
@@ -241,8 +263,8 @@ interface SceneState {
   updateCustomSoundName: (id: string, name: string) => void;
 
   triggerClickEvent: (entityId: EntityId) => void;
-  triggerPointerEvent: (entityId: EntityId, phase: TriggerPhase) => void;
-  triggerDragRelease: (subjectId: EntityId) => void;
+  triggerPointerEvent: (entityId: EntityId, phase: TriggerPhase, eventPosition?: Position) => void;
+  triggerDragRelease: (subjectId: EntityId, eventPosition?: Position) => void;
   evaluateRules: () => void;
   evaluateRulesWithTemp: (tempPositions?: Record<EntityId, Position>) => void;
 }
@@ -314,7 +336,7 @@ const initialEntities: Record<EntityId, Entity> = {
     position: { x: 140, y: 160 },
     size: { width: 256, height: 256 },
     currentStateId: 'default',
-    isDraggable: true,
+    isDraggable: false,
     states: {
       'default': {
         id: 'default',
@@ -375,7 +397,7 @@ const defaultCustomArchetypes: Record<string, Entity> = {
     position: { x: 0, y: 0 },
     size: { width: 256, height: 256 },
     currentStateId: 'default',
-    isDraggable: true,
+    isDraggable: false,
     states: {
       'default': {
         id: 'default',
@@ -401,7 +423,7 @@ const defaultCustomArchetypes: Record<string, Entity> = {
     position: { x: 0, y: 0 },
     size: { width: 70, height: 70 },
     currentStateId: 'default',
-    isDraggable: true,
+    isDraggable: false,
     icon: '⭐',
     states: {
       'default': {
@@ -458,10 +480,23 @@ const ruleCooldowns: Record<string, number> = {};
 const entityStateTimestamps: Record<string, number> = {};
 const preCollisionStates: Record<string, { subjectState?: string; targetState?: string }> = {};
 const preEventAutoRevertStates: Record<string, string> = {};
+const lastCollisionContacts: Record<string, Position> = {};
+const activeDelayTimers = new Set<ReturnType<typeof setTimeout>>();
 const RULE_COOLDOWN_MS = 350; // Minimum interval between identical rule trigger on same entities
 const ENTITY_STATE_COOLDOWN_MS = 250; // Prevents oscillating state ping-pong
 
-// Vérification de la collision avec support précis des Colliders et écoute native Matter.js
+function clearPlayRuntimeState() {
+  activeDelayTimers.forEach((t) => clearTimeout(t));
+  activeDelayTimers.clear();
+  Object.keys(ruleCooldowns).forEach((k) => delete ruleCooldowns[k]);
+  Object.keys(entityStateTimestamps).forEach((k) => delete entityStateTimestamps[k]);
+  Object.keys(preCollisionStates).forEach((k) => delete preCollisionStates[k]);
+  Object.keys(preEventAutoRevertStates).forEach((k) => delete preEventAutoRevertStates[k]);
+  Object.keys(lastCollisionContacts).forEach((k) => delete lastCollisionContacts[k]);
+  lastSpawnedEntityId = null;
+}
+
+// Vérification de la collision avec support précis des Colliders (flipX + scale centrée) et écoute native Matter.js
 const checkCollision = (ent1: Entity, ent2: Entity) => {
   // 1. Détection prioritaire directe depuis le moteur physique Matter.js
   const activePairs = getActivePhysicsCollisionPairs();
@@ -469,98 +504,94 @@ const checkCollision = (ent1: Entity, ent2: Entity) => {
     return true;
   }
 
-  const currentState1 = ent1.states[ent1.currentStateId];
-  const currentState2 = ent2.states[ent2.currentStateId];
-
-  const s1 = currentState1?.scale ?? 1;
-  const s2 = currentState2?.scale ?? 1;
-
-  // Calcul des géométries de colliders verts réelles (en espace de coordonnées canevas 200x200)
-  const geom1 = getEntityColliderBounds(ent1, currentState1);
-  const geom2 = getEntityColliderBounds(ent2, currentState2);
-
-  const scaleX1 = (ent1.size.width * s1) / 200;
-  const scaleY1 = (ent1.size.height * s1) / 200;
-  const scaleX2 = (ent2.size.width * s2) / 200;
-  const scaleY2 = (ent2.size.height * s2) / 200;
-
-  const collider1 = geom1.colliderType;
-  const collider2 = geom2.colliderType;
+  const b1 = getEntityWorldColliderBounds(ent1);
+  const b2 = getEntityWorldColliderBounds(ent2);
 
   // Marge de contact (3px) garantissant la détection même à très faible vitesse ou au repos
   const tol = 3;
 
   // Cercle vs Cercle
-  if (collider1 === 'circle' && collider2 === 'circle') {
-    const cx1 = ent1.position.x + geom1.centerX * scaleX1;
-    const cy1 = ent1.position.y + geom1.centerY * scaleY1;
-    const r1 = geom1.radius * Math.max(scaleX1, scaleY1);
-
-    const cx2 = ent2.position.x + geom2.centerX * scaleX2;
-    const cy2 = ent2.position.y + geom2.centerY * scaleY2;
-    const r2 = geom2.radius * Math.max(scaleX2, scaleY2);
-
-    const dx = cx1 - cx2;
-    const dy = cy1 - cy2;
-    const maxR = r1 + r2 + tol;
+  if (b1.colliderType === 'circle' && b2.colliderType === 'circle') {
+    const dx = b1.centerX - b2.centerX;
+    const dy = b1.centerY - b2.centerY;
+    const maxR = b1.radius + b2.radius + tol;
     return dx * dx + dy * dy <= maxR * maxR;
   }
 
   // Cercle vs Boîte / Polygone
-  if (collider1 === 'circle' && (collider2 === 'box' || collider2 === 'polygon')) {
-    const cx1 = ent1.position.x + geom1.centerX * scaleX1;
-    const cy1 = ent1.position.y + geom1.centerY * scaleY1;
-    const r1 = geom1.radius * Math.max(scaleX1, scaleY1);
-
-    const bx2 = ent2.position.x + geom2.x * scaleX2;
-    const by2 = ent2.position.y + geom2.y * scaleY2;
-    const bw2 = geom2.width * scaleX2;
-    const bh2 = geom2.height * scaleY2;
-
-    const closestX = Math.max(bx2, Math.min(cx1, bx2 + bw2));
-    const closestY = Math.max(by2, Math.min(cy1, by2 + bh2));
-    const dx = cx1 - closestX;
-    const dy = cy1 - closestY;
-    const maxR = r1 + tol;
+  if (b1.colliderType === 'circle' && (b2.colliderType === 'box' || b2.colliderType === 'polygon')) {
+    const closestX = Math.max(b2.x, Math.min(b1.centerX, b2.x + b2.width));
+    const closestY = Math.max(b2.y, Math.min(b1.centerY, b2.y + b2.height));
+    const dx = b1.centerX - closestX;
+    const dy = b1.centerY - closestY;
+    const maxR = b1.radius + tol;
     return dx * dx + dy * dy <= maxR * maxR;
   }
 
-  if ((collider1 === 'box' || collider1 === 'polygon') && collider2 === 'circle') {
-    const cx2 = ent2.position.x + geom2.centerX * scaleX2;
-    const cy2 = ent2.position.y + geom2.centerY * scaleY2;
-    const r2 = geom2.radius * Math.max(scaleX2, scaleY2);
-
-    const bx1 = ent1.position.x + geom1.x * scaleX1;
-    const by1 = ent1.position.y + geom1.y * scaleY1;
-    const bw1 = geom1.width * scaleX1;
-    const bh1 = geom1.height * scaleY1;
-
-    const closestX = Math.max(bx1, Math.min(cx2, bx1 + bw1));
-    const closestY = Math.max(by1, Math.min(cy2, by1 + bh1));
-    const dx = cx2 - closestX;
-    const dy = cy2 - closestY;
-    const maxR = r2 + tol;
+  if ((b1.colliderType === 'box' || b1.colliderType === 'polygon') && b2.colliderType === 'circle') {
+    const closestX = Math.max(b1.x, Math.min(b2.centerX, b1.x + b1.width));
+    const closestY = Math.max(b1.y, Math.min(b2.centerY, b1.y + b1.height));
+    const dx = b2.centerX - closestX;
+    const dy = b2.centerY - closestY;
+    const maxR = b2.radius + tol;
     return dx * dx + dy * dy <= maxR * maxR;
   }
 
   // Boîte AABB vs Boîte AABB avec tolérance
-  const bx1 = ent1.position.x + geom1.x * scaleX1;
-  const by1 = ent1.position.y + geom1.y * scaleY1;
-  const bw1 = geom1.width * scaleX1;
-  const bh1 = geom1.height * scaleY1;
-
-  const bx2 = ent2.position.x + geom2.x * scaleX2;
-  const by2 = ent2.position.y + geom2.y * scaleY2;
-  const bw2 = geom2.width * scaleX2;
-  const bh2 = geom2.height * scaleY2;
-
   return (
-    bx1 <= bx2 + bw2 + tol &&
-    bx1 + bw1 + tol >= bx2 &&
-    by1 <= by2 + bh2 + tol &&
-    by1 + bh1 + tol >= by2
+    b1.x <= b2.x + b2.width + tol &&
+    b1.x + b1.width + tol >= b2.x &&
+    b1.y <= b2.y + b2.height + tol &&
+    b1.y + b1.height + tol >= b2.y
   );
 };
+
+// Calcul du point exact de contact entre deux entités (Matter.js prioritaire, sinon analytique)
+function getCollisionContactPoint(ent1: Entity, ent2: Entity): Position {
+  const matterPt = getPhysicsCollisionContact(ent1.id, ent2.id) || getPhysicsCollisionContact(ent2.id, ent1.id);
+  if (matterPt) return matterPt;
+
+  const b1 = getEntityWorldColliderBounds(ent1);
+  const b2 = getEntityWorldColliderBounds(ent2);
+
+  if (b1.colliderType === 'circle' && b2.colliderType === 'circle') {
+    const totalR = b1.radius + b2.radius;
+    const t = totalR > 0 ? b1.radius / totalR : 0.5;
+    return {
+      x: Math.round((b1.centerX + (b2.centerX - b1.centerX) * t) * 10) / 10,
+      y: Math.round((b1.centerY + (b2.centerY - b1.centerY) * t) * 10) / 10,
+    };
+  }
+
+  if (b1.colliderType === 'circle' && b2.colliderType !== 'circle') {
+    const cx = Math.max(b2.x, Math.min(b1.centerX, b2.x + b2.width));
+    const cy = Math.max(b2.y, Math.min(b1.centerY, b2.y + b2.height));
+    return { x: Math.round(cx * 10) / 10, y: Math.round(cy * 10) / 10 };
+  }
+
+  if (b1.colliderType !== 'circle' && b2.colliderType === 'circle') {
+    const cx = Math.max(b1.x, Math.min(b2.centerX, b1.x + b1.width));
+    const cy = Math.max(b1.y, Math.min(b2.centerY, b1.y + b1.height));
+    return { x: Math.round(cx * 10) / 10, y: Math.round(cy * 10) / 10 };
+  }
+
+  const left = Math.max(b1.x, b2.x);
+  const right = Math.min(b1.x + b1.width, b2.x + b2.width);
+  const top = Math.max(b1.y, b2.y);
+  const bottom = Math.min(b1.y + b1.height, b2.y + b2.height);
+
+  if (right >= left && bottom >= top) {
+    return {
+      x: Math.round(((left + right) / 2) * 10) / 10,
+      y: Math.round(((top + bottom) / 2) * 10) / 10,
+    };
+  }
+
+  return {
+    x: Math.round(((b1.centerX + b2.centerX) / 2) * 10) / 10,
+    y: Math.round(((b1.centerY + b2.centerY) / 2) * 10) / 10,
+  };
+}
 
 export const useSceneStore = create<SceneState>()((set, get) => ({
   entities: {},
@@ -691,14 +722,25 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   rules: [],
   folders: initialFolders,
   customSounds: [],
+  customParticles: [],
   activeCollisions: {},
   selectedEntityId: null,
   appMode: 'edit',
+  sceneBounds: { width: 800, height: 500 },
+  setSceneBounds: (bounds) => {
+    const w = Math.max(100, Math.round(bounds.width));
+    const h = Math.max(100, Math.round(bounds.height));
+    const prev = get().sceneBounds;
+    if (prev.width !== w || prev.height !== h) {
+      set({ sceneBounds: { width: w, height: h } });
+    }
+  },
   entityOrder: ['plant-1', 'apple-1'],
   layerGroups: JSON.parse(JSON.stringify(initialSceneLayerGroups)),
   selectedLayerId: null,
   snapshotEntities: null,
   snapshotEntityOrder: null,
+  snapshotRules: null,
   currentSlotId: null,
   collapsedRuleIds: {},
   ruleBookPage: 1,
@@ -1069,38 +1111,51 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   setAppMode: (mode) => {
     if (mode === 'play') {
-      // Sauvegarder un instantané propre pour la restauration fidèle
+      clearPlayRuntimeState();
+      // Sauvegarder un instantané propre (entités + ordre + règles) pour la restauration fidèle
       const snapshot = JSON.parse(JSON.stringify(get().entities));
       const orderSnapshot = [...(get().entityOrder || Object.keys(get().entities))];
+      const rulesSnapshot = JSON.parse(JSON.stringify(get().rules));
       set({
         appMode: 'play',
         snapshotEntities: snapshot,
         snapshotEntityOrder: orderSnapshot,
+        snapshotRules: rulesSnapshot,
       });
     } else {
-      // Quand on repasse en mode édition, restaurer fidèlement la scène d'avant-jeu
+      // Quand on repasse en mode édition, restaurer fidèlement la scène et les règles d'avant-jeu
       resetMatterPhysicsRuntime();
-      const { snapshotEntities, snapshotEntityOrder } = get();
+      clearParticles();
+      clearPlayRuntimeState();
+      const { snapshotEntities, snapshotEntityOrder, snapshotRules } = get();
       if (snapshotEntities) {
         set({
           entities: JSON.parse(JSON.stringify(snapshotEntities)),
           entityOrder: snapshotEntityOrder ? [...snapshotEntityOrder] : Object.keys(snapshotEntities),
+          ...(snapshotRules ? { rules: JSON.parse(JSON.stringify(snapshotRules)) } : {}),
           activeCollisions: {},
           appMode: 'edit',
         });
       } else {
-        set({ appMode: 'edit', activeCollisions: {} });
+        set({
+          ...(snapshotRules ? { rules: JSON.parse(JSON.stringify(snapshotRules)) } : {}),
+          appMode: 'edit',
+          activeCollisions: {},
+        });
       }
     }
   },
 
   resetScene: () => {
     resetMatterPhysicsRuntime();
-    const { snapshotEntities, snapshotEntityOrder, entities } = get();
+    clearParticles();
+    clearPlayRuntimeState();
+    const { snapshotEntities, snapshotEntityOrder, snapshotRules } = get();
     if (snapshotEntities) {
       set({
         entities: JSON.parse(JSON.stringify(snapshotEntities)),
         entityOrder: snapshotEntityOrder ? [...snapshotEntityOrder] : Object.keys(snapshotEntities),
+        ...(snapshotRules ? { rules: JSON.parse(JSON.stringify(snapshotRules)) } : {}),
         activeCollisions: {},
       });
     } else {
@@ -1118,12 +1173,48 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     set((state) => {
       const entity = state.entities[id];
       if (!entity) return state;
-      return {
-        entities: {
-          ...state.entities,
-          [id]: { ...entity, position },
-        },
+
+      const dx = position.x - entity.position.x;
+      const dy = position.y - entity.position.y;
+      const nextEntities: Record<EntityId, Entity> = {
+        ...state.entities,
+        [id]: { ...entity, position },
       };
+
+      // En mode Édition : conserver la hiérarchie parent/enfant WYSIWYG
+      if (state.appMode === 'edit') {
+        // 1. Si cette entité est un enfant attaché, mettre à jour son parentOffset
+        if (entity.parentId && nextEntities[entity.parentId]) {
+          const parent = nextEntities[entity.parentId];
+          nextEntities[id] = {
+            ...nextEntities[id],
+            parentOffset: computeRelativeParentOffset(
+              { ...entity, position },
+              parent,
+              entity.parentOffset
+            ),
+          };
+        }
+
+        // 2. Si cette entité a des enfants attachés, déplacer ses descendants avec elle
+        if (dx !== 0 || dy !== 0) {
+          const descendants = collectDescendantIds(nextEntities, id);
+          descendants.forEach((childId) => {
+            const child = nextEntities[childId];
+            if (child) {
+              nextEntities[childId] = {
+                ...child,
+                position: {
+                  x: child.position.x + dx,
+                  y: child.position.y + dy,
+                },
+              };
+            }
+          });
+        }
+      }
+
+      return { entities: nextEntities };
     });
     get().evaluateRules();
   },
@@ -1524,17 +1615,126 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           }
         }
 
+        if (transform.flipX !== undefined && entity.flipX !== transform.flipX) {
+          modified = true;
+        }
+
         if (modified) {
           hasChanges = true;
           nextEntities[id] = {
             ...entity,
             position: newPos,
             states: newStates,
+            ...(transform.flipX !== undefined ? { flipX: transform.flipX } : {}),
           };
         }
       });
 
       return hasChanges ? { entities: nextEntities } : state;
+    });
+  },
+
+  setEntityParent: (childId, parentId, customOffset) => {
+    set((state) => {
+      const child = state.entities[childId];
+      if (!child) return state;
+
+      if (!parentId) {
+        const { parentId: _p, parentOffset: _o, ...rest } = child;
+        return {
+          entities: {
+            ...state.entities,
+            [childId]: rest as Entity,
+          },
+        };
+      }
+
+      const parent = state.entities[parentId];
+      if (!parent || childId === parentId || wouldCreateParentCycle(state.entities, childId, parentId)) {
+        return state;
+      }
+
+      const nextOffset = customOffset
+        ? {
+            x: customOffset.x,
+            y: customOffset.y,
+            rotationOffset: customOffset.rotationOffset ?? 0,
+            inheritRotation: customOffset.inheritRotation ?? true,
+            inheritFlip: customOffset.inheritFlip ?? true,
+          }
+        : computeRelativeParentOffset(child, parent, child.parentOffset);
+
+      const updatedChild: Entity = {
+        ...child,
+        parentId,
+        parentOffset: nextOffset,
+      };
+
+      // Si customOffset explicite en mode Édition, positionner immédiatement l'enfant sur le canvas
+      if (customOffset && state.appMode === 'edit') {
+        const synced = computeChildWorldFromParent(updatedChild, parent);
+        updatedChild.position = synced.position;
+      }
+
+      return {
+        entities: {
+          ...state.entities,
+          [childId]: updatedChild,
+        },
+      };
+    });
+  },
+
+  updateEntityParentOffset: (childId, partial) => {
+    set((state) => {
+      const child = state.entities[childId];
+      if (!child || !child.parentId) return state;
+      const nextOffset: ParentOffset = {
+        x: partial.x ?? child.parentOffset?.x ?? 0,
+        y: partial.y ?? child.parentOffset?.y ?? 0,
+        rotationOffset: partial.rotationOffset ?? child.parentOffset?.rotationOffset ?? 0,
+        inheritRotation: partial.inheritRotation ?? child.parentOffset?.inheritRotation ?? true,
+        inheritFlip: partial.inheritFlip ?? child.parentOffset?.inheritFlip ?? true,
+      };
+      const updatedChild: Entity = {
+        ...child,
+        parentOffset: nextOffset,
+      };
+      const parent = state.entities[child.parentId];
+      if (parent && state.appMode === 'edit') {
+        const synced = computeChildWorldFromParent(updatedChild, parent);
+        updatedChild.position = synced.position;
+        if (updatedChild.states[updatedChild.currentStateId]) {
+          updatedChild.states = {
+            ...updatedChild.states,
+            [updatedChild.currentStateId]: {
+              ...updatedChild.states[updatedChild.currentStateId],
+              rotation: synced.rotation,
+            },
+          };
+        }
+        updatedChild.flipX = synced.flipX;
+      }
+      return {
+        entities: {
+          ...state.entities,
+          [childId]: updatedChild,
+        },
+      };
+    });
+  },
+
+  detachEntity: (childId) => {
+    set((state) => {
+      const child = state.entities[childId];
+      if (!child || !child.parentId) return state;
+      const { parentId: _p, parentOffset: _o, ...rest } = child;
+      return {
+        entities: {
+          ...state.entities,
+          [childId]: rest as Entity,
+        },
+      };
     });
   },
 
@@ -1657,7 +1857,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         position: { x: 200 + ((count * 30) % 200), y: 250 },
         size: { width: 256, height: 256 },
         currentStateId: 'pousse',
-        isDraggable: true,
+        isDraggable: false,
         states: existingPeer
           ? JSON.parse(JSON.stringify(existingPeer.states))
           : {
@@ -1692,7 +1892,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         position: { x: 100 + ((count * 40) % 250), y: 100 },
         size: { width: 256, height: 256 },
         currentStateId: 'default',
-        isDraggable: true,
+        isDraggable: false,
         states: existingPeer
           ? JSON.parse(JSON.stringify(existingPeer.states))
           : {
@@ -1721,7 +1921,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         position: { x: 300, y: 150 },
         size: { width: 256, height: 256 },
         currentStateId: 'default',
-        isDraggable: true,
+        isDraggable: false,
         states: existingPeer
           ? JSON.parse(JSON.stringify(existingPeer.states))
           : {
@@ -1778,7 +1978,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       position: { x: 180 + ((count * 35) % 220), y: 140 + ((count * 30) % 180) },
       size: { width: 256, height: 256 },
       currentStateId: 'state_1',
-      isDraggable: true,
+      isDraggable: false,
       states: {
         state_1: {
           id: 'state_1',
@@ -1824,6 +2024,14 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           deletedIds.add(id);
         } else {
           remainingEntities[id] = entity;
+        }
+      });
+
+      // Détacher proprement les enfants éventuels dont le parent vient d'être supprimé
+      Object.entries(remainingEntities).forEach(([id, entity]) => {
+        if (entity.parentId && deletedIds.has(entity.parentId)) {
+          const { parentId: _p, parentOffset: _o, ...rest } = entity;
+          remainingEntities[id] = rest as Entity;
         }
       });
 
@@ -1882,7 +2090,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         position,
         size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : { width: 256, height: 256 },
         currentStateId: initialStateId || 'default',
-        isDraggable: true,
+        isDraggable: false,
         states: {
           'default': { id: 'default', name: 'Normal', color: '#ef4444', scale: 1, rotation: 0 },
           'croquee': { id: 'croquee', name: 'Croquée', color: '#dc2626', scale: 0.85, rotation: -12 },
@@ -1897,7 +2105,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         position,
         size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : { width: 256, height: 256 },
         currentStateId: initialStateId || 'pousse',
-        isDraggable: true,
+        isDraggable: false,
         states: {
           'pousse': { id: 'pousse', name: 'Pousse', color: '#22c55e', scale: 0.9, rotation: 0, stemHeight: 40, flowerColor: '#8b5cf6', flowerPetals: 0 },
           'fleur': { id: 'fleur', name: 'Fleurie', color: '#15803d', scale: 1.1, rotation: 0, stemHeight: 75, flowerColor: '#ec4899', flowerPetals: 6 },
@@ -1912,7 +2120,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         position,
         size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : { width: 256, height: 256 },
         currentStateId: initialStateId || 'default',
-        isDraggable: true,
+        isDraggable: false,
         states: {
           'default': { id: 'default', name: 'Normal', color: '#8b5cf6', scale: 1, rotation: 0 },
           'actif': { id: 'actif', name: 'Actif', color: '#f59e0b', scale: 1.25, rotation: 15 },
@@ -1949,6 +2157,13 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   deleteEntity: (id) => {
     set((state) => {
       const { [id]: _, ...remainingEntities } = state.entities;
+      // Détacher proprement tout enfant dont le parent est supprimé
+      Object.entries(remainingEntities).forEach(([childId, child]) => {
+        if (child.parentId === id) {
+          const { parentId: _p, parentOffset: _o, ...rest } = child;
+          remainingEntities[childId] = rest as Entity;
+        }
+      });
       const updatedOrder = (state.entityOrder || []).filter((item) => item !== id);
       const nextSelected =
         state.selectedEntityId === id ? (updatedOrder[updatedOrder.length - 1] || null) : state.selectedEntityId;
@@ -1976,6 +2191,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   clearProject: () => {
+    clearPlayRuntimeState();
     set({
       entities: {},
       customArchetypes: {},
@@ -1983,6 +2199,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       rules: [],
       folders: initialFolders,
       customSounds: [],
+      customParticles: [],
       layerGroups: JSON.parse(JSON.stringify(initialSceneLayerGroups)),
       projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
       selectedEntityId: null,
@@ -1990,10 +2207,12 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       activeCollisions: {},
       snapshotEntities: null,
       snapshotEntityOrder: null,
+      snapshotRules: null,
     });
   },
 
   restoreDefaultScene: () => {
+    clearPlayRuntimeState();
     set({
       entities: JSON.parse(JSON.stringify(initialEntities)),
       entityOrder: ['plant-1', 'apple-1'],
@@ -2001,10 +2220,12 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       rules: JSON.parse(JSON.stringify(initialRules)),
       folders: JSON.parse(JSON.stringify(initialFolders)),
       customSounds: [],
+      customParticles: [],
       layerGroups: JSON.parse(JSON.stringify(initialSceneLayerGroups)),
       projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
       snapshotEntities: null,
       snapshotEntityOrder: null,
+      snapshotRules: null,
       selectedEntityId: 'plant-1',
       selectedLayerId: null,
       activeCollisions: {},
@@ -2014,7 +2235,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   exportProject: () => {
-    const { entities, customArchetypes, rules, folders, customSounds, layerGroups, settings, projectPalette } = get();
+    const { entities, customArchetypes, rules, folders, customSounds, customParticles, layerGroups, settings, projectPalette } = get();
     return {
       version: 1,
       name: 'Projet Atelier Vivant',
@@ -2024,6 +2245,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       rules,
       folders,
       customSounds,
+      customParticles,
       layerGroups,
       settings: {
         ...settings,
@@ -2042,6 +2264,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         return { success: false, message: 'Le fichier ne contient pas de données de projet valides.' };
       }
 
+      clearPlayRuntimeState();
       const importedEntities = data.entities && typeof data.entities === 'object' ? data.entities : {};
       // Respect exact project archetypes : do not inject the 3 default items (plant, apple, custom) if not present
       let importedArchetypes: Record<string, Entity> = {};
@@ -2061,6 +2284,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const importedRules = Array.isArray(data.rules) ? data.rules : [];
       const importedFolders = Array.isArray(data.folders) ? data.folders : initialFolders;
       const importedCustomSounds = Array.isArray(data.customSounds) ? data.customSounds : [];
+      const importedCustomParticles = Array.isArray(data.customParticles) ? data.customParticles : [];
       const importedLayerGroups = Array.isArray(data.layerGroups) && data.layerGroups.length > 0
         ? data.layerGroups
         : JSON.parse(JSON.stringify(initialSceneLayerGroups));
@@ -2077,6 +2301,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         rules: importedRules,
         folders: importedFolders,
         customSounds: importedCustomSounds,
+        customParticles: importedCustomParticles,
         layerGroups: importedLayerGroups,
         projectPalette: importedPalette,
         settings: importedSettings
@@ -2087,6 +2312,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         activeCollisions: {},
         appMode: 'edit',
         snapshotEntities: null,
+        snapshotEntityOrder: null,
+        snapshotRules: null,
       }));
 
       get().evaluateRules();
@@ -2370,6 +2597,35 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     }));
   },
 
+  // Particules personnalisées dessinées
+  addCustomParticle: (presetData) => {
+    const id = `part-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
+    const newPreset: CustomParticlePreset = {
+      ...presetData,
+      id,
+      createdAt: Date.now(),
+    };
+    set((state) => ({
+      customParticles: [...state.customParticles, newPreset],
+    }));
+    invalidateCustomParticleSprite(id);
+    return id;
+  },
+
+  updateCustomParticle: (id, partial) => {
+    invalidateCustomParticleSprite(id);
+    set((state) => ({
+      customParticles: state.customParticles.map((p) => (p.id === id ? { ...p, ...partial } : p)),
+    }));
+  },
+
+  deleteCustomParticle: (id) => {
+    invalidateCustomParticleSprite(id);
+    set((state) => ({
+      customParticles: state.customParticles.filter((p) => p.id !== id),
+    }));
+  },
+
   triggerKeyEvent: (keyName, phase = 'down') => {
     if (get().appMode !== 'play') return;
     const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
@@ -2444,7 +2700,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     get().triggerPointerEvent(entityId, 'click');
   },
 
-  triggerPointerEvent: (entityId, phase) => {
+  triggerPointerEvent: (entityId, phase, eventPosition) => {
     // Les règles ne s'exécutent QU'EN mode PLAY
     if (get().appMode !== 'play') return;
 
@@ -2454,6 +2710,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
     const now = Date.now();
     const isReleasePhase = phase === 'up' || phase === 'mouse_up' || phase === 'exit' || phase === 'hover_exit';
+    const resolvedPoint = eventPosition || {
+      x: subject.position.x + subject.size.width / 2,
+      y: subject.position.y + subject.size.height / 2,
+    };
 
     const activePointerRules = rules.filter((r) => {
       if (!r.enabled) return false;
@@ -2540,6 +2800,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       if (!isReleasePhase || rule.trigger.phase === 'up' || rule.trigger.phase === 'mouse_up' || rule.trigger.phase === 'exit' || rule.trigger.phase === 'hover_exit') {
         executeRuleActions(rule.actions, {
           subject,
+          eventPosition: resolvedPoint,
           allEntities: entities,
           updateEntityState,
           updateEntityDetails,
@@ -2550,7 +2811,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     });
   },
 
-  triggerDragRelease: (subjectId) => {
+  triggerDragRelease: (subjectId, eventPosition) => {
     // Les règles ne s'exécutent QU'EN mode PLAY
     if (get().appMode !== 'play') return;
 
@@ -2560,6 +2821,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
     const now = Date.now();
     const allEntitiesList = Object.values(entities);
+    const subjectCenter = eventPosition || {
+      x: subject.position.x + subject.size.width / 2,
+      y: subject.position.y + subject.size.height / 2,
+    };
 
     // 1. Règles spécifiques au Drag / Relâchement (type 'drag' ou phase 'drag_release')
     const dragReleaseRules = rules.filter(
@@ -2597,6 +2862,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
       executeRuleActions(rule.actions, {
         subject,
+        eventPosition: subjectCenter,
         allEntities: entities,
         updateEntityState,
         updateEntityDetails,
@@ -2604,9 +2870,6 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         spawnEntity,
       });
     });
-
-// Stockage temporaire des états avant collision pour le mode Contact Continu (Toggle)
-const preCollisionStates: Record<string, { subjectState?: StateId; targetState?: StateId }> = {};
 
     // 2. Règles de collision avec phase 'collision_release' ou 'release' (Relâchement au-dessus d'une cible)
     const collisionReleaseRules = rules.filter(
@@ -2639,6 +2902,8 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
         if (other.id === subject.id) return;
         if (!checkCollision(subject, other)) return;
 
+        const contactPt = getCollisionContactPoint(subject, other);
+
         // Cas 1: subject = Sujet, other = Cible
         if (isSub1 && matchesEntityFilter(other, rule.trigger.targetMode, rule.trigger.targetId, rule.trigger.targetType, rule.trigger.targetTag)) {
           if ((!rule.trigger.subjectStateId || subject.currentStateId === rule.trigger.subjectStateId) &&
@@ -2649,6 +2914,7 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
               executeRuleActions(rule.actions, {
                 subject,
                 target: other,
+                eventPosition: contactPt,
                 allEntities: entities,
                 updateEntityState,
                 updateEntityDetails,
@@ -2669,6 +2935,7 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
               executeRuleActions(rule.actions, {
                 subject: other,
                 target: subject,
+                eventPosition: contactPt,
                 allEntities: entities,
                 updateEntityState,
                 updateEntityDetails,
@@ -2690,108 +2957,109 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
     // Les règles de collision et d'animation ne s'exécutent QU'EN mode PLAY
     if (get().appMode !== 'play') return;
 
-    const { entities, rules, activeCollisions, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
+    const { entities, rules, activeCollisions, sceneBounds, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
     const collisionRules = rules.filter((r) => r.enabled && r.trigger.type === 'collision');
-    if (collisionRules.length === 0) return;
 
     const nextCollisions: Record<string, boolean> = { ...activeCollisions };
     const allEntitiesList = Object.values(entities);
     const now = Date.now();
 
-    collisionRules.forEach((rule) => {
-      // Chercher toutes les paires d'entités distinctes
-      for (let i = 0; i < allEntitiesList.length; i++) {
-        for (let j = i + 1; j < allEntitiesList.length; j++) {
-          const entA = allEntitiesList[i];
-          const entB = allEntitiesList[j];
+    if (collisionRules.length > 0) {
+      collisionRules.forEach((rule) => {
+        // Chercher toutes les paires d'entités distinctes
+        for (let i = 0; i < allEntitiesList.length; i++) {
+          for (let j = i + 1; j < allEntitiesList.length; j++) {
+            const entA = allEntitiesList[i];
+            const entB = allEntitiesList[j];
 
-          let posA = entA.position;
-          if (tempPositions && tempPositions[entA.id]) {
-            posA = tempPositions[entA.id];
-          }
+            let posA = entA.position;
+            if (tempPositions && tempPositions[entA.id]) {
+              posA = tempPositions[entA.id];
+            }
 
-          let posB = entB.position;
-          if (tempPositions && tempPositions[entB.id]) {
-            posB = tempPositions[entB.id];
-          }
+            let posB = entB.position;
+            if (tempPositions && tempPositions[entB.id]) {
+              posB = tempPositions[entB.id];
+            }
 
-          const tempA = { ...entA, position: posA };
-          const tempB = { ...entB, position: posB };
+            const tempA = { ...entA, position: posA };
+            const tempB = { ...entB, position: posB };
 
-          const isColliding = checkCollision(tempA, tempB);
+            const isColliding = checkCollision(tempA, tempB);
 
-          // Vérifier dans le Sens 1 : entA = Sujet, entB = Cible
-          const matchAAsSubject = matchesEntityFilter(
-            entA,
-            rule.trigger.subjectMode,
-            rule.trigger.subjectId,
-            rule.trigger.subjectType,
-            rule.trigger.subjectTag
-          );
-          const matchBAsTarget = matchesEntityFilter(
-            entB,
-            rule.trigger.targetMode,
-            rule.trigger.targetId,
-            rule.trigger.targetType,
-            rule.trigger.targetTag
-          );
-
-          if (matchAAsSubject && matchBAsTarget) {
-            handleCollisionPair(
-              rule,
+            // Vérifier dans le Sens 1 : entA = Sujet, entB = Cible
+            const matchAAsSubject = matchesEntityFilter(
               entA,
-              entB,
-              isColliding,
-              nextCollisions,
-              activeCollisions,
-              now,
-              {
-                entities,
-                updateEntityState,
-                updateEntityDetails,
-                deleteEntity,
-                spawnEntity,
-              }
+              rule.trigger.subjectMode,
+              rule.trigger.subjectId,
+              rule.trigger.subjectType,
+              rule.trigger.subjectTag
             );
-          }
-
-          // Vérifier dans le Sens 2 (Bidirectionnel) : entB = Sujet, entA = Cible
-          const matchBAsSubject = matchesEntityFilter(
-            entB,
-            rule.trigger.subjectMode,
-            rule.trigger.subjectId,
-            rule.trigger.subjectType,
-            rule.trigger.subjectTag
-          );
-          const matchAAsTarget = matchesEntityFilter(
-            entA,
-            rule.trigger.targetMode,
-            rule.trigger.targetId,
-            rule.trigger.targetType,
-            rule.trigger.targetTag
-          );
-
-          if (matchBAsSubject && matchAAsTarget && entA.id !== entB.id) {
-            handleCollisionPair(
-              rule,
+            const matchBAsTarget = matchesEntityFilter(
               entB,
+              rule.trigger.targetMode,
+              rule.trigger.targetId,
+              rule.trigger.targetType,
+              rule.trigger.targetTag
+            );
+
+            if (matchAAsSubject && matchBAsTarget) {
+              handleCollisionPair(
+                rule,
+                tempA,
+                tempB,
+                isColliding,
+                nextCollisions,
+                activeCollisions,
+                now,
+                {
+                  entities,
+                  updateEntityState,
+                  updateEntityDetails,
+                  deleteEntity,
+                  spawnEntity,
+                }
+              );
+            }
+
+            // Vérifier dans le Sens 2 (Bidirectionnel) : entB = Sujet, entA = Cible
+            const matchBAsSubject = matchesEntityFilter(
+              entB,
+              rule.trigger.subjectMode,
+              rule.trigger.subjectId,
+              rule.trigger.subjectType,
+              rule.trigger.subjectTag
+            );
+            const matchAAsTarget = matchesEntityFilter(
               entA,
-              isColliding,
-              nextCollisions,
-              activeCollisions,
-              now,
-              {
-                entities,
-                updateEntityState,
-                updateEntityDetails,
-                deleteEntity,
-                spawnEntity,
-              }
+              rule.trigger.targetMode,
+              rule.trigger.targetId,
+              rule.trigger.targetType,
+              rule.trigger.targetTag
             );
+
+            if (matchBAsSubject && matchAAsTarget && entA.id !== entB.id) {
+              handleCollisionPair(
+                rule,
+                tempB,
+                tempA,
+                isColliding,
+                nextCollisions,
+                activeCollisions,
+                now,
+                {
+                  entities,
+                  updateEntityState,
+                  updateEntityDetails,
+                  deleteEntity,
+                  spawnEntity,
+                }
+              );
+            }
           }
         }
-      }
-    });
+      });
+    }
 
     // 3. Règles de Minuteur / Chronomètre (Timer)
     const timerRules = rules.filter((r) => r.enabled && r.trigger.type === 'timer');
@@ -2842,6 +3110,10 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
               executeRuleActions(rule.actions, {
                 subject: entA,
                 target: entB,
+                eventPosition: {
+                  x: Math.round((centerA.x + centerB.x) / 2),
+                  y: Math.round((centerA.y + centerB.y) / 2),
+                },
                 allEntities: entities,
                 updateEntityState,
                 updateEntityDetails,
@@ -2854,26 +3126,42 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
       });
     });
 
-    // 5. Règles de Bords de Scène / Canvas (Boundary)
+    // 5. Règles de Bords de Scène / Canvas (Boundary dynamiquement calibré sur sceneBounds)
     const boundaryRules = rules.filter((r) => r.enabled && r.trigger.type === 'boundary');
+    const sceneW = Math.max(100, sceneBounds?.width || 800);
+    const sceneH = Math.max(100, sceneBounds?.height || 500);
+    const edgeMargin = 15;
+
     boundaryRules.forEach((rule) => {
       const edge = rule.trigger.boundaryEdge || 'any';
       allEntitiesList.forEach((subject) => {
         if (!matchesEntityFilter(subject, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)) return;
 
+        const hitLeft = subject.position.x <= edgeMargin;
+        const hitRight = subject.position.x + subject.size.width >= sceneW - edgeMargin;
+        const hitTop = subject.position.y <= edgeMargin;
+        const hitBottom = subject.position.y + subject.size.height >= sceneH - edgeMargin;
+
         let hitEdge = false;
-        if (edge === 'left' && subject.position.x <= 15) hitEdge = true;
-        if (edge === 'right' && subject.position.x + subject.size.width >= 185) hitEdge = true;
-        if (edge === 'top' && subject.position.y <= 15) hitEdge = true;
-        if (edge === 'bottom' && subject.position.y + subject.size.height >= 185) hitEdge = true;
-        if (edge === 'any' && (subject.position.x <= 15 || subject.position.x + subject.size.width >= 185 || subject.position.y <= 15 || subject.position.y + subject.size.height >= 185)) hitEdge = true;
+        if (edge === 'left' && hitLeft) hitEdge = true;
+        if (edge === 'right' && hitRight) hitEdge = true;
+        if (edge === 'top' && hitTop) hitEdge = true;
+        if (edge === 'bottom' && hitBottom) hitEdge = true;
+        if (edge === 'any' && (hitLeft || hitRight || hitTop || hitBottom)) hitEdge = true;
 
         if (hitEdge) {
           const cooldownKey = `bound_${rule.id}_${subject.id}`;
           if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
             ruleCooldowns[cooldownKey] = now;
+            const cx = subject.position.x + subject.size.width / 2;
+            const cy = subject.position.y + subject.size.height / 2;
+            const boundaryPt: Position = {
+              x: hitLeft && (edge === 'left' || edge === 'any') ? 0 : hitRight && (edge === 'right' || edge === 'any') ? sceneW : Math.round(cx),
+              y: hitTop && (edge === 'top' || edge === 'any') ? 0 : hitBottom && (edge === 'bottom' || edge === 'any') ? sceneH : Math.round(cy),
+            };
             executeRuleActions(rule.actions, {
               subject,
+              eventPosition: boundaryPt,
               allEntities: entities,
               updateEntityState,
               updateEntityDetails,
@@ -2914,14 +3202,168 @@ const preCollisionStates: Record<string, { subjectState?: StateId; targetState?:
       }
     });
 
-    set({ activeCollisions: nextCollisions });
+    // Ne mettre à jour activeCollisions que si au moins un état de collision a changé (zéro re-render superflu à 60 FPS)
+    const activeKeys = Object.keys(activeCollisions);
+    const nextKeys = Object.keys(nextCollisions);
+    let collisionsChanged = activeKeys.length !== nextKeys.length;
+    if (!collisionsChanged) {
+      for (const k of nextKeys) {
+        if (activeCollisions[k] !== nextCollisions[k]) {
+          collisionsChanged = true;
+          break;
+        }
+      }
+    }
+    if (collisionsChanged) {
+      set({ activeCollisions: nextCollisions });
+    }
   },
 }));
 
 // Dernière instance créée dynamiquement en mode Play (Piste C : Référence "Dernier objet apparu")
 let lastSpawnedEntityId: EntityId | null = null;
 
-// Helper pour traiter les paires de collision avec anti-boucle
+// Helpers hiérarchie Parent-Enfant
+function wouldCreateParentCycle(
+  entities: Record<EntityId, Entity>,
+  childId: EntityId,
+  candidateParentId: EntityId
+): boolean {
+  let cur: EntityId | undefined = candidateParentId;
+  const visited = new Set<string>();
+  while (cur && !visited.has(cur)) {
+    if (cur === childId) return true;
+    visited.add(cur);
+    cur = entities[cur]?.parentId;
+  }
+  return false;
+}
+
+function collectDescendantIds(entities: Record<EntityId, Entity>, rootId: EntityId): EntityId[] {
+  const result: EntityId[] = [];
+  const queue: EntityId[] = [rootId];
+  const visited = new Set<EntityId>([rootId]);
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    Object.values(entities).forEach((ent) => {
+      if (ent.parentId === cur && !visited.has(ent.id)) {
+        visited.add(ent.id);
+        result.push(ent.id);
+        queue.push(ent.id);
+      }
+    });
+  }
+  return result;
+}
+
+function computeRelativeParentOffset(
+  child: Entity,
+  parent: Entity,
+  prevOffset?: ParentOffset
+): ParentOffset {
+  const pCenterX = parent.position.x + parent.size.width / 2;
+  const pCenterY = parent.position.y + parent.size.height / 2;
+  const cCenterX = child.position.x + child.size.width / 2;
+  const cCenterY = child.position.y + child.size.height / 2;
+
+  const parentRotDeg = parent.states[parent.currentStateId]?.rotation ?? 0;
+  const childRotDeg = child.states[child.currentStateId]?.rotation ?? 0;
+  const inheritRotation = prevOffset?.inheritRotation ?? true;
+  const inheritFlip = prevOffset?.inheritFlip ?? true;
+
+  const angleRad = (-parentRotDeg * Math.PI) / 180;
+  const dx = cCenterX - pCenterX;
+  const dy = cCenterY - pCenterY;
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  let localX = dx * cos - dy * sin;
+  const localY = dx * sin + dy * cos;
+
+  if (inheritFlip && parent.flipX) {
+    localX = -localX;
+  }
+
+  return {
+    x: Math.round(localX * 10) / 10,
+    y: Math.round(localY * 10) / 10,
+    rotationOffset: Math.round((childRotDeg - parentRotDeg) * 10) / 10,
+    inheritRotation,
+    inheritFlip,
+  };
+}
+
+function computeChildWorldFromParent(
+  child: Entity,
+  parent: Entity
+): { position: Position; rotation: number; flipX: boolean } {
+  const offset = child.parentOffset || { x: 0, y: 0, rotationOffset: 0, inheritRotation: true, inheritFlip: true };
+  const inheritRotation = offset.inheritRotation !== false;
+  const inheritFlip = offset.inheritFlip !== false;
+
+  const pCenterX = parent.position.x + parent.size.width / 2;
+  const pCenterY = parent.position.y + parent.size.height / 2;
+  const parentRotDeg = parent.states[parent.currentStateId]?.rotation ?? 0;
+  const parentAngleRad = (parentRotDeg * Math.PI) / 180;
+
+  let lx = offset.x || 0;
+  const ly = offset.y || 0;
+  if (inheritFlip && parent.flipX) {
+    lx = -lx;
+  }
+
+  let worldOffsetX = lx;
+  let worldOffsetY = ly;
+  if (inheritRotation && parentAngleRad !== 0) {
+    const cos = Math.cos(parentAngleRad);
+    const sin = Math.sin(parentAngleRad);
+    worldOffsetX = lx * cos - ly * sin;
+    worldOffsetY = lx * sin + ly * cos;
+  }
+
+  return {
+    position: {
+      x: Math.round((pCenterX + worldOffsetX - child.size.width / 2) * 10) / 10,
+      y: Math.round((pCenterY + worldOffsetY - child.size.height / 2) * 10) / 10,
+    },
+    rotation: inheritRotation ? parentRotDeg + (offset.rotationOffset || 0) : (child.states[child.currentStateId]?.rotation ?? 0),
+    flipX: inheritFlip ? Boolean(parent.flipX) : Boolean(child.flipX),
+  };
+}
+
+function resolveEntityReference(
+  mode: SpawnReferenceMode | 'subject' | 'target' | 'entity' | 'instance' | 'type' | 'tag' | 'last_spawned' | undefined,
+  entityId: string | undefined,
+  entityType: EntityType | undefined,
+  tag: string | undefined,
+  subject: Entity | undefined,
+  target: Entity | undefined,
+  liveEntities: Record<EntityId, Entity>
+): Entity | undefined {
+  if (mode === 'subject') {
+    return subject ? liveEntities[subject.id] || subject : undefined;
+  }
+  if (mode === 'target') {
+    return target ? liveEntities[target.id] || target : undefined;
+  }
+  if (mode === 'last_spawned') {
+    return lastSpawnedEntityId ? liveEntities[lastSpawnedEntityId] : undefined;
+  }
+  if ((mode === 'entity' || mode === 'instance') && entityId) {
+    return liveEntities[entityId];
+  }
+  if (mode === 'type' && entityType) {
+    return Object.values(liveEntities).find((e) => e.type === entityType);
+  }
+  if (mode === 'tag' && tag) {
+    const cleanTag = tag.toLowerCase().trim().replace(/^#/, '');
+    if (cleanTag) {
+      return Object.values(liveEntities).find((e) => e.tags?.includes(cleanTag));
+    }
+  }
+  return undefined;
+}
+
+// Helper pour traiter les paires de collision avec anti-boucle et mémorisation du point de contact
 function handleCollisionPair(
   rule: DynamicRule,
   subject: Entity,
@@ -2947,6 +3389,7 @@ function handleCollisionPair(
   // par la règle d'entrée !
   if (isColliding) {
     nextCollisions[collisionKey] = true;
+    lastCollisionContacts[collisionKey] = getCollisionContactPoint(subject, target);
   } else {
     nextCollisions[collisionKey] = false;
   }
@@ -3012,6 +3455,14 @@ function handleCollisionPair(
     delete preCollisionStates[collisionKey];
   }
 
+  const contactPoint = isColliding
+    ? lastCollisionContacts[collisionKey]
+    : lastCollisionContacts[collisionKey] || getCollisionContactPoint(subject, target);
+
+  if (isExiting) {
+    delete lastCollisionContacts[collisionKey];
+  }
+
   if (shouldExecute) {
     // Cooldown séparé enter vs exit pour réactivité immédiate à la séparation
     const cooldownKey = `collision_${rule.id}_${subject.id}_${target.id}_${isExiting ? 'exit' : 'enter'}`;
@@ -3024,6 +3475,7 @@ function handleCollisionPair(
     executeRuleActions(rule.actions, {
       subject,
       target,
+      eventPosition: contactPoint,
       allEntities: helpers.entities,
       updateEntityState: helpers.updateEntityState,
       updateEntityDetails: helpers.updateEntityDetails,
@@ -3039,6 +3491,7 @@ function executeRuleActions(
   helpers: {
     subject?: Entity;
     target?: Entity;
+    eventPosition?: Position;
     allEntities: Record<EntityId, Entity>;
     updateEntityState: (id: EntityId, stateId: StateId) => void;
     updateEntityDetails: (id: EntityId, partial: Partial<Entity>) => void;
@@ -3055,9 +3508,13 @@ function executeRuleActions(
     }
     if (accumulatedDelay > 0) {
       const delayMs = accumulatedDelay;
-      setTimeout(() => {
-        executeAction(act, helpers);
+      const frozenHelpers = { ...helpers };
+      const timerId = setTimeout(() => {
+        activeDelayTimers.delete(timerId);
+        if (useSceneStore.getState().appMode !== 'play') return;
+        executeAction(act, frozenHelpers);
       }, delayMs);
+      activeDelayTimers.add(timerId);
     } else {
       executeAction(act, helpers);
     }
@@ -3070,6 +3527,7 @@ function executeAction(
   helpers: {
     subject?: Entity;
     target?: Entity;
+    eventPosition?: Position;
     allEntities: Record<EntityId, Entity>;
     updateEntityState: (id: EntityId, stateId: StateId) => void;
     updateEntityDetails: (id: EntityId, partial: Partial<Entity>) => void;
@@ -3100,13 +3558,86 @@ function executeAction(
 
   // Toujours lire l'état à jour des entités (utile après un spawn ou un délai)
   const liveEntities = useSceneStore.getState().entities || helpers.allEntities;
+  const sceneBounds = useSceneStore.getState().sceneBounds || { width: 800, height: 500 };
+
+  if (act.type === 'emit_particles') {
+    const originMode = act.particleOriginMode || (helpers.target ? 'target' : 'subject');
+    let originX = 300;
+    let originY = 200;
+
+    if (originMode === 'event_point' && helpers.eventPosition) {
+      originX = helpers.eventPosition.x;
+      originY = helpers.eventPosition.y;
+    } else {
+      const origin =
+        resolveEntityReference(
+          originMode === 'event_point' ? (helpers.target ? 'target' : 'subject') : originMode,
+          act.particleOriginEntityId,
+          act.particleOriginEntityType,
+          act.particleOriginTag,
+          helpers.subject,
+          helpers.target,
+          liveEntities
+        ) ||
+        helpers.subject ||
+        helpers.target;
+
+      if (origin) {
+        originX = origin.position.x + origin.size.width / 2;
+        originY = origin.position.y + origin.size.height / 2;
+      } else if (helpers.eventPosition) {
+        originX = helpers.eventPosition.x;
+        originY = helpers.eventPosition.y;
+      }
+    }
+
+    emitParticlesBurst({
+      x: originX,
+      y: originY,
+      count: act.particleCount ?? 18,
+      color: act.particleColor ?? '#f59e0b',
+      color2: act.particleColor2,
+      shape: act.particleShape ?? 'circle',
+      customParticleId: act.customParticleId,
+      useTint: act.useParticleTint,
+      speed: act.particleSpeed ?? 180,
+      size: act.particleSize ?? 6,
+      lifetime: act.particleLifetime ?? 0.7,
+      gravity: act.particleGravity ?? 220,
+      spread: act.particleSpread ?? 360,
+      angle: act.particleAngle ?? -90,
+    });
+    return;
+  }
 
   if (act.type === 'spawn_entity') {
     const spawnType = act.spawnEntityType || 'custom';
     const locMode = act.spawnLocationMode || act.spawnLocation || (helpers.target ? 'at_target' : 'at_subject');
 
+    // Résoudre l'entité de référence (Sujet, Cible, Entité précise, Type, Tag, Dernier créé)
+    let emitter: Entity | undefined;
+    if (act.spawnReferenceMode) {
+      emitter = resolveEntityReference(
+        act.spawnReferenceMode,
+        act.spawnReferenceEntityId,
+        act.spawnReferenceEntityType,
+        act.spawnReferenceTag,
+        helpers.subject,
+        helpers.target,
+        liveEntities
+      );
+    }
+    if (!emitter) {
+      emitter =
+        locMode === 'at_target' || locMode === 'offset_target'
+          ? helpers.target || helpers.subject
+          : helpers.subject || helpers.target;
+    }
+
     // Find default archetype dimensions
-    const sampleEntity = Object.values(liveEntities).find((e) => e.type === spawnType);
+    const sampleEntity =
+      Object.values(liveEntities).find((e) => e.type === spawnType) ||
+      useSceneStore.getState().customArchetypes[spawnType];
     const defaultW = sampleEntity?.size.width || 256;
     const defaultH = sampleEntity?.size.height || 256;
 
@@ -3115,12 +3646,17 @@ function executeAction(
     let finalWidth = defaultW;
     let finalHeight = defaultH;
 
-    if (act.spawnSizeMode === 'match_target' && helpers.target) {
-      finalWidth = Math.round(helpers.target.size.width * scaleMultiplier);
-      finalHeight = Math.round(helpers.target.size.height * scaleMultiplier);
-    } else if (act.spawnSizeMode === 'match_subject' && helpers.subject) {
-      finalWidth = Math.round(helpers.subject.size.width * scaleMultiplier);
-      finalHeight = Math.round(helpers.subject.size.height * scaleMultiplier);
+    if (act.spawnSizeMode === 'match_reference' && emitter) {
+      finalWidth = Math.round(emitter.size.width * scaleMultiplier);
+      finalHeight = Math.round(emitter.size.height * scaleMultiplier);
+    } else if (act.spawnSizeMode === 'match_target' && (helpers.target || emitter)) {
+      const ref = helpers.target || emitter!;
+      finalWidth = Math.round(ref.size.width * scaleMultiplier);
+      finalHeight = Math.round(ref.size.height * scaleMultiplier);
+    } else if (act.spawnSizeMode === 'match_subject' && (helpers.subject || emitter)) {
+      const ref = helpers.subject || emitter!;
+      finalWidth = Math.round(ref.size.width * scaleMultiplier);
+      finalHeight = Math.round(ref.size.height * scaleMultiplier);
     } else if (act.spawnSizeMode === 'custom' && act.spawnCustomSize) {
       finalWidth = act.spawnCustomSize.width;
       finalHeight = act.spawnCustomSize.height;
@@ -3134,27 +3670,36 @@ function executeAction(
       height: Math.max(16, finalHeight),
     };
 
-    // Determine emitter entity
-    const emitter =
-      locMode === 'at_target' || locMode === 'offset_target'
-        ? helpers.target || helpers.subject
-        : helpers.subject || helpers.target;
-
     let spawnX = 250;
     let spawnY = 200;
 
     if (locMode === 'random') {
-      spawnX = Math.floor(Math.random() * Math.max(60, 680 - spawnSize.width) + 40);
-      spawnY = Math.floor(Math.random() * Math.max(60, 420 - spawnSize.height) + 40);
+      const availW = Math.max(40, sceneBounds.width - spawnSize.width - 40);
+      const availH = Math.max(40, sceneBounds.height - spawnSize.height - 40);
+      spawnX = Math.floor(Math.random() * availW + 20);
+      spawnY = Math.floor(Math.random() * availH + 20);
     } else if (locMode === 'absolute') {
-      const targetCoord = act.spawnPosition || (act as any).spawnAbsoluteCoords || { x: 350, y: 220 };
+      const targetCoord = act.spawnPosition || (act as any).spawnAbsoluteCoords || { x: Math.round(sceneBounds.width / 2), y: Math.round(sceneBounds.height / 2) };
       spawnX = Math.round(targetCoord.x - spawnSize.width / 2);
       spawnY = Math.round(targetCoord.y - spawnSize.height / 2);
+    } else if (locMode === 'at_event_point' || locMode === 'offset_event_point') {
+      const basePt = helpers.eventPosition || (emitter
+        ? { x: emitter.position.x + emitter.size.width / 2, y: emitter.position.y + emitter.size.height / 2 }
+        : { x: sceneBounds.width / 2, y: sceneBounds.height / 2 });
+      if (locMode === 'offset_event_point') {
+        const dx = act.spawnOffset?.x ?? 0;
+        const dy = act.spawnOffset?.y ?? 0;
+        spawnX = Math.round(basePt.x + dx - spawnSize.width / 2);
+        spawnY = Math.round(basePt.y + dy - spawnSize.height / 2);
+      } else {
+        spawnX = Math.round(basePt.x - spawnSize.width / 2);
+        spawnY = Math.round(basePt.y - spawnSize.height / 2);
+      }
     } else if (emitter) {
       const emitterCenterX = emitter.position.x + emitter.size.width / 2;
       const emitterCenterY = emitter.position.y + emitter.size.height / 2;
 
-      if (locMode === 'offset_subject' || locMode === 'offset_target') {
+      if (locMode === 'offset_subject' || locMode === 'offset_target' || locMode === 'offset_entity') {
         const dx = act.spawnOffset?.x ?? 50;
         const dy = act.spawnOffset?.y ?? 0;
         const offsetLength = Math.hypot(dx, dy);
@@ -3170,7 +3715,7 @@ function executeAction(
         spawnX = Math.round(emitterCenterX + adjustedDx - spawnSize.width / 2);
         spawnY = Math.round(emitterCenterY + adjustedDy - spawnSize.height / 2);
       } else {
-        // Direct center alignment on emitter
+        // Direct center alignment on emitter ('at_subject' | 'at_target' | 'at_entity')
         spawnX = Math.round(emitterCenterX - spawnSize.width / 2);
         spawnY = Math.round(emitterCenterY - spawnSize.height / 2);
       }
@@ -3242,6 +3787,27 @@ function executeAction(
       return;
     }
 
+    if (act.type === 'attach_to_parent') {
+      const parentEnt = resolveEntityReference(
+        act.parentTargetMode || (helpers.target ? 'target' : 'subject'),
+        act.parentEntityId,
+        act.parentEntityType,
+        act.parentEntityTag,
+        helpers.subject,
+        helpers.target,
+        useSceneStore.getState().entities || liveEntities
+      );
+      if (parentEnt && parentEnt.id !== entity.id) {
+        useSceneStore.getState().setEntityParent(entity.id, parentEnt.id, act.parentOffset);
+      }
+      return;
+    }
+
+    if (act.type === 'detach_parent') {
+      useSceneStore.getState().detachEntity(entity.id);
+      return;
+    }
+
     if (act.type === 'change_state' && act.targetStateId) {
       const now = Date.now();
       if (now - (entityStateTimestamps[entity.id] || 0) < ENTITY_STATE_COOLDOWN_MS) {
@@ -3300,7 +3866,31 @@ function executeAction(
         helpers.updateEntityState(entity.id, nextStateId);
       }
     } else if (act.type === 'toggle_draggable') {
-      helpers.updateEntityDetails(entity.id, { isDraggable: !entity.isDraggable });
+      const existingBehaviors = entity.behaviors || [];
+      const dragBeh = existingBehaviors.find((b) => b.type === 'draggable');
+      if (dragBeh) {
+        const nextEnabled = !dragBeh.enabled;
+        helpers.updateEntityDetails(entity.id, {
+          isDraggable: nextEnabled,
+          behaviors: existingBehaviors.map((b) =>
+            b.id === dragBeh.id ? { ...b, enabled: nextEnabled } : b
+          ),
+        });
+      } else {
+        helpers.updateEntityDetails(entity.id, {
+          isDraggable: true,
+          behaviors: [
+            ...existingBehaviors,
+            {
+              id: `draggable_${Date.now().toString(36)}`,
+              type: 'draggable',
+              enabled: true,
+              throwable: true,
+              maxThrowSpeed: 1500,
+            },
+          ],
+        });
+      }
     } else if (act.type === 'delete_entity') {
       helpers.deleteEntity(entity.id);
     }

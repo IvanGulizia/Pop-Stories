@@ -126,6 +126,16 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
     }
   };
 
+  const getSceneEventPosition = (clientX: number, clientY: number) => {
+    const container = document.getElementById('scene-canvas-container');
+    if (!container) return undefined;
+    const rect = container.getBoundingClientRect();
+    return {
+      x: Math.round((clientX - rect.left) * 10) / 10,
+      y: Math.round((clientY - rect.top) * 10) / 10,
+    };
+  };
+
   const handleDragEnd = () => {
     const currentX = x.get();
     const currentY = y.get();
@@ -139,7 +149,10 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
       });
       evaluateRulesWithTemp();
       if (hasMovedBeyondDragThresholdRef.current) {
-        triggerDragRelease(entity.id);
+        triggerDragRelease(entity.id, {
+          x: Math.round(numX + entity.size.width / 2),
+          y: Math.round(numY + entity.size.height / 2),
+        });
       }
 
       // Injection de l'élan physique au lancer en mode Play
@@ -251,6 +264,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
         scale: currentState.scale,
         rotate: currentState.rotation,
       }}
+      transition={appMode === 'play' ? { duration: 0 } : undefined}
       whileHover={enableHoverScaleAnimation ? { scale: currentState.scale * (isSelected ? 1.0 : 1.03) } : undefined}
     >
       {/* Hitbox interactive délimitée strictement par le collider vert */}
@@ -263,6 +277,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
         }}
         onPointerEnter={(e) => {
           if (isDraggingRef.current || appMode !== 'play') return;
+          const pt = getSceneEventPosition(e.clientX, e.clientY);
           const isInside = isPointInsideEntityCollider(
             e.clientX,
             e.clientY,
@@ -274,18 +289,19 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
             setCursorState(getHoverState());
             if (!isHoveringRef.current) {
               isHoveringRef.current = true;
-              triggerPointerEvent(entity.id, 'enter');
+              triggerPointerEvent(entity.id, 'enter', pt);
             }
           } else {
             setCursorState('idle');
             if (isHoveringRef.current) {
               isHoveringRef.current = false;
-              triggerPointerEvent(entity.id, 'exit');
+              triggerPointerEvent(entity.id, 'exit', pt);
             }
           }
         }}
         onPointerMove={(e) => {
           if (isDraggingRef.current || appMode !== 'play') return;
+          const pt = getSceneEventPosition(e.clientX, e.clientY);
           const isInside = isPointInsideEntityCollider(
             e.clientX,
             e.clientY,
@@ -297,21 +313,21 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
             setCursorState(getHoverState());
             if (!isHoveringRef.current) {
               isHoveringRef.current = true;
-              triggerPointerEvent(entity.id, 'enter');
+              triggerPointerEvent(entity.id, 'enter', pt);
             }
           } else {
             setCursorState('idle');
             if (isHoveringRef.current) {
               isHoveringRef.current = false;
-              triggerPointerEvent(entity.id, 'exit');
+              triggerPointerEvent(entity.id, 'exit', pt);
             }
           }
         }}
-        onPointerLeave={() => {
+        onPointerLeave={(e) => {
           if (appMode === 'play' && isHoveringRef.current) {
             isHoveringRef.current = false;
             setCursorState('idle');
-            triggerPointerEvent(entity.id, 'exit');
+            triggerPointerEvent(entity.id, 'exit', getSceneEventPosition(e.clientX, e.clientY));
           }
         }}
         onPointerDown={(e) => {
@@ -344,13 +360,15 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
             if (appMode === 'play') setCursorState('click');
           }
           if (appMode === 'play') {
-            triggerPointerEvent(entity.id, 'mouse_down');
-            triggerPointerEvent(entity.id, 'down');
+            const pt = getSceneEventPosition(e.clientX, e.clientY);
+            triggerPointerEvent(entity.id, 'mouse_down', pt);
+            triggerPointerEvent(entity.id, 'down', pt);
 
-            const handleGlobalUp = () => {
+            const handleGlobalUp = (upEvent: PointerEvent) => {
               window.removeEventListener('pointerup', handleGlobalUp);
-              triggerPointerEvent(entity.id, 'mouse_up');
-              triggerPointerEvent(entity.id, 'up');
+              const upPt = getSceneEventPosition(upEvent.clientX, upEvent.clientY);
+              triggerPointerEvent(entity.id, 'mouse_up', upPt);
+              triggerPointerEvent(entity.id, 'up', upPt);
             };
             window.addEventListener('pointerup', handleGlobalUp, { once: true });
           }
@@ -373,6 +391,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
             return;
           }
 
+          const pt = getSceneEventPosition(e.clientX, e.clientY);
           const duration = Date.now() - (pointerDownTimeRef.current || 0);
           const dist = pointerDownPosRef.current
             ? Math.hypot(e.clientX - pointerDownPosRef.current.x, e.clientY - pointerDownPosRef.current.y)
@@ -383,15 +402,15 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
           if (isPureClick && isInside) {
             lastHandledClickTimeRef.current = Date.now();
             selectEntity(entity.id);
-            triggerPointerEvent(entity.id, 'click');
-            triggerPointerEvent(entity.id, 'mouse_up');
+            triggerPointerEvent(entity.id, 'click', pt);
+            triggerPointerEvent(entity.id, 'mouse_up', pt);
             setCursorState(getHoverState());
           } else if (!hasMovedBeyondDragThresholdRef.current) {
             isDraggingRef.current = false;
             setIsDragging(false);
             if (isInside) {
               setCursorState(getHoverState());
-              triggerPointerEvent(entity.id, 'mouse_up');
+              triggerPointerEvent(entity.id, 'mouse_up', pt);
             } else {
               setCursorState('idle');
             }
@@ -421,7 +440,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
           if (!hasMovedBeyondDragThresholdRef.current) {
             lastHandledClickTimeRef.current = Date.now();
             setCursorState(getHoverState());
-            triggerPointerEvent(entity.id, 'click');
+            triggerPointerEvent(entity.id, 'click', getSceneEventPosition(e.clientX, e.clientY));
           }
         }}
       />
@@ -489,7 +508,10 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
       )}
 
       {/* Visuel personnalisé : Vectoriel SVG, Image, Icône ou Forme SVG par défaut */}
-      <div className="relative w-full h-full flex items-center justify-center">
+      <div
+        className="relative w-full h-full flex items-center justify-center"
+        style={{ transform: entity.flipX ? 'scaleX(-1)' : undefined }}
+      >
         {(currentState?.vectorPaths && currentState.vectorPaths.length > 0) ? (
           <div className="w-full h-full flex items-center justify-center select-none p-1">
             <svg
@@ -613,9 +635,9 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
       </div>
 
       {/* Libellé minimaliste (si activé dans les réglages et pas en mode Play) */}
-      {showCanvasLabels && appMode !== 'play' && (isSelected || entity.isDraggable) && (
+      {showCanvasLabels && appMode !== 'play' && (isSelected || canDragFromBehavior) && (
         <div className="absolute -bottom-6 pointer-events-none bg-slate-800/90 text-white backdrop-blur-xs px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide shadow-xs border border-slate-700/50 flex items-center gap-1.5 whitespace-nowrap">
-          {entity.isDraggable && <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-ping" />}
+          {canDragFromBehavior && <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-ping" />}
           <span>{entity.name}</span>
           <span className="opacity-60 font-mono text-[9px]">({currentState.name})</span>
         </div>

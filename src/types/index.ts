@@ -80,8 +80,10 @@ export type BehaviorType =
   | 'follow'
   | 'move_to'
   | 'patrol'
+  | 'wandering'
   | 'keyboard_control'
-  | 'boundary_behavior';
+  | 'boundary_behavior'
+  | 'particle_emitter';
 
 export interface BaseBehaviorConfig {
   id: string;
@@ -116,6 +118,8 @@ export interface ConstantVelocityBehaviorConfig extends BaseBehaviorConfig {
   vx: number;        // px/s
   vy: number;        // px/s
   angularVelocity?: number; // deg/s
+  flipOnMove?: boolean;
+  flipInvert?: boolean;
 }
 
 export interface LookAtBehaviorConfig extends BaseBehaviorConfig {
@@ -137,6 +141,8 @@ export interface FollowBehaviorConfig extends BaseBehaviorConfig {
   speed: number;       // px/s, default 150
   minDistance: number; // stop distance, default 40
   smoothing: number;   // lerp factor 0..1, default 0.1
+  flipOnMove?: boolean;
+  flipInvert?: boolean;
 }
 
 export interface MoveToBehaviorConfig extends BaseBehaviorConfig {
@@ -148,6 +154,8 @@ export interface MoveToBehaviorConfig extends BaseBehaviorConfig {
   targetTag?: string;
   speed: number;       // px/s, default 120
   stopOnArrival: boolean;
+  flipOnMove?: boolean;
+  flipInvert?: boolean;
 }
 
 export interface PatrolBehaviorConfig extends BaseBehaviorConfig {
@@ -156,6 +164,21 @@ export interface PatrolBehaviorConfig extends BaseBehaviorConfig {
   range: number;       // px, default 120
   speed: number;       // px/s, default 100
   pauseDuration: number; // seconds, default 0.5
+  flipOnMove?: boolean;
+  flipInvert?: boolean;
+}
+
+export interface WanderingBehaviorConfig extends BaseBehaviorConfig {
+  type: 'wandering';
+  mode: 'free_2d' | 'horizontal'; // Zone 2D libre ou sol/plateforme horizontal
+  radius: number;          // Rayon de la zone de balade (px), défaut 160
+  speed: number;           // Vitesse (px/s), défaut 90
+  randomness: number;      // Niveau d'aléatoire (0..100%), défaut 65
+  changeInterval: number;  // Fréquence de changement de cap (s), défaut 1.5
+  pauseDuration: number;   // Pause aléatoire max (s), défaut 0.8
+  orientToMovement?: boolean; // Orienter dans le sens du déplacement
+  flipOnMove?: boolean;
+  flipInvert?: boolean;
 }
 
 export interface KeyboardControlBehaviorConfig extends BaseBehaviorConfig {
@@ -164,12 +187,45 @@ export interface KeyboardControlBehaviorConfig extends BaseBehaviorConfig {
   speed: number;       // px/s, default 180
   mode: 'top_down' | 'platformer';
   jumpForce?: number;  // px/s, default 450
+  allowHorizontal?: boolean; // default true
+  allowVertical?: boolean;   // default true (used in top_down)
+  allowJump?: boolean;       // default true (used in platformer)
+  flipOnMove?: boolean;
+  flipInvert?: boolean;
 }
 
 export interface BoundaryBehaviorConfig extends BaseBehaviorConfig {
   type: 'boundary_behavior';
   mode: 'bounce' | 'wrap' | 'clamp';
   bounciness?: number; // 0..1, default 0.8
+}
+
+export type ParticleShape = 'circle' | 'square' | 'spark' | 'star' | 'custom';
+
+export interface CustomParticlePreset {
+  id: string;
+  name: string;
+  vectorPaths: VectorPath[];
+  useTint?: boolean;
+  createdAt: number;
+}
+
+export interface ParticleEmitterBehaviorConfig extends BaseBehaviorConfig {
+  type: 'particle_emitter';
+  rate: number;          // particules / seconde (1..40)
+  color: string;
+  color2?: string;
+  shape: ParticleShape;
+  customParticleId?: string;
+  useParticleTint?: boolean;
+  speed: number;         // px/s
+  size: number;          // px
+  lifetime: number;      // secondes
+  gravity: number;       // px/s²
+  spread: number;        // cône en degrés (0..360)
+  angle: number;         // direction en degrés (-90 = haut)
+  offsetX?: number;      // décalage X par rapport au centre
+  offsetY?: number;      // décalage Y par rapport au centre
 }
 
 export type EntityBehavior =
@@ -181,8 +237,10 @@ export type EntityBehavior =
   | FollowBehaviorConfig
   | MoveToBehaviorConfig
   | PatrolBehaviorConfig
+  | WanderingBehaviorConfig
   | KeyboardControlBehaviorConfig
-  | BoundaryBehaviorConfig;
+  | BoundaryBehaviorConfig
+  | ParticleEmitterBehaviorConfig;
 
 export type BehaviorOverride = {
   enabled?: boolean;
@@ -210,6 +268,14 @@ export interface EntityState {
   flowerPetals?: number;
 }
 
+export interface ParentOffset {
+  x: number;
+  y: number;
+  rotationOffset?: number;
+  inheritRotation?: boolean;
+  inheritFlip?: boolean;
+}
+
 export interface Entity {
   id: EntityId;
   name: string;
@@ -228,6 +294,9 @@ export interface Entity {
   drawingLayers?: DrawingLayer[];
   behaviors?: EntityBehavior[];
   zIndex?: number;
+  flipX?: boolean;
+  parentId?: EntityId;
+  parentOffset?: ParentOffset;
 }
 
 export type TriggerType =
@@ -307,9 +376,32 @@ export interface RuleTrigger {
 
 export type ActionTargetMode = 'subject' | 'target' | 'type' | 'tag' | 'instance' | 'last_spawned';
 
-export type ActionType = 'change_state' | 'toggle_state' | 'toggle_draggable' | 'delete_entity' | 'spawn_entity' | 'play_sound' | 'add_score' | 'delay';
+export type ActionType =
+  | 'change_state'
+  | 'toggle_state'
+  | 'toggle_draggable'
+  | 'delete_entity'
+  | 'spawn_entity'
+  | 'play_sound'
+  | 'add_score'
+  | 'delay'
+  | 'attach_to_parent'
+  | 'detach_parent'
+  | 'emit_particles';
 
-export type SpawnLocationMode = 'at_subject' | 'at_target' | 'offset_subject' | 'offset_target' | 'random' | 'absolute';
+export type SpawnLocationMode =
+  | 'at_subject'
+  | 'at_target'
+  | 'at_entity'
+  | 'at_event_point'
+  | 'offset_subject'
+  | 'offset_target'
+  | 'offset_entity'
+  | 'offset_event_point'
+  | 'random'
+  | 'absolute';
+
+export type SpawnReferenceMode = 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned';
 
 export type SoundType = 'pop' | 'bell' | 'laser' | 'bounce' | 'magic' | 'win';
 
@@ -350,14 +442,43 @@ export interface RuleAction {
   spawnEntityType?: EntityType;
   spawnInitialStateId?: StateId;
   spawnTags?: string[]; // Tags supplémentaires attribués à l'instance créée
-  spawnLocation?: SpawnLocationMode; // 'at_subject', 'at_target', 'offset_subject', 'offset_target', 'random', 'absolute'
+  spawnLocation?: SpawnLocationMode;
   spawnLocationMode?: SpawnLocationMode;
+  spawnReferenceMode?: SpawnReferenceMode;
+  spawnReferenceEntityId?: EntityId;
+  spawnReferenceEntityType?: EntityType;
+  spawnReferenceTag?: string;
   spawnPosition?: Position;
   spawnAbsoluteCoords?: Position;
   spawnOffset?: Position;
-  spawnSizeMode?: 'default' | 'match_target' | 'match_subject' | 'custom';
+  spawnSizeMode?: 'default' | 'match_target' | 'match_subject' | 'match_reference' | 'custom';
   spawnScaleMultiplier?: number;
   spawnCustomSize?: Size;
+
+  // Champs pour 'attach_to_parent'
+  parentTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned';
+  parentEntityId?: EntityId;
+  parentEntityType?: EntityType;
+  parentEntityTag?: string;
+  parentOffset?: ParentOffset;
+
+  // Champs pour 'emit_particles'
+  particleOriginMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'event_point';
+  particleOriginEntityId?: EntityId;
+  particleOriginEntityType?: EntityType;
+  particleOriginTag?: string;
+  particleCount?: number;
+  particleColor?: string;
+  particleColor2?: string;
+  particleShape?: ParticleShape;
+  customParticleId?: string;
+  useParticleTint?: boolean;
+  particleSpeed?: number;
+  particleSize?: number;
+  particleLifetime?: number;
+  particleGravity?: number;
+  particleSpread?: number;
+  particleAngle?: number;
 
   // Champs pour 'play_sound'
   soundType?: 'pop' | 'bell' | 'laser' | 'bounce' | 'magic' | 'win';
@@ -453,6 +574,7 @@ export interface ProjectExportData {
   rules: DynamicRule[];
   folders?: RuleFolder[];
   customSounds?: CustomSound[];
+  customParticles?: CustomParticlePreset[];
   layerGroups?: SceneLayerGroup[];
   settings?: AppSettings;
   projectPalette?: ProjectPaletteColor[];

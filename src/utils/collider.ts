@@ -64,56 +64,53 @@ export function extractPathsBounds(paths: VectorPath[]): { minX: number; maxX: n
 /**
  * Calculates the exact collider geometry in 200x200 canvas space.
  */
-export function getEntityColliderBounds(entity: Entity, currentState?: EntityState): EntityColliderGeometry {
+export function getEntityColliderBounds(
+  entity: Entity,
+  currentState?: EntityState,
+  flipX: boolean = Boolean(entity.flipX)
+): EntityColliderGeometry {
   const effectiveState = currentState || entity.states[entity.currentStateId];
   const colliderType: ColliderType =
     effectiveState?.colliderType || entity.colliderType || (entity.type === 'apple' ? 'circle' : 'box');
 
   const paths = effectiveState?.vectorPaths || entity.vectorPaths;
 
+  let rawX = 0;
+  let rawY = 0;
+  let width = 160;
+  let height = 160;
+
   if (paths && paths.length > 0) {
     const { minX, maxX, minY, maxY, hasBounds } = extractPathsBounds(paths);
 
     if (hasBounds && maxX > minX && maxY > minY) {
       // Ajustement serré au tracé pour éliminer tout offset ou flottement visuel
-      const x = Math.max(0, Math.round(minX));
-      const y = Math.max(0, Math.round(minY));
-      const width = Math.min(200, Math.max(8, Math.round(maxX - minX)));
-      const height = Math.min(200, Math.max(8, Math.round(maxY - minY)));
-      const centerX = x + width / 2;
-      const centerY = y + height / 2;
-      const radius = Math.max(width, height) / 2;
-
-      return {
-        x,
-        y,
-        width,
-        height,
-        centerX,
-        centerY,
-        radius,
-        colliderType,
-      };
+      rawX = Math.max(0, Math.round(minX));
+      rawY = Math.max(0, Math.round(minY));
+      width = Math.min(200, Math.max(8, Math.round(maxX - minX)));
+      height = Math.min(200, Math.max(8, Math.round(maxY - minY)));
+    } else {
+      rawX = (200 - width) / 2;
+      rawY = (200 - height) / 2;
     }
+  } else {
+    // Fallback procédural calibré sur les proportions de rendu réelles
+    if (entity.type === 'apple') {
+      width = 170; // 85% du conteneur
+      height = 170;
+    } else if (entity.type === 'plant') {
+      width = 150;
+      height = 170;
+    }
+    rawX = (200 - width) / 2;
+    rawY = (200 - height) / 2;
   }
 
-  // Fallback procédural calibré sur les proportions de rendu réelles
-  let fbWidth = 160;
-  let fbHeight = 160;
-  if (entity.type === 'apple') {
-    fbWidth = 170; // 85% du conteneur
-    fbHeight = 170;
-  } else if (entity.type === 'plant') {
-    fbWidth = 150;
-    fbHeight = 170;
-  }
-
-  const x = (200 - fbWidth) / 2;
-  const y = (200 - fbHeight) / 2;
-  const width = fbWidth;
-  const height = fbHeight;
-  const centerX = 100;
-  const centerY = 100;
+  // Miroir horizontal fidèle lorsque flipX est activé sur le visuel
+  const x = flipX ? Math.max(0, Math.min(200 - width, 200 - (rawX + width))) : rawX;
+  const y = rawY;
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
   const radius = Math.max(width, height) / 2;
 
   return {
@@ -125,6 +122,48 @@ export function getEntityColliderBounds(entity: Entity, currentState?: EntitySta
     centerY,
     radius,
     colliderType,
+  };
+}
+
+/**
+ * Computes exact world-space collider bounds factoring in centered DOM transform scale and flipX.
+ */
+export function getEntityWorldColliderBounds(
+  entity: Entity,
+  currentState?: EntityState
+): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  centerX: number;
+  centerY: number;
+  radius: number;
+  colliderType: ColliderType;
+  scaleX: number;
+  scaleY: number;
+} {
+  const effectiveState = currentState || entity.states[entity.currentStateId];
+  const s = effectiveState?.scale ?? 1;
+  const geom = getEntityColliderBounds(entity, effectiveState, Boolean(entity.flipX));
+  const scaleX = (entity.size.width * s) / 200;
+  const scaleY = (entity.size.height * s) / 200;
+
+  // CSS transform: scale(s) avec transform-origin: center décale le coin haut-gauche de W*(1-s)/2
+  const originOffsetX = (entity.size.width * (1 - s)) / 2;
+  const originOffsetY = (entity.size.height * (1 - s)) / 2;
+
+  return {
+    x: entity.position.x + originOffsetX + geom.x * scaleX,
+    y: entity.position.y + originOffsetY + geom.y * scaleY,
+    width: geom.width * scaleX,
+    height: geom.height * scaleY,
+    centerX: entity.position.x + originOffsetX + geom.centerX * scaleX,
+    centerY: entity.position.y + originOffsetY + geom.centerY * scaleY,
+    radius: geom.radius * Math.max(scaleX, scaleY),
+    colliderType: geom.colliderType,
+    scaleX,
+    scaleY,
   };
 }
 
@@ -153,7 +192,7 @@ export function isPointInsideEntityCollider(
     return false;
   }
 
-  const geometry = getEntityColliderBounds(entity, currentState);
+  const geometry = getEntityColliderBounds(entity, currentState, Boolean(entity.flipX));
 
   // Scale from 200x200 canvas coordinate space to actual DOM rendered pixel dimensions
   const scaleX = rect.width / 200;
@@ -198,7 +237,7 @@ export function getColliderClipPath(colliderType?: ColliderType): string | undef
  * Allows clicks outside the collider to pass through to underlying elements natively.
  */
 export function getEntityColliderClipPath(entity: Entity, currentState?: EntityState): string {
-  const geom = getEntityColliderBounds(entity, currentState);
+  const geom = getEntityColliderBounds(entity, currentState, Boolean(entity.flipX));
   if (geom.colliderType === 'circle') {
     const cxPct = ((geom.centerX / 200) * 100).toFixed(2);
     const cyPct = ((geom.centerY / 200) * 100).toFixed(2);
