@@ -23,6 +23,7 @@ import { EntityMiniPreview } from './EntityMiniPreview';
 import { SpawnLocationPicker } from './SpawnLocationPicker';
 import { SoundRecorderModal } from './SoundRecorderModal';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
+import { ParticleEditorModal } from './ParticleEditorModal';
 import { invalidateCustomParticleSprite } from '../utils/particleSystem';
 import {
   Plus,
@@ -51,6 +52,7 @@ import {
   Paintbrush,
   Pencil,
   Tag,
+  Sliders,
 } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
 
@@ -275,6 +277,7 @@ export function RuleBook() {
     context: 'wizard' | 'modal';
     editingPreset?: CustomParticlePreset;
   } | null>(null);
+  const [particleEditorContext, setParticleEditorContext] = useState<'wizard' | 'modal' | null>(null);
 
   // Folder & Search state
   const [selectedFolderId, setSelectedFolderId] = useState<string | 'all'>('all');
@@ -5242,6 +5245,15 @@ export function RuleBook() {
                           </div>
                         )}
 
+                        <button
+                          type="button"
+                          onClick={() => setParticleEditorContext('wizard')}
+                          className="w-full py-2 px-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-all active:scale-[0.99]"
+                        >
+                          <Sliders className="w-3.5 h-3.5" />
+                          <span>Ouvrir l'Éditeur &amp; Testeur Visuel</span>
+                        </button>
+
                         <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
                           <span className="font-bold text-slate-700 text-xs">Forme</span>
                           <select
@@ -7927,6 +7939,15 @@ export function RuleBook() {
                             </div>
                           )}
 
+                          <button
+                            type="button"
+                            onClick={() => setParticleEditorContext('modal')}
+                            className="w-full py-2 px-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-all active:scale-[0.99]"
+                          >
+                            <Sliders className="w-3.5 h-3.5" />
+                            <span>Ouvrir l'Éditeur &amp; Testeur Visuel</span>
+                          </button>
+
                           <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
                             <span className="font-bold text-slate-700 text-xs">Forme</span>
                             <select
@@ -8482,6 +8503,60 @@ export function RuleBook() {
           onClose={() => setParticleDrawingTarget(null)}
         />
       )}
+
+      {/* Éditeur & Testeur interactif de particules (Action emit_particles) */}
+      {particleEditorContext && (() => {
+        const src =
+          particleEditorContext === 'wizard'
+            ? activeWizard
+            : activeModal && activeModal.type === 'action'
+            ? activeModal
+            : null;
+        if (!src) return null;
+        return (
+          <ParticleEditorModal
+            isOpen={true}
+            mode="burst"
+            initialConfig={{
+              shape: src.particleShape || 'circle',
+              customParticleId: src.customParticleId,
+              useParticleTint: src.useParticleTint,
+              color: src.particleColor || '#f59e0b',
+              color2: src.particleColor2 || '#ef4444',
+              count: src.particleCount ?? 20,
+              speed: src.particleSpeed ?? 180,
+              size: src.particleSize ?? 6,
+              lifetime: src.particleLifetime ?? 0.7,
+              gravity: src.particleGravity ?? 220,
+              spread: src.particleSpread ?? 360,
+              angle: src.particleAngle ?? -90,
+            }}
+            onApply={(cfg) => {
+              const patch = {
+                particleShape: cfg.shape,
+                customParticleId: cfg.shape === 'custom' ? cfg.customParticleId : undefined,
+                useParticleTint: cfg.shape === 'custom' ? Boolean(cfg.useParticleTint) : undefined,
+                particleColor: cfg.color,
+                particleColor2: cfg.color2,
+                particleCount: cfg.count ?? 20,
+                particleSpeed: cfg.speed,
+                particleSize: cfg.size,
+                particleLifetime: cfg.lifetime,
+                particleGravity: cfg.gravity,
+                particleSpread: cfg.spread,
+                particleAngle: cfg.angle,
+              };
+              if (particleEditorContext === 'wizard' && activeWizard) {
+                setActiveWizard({ ...activeWizard, ...patch });
+              } else if (particleEditorContext === 'modal' && activeModal && activeModal.type === 'action') {
+                setActiveModal({ ...activeModal, ...patch });
+              }
+              setParticleEditorContext(null);
+            }}
+            onClose={() => setParticleEditorContext(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

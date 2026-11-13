@@ -519,7 +519,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
               className="w-full h-full pointer-events-none overflow-visible"
             >
               {(() => {
-                const layers = currentState.drawingLayers || entity.drawingLayers;
+                const layers = currentState.drawingLayers || (currentState.id === 'state_1' ? entity.drawingLayers : undefined);
                 const paths = currentState.vectorPaths;
                 if (!layers || layers.length === 0) {
                   return paths.map((p) => (
@@ -534,11 +534,14 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
                     />
                   ));
                 }
+                const fallbackLayerId = layers[layers.length - 1]?.id || 'layer-1';
+                const layerIds = new Set(layers.map((l) => l.id));
                 return [...layers].reverse().map((layer) => {
                   if (!layer.visible) return null;
-                  const layerPaths = paths.filter(
-                    (p) => (p.layerId || layers[layers.length - 1]?.id || 'layer-1') === layer.id
-                  );
+                  const layerPaths = paths.filter((p) => {
+                    const resolvedId = p.layerId && layerIds.has(p.layerId) ? p.layerId : fallbackLayerId;
+                    return resolvedId === layer.id;
+                  });
                   return (
                     <g key={layer.id} opacity={layer.opacity ?? 1}>
                       {layerPaths.map((p) => (
@@ -588,11 +591,14 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
                     />
                   ));
                 }
+                const fallbackLayerId = layers[layers.length - 1]?.id || 'layer-1';
+                const layerIds = new Set(layers.map((l) => l.id));
                 return [...layers].reverse().map((layer) => {
                   if (!layer.visible) return null;
-                  const layerPaths = paths.filter(
-                    (p) => (p.layerId || layers[layers.length - 1]?.id || 'layer-1') === layer.id
-                  );
+                  const layerPaths = paths.filter((p) => {
+                    const resolvedId = p.layerId && layerIds.has(p.layerId) ? p.layerId : fallbackLayerId;
+                    return resolvedId === layer.id;
+                  });
                   return (
                     <g key={layer.id} opacity={layer.opacity ?? 1}>
                       {layerPaths.map((p) => (

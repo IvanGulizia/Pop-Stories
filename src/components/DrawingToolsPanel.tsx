@@ -99,6 +99,29 @@ export function DrawingToolsPanel({ onUndo, onClearLayer }: DrawingToolsPanelPro
 
   return (
     <div className="space-y-4 flex flex-col h-full text-slate-800 select-none">
+      {/* Opacité du calque actif (arrière-plan, premier-plan, collider) */}
+      {activeLayer && (
+        <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5">
+          <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+            <span className="truncate">Opacité ({activeLayer.name})</span>
+            <span className="font-mono text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+              {Math.round((activeLayer.opacity ?? 1) * 100)}%
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={activeLayer.opacity ?? 1}
+            onChange={(e) =>
+              updateLayer(activeLayer!.id, { opacity: parseFloat(e.target.value) })
+            }
+            className="w-full accent-indigo-600 cursor-pointer"
+          />
+        </div>
+      )}
+
       {/* Propriétés spécifiques aux Calques Colliders */}
       {isColliderLayer && activeLayer && (
         <div className="p-3 bg-orange-50/70 border border-orange-200/90 rounded-2xl space-y-3">
@@ -191,14 +214,14 @@ export function DrawingToolsPanel({ onUndo, onClearLayer }: DrawingToolsPanelPro
               <div>
                 <div className="flex justify-between text-[10px] font-semibold text-slate-600 mb-0.5">
                   <span>Adhérence</span>
-                  <span>{Math.round((activeLayer.colliderFriction ?? 0.9) * 100)}%</span>
+                  <span>{Math.round((activeLayer.colliderFriction ?? 0.8) * 100)}%</span>
                 </div>
                 <input
                   type="range"
                   min={0}
                   max={1}
                   step={0.05}
-                  value={activeLayer.colliderFriction ?? 0.9}
+                  value={activeLayer.colliderFriction ?? 0.8}
                   onChange={(e) =>
                     updateLayer(activeLayer!.id, { colliderFriction: parseFloat(e.target.value) })
                   }

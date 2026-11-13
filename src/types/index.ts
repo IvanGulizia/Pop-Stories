@@ -81,6 +81,7 @@ export type BehaviorType =
   | 'move_to'
   | 'patrol'
   | 'wandering'
+  | 'flee'
   | 'keyboard_control'
   | 'boundary_behavior'
   | 'particle_emitter';
@@ -93,12 +94,14 @@ export interface BaseBehaviorConfig {
 
 export interface PhysicsBehaviorConfig extends BaseBehaviorConfig {
   type: 'physics';
-  gravity: number;   // px/s^2, default 400
-  bounce: number;    // restitution 0..1, default 0.4
-  friction: number;  // 0..1, default 0.98
-  mass: number;      // default 1
-  isTrigger?: boolean; // false = solide avec rebond/blocage physique, true = trigger/fantôme
-  isStatic?: boolean;  // true = obstacle fixe infranchissable
+  gravity: number;       // px/s^2, default 400
+  bounce: number;        // restitution 0..1, default 0.4
+  friction: number;      // 0..1 surface friction (0 = glace sans rotation, 1 = caoutchouc qui roule), default 0.5
+  frictionStatic?: number; // 0..2 static friction, default 0.5
+  frictionAir?: number;    // 0..0.25 air drag damping, default 0.015
+  mass: number;          // default 1
+  isTrigger?: boolean;   // false = solide avec rebond/blocage physique, true = trigger/fantôme
+  isStatic?: boolean;    // true = obstacle fixe infranchissable
   freezeRotation?: boolean; // Rigidbody2D Freeze Rotation (empêche la rotation sous les chocs)
 }
 
@@ -240,6 +243,21 @@ export interface ParticleEmitterBehaviorConfig extends BaseBehaviorConfig {
   offsetY?: number;      // décalage Y par rapport au centre
 }
 
+export interface FleeBehaviorConfig extends BaseBehaviorConfig {
+  type: 'flee';
+  targetType: 'mouse' | 'entity' | 'nearest_type' | 'nearest_tag';
+  targetEntityId?: string;
+  targetEntityType?: EntityType;
+  targetTag?: string;
+  speed: number;           // px/s, default 160
+  fleeRadius: number;      // rayon de fuite en px (0 = toujours fuir), default 220
+  axisMode?: 'free_2d' | 'horizontal'; // 2D libre ou sol horizontal
+  acceleration?: number;   // 0.05..1
+  damping?: number;        // 0..0.98
+  flipOnMove?: boolean;
+  flipInvert?: boolean;
+}
+
 export type EntityBehavior =
   | PhysicsBehaviorConfig
   | DraggableBehaviorConfig
@@ -250,6 +268,7 @@ export type EntityBehavior =
   | MoveToBehaviorConfig
   | PatrolBehaviorConfig
   | WanderingBehaviorConfig
+  | FleeBehaviorConfig
   | KeyboardControlBehaviorConfig
   | BoundaryBehaviorConfig
   | ParticleEmitterBehaviorConfig;
@@ -419,10 +438,25 @@ export type SpawnReferenceMode = 'subject' | 'target' | 'entity' | 'type' | 'tag
 
 export type SoundType = 'pop' | 'bell' | 'laser' | 'bounce' | 'magic' | 'win';
 
+export interface CustomSoundEditParams {
+  trimStart: number;    // 0..1 normalized
+  trimEnd: number;      // 0..1 normalized
+  fadeIn: number;       // seconds
+  fadeOut: number;      // seconds
+  attack: number;       // seconds (ADSR)
+  decay: number;        // seconds (ADSR)
+  sustain: number;      // 0..1 level (ADSR)
+  release: number;      // seconds (ADSR)
+  gain: number;         // 0.1..2.5 volume boost
+  playbackRate: number; // 0.5..2.0 speed/pitch
+}
+
 export interface CustomSound {
   id: string;
   name: string;
   dataUrl: string;
+  rawDataUrl?: string;
+  editParams?: CustomSoundEditParams;
   duration?: number;
   source: 'mic' | 'upload';
   createdAt: number;

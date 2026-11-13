@@ -2174,7 +2174,7 @@ export function DrawingCanvas({
                 <span className="shrink-0 font-medium">Opacité :</span>
                 <input
                   type="range"
-                  min="0.1"
+                  min="0"
                   max="1"
                   step="0.05"
                   value={activeLayer.opacity ?? 1}

@@ -14,6 +14,7 @@ import {
   Check,
   Link2,
   Unlink,
+  Copy,
 } from 'lucide-react';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { OnionStateOption } from './DrawingCanvas';
@@ -26,6 +27,7 @@ export function Inspector() {
   const updateEntityState = useSceneStore((state) => state.updateEntityState);
   const updateStateProperties = useSceneStore((state) => state.updateStateProperties);
   const addStateToEntity = useSceneStore((state) => state.addStateToEntity);
+  const duplicateStateInEntity = useSceneStore((state) => state.duplicateStateInEntity);
   const removeStateFromEntity = useSceneStore((state) => state.removeStateFromEntity);
   const deleteEntity = useSceneStore((state) => state.deleteEntity);
   const addTagToEntity = useSceneStore((state) => state.addTagToEntity);
@@ -466,20 +468,34 @@ export function Inspector() {
                 }`}
                 title="Cliquer pour activer cet état • Glissez sur une case de règle"
               >
-                {/* Bouton supprimer état (si plus d'un état) */}
-                {canDelete && (
+                {/* Boutons Dupliquer & Supprimer état */}
+                <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      removeStateFromEntity(selectedEntity.id, st.id);
+                      const newId = duplicateStateInEntity(selectedEntity.id, st.id);
+                      if (newId) updateEntityState(selectedEntity.id, newId);
                     }}
-                    className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 transition-opacity cursor-pointer"
-                    title="Supprimer cet état"
+                    className="text-slate-400 hover:text-indigo-600 p-1 rounded-md hover:bg-indigo-50 cursor-pointer"
+                    title="Dupliquer cet état (avec son dessin et ses overrides)"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <Copy className="w-3.5 h-3.5" />
                   </button>
-                )}
+                  {canDelete && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeStateFromEntity(selectedEntity.id, st.id);
+                      }}
+                      className="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 cursor-pointer"
+                      title="Supprimer cet état"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
 
                 {/* Nom de l'état (avec possibilité de renommage) */}
                 {renamingStateId === st.id ? (
@@ -563,17 +579,46 @@ export function Inspector() {
                 >
                   {statePaths.length > 0 ? (
                     <svg viewBox="0 0 200 200" className="w-full h-full pointer-events-none">
-                      {statePaths.map((p) => (
-                        <path
-                          key={p.id}
-                          d={p.d}
-                          stroke={p.stroke}
-                          strokeWidth={p.strokeWidth}
-                          fill={p.fill || 'none'}
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      ))}
+                      {(() => {
+                        const stLayers = st.drawingLayers || (st.id === selectedEntity.currentStateId ? selectedEntity.drawingLayers : undefined);
+                        if (!stLayers || stLayers.length === 0) {
+                          return statePaths.map((p) => (
+                            <path
+                              key={p.id}
+                              d={p.d}
+                              stroke={p.stroke}
+                              strokeWidth={p.strokeWidth}
+                              fill={p.fill || 'none'}
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          ));
+                        }
+                        const fallbackLayerId = stLayers[stLayers.length - 1]?.id || 'layer-1';
+                        const layerIds = new Set(stLayers.map((l) => l.id));
+                        return [...stLayers].reverse().map((layer) => {
+                          if (!layer.visible) return null;
+                          const layerPaths = statePaths.filter((p) => {
+                            const resolvedId = p.layerId && layerIds.has(p.layerId) ? p.layerId : fallbackLayerId;
+                            return resolvedId === layer.id;
+                          });
+                          return (
+                            <g key={layer.id} opacity={layer.opacity ?? 1}>
+                              {layerPaths.map((p) => (
+                                <path
+                                  key={p.id}
+                                  d={p.d}
+                                  stroke={p.stroke}
+                                  strokeWidth={p.strokeWidth}
+                                  fill={p.fill || 'none'}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              ))}
+                            </g>
+                          );
+                        });
+                      })()}
                     </svg>
                   ) : (
                     <span className="text-[10px] text-slate-400 font-medium italic">

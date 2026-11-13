@@ -16,11 +16,13 @@ import {
   BehaviorOverride,
   AutoDestroyBehaviorConfig,
   ParticleEmitterBehaviorConfig,
+  FleeBehaviorConfig,
   ParticleShape,
   CustomParticlePreset,
 } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
+import { ParticleEditorModal } from './ParticleEditorModal';
 import { invalidateCustomParticleSprite } from '../utils/particleSystem';
 import {
   Activity,
@@ -44,6 +46,8 @@ import {
   Shuffle,
   Paintbrush,
   Pencil,
+  Wind,
+  Sliders,
 } from 'lucide-react';
 
 interface BehaviorManagerProps {
@@ -76,6 +80,10 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
     behaviorId: string;
     isOverridden: boolean;
     editingPreset?: CustomParticlePreset;
+  } | null>(null);
+  const [particleEditorState, setParticleEditorState] = useState<{
+    behaviorId: string;
+    isOverridden: boolean;
   } | null>(null);
 
   // Sync with selectedStateId if it changes from parent Inspector
@@ -151,7 +159,9 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
           isStatic: false,
           gravity: 400,
           bounce: 0.4,
-          friction: 0.98,
+          friction: 0.6,
+          frictionStatic: 0.5,
+          frictionAir: 0.015,
           mass: 1,
           freezeRotation: false,
         } as PhysicsBehaviorConfig;
@@ -228,6 +238,20 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
           pauseDuration: 0.8,
           orientToMovement: false,
         } as WanderingBehaviorConfig;
+        break;
+      case 'flee':
+        newBehavior = {
+          id: generateBehaviorId('flee'),
+          type: 'flee',
+          enabled: true,
+          targetType: 'mouse',
+          speed: 160,
+          fleeRadius: 220,
+          axisMode: 'free_2d',
+          acceleration: 0.35,
+          damping: 0.85,
+          flipOnMove: false,
+        } as FleeBehaviorConfig;
         break;
       case 'keyboard_control':
         newBehavior = {
@@ -332,6 +356,8 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
         return <Repeat className="w-4 h-4 text-blue-600" />;
       case 'wandering':
         return <Shuffle className="w-4 h-4 text-emerald-600" />;
+      case 'flee':
+        return <Wind className="w-4 h-4 text-rose-500" />;
       case 'keyboard_control':
         return <Gamepad2 className="w-4 h-4 text-rose-600" />;
       case 'boundary_behavior':
@@ -363,6 +389,8 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
         return 'Patrouille';
       case 'wandering':
         return 'Balade Aléatoire (Wandering)';
+      case 'flee':
+        return 'Fuir (Flee)';
       case 'keyboard_control':
         return 'Contrôles Joueur';
       case 'boundary_behavior':
@@ -588,6 +616,11 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
                           isOverridden: hasOverride,
                           editingPreset,
                         }),
+                      onOpenParticleEditor: () =>
+                        setParticleEditorState({
+                          behaviorId: behavior.id,
+                          isOverridden: hasOverride,
+                        }),
                       onDeleteCustomParticle: (presetId) => {
                         deleteCustomParticle(presetId);
                         invalidateCustomParticleSprite(presetId);
@@ -796,6 +829,20 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
                       <div className="text-[11px] text-slate-500">Poursuite continue avec distance minimale de sécurité.</div>
                     </div>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleAddBehavior('flee')}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-rose-400 hover:bg-rose-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <Wind className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-800 text-xs">Fuir (Flee)</div>
+                      <div className="text-[11px] text-slate-500">S'éloigne automatiquement de la souris, d'une entité ou d'un tag.</div>
+                    </div>
+                  </button>
                 </div>
               </div>
 
@@ -886,6 +933,62 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
           onClose={() => setParticleDrawerState(null)}
         />
       )}
+      {/* Éditeur & Testeur interactif de particules */}
+      {particleEditorState && (() => {
+        const base = baseBehaviors.find((bh) => bh.id === particleEditorState.behaviorId);
+        if (!base || base.type !== 'particle_emitter') return null;
+        const ov = particleEditorState.isOverridden
+          ? targetState?.behaviorOverrides?.[base.id]
+          : undefined;
+        const effective = { ...base, ...(ov || {}) } as ParticleEmitterBehaviorConfig;
+        return (
+          <ParticleEditorModal
+            isOpen={true}
+            mode="emitter"
+            initialConfig={{
+              shape: effective.shape || 'circle',
+              customParticleId: effective.customParticleId,
+              useParticleTint: effective.useParticleTint,
+              color: effective.color || '#f59e0b',
+              color2: effective.color2 || effective.color || '#ef4444',
+              rate: effective.rate ?? 14,
+              speed: effective.speed ?? 140,
+              size: effective.size ?? 6,
+              lifetime: effective.lifetime ?? 0.8,
+              gravity: effective.gravity ?? 160,
+              spread: effective.spread ?? 60,
+              angle: effective.angle ?? -90,
+              offsetX: effective.offsetX ?? 0,
+              offsetY: effective.offsetY ?? 0,
+            }}
+            onApply={(cfg) => {
+              const patch: Partial<ParticleEmitterBehaviorConfig> = {
+                shape: cfg.shape,
+                customParticleId: cfg.shape === 'custom' ? cfg.customParticleId : undefined,
+                useParticleTint: cfg.shape === 'custom' ? Boolean(cfg.useParticleTint) : undefined,
+                color: cfg.color,
+                color2: cfg.color2,
+                rate: cfg.rate ?? 14,
+                speed: cfg.speed,
+                size: cfg.size,
+                lifetime: cfg.lifetime,
+                gravity: cfg.gravity,
+                spread: cfg.spread,
+                angle: cfg.angle,
+                offsetX: cfg.offsetX ?? 0,
+                offsetY: cfg.offsetY ?? 0,
+              };
+              if (particleEditorState.isOverridden) {
+                handleUpdateOverride(particleEditorState.behaviorId, patch);
+              } else {
+                handleUpdateBaseBehavior(particleEditorState.behaviorId, patch);
+              }
+              setParticleEditorState(null);
+            }}
+            onClose={() => setParticleEditorState(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -902,6 +1005,7 @@ function renderBehaviorControls({
   availableTags,
   customParticles,
   onOpenParticleDrawer,
+  onOpenParticleEditor,
   onDeleteCustomParticle,
 }: {
   behavior: EntityBehavior;
@@ -914,6 +1018,7 @@ function renderBehaviorControls({
   availableTags: string[];
   customParticles: CustomParticlePreset[];
   onOpenParticleDrawer: (editingPreset?: CustomParticlePreset) => void;
+  onOpenParticleEditor: () => void;
   onDeleteCustomParticle: (presetId: string) => void;
 }) {
   const update = (partial: any) => {
@@ -1103,8 +1208,8 @@ function renderBehaviorControls({
               </div>
               <input
                 type="range"
-                min="-800"
-                max="1200"
+                min="-2000"
+                max="2000"
                 step="50"
                 value={b.gravity ?? 400}
                 onChange={(e) => update({ gravity: parseFloat(e.target.value) })}
@@ -1127,7 +1232,7 @@ function renderBehaviorControls({
             <input
               type="range"
               min="0"
-              max="1"
+              max="1.2"
               step="0.05"
               value={b.bounce ?? 0.4}
               onChange={(e) => update({ bounce: parseFloat(e.target.value) })}
@@ -1135,27 +1240,55 @@ function renderBehaviorControls({
             />
           </div>
 
-          {/* Ligne 5: Friction au contact */}
+          {/* Ligne 5: Friction / Adhérence au contact */}
           <div className="p-2 bg-white rounded-xl border border-slate-200">
             <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
               <div>
-                <span className="font-bold">Friction (Adhérence)</span>
-                <span className="text-[10px] text-slate-400 block">Frottement de surface lors du glissement</span>
+                <span className="font-bold">Adhérence surface (Friction)</span>
+                <span className="text-[10px] text-slate-400 block">
+                  0 = Glace (glisse) • 0.6+ = Accroche &amp; fait rouler les balles
+                </span>
               </div>
               <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-                {b.friction ?? 0.98}
+                {Math.round((b.friction ?? 0.6) * 100)}%
               </span>
             </div>
             <input
               type="range"
-              min="0.8"
+              min="0"
               max="1"
-              step="0.01"
-              value={b.friction ?? 0.98}
+              step="0.05"
+              value={b.friction ?? 0.6}
               onChange={(e) => update({ friction: parseFloat(e.target.value) })}
               className="w-full accent-indigo-600"
             />
           </div>
+
+          {/* Ligne 5.5: Résistance de l'air (Friction Air) */}
+          {!b.isStatic && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200">
+              <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                <div>
+                  <span className="font-bold">Résistance de l'air (Freinage)</span>
+                  <span className="text-[10px] text-slate-400 block">
+                    0 = Vide spatial (aucun freinage) • 0.05+ = Freinage fort
+                  </span>
+                </div>
+                <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                  {(b.frictionAir ?? 0.015).toFixed(3)}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="0.25"
+                step="0.005"
+                value={b.frictionAir ?? 0.015}
+                onChange={(e) => update({ frictionAir: parseFloat(e.target.value) })}
+                className="w-full accent-indigo-600"
+              />
+            </div>
+          )}
 
           {/* Ligne 6: Masse du corps */}
           {!b.isStatic && (
@@ -1171,9 +1304,9 @@ function renderBehaviorControls({
               </div>
               <input
                 type="range"
-                min="0.2"
-                max="10"
-                step="0.2"
+                min="0.1"
+                max="50"
+                step="0.1"
                 value={b.mass ?? 1}
                 onChange={(e) => update({ mass: parseFloat(e.target.value) })}
                 className="w-full accent-indigo-600"
@@ -2013,6 +2146,144 @@ function renderBehaviorControls({
       );
     }
 
+    case 'flee': {
+      const b = { ...behavior, ...(override || {}) } as FleeBehaviorConfig;
+      return (
+        <div className="space-y-1.5">
+          {/* Ligne 1: Menace à fuir */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Menace à fuir</span>
+            <select
+              value={b.targetType || 'mouse'}
+              onChange={(e) => update({ targetType: e.target.value as any })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[190px]"
+            >
+              <option value="mouse">Curseur / Souris</option>
+              <option value="entity">Entité précise</option>
+              <option value="nearest_type">Type d'objet le plus proche</option>
+              <option value="nearest_tag">Tag le plus proche (#tag)</option>
+            </select>
+          </div>
+
+          {b.targetType === 'entity' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Entité crainte</span>
+              <select
+                value={b.targetEntityId || ''}
+                onChange={(e) => update({ targetEntityId: e.target.value })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[160px]"
+              >
+                <option value="">-- Choisir une entité --</option>
+                {targetEntityOptions.map((ent) => (
+                  <option key={ent.id} value={ent.id}>
+                    {ent.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {b.targetType === 'nearest_type' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Type recherché</span>
+              <select
+                value={b.targetEntityType || ''}
+                onChange={(e) => update({ targetEntityType: e.target.value })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[160px]"
+              >
+                <option value="">-- Choisir un type --</option>
+                {entityTypeOptions.map((opt) => (
+                  <option key={opt.type} value={opt.type}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {b.targetType === 'nearest_tag' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Tag recherché</span>
+              <input
+                type="text"
+                list={`tags-flee-${b.id}`}
+                placeholder="ex: danger, joueur..."
+                value={b.targetTag || ''}
+                onChange={(e) => update({ targetTag: e.target.value.replace(/^#/, '') })}
+                className="w-32 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+              />
+              <datalist id={`tags-flee-${b.id}`}>
+                {availableTags.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
+            </div>
+          )}
+
+          {/* Rayon de fuite */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <div>
+                <span className="font-bold">Rayon de détection (Fuite)</span>
+                <span className="text-[10px] text-slate-400 block">
+                  {(b.fleeRadius ?? 220) === 0
+                    ? '0 = Fuit en permanence sans limite de distance'
+                    : `Fuit dès que la menace entre à moins de ${b.fleeRadius ?? 220} px`}
+                </span>
+              </div>
+              <span className="font-mono font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded text-[11px]">
+                {(b.fleeRadius ?? 220) === 0 ? '∞' : `${b.fleeRadius ?? 220} px`}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="600"
+              step="10"
+              value={b.fleeRadius ?? 220}
+              onChange={(e) => update({ fleeRadius: parseFloat(e.target.value) })}
+              className="w-full accent-rose-500"
+            />
+          </div>
+
+          {/* Vitesse de fuite */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Vitesse de fuite</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.speed ?? 160} px/s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="30"
+              max="500"
+              step="10"
+              value={b.speed ?? 160}
+              onChange={(e) => update({ speed: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Axe de fuite */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Axe de déplacement</span>
+            <select
+              value={b.axisMode || 'free_2d'}
+              onChange={(e) => update({ axisMode: e.target.value as any })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              <option value="free_2d">Zone 2D (Toutes directions)</option>
+              <option value="horizontal">Horizontal (Sol / Plateforme)</option>
+            </select>
+          </div>
+
+          {renderInertiaControls(b, 0.85)}
+          {renderFlipControls(b)}
+        </div>
+      );
+    }
+
     case 'boundary_behavior': {
       const b = { ...behavior, ...(override || {}) } as BoundaryBehaviorConfig;
       return (
@@ -2062,6 +2333,16 @@ function renderBehaviorControls({
       const b = { ...behavior, ...(override || {}) } as ParticleEmitterBehaviorConfig;
       return (
         <div className="space-y-1.5">
+          {/* Bouton Éditeur & Testeur interactif */}
+          <button
+            type="button"
+            onClick={onOpenParticleEditor}
+            className="w-full py-2 px-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-all active:scale-[0.99]"
+          >
+            <Sliders className="w-3.5 h-3.5" />
+            <span>Ouvrir l'Éditeur &amp; Testeur de Particules</span>
+          </button>
+
           {/* Ligne 1: Forme des particules */}
           <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
             <span className="font-bold text-slate-700 text-xs">Forme des particules</span>

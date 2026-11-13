@@ -12,6 +12,7 @@ import {
   MoveToBehaviorConfig,
   PatrolBehaviorConfig,
   WanderingBehaviorConfig,
+  FleeBehaviorConfig,
   KeyboardControlBehaviorConfig,
   BoundaryBehaviorConfig,
   AutoDestroyBehaviorConfig,
@@ -487,7 +488,8 @@ function buildColliderLayerBodies(
   const bodies: Matter.Body[] = [];
   const label = `layercol::${layer.id}`;
   const isSensor = Boolean(layer.colliderIsTrigger);
-  const friction = 1 - Math.max(0, Math.min(1, layer.colliderFriction ?? 0.9));
+  const friction = Math.max(0, Math.min(1, layer.colliderFriction ?? 0.8));
+  const frictionStatic = Math.max(0.1, friction * 1.2);
   const restitution = Math.max(0, Math.min(1, layer.colliderBounce ?? 0.0));
   const isLegacy200 = layer.coordinateSpace === 'legacy_200';
   const sx = isLegacy200 ? Math.max(100, canvasBounds.width) / 200 : 1;
@@ -506,6 +508,7 @@ function buildColliderLayerBodies(
           isStatic: true,
           isSensor,
           friction,
+          frictionStatic,
           restitution,
           label,
         })
@@ -520,6 +523,7 @@ function buildColliderLayerBodies(
           isStatic: true,
           isSensor,
           friction,
+          frictionStatic,
           restitution,
           label,
         })
@@ -545,6 +549,7 @@ function buildColliderLayerBodies(
           isStatic: true,
           isSensor,
           friction,
+          frictionStatic,
           restitution,
           label,
         })
@@ -562,12 +567,21 @@ function buildColliderLayerBodies(
       const len = Math.hypot(dx, dy);
       if (len < 0.5) continue;
       const angle = Math.atan2(dy, dx);
+      const segW = len + thickness * 0.8;
+      const chamferR = Math.max(1, Math.min(thickness * 0.45, segW * 0.42));
       const part = Bodies.rectangle(
         (a.x + b.x) / 2,
         (a.y + b.y) / 2,
-        len + thickness * 0.65,
+        segW,
         thickness,
-        { angle, label }
+        {
+          angle,
+          label,
+          friction,
+          frictionStatic,
+          restitution,
+          chamfer: { radius: chamferR },
+        }
       );
       parts.push(part);
     }
@@ -576,6 +590,7 @@ function buildColliderLayerBodies(
       parts[0].isStatic = true;
       parts[0].isSensor = isSensor;
       parts[0].friction = friction;
+      parts[0].frictionStatic = frictionStatic;
       parts[0].restitution = restitution;
       Body.setStatic(parts[0], true);
       bodies.push(parts[0]);
@@ -585,6 +600,7 @@ function buildColliderLayerBodies(
         isStatic: true,
         isSensor,
         friction,
+        frictionStatic,
         restitution,
         label,
       });
@@ -753,7 +769,7 @@ function ensurePhysicsWorld(
     const physics = effectiveBehaviors.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
     const boundary = effectiveBehaviors.find((b) => b.type === 'boundary_behavior') as BoundaryBehaviorConfig | undefined;
     const hasMovement = effectiveBehaviors.some((b) =>
-      ['keyboard_control', 'constant_velocity', 'patrol', 'wandering', 'move_to', 'follow'].includes(b.type)
+      ['keyboard_control', 'constant_velocity', 'patrol', 'wandering', 'move_to', 'follow', 'flee'].includes(b.type)
     );
     const isAttachedChild = !!(entity.parentId && entities[entity.parentId]);
 
@@ -806,7 +822,9 @@ function ensurePhysicsWorld(
       }
 
       const restitution = physics?.bounce ?? boundary?.bounciness ?? 0.0;
-      const friction = 1 - (physics?.friction ?? 0.98);
+      const friction = Math.max(0, Math.min(1, physics?.friction ?? 0.6));
+      const frictionStatic = Math.max(0, Math.min(2, physics?.frictionStatic ?? Math.max(0.2, friction * 1.1)));
+      const frictionAir = Math.max(0, Math.min(0.25, physics?.frictionAir ?? 0.015));
 
       const bodyOptions: Matter.IBodyDefinition = {
         label: entity.id,
@@ -814,7 +832,8 @@ function ensurePhysicsWorld(
         isSensor,
         restitution,
         friction,
-        frictionAir: 0.02,
+        frictionStatic,
+        frictionAir,
         mass: Math.max(0.1, physics?.mass || 1),
         inertia: freezeRotation ? Infinity : undefined,
         collisionFilter: { group: collisionGroup },
@@ -858,7 +877,15 @@ function ensurePhysicsWorld(
       body.isSensor = physics ? (physics.isTrigger === true) : true;
       body.collisionFilter.group = collisionGroup;
       if (physics) {
+        const nextFriction = Math.max(0, Math.min(1, physics.friction ?? 0.6));
         body.restitution = physics.bounce ?? 0.0;
+        body.friction = nextFriction;
+        body.frictionStatic = Math.max(0, Math.min(2, physics.frictionStatic ?? Math.max(0.2, nextFriction * 1.1)));
+        body.frictionAir = Math.max(0, Math.min(0.25, physics.frictionAir ?? 0.015));
+        const targetMass = Math.max(0.1, physics.mass || 1);
+        if (!isStatic && Math.abs(body.mass - targetMass) > 0.05) {
+          Body.setMass(body, targetMass);
+        }
         if (physics.freezeRotation) {
           Body.setInertia(body, Infinity);
           Body.setAngle(body, 0);
@@ -973,6 +1000,7 @@ export function stepMatterPhysics(params: {
     const wandering = effectiveBehaviors.find((b) => b.type === 'wandering') as WanderingBehaviorConfig | undefined;
     const moveTo = effectiveBehaviors.find((b) => b.type === 'move_to') as MoveToBehaviorConfig | undefined;
     const follow = effectiveBehaviors.find((b) => b.type === 'follow') as FollowBehaviorConfig | undefined;
+    const flee = effectiveBehaviors.find((b) => b.type === 'flee') as FleeBehaviorConfig | undefined;
     const lookAt = effectiveBehaviors.find((b) => b.type === 'look_at') as LookAtBehaviorConfig | undefined;
     const boundary = effectiveBehaviors.find((b) => b.type === 'boundary_behavior') as BoundaryBehaviorConfig | undefined;
 
@@ -989,20 +1017,19 @@ export function stepMatterPhysics(params: {
         y: -0.001 * body.mass * (engine.world.gravity.y || 1),
       });
       // S'il n'y a pas d'action verticale commandée, amortir vy résiduel
-      if (!keyboard && !constVel?.vy && !patrol && !wandering && !moveTo && !follow) {
+      if (!keyboard && !constVel?.vy && !patrol && !wandering && !moveTo && !follow && !flee) {
         Body.setVelocity(body, { x: body.velocity.x, y: body.velocity.y * 0.8 });
       }
     }
 
-    // 1. Gravité personnalisée
+    // 1. Gravité personnalisée exacte (400 = gravité standard 1x ; 0 = apesanteur exacte)
     if (physics && !physics.isStatic) {
       const customG = physics.gravity ?? 400;
-      const defaultG = 9.8 * 60; // échelle approximative Matter.js
-      const diffG = customG - defaultG;
-      if (Math.abs(diffG) > 10) {
+      const gravityRatio = customG / 400;
+      if (Math.abs(gravityRatio - 1) > 0.001) {
         Body.applyForce(body, body.position, {
           x: 0,
-          y: (diffG * 0.000002) * body.mass,
+          y: (gravityRatio - 1) * 0.001 * (engine.world.gravity.y || 1) * body.mass,
         });
       }
     }
@@ -1424,6 +1451,81 @@ export function stepMatterPhysics(params: {
       }
     }
 
+    // 6b. Flee (Fuir une menace)
+    if (flee) {
+      let threatX = body.position.x;
+      let threatY = body.position.y;
+      let hasThreat = false;
+
+      if (flee.targetType === 'mouse' && mousePos) {
+        threatX = mousePos.x;
+        threatY = mousePos.y;
+        hasThreat = true;
+      } else if (flee.targetType === 'entity' && flee.targetEntityId) {
+        const threatEntity = entities[flee.targetEntityId];
+        if (threatEntity) {
+          const tOffset = colliderOffsets.get(threatEntity.id) || { relCenterX: threatEntity.size.width / 2, relCenterY: threatEntity.size.height / 2 };
+          threatX = threatEntity.position.x + tOffset.relCenterX;
+          threatY = threatEntity.position.y + tOffset.relCenterY;
+          hasThreat = true;
+        }
+      } else if (flee.targetType === 'nearest_type' || flee.targetType === 'nearest_tag') {
+        const nearestThreat = findNearestTarget(
+          flee.targetType,
+          flee.targetEntityType,
+          flee.targetTag
+        );
+        if (nearestThreat) {
+          const tOffset = colliderOffsets.get(nearestThreat.id) || { relCenterX: nearestThreat.size.width / 2, relCenterY: nearestThreat.size.height / 2 };
+          threatX = nearestThreat.position.x + tOffset.relCenterX;
+          threatY = nearestThreat.position.y + tOffset.relCenterY;
+          hasThreat = true;
+        }
+      }
+
+      const fleeAccel = flee.acceleration ?? 0.35;
+      const fleeDamp = flee.damping ?? 0.85;
+      const axisMode = flee.axisMode || 'free_2d';
+
+      if (hasThreat) {
+        const dx = body.position.x - threatX;
+        const dy = body.position.y - threatY;
+        const dist = Math.hypot(dx, dy);
+        const radius = flee.fleeRadius ?? 220;
+        const shouldFlee = radius <= 0 || dist < radius;
+
+        if (shouldFlee) {
+          const speed = (flee.speed ?? 160) / 60;
+          if (axisMode === 'horizontal') {
+            const dirX = Math.abs(dx) < 1 ? (Math.random() < 0.5 ? -1 : 1) : Math.sign(dx);
+            const nextVx = approachAxisVelocity(body.velocity.x, dirX * speed, fleeAccel, fleeDamp, 0.85);
+            Body.setVelocity(body, { x: nextVx, y: body.velocity.y });
+          } else {
+            const safeDist = Math.max(0.001, dist);
+            const dirX = dist < 1 ? Math.cos(Math.random() * Math.PI * 2) : dx / safeDist;
+            const dirY = dist < 1 ? Math.sin(Math.random() * Math.PI * 2) : dy / safeDist;
+            const nextVx = approachAxisVelocity(body.velocity.x, dirX * speed, fleeAccel, fleeDamp, 0.85);
+            const nextVy = approachAxisVelocity(body.velocity.y, dirY * speed, fleeAccel, fleeDamp, 0.85);
+            Body.setVelocity(body, { x: nextVx, y: nextVy });
+          }
+        } else {
+          Body.setVelocity(
+            body,
+            axisMode === 'horizontal'
+              ? { x: body.velocity.x * fleeDamp, y: body.velocity.y }
+              : { x: body.velocity.x * fleeDamp, y: body.velocity.y * fleeDamp }
+          );
+        }
+      } else {
+        Body.setVelocity(
+          body,
+          axisMode === 'horizontal'
+            ? { x: body.velocity.x * fleeDamp, y: body.velocity.y }
+            : { x: body.velocity.x * fleeDamp, y: body.velocity.y * fleeDamp }
+        );
+      }
+    }
+
     // 7. Look At
     if (lookAt) {
       let targetX = body.position.x;
@@ -1477,7 +1579,7 @@ export function stepMatterPhysics(params: {
     }
 
     // 7b. Flip horizontal automatique selon le sens du mouvement
-    const flipBehavior = [keyboard, patrol, wandering, moveTo, follow, constVel].find(
+    const flipBehavior = [keyboard, patrol, wandering, moveTo, follow, flee, constVel].find(
       (b) => b && (b as any).flipOnMove === true
     ) as { flipOnMove?: boolean; flipInvert?: boolean } | undefined;
 

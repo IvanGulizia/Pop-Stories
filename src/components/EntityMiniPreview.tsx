@@ -24,6 +24,8 @@ export function EntityMiniPreview({
   // Render vector paths if available
   const vectorPaths: VectorPath[] | undefined =
     activeState?.vectorPaths || entity?.vectorPaths;
+  const drawingLayers =
+    activeState?.drawingLayers || entity?.drawingLayers;
 
   if (vectorPaths && vectorPaths.length > 0) {
     return (
@@ -32,17 +34,44 @@ export function EntityMiniPreview({
         style={{ width: size, height: size }}
       >
         <svg viewBox="0 0 200 200" className="w-full h-full">
-          {vectorPaths.map((p) => (
-            <path
-              key={p.id}
-              d={p.d}
-              stroke={p.stroke}
-              strokeWidth={p.strokeWidth || 3}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill={p.fill || 'none'}
-            />
-          ))}
+          {!drawingLayers || drawingLayers.length === 0
+            ? vectorPaths.map((p) => (
+                <path
+                  key={p.id}
+                  d={p.d}
+                  stroke={p.stroke}
+                  strokeWidth={p.strokeWidth || 3}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill={p.fill || 'none'}
+                />
+              ))
+            : (() => {
+                const fallbackLayerId = drawingLayers[drawingLayers.length - 1]?.id || 'layer-1';
+                const layerIds = new Set(drawingLayers.map((l) => l.id));
+                return [...drawingLayers].reverse().map((layer) => {
+                  if (!layer.visible) return null;
+                  const layerPaths = vectorPaths.filter((p) => {
+                    const resolvedId = p.layerId && layerIds.has(p.layerId) ? p.layerId : fallbackLayerId;
+                    return resolvedId === layer.id;
+                  });
+                  return (
+                    <g key={layer.id} opacity={layer.opacity ?? 1}>
+                      {layerPaths.map((p) => (
+                        <path
+                          key={p.id}
+                          d={p.d}
+                          stroke={p.stroke}
+                          strokeWidth={p.strokeWidth || 3}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          fill={p.fill || 'none'}
+                        />
+                      ))}
+                    </g>
+                  );
+                });
+              })()}
         </svg>
       </div>
     );

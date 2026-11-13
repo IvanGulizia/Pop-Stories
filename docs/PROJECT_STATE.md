@@ -1,6 +1,12 @@
 # État du Projet
 
 ## Complété
+- **Physique Roulante, Sound Studio ADSR, Export Nommé, Duplication d'État, Opacité des Calques, Comportement Flee & Éditeur de Particules (Phase 10.13)** :
+  - **Physique Matter.js & Plages étendues** : Correction de l'adhérence (`0..1` direct sans inversion `1 - x`) sur les entités et calques colliders avec chanfreins anti-accrochage sur segments, gravité (`-2000..2000`), masse (`0.1..50`) et résistance de l'air (`frictionAir`).
+  - **Sound Studio complet** : Forme d'onde interactive, découpe Trim début/fin, Fade In/Out, enveloppe ADSR, Gain & Pitch, aperçu Web Audio et export WAV non-destructif (`rawDataUrl` + `editParams` rééditables).
+  - **Export nommé & Duplication d'état** : Modale de nommage `.json` dans `SettingsPanel.tsx` et bouton *Dupliquer l'état* (`duplicateStateInEntity`) dans `Inspector.tsx`.
+  - **Opacité des calques fidèle partout** : Propagation complète de `drawingLayers` depuis `CreateEntityModal` jusqu'à `CustomShape`, `EntityMiniPreview`, `Inspector` et `DrawingToolsPanel`.
+  - **Comportement `flee` & Éditeur de Particules (`ParticleEditorModal`)** : Fuite paramétrable (cible, rayon, axe, inertie, flip) et atelier temps réel 60 FPS avec scène de test interactive relié à `BehaviorManager` et `RuleBook`.
 - **Calques Colliders Précis, WYSIWYG Monde, Inertie/Damping & Anti-Scintillement Collisions (Phase 10.12)** :
   - **Écran d'accueil au démarrage** : Ouverture directe sur l'écran d'accueil invitant à créer la première entité (boutons démo temporairement masqués).
   - **Calques Colliders de Décor avec `#Tags`** : Dessin direct sur calque dédié générant des colliders Matter.js précis le long des traits/formes (`rect`, `circle`, segments décimés orientés), avec `#tags`, Solide/Trigger, visibilité Play, friction et rebond, exploitables directement dans les règles `on_collision`.

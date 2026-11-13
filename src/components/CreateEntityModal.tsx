@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useSceneStore } from '../store/useSceneStore';
 import { X, Sparkles, Tag, Paintbrush } from 'lucide-react';
 import { DrawingCanvas } from './DrawingCanvas';
-import { VectorPath } from '../types';
+import { VectorPath, DrawingLayer } from '../types';
 
 interface CreateEntityModalProps {
   isOpen: boolean;
@@ -17,6 +17,7 @@ export function CreateEntityModal({ isOpen, onClose }: CreateEntityModalProps) {
   const [name, setName] = useState('Mon Dessin');
   const [drawingDataUrl, setDrawingDataUrl] = useState<string | undefined>(undefined);
   const [vectorPaths, setVectorPaths] = useState<VectorPath[]>([]);
+  const [drawingLayers, setDrawingLayers] = useState<DrawingLayer[] | undefined>(undefined);
   const [color] = useState('transparent');
   const [tagInput, setTagInput] = useState('');
 
@@ -38,6 +39,7 @@ export function CreateEntityModal({ isOpen, onClose }: CreateEntityModalProps) {
       icon: '🎨',
       drawingDataUrl,
       vectorPaths,
+      drawingLayers,
       color,
       tags: tags.length > 0 ? tags : [slug, 'custom'],
     });
@@ -113,6 +115,7 @@ export function CreateEntityModal({ isOpen, onClose }: CreateEntityModalProps) {
                 setVectorPaths(paths);
                 setDrawingDataUrl(dataUrl);
               }}
+              onLayersChange={setDrawingLayers}
               initialStrokeColor="#6366f1"
             />
           </div>

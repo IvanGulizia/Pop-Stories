@@ -1,3 +1,23 @@
+## [Phase 10.13] - 2026-11-13
+### Ajouté & Corrigé
+- **Calibrage Physique Matter.js & Roulement sur Calques Colliders (`matterPhysicsEngine.ts` / `BehaviorManager.tsx`)** :
+  - Suppression de l'inversion erronée de friction (`1 - friction`) sur les entités et les calques colliders : l'adhérence (`0 = glace`, `1 = gomme`) permet désormais aux balles circulaires de rouler naturellement sur les pentes et sols tracés.
+  - Ajout de chanfreins (`chamfer`) sur les segments de polylignes des calques colliders pour éviter les blocages aux jonctions de segments, et synchronisation dynamique à chaud de `friction`, `frictionStatic`, `frictionAir` et `mass`.
+  - Élargissement des plages de curseurs dans `BehaviorManager.tsx` (`Gravité -2000..2000`, `Masse 0.1..50`, `Adhérence 0..1`, `Rebond 0..1.2`) + ajout du paramètre **Résistance de l'air (`frictionAir` `0..0.25`)**.
+- **Sound Studio Enrichi (`SoundRecorderModal.tsx` / `audioEditor.ts`)** :
+  - Décodage Web Audio (`decodeAudioData`), forme d'onde interactive sur `<canvas>` avec poignées déplaçables, **Découpe (Trim)** début/fin, **Fade In / Fade Out**, **Enveloppe ADSR** (*Attack, Decay, Sustain, Release*), **Gain** et **Vitesse / Pitch** avec courbe d'enveloppe superposée en temps réel.
+  - Aperçu fidèle via `AudioBufferSourceNode` + `GainNode` et encodage hors-ligne `OfflineAudioContext` vers WAV 16-bit PCM tout en conservant `rawDataUrl` et `editParams` pour permettre la réédition non-destructive depuis *"Mes Sons"*.
+- **Nommage du fichier à l'Export (`SettingsPanel.tsx`)** :
+  - Fenêtre modale dédiée permettant de nommer librement le fichier `.json` avant téléchargement lors de l'export de projet ou de pack de curseurs.
+- **Duplication d'État (`useSceneStore.ts` / `Inspector.tsx`)** :
+  - Action `duplicateStateInEntity` clonant tracés, calques, échelle, rotation, collider et `behaviorOverrides`, accessible via un bouton dédié sur chaque carte d'état dans l'Inspecteur.
+- **Correction Opacité des Calques de Dessin (`CreateEntityModal.tsx` / `CustomShape.tsx` / `EntityMiniPreview.tsx` / `Inspector.tsx` / `DrawingToolsPanel.tsx`)** :
+  - Conservation complète de `drawingLayers` à la création d'entité (`onLayersChange`), rendu respectant `layer.opacity` et `layer.visible` sur le canvas principal et dans les aperçus miniatures sans fuite entre états, et ajout d'un curseur d'opacité dans `DrawingToolsPanel.tsx` pour les calques de décor/colliders.
+- **Nouveau Comportement `Fuir (Flee)` (`matterPhysicsEngine.ts` / `BehaviorManager.tsx`)** :
+  - Comportement autonome configurable s'éloignant de la souris, d'une entité, du type ou du `#tag` le plus proche dans un rayon de détection donné (`0 = fuite permanente`), avec mode `2D libre` ou `Horizontal`, accélération, damping et `Flip horizontal`.
+- **Éditeur & Testeur Interactif de Particules (`ParticleEditorModal.tsx`)** :
+  - Atelier visuel temps réel 60 FPS partageant exactement le moteur `particleSystem.ts` (`createParticlePool`), avec scène de test cliquable/glissable, thèmes de fond (*Nuit / Grille / Clair*), mode auto ou salve, 6 présets rapides, dessin de particules personnalisées et intégration directe dans `BehaviorManager` (`particle_emitter`) et `RuleBook` (`emit_particles`).
+
 ## [Phase 10.12] - 2026-11-13
 ### Ajouté & Corrigé
 - **Écran d'accueil au démarrage (`Scene.tsx` / `App.tsx`)** :

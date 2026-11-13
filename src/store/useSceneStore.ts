@@ -14,6 +14,7 @@ import {
   ActionTargetMode,
   AppMode,
   VectorPath,
+  DrawingLayer,
   AppSettings,
   ProjectExportData,
   RuleFolder,
@@ -216,6 +217,7 @@ interface SceneState {
   updateEntityParentOffset: (childId: EntityId, partial: Partial<ParentOffset>) => void;
   detachEntity: (childId: EntityId) => void;
   addStateToEntity: (entityId: EntityId, name?: string) => string;
+  duplicateStateInEntity: (entityId: EntityId, stateId: StateId) => string;
   removeStateFromEntity: (entityId: EntityId, stateId: StateId) => void;
   addEntity: (type: EntityType) => void;
   addCustomEntity: (customData: {
@@ -224,6 +226,7 @@ interface SceneState {
     icon?: string;
     drawingDataUrl?: string;
     vectorPaths?: VectorPath[];
+    drawingLayers?: DrawingLayer[];
     color?: string;
     tags?: string[];
   }) => void;
@@ -271,6 +274,7 @@ interface SceneState {
   addCustomSound: (sound: Omit<CustomSound, 'id' | 'createdAt'>) => string;
   deleteCustomSound: (id: string) => void;
   updateCustomSoundName: (id: string, name: string) => void;
+  updateCustomSound: (id: string, partial: Partial<CustomSound>) => void;
 
   triggerClickEvent: (entityId: EntityId) => void;
   triggerPointerEvent: (entityId: EntityId, phase: TriggerPhase, eventPosition?: Position) => void;
@@ -1843,6 +1847,53 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     return newId;
   },
 
+  duplicateStateInEntity: (entityId, stateId) => {
+    const targetEntity = findTargetEntityOrArchetype(get(), entityId);
+    if (!targetEntity) return '';
+    const sourceState = targetEntity.states[stateId];
+    if (!sourceState) return '';
+
+    const targetType = targetEntity.type;
+    const baseName = `${sourceState.name} (copie)`;
+    const newId = `state_copy_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+
+    const clonedState: EntityState = {
+      ...JSON.parse(JSON.stringify(sourceState)),
+      id: newId,
+      name: baseName,
+    };
+
+    set((state) => {
+      const updatedEntities = { ...state.entities };
+      Object.values(updatedEntities).forEach((e) => {
+        if (e.type === targetType) {
+          updatedEntities[e.id] = {
+            ...e,
+            states: {
+              ...e.states,
+              [newId]: JSON.parse(JSON.stringify(clonedState)),
+            },
+          };
+        }
+      });
+
+      const updatedArchetypes = { ...state.customArchetypes };
+      if (updatedArchetypes[targetType]) {
+        updatedArchetypes[targetType] = {
+          ...updatedArchetypes[targetType],
+          states: {
+            ...updatedArchetypes[targetType].states,
+            [newId]: JSON.parse(JSON.stringify(clonedState)),
+          },
+        };
+      }
+
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
+    });
+
+    return newId;
+  },
+
   removeStateFromEntity: (entityId, stateId) => {
     set((state) => {
       const targetEntity = findTargetEntityOrArchetype(state, entityId);
@@ -2000,7 +2051,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     });
   },
 
-  addCustomEntity: ({ name, type, icon, drawingDataUrl, vectorPaths, color, tags }) => {
+  addCustomEntity: ({ name, type, icon, drawingDataUrl, vectorPaths, drawingLayers, color, tags }) => {
     const cleanName = (name && name.trim()) || 'Mon Dessin';
     const slug = cleanName.toLowerCase().replace(/[^a-z0-9]/gi, '_') || 'dessin';
     const uniqueType = type || `custom_${slug}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
@@ -2008,6 +2059,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     const id = `custom-${Date.now().toString(36)}`;
     const currentEntities = Object.values(get().entities);
     const count = currentEntities.length + 1;
+    const clonedLayers = drawingLayers && drawingLayers.length > 0
+      ? JSON.parse(JSON.stringify(drawingLayers))
+      : undefined;
 
     const newEntity: Entity = {
       id,
@@ -2016,6 +2070,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       icon: icon || '🎨',
       drawingDataUrl,
       vectorPaths: vectorPaths ? JSON.parse(JSON.stringify(vectorPaths)) : [],
+      ...(clonedLayers ? { drawingLayers: clonedLayers } : {}),
       tags: tags && tags.length > 0 ? tags : [slug, 'custom'],
       position: { x: 180 + ((count * 35) % 220), y: 140 + ((count * 30) % 180) },
       size: { width: 256, height: 256 },
@@ -2029,6 +2084,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           scale: 1,
           rotation: 0,
           vectorPaths: vectorPaths ? JSON.parse(JSON.stringify(vectorPaths)) : [],
+          ...(clonedLayers ? { drawingLayers: JSON.parse(JSON.stringify(clonedLayers)) } : {}),
         },
       },
     };
@@ -2654,6 +2710,12 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   updateCustomSoundName: (id, name) => {
     set((state) => ({
       customSounds: state.customSounds.map((s) => (s.id === id ? { ...s, name } : s)),
+    }));
+  },
+
+  updateCustomSound: (id, partial) => {
+    set((state) => ({
+      customSounds: state.customSounds.map((s) => (s.id === id ? { ...s, ...partial } : s)),
     }));
   },
 
