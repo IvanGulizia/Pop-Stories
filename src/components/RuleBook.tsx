@@ -318,11 +318,16 @@ export function RuleBook() {
 
   const entityList = Object.values(entities);
 
-  // Tous les #tags utilisés dans le projet (entités, archétypes, règles)
+  const layerGroups = useSceneStore((state) => state.layerGroups || []);
+
+  // Tous les #tags utilisés dans le projet (entités, archétypes, calques collider, règles)
   const allProjectTags = useMemo(() => {
     const tagSet = new Set<string>();
     entityList.forEach((e) => e.tags?.forEach((t) => tagSet.add(t)));
     Object.values(customArchetypes).forEach((a) => a.tags?.forEach((t) => tagSet.add(t)));
+    layerGroups.forEach((g) => {
+      g.layers?.forEach((l) => l.colliderTags?.forEach((t) => tagSet.add(t)));
+    });
     rules.forEach((r) => {
       if (r.trigger.subjectTag) tagSet.add(r.trigger.subjectTag);
       if (r.trigger.targetTag) tagSet.add(r.trigger.targetTag);
@@ -335,7 +340,7 @@ export function RuleBook() {
       });
     });
     return Array.from(tagSet).sort();
-  }, [entityList, customArchetypes, rules]);
+  }, [entityList, customArchetypes, layerGroups, rules]);
 
   // Helper to find representative entity from canvas or archetype library
   const getEntityObj = (type?: string) => {

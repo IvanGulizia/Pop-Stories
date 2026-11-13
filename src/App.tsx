@@ -37,11 +37,22 @@ export default function App() {
   const resetScene = useSceneStore((state) => state.resetScene);
   const clearAllEntities = useSceneStore((state) => state.clearAllEntities);
   const clearProject = useSceneStore((state) => state.clearProject);
-  const restoreDefaultScene = useSceneStore((state) => state.restoreDefaultScene);
   const rules = useSceneStore((state) => state.rules);
   const entities = useSceneStore((state) => state.entities);
   const settings = useSceneStore((state) => state.settings);
   const setLayerVectorPaths = useSceneStore((state) => state.setLayerVectorPaths);
+
+  // Main UI View States
+  const [activeView, setActiveView] = useState<'canvas' | 'rules'>('canvas');
+  const [isEntitiesOpen, setIsEntitiesOpen] = useState(true);
+  const [leftTab, setLeftTab] = useState<'entities' | 'scene'>('entities');
+  const [rightPanel, setRightPanel] = useState<'none' | 'inspector' | 'settings'>('inspector');
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [isSlotsModalOpen, setIsSlotsModalOpen] = useState(false);
+
+  // Drawing Layer State
+  const [editingLayer, setEditingLayer] = useState<{ layer: SceneLayer; group: SceneLayerGroup } | null>(null);
 
   // Keyboard Event Listener in Play Mode (Down & Up phases)
   useEffect(() => {
@@ -65,9 +76,9 @@ export default function App() {
     };
   }, [appMode]);
 
-  // Continuous 60fps evaluation loop in Play mode (physics, continuous timers, collisions, proximity, boundary)
+  // Continuous 60fps evaluation loop in Play mode when not on canvas (Scene handles canvas tick)
   useEffect(() => {
-    if (appMode !== 'play') return;
+    if (appMode !== 'play' || activeView === 'canvas') return;
     let animId: number;
     const loop = () => {
       useSceneStore.getState().evaluateRules();
@@ -75,19 +86,7 @@ export default function App() {
     };
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [appMode]);
-
-  // Main UI View States
-  const [activeView, setActiveView] = useState<'canvas' | 'rules'>('canvas');
-  const [isEntitiesOpen, setIsEntitiesOpen] = useState(true);
-  const [leftTab, setLeftTab] = useState<'entities' | 'scene'>('entities');
-  const [rightPanel, setRightPanel] = useState<'none' | 'inspector' | 'settings'>('inspector');
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(true);
-  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
-  const [isSlotsModalOpen, setIsSlotsModalOpen] = useState(false);
-
-  // Drawing Layer State
-  const [editingLayer, setEditingLayer] = useState<{ layer: SceneLayer; group: SceneLayerGroup } | null>(null);
+  }, [appMode, activeView]);
 
   const activeRulesCount = rules.filter((r) => r.enabled).length;
   const activeEntitiesCount = Object.keys(entities).length;
@@ -482,21 +481,6 @@ export default function App() {
                 </div>
                 <div className="text-[11px] text-slate-500 mt-1">
                   Efface les objets sur la scène ET supprime toutes les règles Storyboard.
-                </div>
-              </button>
-
-              <button
-                onClick={() => {
-                  restoreDefaultScene();
-                  setIsClearModalOpen(false);
-                }}
-                className="w-full text-left p-3.5 bg-slate-50 hover:bg-indigo-50/60 border border-slate-200 hover:border-indigo-300 rounded-2xl transition-all cursor-pointer group"
-              >
-                <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-700 flex items-center gap-2">
-                  🌱 Restaurer le projet de départ
-                </div>
-                <div className="text-[11px] text-slate-500 mt-1">
-                  Restaure la scène de démonstration d'origine (Plante, Pomme, Étoile).
                 </div>
               </button>
             </div>

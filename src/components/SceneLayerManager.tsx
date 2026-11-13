@@ -7,20 +7,19 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
-  Paintbrush,
   Plus,
   Trash2,
   Folder,
   FolderPlus,
-  Sparkles,
   MoveHorizontal,
+  Shield,
 } from 'lucide-react';
 
 interface SceneLayerManagerProps {
   onOpenDrawLayerModal: (layer: SceneLayer, group: SceneLayerGroup) => void;
 }
 
-export function SceneLayerManager({ onOpenDrawLayerModal }: SceneLayerManagerProps) {
+export function SceneLayerManager(_props: SceneLayerManagerProps) {
   const layerGroups = useSceneStore((state) => state.layerGroups);
   const selectedLayerId = useSceneStore((state) => state.selectedLayerId);
   const addLayerGroup = useSceneStore((state) => state.addLayerGroup);
@@ -85,6 +84,7 @@ export function SceneLayerManager({ onOpenDrawLayerModal }: SceneLayerManagerPro
         {layerGroups.map((group) => {
           const isBackground = group.kind === 'background';
           const isForeground = group.kind === 'foreground';
+          const isColliderGroup = group.kind === 'collider';
           const isCollapsed = !!group.isCollapsed;
 
           return (
@@ -93,6 +93,8 @@ export function SceneLayerManager({ onOpenDrawLayerModal }: SceneLayerManagerPro
               className={`rounded-2xl border transition-all overflow-hidden ${
                 isBackground
                   ? 'bg-sky-50/40 border-sky-200/80'
+                  : isColliderGroup
+                  ? 'bg-orange-50/40 border-orange-200/80'
                   : isForeground
                   ? 'bg-amber-50/40 border-amber-200/80'
                   : 'bg-slate-50/70 border-slate-200'
@@ -109,9 +111,15 @@ export function SceneLayerManager({ onOpenDrawLayerModal }: SceneLayerManagerPro
                     {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                   </button>
 
-                  <Folder className={`w-3.5 h-3.5 shrink-0 ${
-                    isBackground ? 'text-sky-600' : isForeground ? 'text-amber-600' : 'text-slate-500'
-                  }`} />
+                  {isColliderGroup ? (
+                    <Shield className="w-3.5 h-3.5 shrink-0 text-orange-600" />
+                  ) : (
+                    <Folder
+                      className={`w-3.5 h-3.5 shrink-0 ${
+                        isBackground ? 'text-sky-600' : isForeground ? 'text-amber-600' : 'text-slate-500'
+                      }`}
+                    />
+                  )}
 
                   <span className="text-xs font-bold text-slate-800 truncate">
                     {group.name}
@@ -133,7 +141,7 @@ export function SceneLayerManager({ onOpenDrawLayerModal }: SceneLayerManagerPro
                     <span>Calque</span>
                   </button>
 
-                  {!isBackground && !isForeground && (
+                  {!isBackground && !isForeground && !isColliderGroup && (
                     <button
                       type="button"
                       onClick={() => deleteLayerGroup(group.id)}
@@ -151,20 +159,25 @@ export function SceneLayerManager({ onOpenDrawLayerModal }: SceneLayerManagerPro
                 <div className="p-2 space-y-1.5 border-t border-slate-100">
                   {group.layers.length === 0 ? (
                     <div className="py-2 text-center text-[11px] text-slate-400 italic">
-                      Aucun calque. Cliquez sur "+ Calque" pour dessiner un décor.
+                      {isColliderGroup
+                        ? 'Aucun calque collider. Cliquez sur "+ Calque" pour tracer des murs ou sols précis.'
+                        : 'Aucun calque. Cliquez sur "+ Calque" pour dessiner un décor.'}
                     </div>
                   ) : (
                     group.layers.map((layer) => {
                       const isSelected = selectedLayerId === layer.id;
                       const pathsCount = layer.vectorPaths?.length || 0;
+                      const isColliderLayer = isColliderGroup || layer.role === 'collider';
 
                       return (
                         <div
                           key={layer.id}
-                          onClick={() => selectLayer(layer.id)}
+                          onClick={() => selectLayer(isSelected ? null : layer.id)}
                           className={`p-2 rounded-xl border transition-all flex items-center justify-between gap-2 cursor-pointer ${
                             isSelected
-                              ? 'bg-indigo-50 border-indigo-300 ring-2 ring-indigo-500/20'
+                              ? isColliderLayer
+                                ? 'bg-orange-50 border-orange-300 ring-2 ring-orange-500/20'
+                                : 'bg-indigo-50 border-indigo-300 ring-2 ring-indigo-500/20'
                               : 'bg-white hover:bg-slate-50 border-slate-200/80'
                           }`}
                         >
@@ -186,8 +199,28 @@ export function SceneLayerManager({ onOpenDrawLayerModal }: SceneLayerManagerPro
                               <p className="text-xs font-bold text-slate-800 truncate leading-snug">
                                 {layer.name}
                               </p>
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
-                                <span>{pathsCount} {pathsCount > 1 ? 'formes' : 'forme'}</span>
+                              <div className="flex flex-wrap items-center gap-1 text-[10px] text-slate-400">
+                                <span>{pathsCount} {pathsCount > 1 ? 'tracés' : 'tracé'}</span>
+                                {isColliderLayer && (
+                                  <span
+                                    className={`text-[9px] font-bold px-1 rounded ${
+                                      layer.colliderIsTrigger
+                                        ? 'text-purple-700 bg-purple-50'
+                                        : 'text-orange-700 bg-orange-50'
+                                    }`}
+                                  >
+                                    {layer.colliderIsTrigger ? 'Trigger' : 'Solide'}
+                                  </span>
+                                )}
+                                {isColliderLayer &&
+                                  (layer.colliderTags || []).map((tag) => (
+                                    <span
+                                      key={tag}
+                                      className="text-[9px] font-bold text-slate-600 bg-slate-100 px-1 rounded"
+                                    >
+                                      #{tag}
+                                    </span>
+                                  ))}
                                 {layer.parallaxFactor !== undefined && layer.parallaxFactor !== 1 && (
                                   <span className="text-[9px] font-semibold text-sky-600 bg-sky-50 px-1 rounded flex items-center gap-0.5">
                                     <MoveHorizontal className="w-2.5 h-2.5" />

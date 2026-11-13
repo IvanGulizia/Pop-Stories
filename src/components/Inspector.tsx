@@ -598,6 +598,63 @@ export function Inspector() {
             );
           })}
         </div>
+
+        {/* Option Collider unifié entre les états (évite les boucles Enter/Exit si les dessins ont des tailles différentes) */}
+        {Object.keys(selectedEntity.states).length > 1 && (
+          <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="font-bold text-slate-700 text-xs">
+                  Collider commun entre les états
+                </div>
+                <div className="text-[10px] text-slate-400 leading-snug">
+                  Conserve la même hitbox même quand l'état change de dessin (évite les boucles Enter/Exit).
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={Boolean(selectedEntity.sharedCollider)}
+                onChange={(e) =>
+                  updateEntityDetails(selectedEntity.id, {
+                    sharedCollider: e.target.checked,
+                    colliderReferenceStateId:
+                      selectedEntity.colliderReferenceStateId ||
+                      Object.keys(selectedEntity.states)[0] ||
+                      selectedEntity.currentStateId,
+                  })
+                }
+                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
+              />
+            </div>
+
+            {selectedEntity.sharedCollider && (
+              <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-200/70">
+                <span className="text-[11px] font-semibold text-slate-600">
+                  État de référence :
+                </span>
+                <select
+                  value={
+                    selectedEntity.colliderReferenceStateId ||
+                    Object.keys(selectedEntity.states)[0] ||
+                    selectedEntity.currentStateId
+                  }
+                  onChange={(e) =>
+                    updateEntityDetails(selectedEntity.id, {
+                      colliderReferenceStateId: e.target.value,
+                    })
+                  }
+                  className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 max-w-[140px]"
+                >
+                  {Object.values(selectedEntity.states).map((st) => (
+                    <option key={st.id} value={st.id}>
+                      État {st.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

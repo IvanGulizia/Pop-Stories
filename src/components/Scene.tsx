@@ -3,7 +3,7 @@ import { useSceneStore } from '../store/useSceneStore';
 import { Apple } from './Apple';
 import { Plant } from './Plant';
 import { CustomShape } from './CustomShape';
-import { Sparkles, Paintbrush, PlayCircle } from 'lucide-react';
+import { Sparkles, Paintbrush } from 'lucide-react';
 import { ParticleCanvasOverlay } from './ParticleCanvasOverlay';
 import {
   stepMatterPhysics,
@@ -27,7 +27,6 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
   const selectEntity = useSceneStore((state) => state.selectEntity);
   const spawnEntity = useSceneStore((state) => state.spawnEntity);
-  const restoreDefaultScene = useSceneStore((state) => state.restoreDefaultScene);
   const settings = useSceneStore((state) => state.settings);
   const appMode = useSceneStore((state) => state.appMode);
   const gameScore = useSceneStore((state) => state.gameScore);
@@ -137,12 +136,22 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           setSceneBounds({ width: liveW, height: liveH });
         }
 
-        const currentEntities = useSceneStore.getState().entities;
+        const stateSnapshot = useSceneStore.getState();
+        const currentEntities = stateSnapshot.entities;
+        const activeColliderLayers = (stateSnapshot.layerGroups || []).flatMap((g) =>
+          g.layers.filter(
+            (l) =>
+              (l.role === 'collider' || g.kind === 'collider') &&
+              l.visible &&
+              (l.vectorPaths?.length || 0) > 0
+          )
+        );
         const result = stepMatterPhysics({
           entities: currentEntities,
           deltaTime,
           canvasBounds: { width: liveW, height: liveH },
           mousePos: mousePosRef.current,
+          colliderLayers: activeColliderLayers,
         });
 
         if (Object.keys(result.updatedTransforms).length > 0) {
@@ -216,24 +225,27 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const layerGroups = useSceneStore((state) => state.layerGroups || []);
 
   const backgroundGroups = layerGroups.filter((g) => g.kind === 'background');
+  const colliderGroups = layerGroups.filter((g) => g.kind === 'collider');
   const foregroundGroups = layerGroups.filter((g) => g.kind === 'foreground');
   const otherGroups = layerGroups.filter((g) => g.kind === 'custom');
 
-  const renderLayerSvg = (paths: any[], opacity: number = 1) => {
+  const renderLayerSvg = (layer: any, isCollider = false) => {
+    const paths = layer.vectorPaths;
     if (!paths || paths.length === 0) return null;
+    const isLegacy200 = layer.coordinateSpace === 'legacy_200';
     return (
       <svg
-        viewBox="0 0 200 200"
-        className="w-full h-full pointer-events-none"
-        style={{ opacity }}
-        preserveAspectRatio="none"
+        {...(isLegacy200 ? { viewBox: '0 0 200 200', preserveAspectRatio: 'none' as const } : {})}
+        className="w-full h-full pointer-events-none overflow-visible"
+        style={{ opacity: layer.opacity }}
       >
-        {paths.map((p, idx) => (
+        {paths.map((p: any, idx: number) => (
           <path
             key={p.id || idx}
             d={p.d}
-            stroke={p.stroke || '#6366f1'}
+            stroke={p.stroke || (isCollider ? '#f97316' : '#6366f1')}
             strokeWidth={p.strokeWidth || 4}
+            strokeDasharray={isCollider && !isPlayMode ? '6 4' : undefined}
             fill={p.fill && p.fill !== 'none' ? p.fill : 'none'}
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -295,9 +307,24 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         <div className="absolute inset-0 pointer-events-none z-1">
           {backgroundGroups.flatMap((g) => g.layers).map((layer) => {
             if (!layer.visible || !layer.vectorPaths || layer.vectorPaths.length === 0) return null;
+            const isCollider = layer.role === 'collider';
+            if (isCollider && isPlayMode && layer.showColliderInPlay === false) return null;
             return (
               <div key={layer.id} className="absolute inset-0">
-                {renderLayerSvg(layer.vectorPaths, layer.opacity)}
+                {renderLayerSvg(layer, isCollider)}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 1.5. CALQUES COLLIDERS DE DÉCOR (MURS / SOLS / CAPTEURS: z-5) */}
+        <div className="absolute inset-0 pointer-events-none z-5">
+          {colliderGroups.flatMap((g) => g.layers).map((layer) => {
+            if (!layer.visible || !layer.vectorPaths || layer.vectorPaths.length === 0) return null;
+            if (isPlayMode && layer.showColliderInPlay === false) return null;
+            return (
+              <div key={layer.id} className="absolute inset-0">
+                {renderLayerSvg(layer, true)}
               </div>
             );
           })}
@@ -305,7 +332,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
 
         {/* Empty State Overlay when no entities and no archetypes exist */}
         {isCompletelyEmptyProject && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 pointer-events-auto bg-slate-50/50 backdrop-blur-2xs">
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 pointer-events-auto bg-slate-50/60 backdrop-blur-2xs">
             <div className="w-16 h-16 bg-white border border-slate-200 rounded-3xl flex items-center justify-center text-3xl shadow-sm mb-4 animate-in zoom-in-95 duration-200">
               🎨
             </div>
@@ -313,24 +340,24 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
               Nouveau Projet Atelier Vivant
             </h3>
             <p className="text-xs text-slate-500 max-w-md mt-1.5 mb-6 leading-relaxed">
-              Le canvas et vos règles sont vides. Choisissez comment démarrer votre projet :
+              Votre scène est prête. Créez votre première entité pour commencer à dessiner et animer votre univers :
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg w-full">
-              {/* Option 1: Créer une Entité */}
+            <div className="max-w-sm w-full">
+              {/* Option Principale: Créer une Entité */}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   if (onOpenCreateModal) onOpenCreateModal();
                 }}
-                className="p-5 bg-white hover:bg-indigo-50/40 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl shadow-xs hover:shadow-md transition-all text-left flex flex-col justify-between gap-3 group cursor-pointer active:scale-[0.98]"
+                className="w-full p-5 bg-white hover:bg-indigo-50/40 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl shadow-xs hover:shadow-md transition-all text-left flex flex-col justify-between gap-3 group cursor-pointer active:scale-[0.98]"
               >
                 <div className="flex items-center justify-between">
                   <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                     <Paintbrush className="w-5 h-5" />
                   </div>
                   <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
-                    Nouveau
+                    Démarrer
                   </span>
                 </div>
                 <div>
@@ -340,32 +367,6 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
                   </div>
                   <div className="text-[11px] text-slate-500 mt-1 leading-snug">
                     Ouvre l'atelier de dessin vectoriel pour concevoir votre premier objet et ses états.
-                  </div>
-                </div>
-              </button>
-
-              {/* Option 2: Ouvrir la Scène Démo */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  restoreDefaultScene();
-                }}
-                className="p-5 bg-white hover:bg-emerald-50/40 border-2 border-slate-200 hover:border-emerald-500 rounded-3xl shadow-xs hover:shadow-md transition-all text-left flex flex-col justify-between gap-3 group cursor-pointer active:scale-[0.98]"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                    <PlayCircle className="w-5 h-5" />
-                  </div>
-                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-                    Démo
-                  </span>
-                </div>
-                <div>
-                  <div className="text-sm font-bold text-slate-800 group-hover:text-emerald-950">
-                    Ouvrir la scène d'exemple
-                  </div>
-                  <div className="text-[11px] text-slate-500 mt-1 leading-snug">
-                    Charge la scène interactive d'exemple (Plante magique, Pomme, règles Storyboard).
                   </div>
                 </div>
               </button>
@@ -400,9 +401,11 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         <div className="absolute inset-0 pointer-events-none z-40">
           {[...otherGroups, ...foregroundGroups].flatMap((g) => g.layers).map((layer) => {
             if (!layer.visible || !layer.vectorPaths || layer.vectorPaths.length === 0) return null;
+            const isCollider = layer.role === 'collider';
+            if (isCollider && isPlayMode && layer.showColliderInPlay === false) return null;
             return (
               <div key={layer.id} className="absolute inset-0">
-                {renderLayerSvg(layer.vectorPaths, layer.opacity)}
+                {renderLayerSvg(layer, isCollider)}
               </div>
             );
           })}
@@ -446,7 +449,6 @@ function DirectCanvasDrawingOverlay({
   const fillColor = useSceneStore((state) => state.drawingFillColor);
   const fillColorId = useSceneStore((state) => state.drawingFillColorId);
   const strokeWidth = useSceneStore((state) => state.drawingStrokeWidth);
-  const selectLayer = useSceneStore((state) => state.selectLayer);
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [points, setPoints] = useState<{ x: number; y: number }[]>([]);
@@ -454,11 +456,18 @@ function DirectCanvasDrawingOverlay({
   const [currentPt, setCurrentPt] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
+  const isLegacy200 = layer.coordinateSpace === 'legacy_200';
+
   const getSvgCoordinates = (e: React.PointerEvent<SVGSVGElement>) => {
     if (!svgRef.current) return { x: 0, y: 0 };
     const rect = svgRef.current.getBoundingClientRect();
-    const x = Math.max(0, Math.min(200, ((e.clientX - rect.left) / rect.width) * 200));
-    const y = Math.max(0, Math.min(200, ((e.clientY - rect.top) / rect.height) * 200));
+    if (isLegacy200) {
+      const x = Math.max(0, Math.min(200, ((e.clientX - rect.left) / rect.width) * 200));
+      const y = Math.max(0, Math.min(200, ((e.clientY - rect.top) / rect.height) * 200));
+      return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+    }
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
     return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
   };
 
@@ -474,6 +483,10 @@ function DirectCanvasDrawingOverlay({
     d += ` L ${pts[pts.length - 1].x} ${pts[pts.length - 1].y}`;
     return d;
   };
+
+  const eraserRadius = isLegacy200
+    ? Math.max(10, strokeWidth * 2)
+    : Math.max(14, strokeWidth * 1.5);
 
   const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     e.stopPropagation();
@@ -491,9 +504,8 @@ function DirectCanvasDrawingOverlay({
     if (drawingTool === 'eraser_stroke' || drawingTool === 'eraser_partial') {
       const existing = layer.vectorPaths || [];
       const updated = existing.filter((p: any) => {
-        // Erase any path near click point
         if (p.points && p.points.length > 0) {
-          const hit = p.points.some((pPoint: any) => Math.hypot(pPoint.x - pt.x, pPoint.y - pt.y) <= Math.max(10, strokeWidth * 2));
+          const hit = p.points.some((pPoint: any) => Math.hypot(pPoint.x - pt.x, pPoint.y - pt.y) <= eraserRadius);
           return !hit;
         }
         return true;
@@ -510,7 +522,8 @@ function DirectCanvasDrawingOverlay({
     if (drawingTool === 'pencil') {
       setPoints((prev) => {
         const last = prev[prev.length - 1];
-        if (!last || Math.hypot(pt.x - last.x, pt.y - last.y) >= 0.8) {
+        const minStep = isLegacy200 ? 0.8 : 2.5;
+        if (!last || Math.hypot(pt.x - last.x, pt.y - last.y) >= minStep) {
           return [...prev, pt];
         }
         return prev;
@@ -519,7 +532,7 @@ function DirectCanvasDrawingOverlay({
       const existing = layer.vectorPaths || [];
       const updated = existing.filter((p: any) => {
         if (p.points && p.points.length > 0) {
-          const hit = p.points.some((pPoint: any) => Math.hypot(pPoint.x - pt.x, pPoint.y - pt.y) <= Math.max(10, strokeWidth * 2));
+          const hit = p.points.some((pPoint: any) => Math.hypot(pPoint.x - pt.x, pPoint.y - pt.y) <= eraserRadius);
           return !hit;
         }
         return true;
@@ -592,6 +605,10 @@ function DirectCanvasDrawingOverlay({
       const cx = (startPt.x + pt.x) / 2;
       const cy = (startPt.y + pt.y) / 2;
       const r = Math.max(3, Math.hypot(pt.x - startPt.x, pt.y - startPt.y) / 2);
+      const perimeterPts = Array.from({ length: 16 }, (_, idx) => {
+        const a = (idx / 16) * Math.PI * 2;
+        return { x: Math.round((cx + Math.cos(a) * r) * 10) / 10, y: Math.round((cy + Math.sin(a) * r) * 10) / 10 };
+      });
       newPath = {
         id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         d: `M ${cx - r} ${cy} a ${r} ${r} 0 1 0 ${r * 2} 0 a ${r} ${r} 0 1 0 ${-r * 2} 0 Z`,
@@ -600,6 +617,8 @@ function DirectCanvasDrawingOverlay({
         strokeWidth,
         fill: fillColor,
         fillColorId,
+        circle: { cx, cy, r },
+        points: perimeterPts,
       };
     }
 
@@ -613,29 +632,12 @@ function DirectCanvasDrawingOverlay({
   };
 
   return (
-    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center">
-      {/* Top Banner indicating active layer drawing mode */}
-      <div className="absolute top-3 left-3 z-50 bg-slate-900/90 text-white text-xs font-bold px-3 py-1.5 rounded-2xl shadow-lg border border-slate-700 flex items-center gap-2 backdrop-blur-xs">
-        <span className={`w-2.5 h-2.5 rounded-full ${layer.locked ? 'bg-amber-400' : 'bg-indigo-400 animate-ping'}`} />
-        <span>
-          {layer.locked ? 'Calque verrouillé : ' : 'Dessin Direct sur : '}
-          <strong>{layer.name}</strong>
-        </span>
-        <button
-          type="button"
-          onClick={() => selectLayer(null)}
-          className="ml-2 px-2 py-0.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] rounded-lg font-bold transition-all cursor-pointer"
-        >
-          Terminer
-        </button>
-      </div>
-
+    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center" onClick={(e) => e.stopPropagation()}>
       {/* SVG Canvas Interactive Surface */}
       <svg
         ref={svgRef}
-        viewBox="0 0 200 200"
-        preserveAspectRatio="none"
-        className="w-full h-full atelier-fine-crosshair touch-none select-none"
+        {...(isLegacy200 ? { viewBox: '0 0 200 200', preserveAspectRatio: 'none' as const } : {})}
+        className="w-full h-full atelier-fine-crosshair touch-none select-none overflow-visible"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

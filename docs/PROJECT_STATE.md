@@ -1,6 +1,12 @@
 # État du Projet
 
 ## Complété
+- **Calques Colliders Précis, WYSIWYG Monde, Inertie/Damping & Anti-Scintillement Collisions (Phase 10.12)** :
+  - **Écran d'accueil au démarrage** : Ouverture directe sur l'écran d'accueil invitant à créer la première entité (boutons démo temporairement masqués).
+  - **Calques Colliders de Décor avec `#Tags`** : Dessin direct sur calque dédié générant des colliders Matter.js précis le long des traits/formes (`rect`, `circle`, segments décimés orientés), avec `#tags`, Solide/Trigger, visibilité Play, friction et rebond, exploitables directement dans les règles `on_collision`.
+  - **Calques 100 % WYSIWYG (`coordinateSpace: 'world'`)** : Suppression de l'étirement `200×200 preserveAspectRatio="none"` au profit d'un repère monde exact `1px = 1 unité SVG` indépendant du ratio du canvas, sans badges superflus de validation.
+  - **Accélération & Damping (Inertie)** : Réactivité et glisse réglables sur `constant_velocity`, `keyboard_control`, `patrol`, `wandering`, `move_to` et `follow`.
+  - **Correction boucle/scintillement Collision + Changement d'état** : Option d'entité **« Collider commun entre les états »** (`sharedCollider`), garde anti-faux-Exit en place (`< 2.5px`) dans `handleCollisionPair`, et suppression des évaluations redondantes de `evaluateRules()` par frame.
 - **Ciblage `🌐 Tous objets`, Sujet sur Bords de Scène & Précision Dynamique des Bordures (Phase 10.11)** :
   - **Ciblage `'any'` (`🌐 Tous les objets`)** : Nouvel onglet *Tous objets* pour le Sujet et la Cible dans `RuleBook.tsx` (`matchesEntityFilter`), et désactivation du blocage global forcé sur `boundary` afin de cibler une entité précise ou tous les objets sur les collisions avec les bords.
   - **Détection exacte sur bord réel & Resize en direct** : Calibrage des règles `boundary` sur `getEntityWorldColliderBounds` (`tol = 2px`) et de `boundary_behavior` sur `body.bounds`, avec synchronisation `clientWidth`/`clientHeight` à 60 FPS dans `Scene.tsx` et murs Matter.js adaptatifs.

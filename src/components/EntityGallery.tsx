@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { useSceneStore } from '../store/useSceneStore';
 import { EntityMiniPreview } from './EntityMiniPreview';
-import { Plus, GripVertical, Trash2, Sparkles, PlayCircle, Bookmark, Download, Upload, ArrowUpRight, FolderHeart } from 'lucide-react';
+import { Plus, GripVertical, Trash2, Sparkles, Bookmark, Download, Upload, ArrowUpRight, FolderHeart } from 'lucide-react';
 import { EntityType, Entity } from '../types';
 
 interface EntityGalleryProps {
@@ -24,7 +24,6 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
   const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
   const localEntityCollection = useSceneStore((state) => state.localEntityCollection || {});
   const deleteCustomArchetype = useSceneStore((state) => state.deleteCustomArchetype);
-  const restoreDefaultScene = useSceneStore((state) => state.restoreDefaultScene);
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
   const selectEntity = useSceneStore((state) => state.selectEntity);
   const updateEntityDetails = useSceneStore((state) => state.updateEntityDetails);
@@ -205,13 +204,6 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
                     className="w-full py-1.5 text-[11px] font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <FolderHeart className="w-3.5 h-3.5" /> Ouvrir Ma Collection Local
-                  </button>
-                  <button
-                    type="button"
-                    onClick={restoreDefaultScene}
-                    className="w-full py-1.5 text-[11px] font-medium text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <PlayCircle className="w-3.5 h-3.5 text-emerald-600" /> Charger scène exemple
                   </button>
                 </div>
               </div>

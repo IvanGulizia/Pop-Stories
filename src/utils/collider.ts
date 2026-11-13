@@ -62,6 +62,24 @@ export function extractPathsBounds(paths: VectorPath[]): { minX: number; maxX: n
 }
 
 /**
+ * Resolves which EntityState supplies the collider geometry (supports entity.sharedCollider).
+ */
+export function resolveColliderState(
+  entity: Entity,
+  currentState?: EntityState
+): EntityState | undefined {
+  const activeState = currentState || entity.states[entity.currentStateId];
+  if (!entity.sharedCollider) {
+    return activeState;
+  }
+  const refId =
+    entity.colliderReferenceStateId && entity.states[entity.colliderReferenceStateId]
+      ? entity.colliderReferenceStateId
+      : Object.keys(entity.states)[0];
+  return (refId ? entity.states[refId] : undefined) || activeState;
+}
+
+/**
  * Calculates the exact collider geometry in 200x200 canvas space.
  */
 export function getEntityColliderBounds(
@@ -69,7 +87,7 @@ export function getEntityColliderBounds(
   currentState?: EntityState,
   flipX: boolean = Boolean(entity.flipX)
 ): EntityColliderGeometry {
-  const effectiveState = currentState || entity.states[entity.currentStateId];
+  const effectiveState = resolveColliderState(entity, currentState);
   const colliderType: ColliderType =
     effectiveState?.colliderType || entity.colliderType || (entity.type === 'apple' ? 'circle' : 'box');
 
@@ -143,7 +161,7 @@ export function getEntityWorldColliderBounds(
   scaleX: number;
   scaleY: number;
 } {
-  const effectiveState = currentState || entity.states[entity.currentStateId];
+  const effectiveState = resolveColliderState(entity, currentState);
   const s = effectiveState?.scale ?? 1;
   const geom = getEntityColliderBounds(entity, effectiveState, Boolean(entity.flipX));
   const scaleX = (entity.size.width * s) / 200;

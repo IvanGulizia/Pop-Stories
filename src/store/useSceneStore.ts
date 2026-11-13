@@ -36,6 +36,7 @@ import {
   resetMatterPhysicsRuntime,
   getActivePhysicsCollisionPairs,
   getPhysicsCollisionContact,
+  checkEntityAgainstColliderLayer,
 } from '../utils/matterPhysicsEngine';
 import {
   clearParticles,
@@ -77,9 +78,18 @@ export const initialSceneLayerGroups: SceneLayerGroup[] = [
         visible: true,
         opacity: 1,
         parallaxFactor: 0,
+        coordinateSpace: 'world',
+        role: 'visual',
         vectorPaths: [],
       },
     ],
+  },
+  {
+    id: 'group-col',
+    name: 'Colliders de Décor (Murs / Sols)',
+    kind: 'collider',
+    isCollapsed: false,
+    layers: [],
   },
   {
     id: 'group-fg',
@@ -479,7 +489,15 @@ const initialRules: DynamicRule[] = [
 // Anti-Infinite Loop & Rapid Bounce Protections
 const ruleCooldowns: Record<string, number> = {};
 const entityStateTimestamps: Record<string, number> = {};
-const preCollisionStates: Record<string, { subjectState?: string; targetState?: string }> = {};
+const preCollisionStates: Record<
+  string,
+  {
+    subjectState?: string;
+    targetState?: string;
+    lastOverlapPosA?: Position;
+    lastOverlapPosB?: Position;
+  }
+> = {};
 const preEventAutoRevertStates: Record<string, string> = {};
 const lastCollisionContacts: Record<string, Position> = {};
 const activeDelayTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -964,12 +982,24 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     set((state) => {
       const targetGroup = state.layerGroups.find((g) => g.id === groupId);
       const count = (targetGroup?.layers.length || 0) + 1;
+      const isColliderGroup = targetGroup?.kind === 'collider';
       const newLayer: SceneLayer = {
         id: layerId,
-        name: name?.trim() || `Calque #${count}`,
+        name: name?.trim() || (isColliderGroup ? `Collider #${count}` : `Calque #${count}`),
         visible: true,
         opacity: 1,
         parallaxFactor: targetGroup?.kind === 'background' ? 0 : 1,
+        coordinateSpace: 'world',
+        role: isColliderGroup ? 'collider' : 'visual',
+        ...(isColliderGroup
+          ? {
+              colliderTags: ['sol'],
+              colliderIsTrigger: false,
+              colliderFriction: 0.9,
+              colliderBounce: 0,
+              showColliderInPlay: true,
+            }
+          : {}),
         vectorPaths: [],
       };
       return {
@@ -1006,7 +1036,16 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     set((state) => ({
       layerGroups: state.layerGroups.map((g) => ({
         ...g,
-        layers: g.layers.map((l) => (l.id === layerId ? { ...l, vectorPaths } : l)),
+        layers: g.layers.map((l) =>
+          l.id === layerId
+            ? {
+                ...l,
+                coordinateSpace:
+                  l.coordinateSpace || (l.vectorPaths.length === 0 ? 'world' : 'legacy_200'),
+                vectorPaths,
+              }
+            : l
+        ),
       })),
     }));
   },
@@ -2288,9 +2327,27 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const importedFolders = Array.isArray(data.folders) ? data.folders : initialFolders;
       const importedCustomSounds = Array.isArray(data.customSounds) ? data.customSounds : [];
       const importedCustomParticles = Array.isArray(data.customParticles) ? data.customParticles : [];
-      const importedLayerGroups = Array.isArray(data.layerGroups) && data.layerGroups.length > 0
+      const rawLayerGroups: SceneLayerGroup[] = Array.isArray(data.layerGroups) && data.layerGroups.length > 0
         ? data.layerGroups
         : JSON.parse(JSON.stringify(initialSceneLayerGroups));
+      const normalizedLayerGroups = rawLayerGroups.map((g) => ({
+        ...g,
+        layers: (g.layers || []).map((l) => ({
+          ...l,
+          coordinateSpace:
+            l.coordinateSpace || ((l.vectorPaths?.length || 0) === 0 ? 'world' : 'legacy_200'),
+        })),
+      }));
+      if (!normalizedLayerGroups.some((g) => g.kind === 'collider')) {
+        normalizedLayerGroups.splice(1, 0, {
+          id: 'group-col',
+          name: 'Colliders de Décor (Murs / Sols)',
+          kind: 'collider',
+          isCollapsed: false,
+          layers: [],
+        });
+      }
+      const importedLayerGroups = normalizedLayerGroups;
       const importedSettings = data.settings && typeof data.settings === 'object' ? data.settings : undefined;
       const importedPalette: ProjectPaletteColor[] = Array.isArray(data.projectPalette) && data.projectPalette.length > 0
         ? data.projectPalette
@@ -2960,16 +3017,30 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     // Les règles de collision et d'animation ne s'exécutent QU'EN mode PLAY
     if (get().appMode !== 'play') return;
 
-    const { entities, rules, activeCollisions, sceneBounds, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
+    const { entities, rules, activeCollisions, sceneBounds, layerGroups, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
     const collisionRules = rules.filter((r) => r.enabled && r.trigger.type === 'collision');
 
     const nextCollisions: Record<string, boolean> = { ...activeCollisions };
     const allEntitiesList = Object.values(entities);
     const now = Date.now();
+    const sceneW = Math.max(100, sceneBounds?.width || 800);
+    const sceneH = Math.max(100, sceneBounds?.height || 500);
+
+    // Calques Colliders actifs portant des tracés
+    const activeColliderLayers = (layerGroups || []).flatMap((g) =>
+      (g.layers || [])
+        .filter(
+          (l) =>
+            (l.role === 'collider' || g.kind === 'collider') &&
+            l.visible &&
+            (l.vectorPaths?.length || 0) > 0
+        )
+        .map((l) => ({ layer: l, groupKind: g.kind }))
+    );
 
     if (collisionRules.length > 0) {
       collisionRules.forEach((rule) => {
-        // Chercher toutes les paires d'entités distinctes
+        // A. Collisions Entité <-> Entité
         for (let i = 0; i < allEntitiesList.length; i++) {
           for (let j = i + 1; j < allEntitiesList.length; j++) {
             const entA = allEntitiesList[i];
@@ -3061,6 +3132,86 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
             }
           }
         }
+
+        // B. Collisions Entité <-> Calques Colliders de décor (via #Tags ou 'any')
+        if (activeColliderLayers.length > 0) {
+          for (const ent of allEntitiesList) {
+            const matchAsSubject = matchesEntityFilter(
+              ent,
+              rule.trigger.subjectMode,
+              rule.trigger.subjectId,
+              rule.trigger.subjectType,
+              rule.trigger.subjectTag
+            );
+            if (!matchAsSubject) continue;
+
+            const tempEnt = tempPositions && tempPositions[ent.id]
+              ? { ...ent, position: tempPositions[ent.id] }
+              : ent;
+            const entBounds = getEntityWorldColliderBounds(tempEnt);
+
+            for (const { layer } of activeColliderLayers) {
+              const layerProxy: Entity = {
+                id: `layercol::${layer.id}`,
+                name: layer.name,
+                type: '__collider_layer__',
+                tags: layer.colliderTags || [],
+                position: { x: 0, y: 0 },
+                size: { width: sceneW, height: sceneH },
+                currentStateId: 'A',
+                isDraggable: false,
+                states: {
+                  A: {
+                    id: 'A',
+                    name: 'A',
+                    color: 'transparent',
+                    scale: 1,
+                    rotation: 0,
+                  },
+                },
+              };
+
+              const matchLayerAsTarget =
+                (rule.trigger.targetMode === 'any' || rule.trigger.targetMode === 'tag') &&
+                matchesEntityFilter(
+                  layerProxy,
+                  rule.trigger.targetMode,
+                  rule.trigger.targetId,
+                  rule.trigger.targetType,
+                  rule.trigger.targetTag
+                );
+
+              if (!matchLayerAsTarget) continue;
+
+              const hit = checkEntityAgainstColliderLayer(entBounds, tempEnt.id, layer, {
+                width: sceneW,
+                height: sceneH,
+              });
+
+              const cKey = `${rule.id}_${tempEnt.id}_${layerProxy.id}`;
+              if (hit.colliding && hit.contactPoint) {
+                lastCollisionContacts[cKey] = hit.contactPoint;
+              }
+
+              handleCollisionPair(
+                rule,
+                tempEnt,
+                layerProxy,
+                hit.colliding,
+                nextCollisions,
+                activeCollisions,
+                now,
+                {
+                  entities,
+                  updateEntityState,
+                  updateEntityDetails,
+                  deleteEntity,
+                  spawnEntity,
+                }
+              );
+            }
+          }
+        }
       });
     }
 
@@ -3131,8 +3282,6 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
     // 5. Règles de Bords de Scène / Canvas (Calibrées sur le collider réel et sceneBounds en direct)
     const boundaryRules = rules.filter((r) => r.enabled && r.trigger.type === 'boundary');
-    const sceneW = Math.max(100, sceneBounds?.width || 800);
-    const sceneH = Math.max(100, sceneBounds?.height || 500);
     const edgeTol = 2;
 
     boundaryRules.forEach((rule) => {
@@ -3368,12 +3517,12 @@ function resolveEntityReference(
   return undefined;
 }
 
-// Helper pour traiter les paires de collision avec anti-boucle et mémorisation du point de contact
+// Helper pour traiter les paires de collision avec anti-boucle, continuité d'état et mémorisation du point de contact
 function handleCollisionPair(
   rule: DynamicRule,
   subject: Entity,
   target: Entity,
-  isColliding: boolean,
+  rawIsColliding: boolean,
   nextCollisions: Record<string, boolean>,
   activeCollisions: Record<string, boolean>,
   now: number,
@@ -3387,6 +3536,31 @@ function handleCollisionPair(
 ) {
   const collisionKey = `${rule.id}_${subject.id}_${target.id}`;
   const wasColliding = !!activeCollisions[collisionKey];
+
+  // Protection anti-scintillement lors d'un changement d'état sur place (sans séparation physique réelle) :
+  // Si un changement d'état sur l'une des entités a rétréci/décalé son dessin alors qu'aucune des deux entités
+  // n'a bougé de >= 2.5px depuis le dernier chevauchement, maintenir la collision active pour éviter Exit -> Enter en boucle.
+  let isColliding = rawIsColliding;
+  if (!isColliding && wasColliding) {
+    const pre = preCollisionStates[collisionKey];
+    if (pre) {
+      const stateChanged =
+        (pre.subjectState && subject.currentStateId !== pre.subjectState) ||
+        (pre.targetState && target.currentStateId !== pre.targetState);
+      if (stateChanged) {
+        const distA = pre.lastOverlapPosA
+          ? Math.hypot(subject.position.x - pre.lastOverlapPosA.x, subject.position.y - pre.lastOverlapPosA.y)
+          : 999;
+        const distB = pre.lastOverlapPosB
+          ? Math.hypot(target.position.x - pre.lastOverlapPosB.x, target.position.y - pre.lastOverlapPosB.y)
+          : 999;
+        if (distA < 2.5 && distB < 2.5) {
+          isColliding = true;
+        }
+      }
+    }
+  }
+
   const isExiting = !isColliding && wasColliding;
 
   // IMPORTANT: Si la collision physique est active, maintenir nextCollisions[collisionKey] = true
@@ -3394,7 +3568,9 @@ function handleCollisionPair(
   // par la règle d'entrée !
   if (isColliding) {
     nextCollisions[collisionKey] = true;
-    lastCollisionContacts[collisionKey] = getCollisionContactPoint(subject, target);
+    if (!lastCollisionContacts[collisionKey] || rawIsColliding) {
+      lastCollisionContacts[collisionKey] = getCollisionContactPoint(subject, target);
+    }
   } else {
     nextCollisions[collisionKey] = false;
   }
@@ -3428,13 +3604,19 @@ function handleCollisionPair(
     preCollisionStates[collisionKey] = {
       subjectState: subject.currentStateId,
       targetState: target.currentStateId,
+      lastOverlapPosA: { ...subject.position },
+      lastOverlapPosB: { ...target.position },
     };
 
     if (rulePhase === 'enter' || rulePhase === 'stay') {
       shouldExecute = true;
     }
   } else if (isColliding && wasColliding) {
-    // Contact continu (Stay)
+    // Contact continu (Stay) : mémoriser la dernière position où les colliders se chevauchaient réellement
+    if (rawIsColliding && preCollisionStates[collisionKey]) {
+      preCollisionStates[collisionKey].lastOverlapPosA = { ...subject.position };
+      preCollisionStates[collisionKey].lastOverlapPosB = { ...target.position };
+    }
     if (rulePhase === 'stay') {
       shouldExecute = true;
     }

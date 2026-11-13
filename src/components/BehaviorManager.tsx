@@ -58,6 +58,7 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
   const entities = useSceneStore((state) => state.entities);
   const customArchetypes = useSceneStore((state) => state.customArchetypes);
   const rules = useSceneStore((state) => state.rules);
+  const layerGroups = useSceneStore((state) => state.layerGroups || []);
   const customParticles = useSceneStore((state) => state.customParticles || []);
   const addCustomParticle = useSceneStore((state) => state.addCustomParticle);
   const updateCustomParticle = useSceneStore((state) => state.updateCustomParticle);
@@ -116,8 +117,13 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
         a.spawnTags?.forEach((t) => tagSet.add(t));
       });
     });
+    (layerGroups || []).forEach((g) => {
+      (g.layers || []).forEach((l) => {
+        l.colliderTags?.forEach((t) => tagSet.add(t));
+      });
+    });
     return Array.from(tagSet);
-  }, [entities, rules]);
+  }, [entities, rules, layerGroups]);
 
   const generateBehaviorId = (type: BehaviorType) => {
     return `${type}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
@@ -948,6 +954,63 @@ function renderBehaviorControls({
     </>
   );
 
+  const renderInertiaControls = (
+    b: { acceleration?: number; damping?: number },
+    defaultDamping: number = 0
+  ) => {
+    const accelVal = b.acceleration ?? 1;
+    const dampVal = b.damping ?? defaultDamping;
+    return (
+      <>
+        <div className="p-2 bg-white rounded-xl border border-slate-200">
+          <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+            <div>
+              <span className="font-bold">Accélération (Réactivité)</span>
+              <span className="text-[10px] text-slate-400 block">
+                {accelVal >= 0.95 ? 'Démarrage instantané' : accelVal <= 0.2 ? 'Montée lente et lourde' : 'Accélération progressive'}
+              </span>
+            </div>
+            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+              {Math.round(accelVal * 100)}%
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0.05"
+            max="1"
+            step="0.05"
+            value={accelVal}
+            onChange={(e) => update({ acceleration: parseFloat(e.target.value) })}
+            className="w-full accent-indigo-600"
+          />
+        </div>
+
+        <div className="p-2 bg-white rounded-xl border border-slate-200">
+          <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+            <div>
+              <span className="font-bold">Inertie / Glisse (Damping)</span>
+              <span className="text-[10px] text-slate-400 block">
+                {dampVal <= 0.05 ? 'Arrêt sec immédiat' : dampVal >= 0.9 ? 'Longue glisse (effet patinoire / espace)' : 'Décélération amortie'}
+              </span>
+            </div>
+            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+              {Math.round(dampVal * 100)}%
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="0.98"
+            step="0.02"
+            value={dampVal}
+            onChange={(e) => update({ damping: parseFloat(e.target.value) })}
+            className="w-full accent-indigo-600"
+          />
+        </div>
+      </>
+    );
+  };
+
   switch (behavior.type) {
     case 'draggable': {
       const b = { ...behavior, ...(override || {}) } as DraggableBehaviorConfig;
@@ -1229,6 +1292,7 @@ function renderBehaviorControls({
             />
           </div>
 
+          {renderInertiaControls(b, 0)}
           {renderFlipControls(b)}
         </div>
       );
@@ -1351,6 +1415,7 @@ function renderBehaviorControls({
             </div>
           )}
 
+          {renderInertiaControls(b, 0.8)}
           {renderFlipControls(b)}
         </div>
       );
@@ -1428,6 +1493,7 @@ function renderBehaviorControls({
             </div>
           </div>
 
+          {renderInertiaControls(b, 0)}
           {renderFlipControls(b)}
         </div>
       );
@@ -1570,6 +1636,7 @@ function renderBehaviorControls({
             </div>
           )}
 
+          {renderInertiaControls(b, 0.78)}
           {renderFlipControls(b)}
         </div>
       );
@@ -1702,6 +1769,7 @@ function renderBehaviorControls({
             />
           </div>
 
+          {renderInertiaControls(b, 0)}
           {renderFlipControls(b)}
         </div>
       );
@@ -1939,6 +2007,7 @@ function renderBehaviorControls({
             />
           </div>
 
+          {renderInertiaControls(b, 0.8)}
           {renderFlipControls(b)}
         </div>
       );

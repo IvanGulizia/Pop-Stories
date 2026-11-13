@@ -16,8 +16,9 @@ import {
   BoundaryBehaviorConfig,
   AutoDestroyBehaviorConfig,
   ParticleEmitterBehaviorConfig,
+  SceneLayer,
 } from '../types';
-import { getEntityColliderBounds } from './collider';
+import { getEntityColliderBounds, resolveColliderState } from './collider';
 import { emitParticlesBurst } from './particleSystem';
 
 const { Engine, World, Bodies, Body } = Matter;
@@ -91,6 +92,8 @@ let engine: Matter.Engine | null = null;
 const bodyMap = new Map<string, Matter.Body>();
 const colliderOffsets = new Map<string, { relCenterX: number; relCenterY: number }>();
 const bodySignatures = new Map<string, string>();
+const colliderLayerBodyMap = new Map<string, Matter.Body[]>();
+const colliderLayerSignatures = new Map<string, string>();
 const boundaryBodies: Matter.Body[] = [];
 const patrolStates = new Map<string, { direction: 1 | -1; timer: number; initialPos: Position }>();
 interface WanderingRuntimeState {
@@ -196,6 +199,171 @@ export function getPhysicsCollisionContact(idA: string, idB: string): Position |
   return activePhysicsCollisionContacts.get(`${idA}:::${idB}`);
 }
 
+/**
+ * Calcule le point le plus proche entre un point P et un segment [A, B], ainsi que la distance.
+ */
+function closestPointOnSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): { x: number; y: number; dist: number } {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq <= 0.0001) {
+    return { x: ax, y: ay, dist: Math.hypot(px - ax, py - ay) };
+  }
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  const cx = ax + t * dx;
+  const cy = ay + t * dy;
+  return { x: cx, y: cy, dist: Math.hypot(px - cx, py - cy) };
+}
+
+/**
+ * Vérifie si une entité entre en contact avec un calque Collider de décor (via Matter.js ou géométrie exacte des segments).
+ */
+export function checkEntityAgainstColliderLayer(
+  entityBounds: { x: number; y: number; width: number; height: number; centerX: number; centerY: number; radius: number; colliderType: string },
+  entityId: string,
+  layer: SceneLayer,
+  canvasBounds: { width: number; height: number }
+): { colliding: boolean; contactPoint?: Position } {
+  const layerBodyLabel = `layercol::${layer.id}`;
+  if (
+    activePhysicsCollisionPairs.has(`${entityId}:::${layerBodyLabel}`) ||
+    activePhysicsCollisionPairs.has(`${layerBodyLabel}:::${entityId}`)
+  ) {
+    return {
+      colliding: true,
+      contactPoint:
+        activePhysicsCollisionContacts.get(`${entityId}:::${layerBodyLabel}`) ||
+        activePhysicsCollisionContacts.get(`${layerBodyLabel}:::${entityId}`),
+    };
+  }
+
+  const paths = layer.vectorPaths || [];
+  if (paths.length === 0) return { colliding: false };
+
+  const isLegacy200 = layer.coordinateSpace === 'legacy_200';
+  const sx = isLegacy200 ? Math.max(100, canvasBounds.width) / 200 : 1;
+  const sy = isLegacy200 ? Math.max(100, canvasBounds.height) / 200 : 1;
+  const tol = 3;
+
+  const entIsCircle = entityBounds.colliderType === 'circle';
+  const entHalfW = entityBounds.width / 2;
+  const entHalfH = entityBounds.height / 2;
+  // Rayon effectif approximatif pour les tests segment/cercle rapides et fidèles à la boîte
+  const boxReach = entIsCircle ? entityBounds.radius : Math.max(entHalfW, entHalfH);
+
+  for (const p of paths) {
+    const halfStroke = Math.max(2, ((p.strokeWidth || 6) * ((sx + sy) / 2)) / 2);
+
+    if (p.rect && Math.abs(p.rect.width) > 1 && Math.abs(p.rect.height) > 1) {
+      const rw = Math.abs(p.rect.width) * sx;
+      const rh = Math.abs(p.rect.height) * sy;
+      const rx = (p.rect.width < 0 ? p.rect.x + p.rect.width : p.rect.x) * sx;
+      const ry = (p.rect.height < 0 ? p.rect.y + p.rect.height : p.rect.y) * sy;
+
+      const closestX = Math.max(rx - halfStroke, Math.min(entityBounds.centerX, rx + rw + halfStroke));
+      const closestY = Math.max(ry - halfStroke, Math.min(entityBounds.centerY, ry + rh + halfStroke));
+
+      if (entIsCircle) {
+        const d = Math.hypot(entityBounds.centerX - closestX, entityBounds.centerY - closestY);
+        if (d <= entityBounds.radius + tol) {
+          return { colliding: true, contactPoint: { x: Math.round(closestX), y: Math.round(closestY) } };
+        }
+      } else if (
+        entityBounds.x <= rx + rw + halfStroke + tol &&
+        entityBounds.x + entityBounds.width + tol >= rx - halfStroke &&
+        entityBounds.y <= ry + rh + halfStroke + tol &&
+        entityBounds.y + entityBounds.height + tol >= ry - halfStroke
+      ) {
+        return { colliding: true, contactPoint: { x: Math.round(closestX), y: Math.round(closestY) } };
+      }
+      continue;
+    }
+
+    if ((p as any).circle && (p as any).circle.r > 1) {
+      const c = (p as any).circle;
+      const cx = c.cx * sx;
+      const cy = c.cy * sy;
+      const cr = c.r * Math.max(sx, sy) + halfStroke;
+      if (entIsCircle) {
+        const d = Math.hypot(entityBounds.centerX - cx, entityBounds.centerY - cy);
+        if (d <= entityBounds.radius + cr + tol) {
+          const t = d > 0 ? cr / d : 0.5;
+          return {
+            colliding: true,
+            contactPoint: { x: Math.round(cx + (entityBounds.centerX - cx) * t), y: Math.round(cy + (entityBounds.centerY - cy) * t) },
+          };
+        }
+      } else {
+        const closestX = Math.max(entityBounds.x, Math.min(cx, entityBounds.x + entityBounds.width));
+        const closestY = Math.max(entityBounds.y, Math.min(cy, entityBounds.y + entityBounds.height));
+        if (Math.hypot(cx - closestX, cy - closestY) <= cr + tol) {
+          return { colliding: true, contactPoint: { x: Math.round(closestX), y: Math.round(closestY) } };
+        }
+      }
+      continue;
+    }
+
+    const pts = (p.points || []).map((pt) => ({ x: pt.x * sx, y: pt.y * sy }));
+    if (pts.length === 0) continue;
+
+    if (pts.length === 1) {
+      const pt = pts[0];
+      if (entIsCircle) {
+        if (Math.hypot(entityBounds.centerX - pt.x, entityBounds.centerY - pt.y) <= entityBounds.radius + halfStroke + tol) {
+          return { colliding: true, contactPoint: { x: Math.round(pt.x), y: Math.round(pt.y) } };
+        }
+      } else {
+        const closestX = Math.max(entityBounds.x, Math.min(pt.x, entityBounds.x + entityBounds.width));
+        const closestY = Math.max(entityBounds.y, Math.min(pt.y, entityBounds.y + entityBounds.height));
+        if (Math.hypot(pt.x - closestX, pt.y - closestY) <= halfStroke + tol) {
+          return { colliding: true, contactPoint: { x: Math.round(closestX), y: Math.round(closestY) } };
+        }
+      }
+      continue;
+    }
+
+    const step = Math.max(1, Math.floor(pts.length / 48));
+    for (let i = 0; i < pts.length - 1; i += step) {
+      const a = pts[i];
+      const b = pts[Math.min(pts.length - 1, i + step)];
+      // Broadphase rapide sur le segment
+      const segMinX = Math.min(a.x, b.x) - halfStroke - tol;
+      const segMaxX = Math.max(a.x, b.x) + halfStroke + tol;
+      const segMinY = Math.min(a.y, b.y) - halfStroke - tol;
+      const segMaxY = Math.max(a.y, b.y) + halfStroke + tol;
+      if (
+        entityBounds.x + entityBounds.width < segMinX ||
+        entityBounds.x > segMaxX ||
+        entityBounds.y + entityBounds.height < segMinY ||
+        entityBounds.y > segMaxY
+      ) {
+        continue;
+      }
+
+      const hit = closestPointOnSegment(entityBounds.centerX, entityBounds.centerY, a.x, a.y, b.x, b.y);
+      if (entIsCircle) {
+        if (hit.dist <= entityBounds.radius + halfStroke + tol) {
+          return { colliding: true, contactPoint: { x: Math.round(hit.x), y: Math.round(hit.y) } };
+        }
+      } else {
+        // Test précis entre la boîte AABB de l'entité et la capsule du segment
+        const closestInBoxX = Math.max(entityBounds.x, Math.min(hit.x, entityBounds.x + entityBounds.width));
+        const closestInBoxY = Math.max(entityBounds.y, Math.min(hit.y, entityBounds.y + entityBounds.height));
+        const dBox = closestPointOnSegment(closestInBoxX, closestInBoxY, a.x, a.y, b.x, b.y);
+        if (dBox.dist <= halfStroke + tol || (hit.dist <= boxReach + halfStroke + tol &&
+            hit.x >= entityBounds.x - halfStroke - tol &&
+            hit.x <= entityBounds.x + entityBounds.width + halfStroke + tol &&
+            hit.y >= entityBounds.y - halfStroke - tol &&
+            hit.y <= entityBounds.y + entityBounds.height + halfStroke + tol)) {
+          return { colliding: true, contactPoint: { x: Math.round(dBox.x), y: Math.round(dBox.y) } };
+        }
+      }
+    }
+  }
+
+  return { colliding: false };
+}
+
 export function resetMatterPhysicsRuntime() {
   if (engine) {
     World.clear(engine.world, false);
@@ -205,6 +373,8 @@ export function resetMatterPhysicsRuntime() {
   bodyMap.clear();
   colliderOffsets.clear();
   bodySignatures.clear();
+  colliderLayerBodyMap.clear();
+  colliderLayerSignatures.clear();
   boundaryBodies.length = 0;
   patrolStates.clear();
   wanderingStates.clear();
@@ -287,19 +457,165 @@ function shortestAngleDiffRad(fromRad: number, toRad: number): number {
 }
 
 /**
+ * Décimation légère d'une polyligne pour produire des capsules de collision fluides et performantes.
+ */
+function decimatePolyline(points: Position[], minDist: number): Position[] {
+  if (points.length <= 2) return points;
+  const result: Position[] = [points[0]];
+  let last = points[0];
+  for (let i = 1; i < points.length - 1; i++) {
+    const pt = points[i];
+    if (Math.hypot(pt.x - last.x, pt.y - last.y) >= minDist) {
+      result.push(pt);
+      last = pt;
+    }
+  }
+  const finalPt = points[points.length - 1];
+  if (Math.hypot(finalPt.x - last.x, finalPt.y - last.y) >= 1) {
+    result.push(finalPt);
+  }
+  return result;
+}
+
+/**
+ * Construit les corps statiques Matter.js précis correspondant aux tracés d'un calque Collider.
+ */
+function buildColliderLayerBodies(
+  layer: SceneLayer,
+  canvasBounds: { width: number; height: number }
+): Matter.Body[] {
+  const bodies: Matter.Body[] = [];
+  const label = `layercol::${layer.id}`;
+  const isSensor = Boolean(layer.colliderIsTrigger);
+  const friction = 1 - Math.max(0, Math.min(1, layer.colliderFriction ?? 0.9));
+  const restitution = Math.max(0, Math.min(1, layer.colliderBounce ?? 0.0));
+  const isLegacy200 = layer.coordinateSpace === 'legacy_200';
+  const sx = isLegacy200 ? Math.max(100, canvasBounds.width) / 200 : 1;
+  const sy = isLegacy200 ? Math.max(100, canvasBounds.height) / 200 : 1;
+
+  for (const p of layer.vectorPaths || []) {
+    const thickness = Math.max(4, (p.strokeWidth || 6) * ((sx + sy) / 2));
+
+    if (p.rect && Math.abs(p.rect.width) > 1 && Math.abs(p.rect.height) > 1) {
+      const rw = Math.abs(p.rect.width) * sx;
+      const rh = Math.abs(p.rect.height) * sy;
+      const rx = (p.rect.width < 0 ? p.rect.x + p.rect.width : p.rect.x) * sx;
+      const ry = (p.rect.height < 0 ? p.rect.y + p.rect.height : p.rect.y) * sy;
+      bodies.push(
+        Bodies.rectangle(rx + rw / 2, ry + rh / 2, Math.max(4, rw), Math.max(4, rh), {
+          isStatic: true,
+          isSensor,
+          friction,
+          restitution,
+          label,
+        })
+      );
+      continue;
+    }
+
+    if ((p as any).circle && (p as any).circle.r > 1) {
+      const c = (p as any).circle;
+      bodies.push(
+        Bodies.circle(c.cx * sx, c.cy * sy, Math.max(3, c.r * Math.max(sx, sy)), {
+          isStatic: true,
+          isSensor,
+          friction,
+          restitution,
+          label,
+        })
+      );
+      continue;
+    }
+
+    let pts = (p.points || []).map((pt) => ({ x: pt.x * sx, y: pt.y * sy }));
+    if (pts.length === 0 && p.d) {
+      const nums = p.d.match(/-?\d+(?:\.\d+)?/g);
+      if (nums && nums.length >= 2) {
+        for (let i = 0; i + 1 < nums.length; i += 2) {
+          pts.push({ x: parseFloat(nums[i]) * sx, y: parseFloat(nums[i + 1]) * sy });
+        }
+      }
+    }
+
+    if (pts.length === 0) continue;
+
+    if (pts.length === 1) {
+      bodies.push(
+        Bodies.circle(pts[0].x, pts[0].y, thickness / 2, {
+          isStatic: true,
+          isSensor,
+          friction,
+          restitution,
+          label,
+        })
+      );
+      continue;
+    }
+
+    const simplified = decimatePolyline(pts, Math.max(8, thickness * 0.7));
+    const parts: Matter.Body[] = [];
+    for (let i = 0; i < simplified.length - 1; i++) {
+      const a = simplified[i];
+      const b = simplified[i + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 0.5) continue;
+      const angle = Math.atan2(dy, dx);
+      const part = Bodies.rectangle(
+        (a.x + b.x) / 2,
+        (a.y + b.y) / 2,
+        len + thickness * 0.65,
+        thickness,
+        { angle, label }
+      );
+      parts.push(part);
+    }
+
+    if (parts.length === 1) {
+      parts[0].isStatic = true;
+      parts[0].isSensor = isSensor;
+      parts[0].friction = friction;
+      parts[0].restitution = restitution;
+      Body.setStatic(parts[0], true);
+      bodies.push(parts[0]);
+    } else if (parts.length > 1) {
+      const compound = Body.create({
+        parts,
+        isStatic: true,
+        isSensor,
+        friction,
+        restitution,
+        label,
+      });
+      Body.setStatic(compound, true);
+      bodies.push(compound);
+    }
+  }
+
+  return bodies;
+}
+
+/**
  * Initialise le monde physique Matter.js avec les entités et bordures de scène
  * en calibrant les corps rigides rigoureusement sur les colliders verts du mode dessin.
  */
-function ensurePhysicsWorld(canvasBounds: { width: number; height: number }, entities: Record<string, Entity>) {
+function ensurePhysicsWorld(
+  canvasBounds: { width: number; height: number },
+  entities: Record<string, Entity>,
+  colliderLayers: SceneLayer[] = []
+) {
   if (!engine) {
     engine = Engine.create({
       gravity: { x: 0, y: 1, scale: 0.001 },
       enableSleeping: false,
     });
 
+    const getBodyLabel = (b: Matter.Body) => b.parent?.label || b.label;
+
     const recordContactFromPair = (pair: Matter.Pair) => {
-      const idA = pair.bodyA.label;
-      const idB = pair.bodyB.label;
+      const idA = getBodyLabel(pair.bodyA);
+      const idB = getBodyLabel(pair.bodyB);
       if (!idA || !idB) return;
 
       activePhysicsCollisionPairs.add(`${idA}:::${idB}`);
@@ -333,8 +649,8 @@ function ensurePhysicsWorld(canvasBounds: { width: number; height: number }, ent
     // Écouteur de collisions pour capture temps-réel et rebond calibré
     Matter.Events.on(engine, 'collisionStart', (event) => {
       event.pairs.forEach((pair) => {
-        const idA = pair.bodyA.label;
-        const idB = pair.bodyB.label;
+        const idA = getBodyLabel(pair.bodyA);
+        const idB = getBodyLabel(pair.bodyB);
         recordContactFromPair(pair);
 
         // Calibrage du rebond selon la surface heurtée
@@ -357,8 +673,8 @@ function ensurePhysicsWorld(canvasBounds: { width: number; height: number }, ent
 
     Matter.Events.on(engine, 'collisionEnd', (event) => {
       event.pairs.forEach((pair) => {
-        const idA = pair.bodyA.label;
-        const idB = pair.bodyB.label;
+        const idA = getBodyLabel(pair.bodyA);
+        const idB = getBodyLabel(pair.bodyB);
         if (idA && idB) {
           activePhysicsCollisionPairs.delete(`${idA}:::${idB}`);
           activePhysicsCollisionPairs.delete(`${idB}:::${idA}`);
@@ -458,10 +774,10 @@ function ensurePhysicsWorld(canvasBounds: { width: number; height: number }, ent
     const isSensor = physics ? (physics.isTrigger === true) : true;
     const collisionGroup = getHierarchyCollisionGroup(entity, entities);
 
-    // Calcul précis du collider issu du mode dessin (coordonnées viewBox 200x200)
-    // Prend en compte flipX et le centrage exact du transform-origin: center lorsque scale !== 1
+    // Calcul précis du collider issu du mode dessin (supporte sharedCollider entre états)
+    const colliderState = resolveColliderState(entity, currentState);
     const geom = getEntityColliderBounds(entity, currentState, Boolean(entity.flipX));
-    const scale = currentState?.scale ?? 1;
+    const scale = colliderState?.scale ?? 1;
     const scaleX = (entity.size.width * scale) / 200;
     const scaleY = (entity.size.height * scale) / 200;
     const originOffsetX = (entity.size.width * (1 - scale)) / 2;
@@ -551,6 +867,58 @@ function ensurePhysicsWorld(canvasBounds: { width: number; height: number }, ent
       }
     }
   }
+
+  // Synchronisation des calques Colliders de décor dans Matter.World
+  const activeLayerIds = new Set(colliderLayers.map((l) => l.id));
+  for (const [layerId, bodies] of colliderLayerBodyMap.entries()) {
+    if (!activeLayerIds.has(layerId)) {
+      bodies.forEach((b) => World.remove(engine!.world, b));
+      colliderLayerBodyMap.delete(layerId);
+      colliderLayerSignatures.delete(layerId);
+    }
+  }
+
+  for (const layer of colliderLayers) {
+    const sig = JSON.stringify({
+      isTrig: Boolean(layer.colliderIsTrigger),
+      fric: layer.colliderFriction ?? 0.9,
+      bnc: layer.colliderBounce ?? 0,
+      cs: layer.coordinateSpace || 'world',
+      wh: layer.coordinateSpace === 'legacy_200' ? `${Math.round(w)}x${Math.round(h)}` : 'world',
+      paths: (layer.vectorPaths || []).map((p) => `${p.id}:${p.d}:${p.strokeWidth}:${p.points?.length || 0}`),
+    });
+
+    if (colliderLayerSignatures.get(layer.id) !== sig) {
+      const prevBodies = colliderLayerBodyMap.get(layer.id);
+      if (prevBodies) {
+        prevBodies.forEach((b) => World.remove(engine!.world, b));
+      }
+      const nextBodies = buildColliderLayerBodies(layer, canvasBounds);
+      if (nextBodies.length > 0) {
+        World.add(engine!.world, nextBodies);
+      }
+      colliderLayerBodyMap.set(layer.id, nextBodies);
+      colliderLayerSignatures.set(layer.id, sig);
+    }
+  }
+}
+
+/**
+ * Interpolation fluide de vitesse (Accélération + Inertie/Damping) compatible à 100% avec les comportements existants.
+ */
+function approachAxisVelocity(
+  current: number,
+  target: number | null,
+  accel?: number,
+  damping?: number,
+  fallbackDamping?: number
+): number {
+  if (target !== null) {
+    const a = accel !== undefined ? Math.max(0.02, Math.min(1, accel)) : 1;
+    return a >= 0.999 ? target : current + (target - current) * a;
+  }
+  const d = damping !== undefined ? Math.max(0, Math.min(0.99, damping)) : fallbackDamping;
+  return d !== undefined ? current * d : current;
 }
 
 /**
@@ -561,11 +929,12 @@ export function stepMatterPhysics(params: {
   deltaTime: number; // en secondes
   canvasBounds: { width: number; height: number };
   mousePos?: { x: number; y: number } | null;
+  colliderLayers?: SceneLayer[];
 }): PhysicsTickResult {
-  const { entities, deltaTime, canvasBounds, mousePos } = params;
+  const { entities, deltaTime, canvasBounds, mousePos, colliderLayers = [] } = params;
   const dt = Math.min(deltaTime, 0.05);
 
-  ensurePhysicsWorld(canvasBounds, entities);
+  ensurePhysicsWorld(canvasBounds, entities, colliderLayers);
   if (!engine) return { updatedTransforms: {} };
 
   const updatedTransforms: Record<string, { position: Position; rotation?: number; flipX?: boolean }> = {};
@@ -638,13 +1007,14 @@ export function stepMatterPhysics(params: {
       }
     }
 
-    // 2. Vitesse continue (convertie de px/s vers px/frame)
+    // 2. Vitesse continue (convertie de px/s vers px/frame avec accélération & damping)
     if (constVel) {
-      if (constVel.vx !== undefined && constVel.vx !== 0) {
-        Body.setVelocity(body, { x: constVel.vx / 60, y: body.velocity.y });
-      }
-      if (constVel.vy !== undefined && constVel.vy !== 0) {
-        Body.setVelocity(body, { x: body.velocity.x, y: constVel.vy / 60 });
+      const targetVx = constVel.vx !== undefined && constVel.vx !== 0 ? constVel.vx / 60 : null;
+      const targetVy = constVel.vy !== undefined && constVel.vy !== 0 ? constVel.vy / 60 : null;
+      const nextVx = approachAxisVelocity(body.velocity.x, targetVx, constVel.acceleration, constVel.damping);
+      const nextVy = approachAxisVelocity(body.velocity.y, targetVy, constVel.acceleration, constVel.damping);
+      if (targetVx !== null || targetVy !== null || constVel.damping !== undefined) {
+        Body.setVelocity(body, { x: nextVx, y: nextVy });
       }
       if (constVel.angularVelocity) {
         Body.setAngularVelocity(body, ((constVel.angularVelocity / 60) * Math.PI) / 180);
@@ -686,6 +1056,8 @@ export function stepMatterPhysics(params: {
           (allowWasd && (activeKeys.has('s') || activeKeys.has('keys'))));
 
       const speed = (keyboard.speed ?? 180) / 60; // conversion px/s -> px/frame
+      const accel = keyboard.acceleration;
+      const damp = keyboard.damping;
 
       if (keyboard.mode === 'top_down') {
         let mx = 0;
@@ -700,16 +1072,19 @@ export function stepMatterPhysics(params: {
           my *= 0.7071;
         }
 
-        const nextVx = allowHorizontal ? (mx !== 0 ? mx * speed : (!physics ? body.velocity.x * 0.8 : body.velocity.x)) : body.velocity.x;
-        const nextVy = allowVertical ? (my !== 0 ? my * speed : (!physics ? body.velocity.y * 0.8 : body.velocity.y)) : body.velocity.y;
+        const nextVx = allowHorizontal
+          ? approachAxisVelocity(body.velocity.x, mx !== 0 ? mx * speed : null, accel, damp, !physics ? 0.8 : undefined)
+          : body.velocity.x;
+        const nextVy = allowVertical
+          ? approachAxisVelocity(body.velocity.y, my !== 0 ? my * speed : null, accel, damp, !physics ? 0.8 : undefined)
+          : body.velocity.y;
         Body.setVelocity(body, { x: nextVx, y: nextVy });
       } else {
         // Mode Plateforme
         let vx = body.velocity.x;
         if (allowHorizontal) {
-          if (left) vx = -speed;
-          else if (right) vx = speed;
-          else if (!physics) vx *= 0.8;
+          const targetVx = left ? -speed : right ? speed : null;
+          vx = approachAxisVelocity(body.velocity.x, targetVx, accel, damp, !physics ? 0.8 : undefined);
         }
 
         // Détection de contact au sol pour le saut
@@ -733,33 +1108,38 @@ export function stepMatterPhysics(params: {
 
       if (patrolState.timer > 0) {
         patrolState.timer -= dt;
+        const dampStop = patrol.damping ?? 0;
         Body.setVelocity(
           body,
           patrol.axis === 'horizontal'
-            ? { x: 0, y: body.velocity.y }
-            : { x: body.velocity.x, y: 0 }
+            ? { x: body.velocity.x * dampStop, y: body.velocity.y }
+            : { x: body.velocity.x, y: body.velocity.y * dampStop }
         );
       } else {
         const origin = patrolState.initialPos;
         const range = patrol.range ?? 120;
         const speed = (patrol.speed ?? 100) / 60; // px/s -> px/frame
         const pause = patrol.pauseDuration ?? 0.5;
+        const accel = patrol.acceleration;
+        const damp = patrol.damping ?? 0;
 
         if (patrol.axis === 'horizontal') {
-          Body.setVelocity(body, { x: patrolState.direction * speed, y: body.velocity.y });
+          const nextVx = approachAxisVelocity(body.velocity.x, patrolState.direction * speed, accel, damp, 0);
+          Body.setVelocity(body, { x: nextVx, y: body.velocity.y });
           const currentOffset = body.position.x - (origin.x + entity.size.width / 2);
           if (Math.abs(currentOffset) >= range) {
             patrolState.direction = currentOffset > 0 ? -1 : 1;
             patrolState.timer = pause;
-            Body.setVelocity(body, { x: 0, y: body.velocity.y });
+            Body.setVelocity(body, { x: body.velocity.x * damp, y: body.velocity.y });
           }
         } else {
-          Body.setVelocity(body, { x: body.velocity.x, y: patrolState.direction * speed });
+          const nextVy = approachAxisVelocity(body.velocity.y, patrolState.direction * speed, accel, damp, 0);
+          Body.setVelocity(body, { x: body.velocity.x, y: nextVy });
           const currentOffset = body.position.y - (origin.y + entity.size.height / 2);
           if (Math.abs(currentOffset) >= range) {
             patrolState.direction = currentOffset > 0 ? -1 : 1;
             patrolState.timer = pause;
-            Body.setVelocity(body, { x: body.velocity.x, y: 0 });
+            Body.setVelocity(body, { x: body.velocity.x, y: body.velocity.y * damp });
           }
         }
       }
@@ -847,12 +1227,15 @@ export function stepMatterPhysics(params: {
         wState!.currentAngle = Math.atan2(ty - body.position.y, tx - body.position.x);
       };
 
+      const wAccel = wandering.acceleration;
+      const wDamp = wandering.damping ?? 0.78;
+
       if (wState.pauseTimer > 0) {
         wState.pauseTimer -= dt;
         if (mode === 'horizontal') {
-          Body.setVelocity(body, { x: body.velocity.x * 0.78, y: body.velocity.y });
+          Body.setVelocity(body, { x: body.velocity.x * wDamp, y: body.velocity.y });
         } else {
-          Body.setVelocity(body, { x: body.velocity.x * 0.78, y: body.velocity.y * 0.78 });
+          Body.setVelocity(body, { x: body.velocity.x * wDamp, y: body.velocity.y * wDamp });
         }
         if (wState.pauseTimer <= 0) {
           pickNextWanderTarget();
@@ -870,19 +1253,22 @@ export function stepMatterPhysics(params: {
         if (mode === 'horizontal') {
           const dist = Math.abs(dx);
           if (dist > 6 && wState.moveTimer > 0) {
-            Body.setVelocity(body, { x: Math.sign(dx) * speedPxFrame, y: body.velocity.y });
+            const nextVx = approachAxisVelocity(body.velocity.x, Math.sign(dx) * speedPxFrame, wAccel, wDamp, wDamp);
+            Body.setVelocity(body, { x: nextVx, y: body.velocity.y });
           } else if (maxPause > 0 && Math.random() < 0.7) {
             wState.pauseTimer = maxPause * (0.25 + Math.random() * 0.75);
-            Body.setVelocity(body, { x: 0, y: body.velocity.y });
+            Body.setVelocity(body, { x: body.velocity.x * wDamp, y: body.velocity.y });
           } else {
             pickNextWanderTarget();
           }
         } else {
           const dist = Math.hypot(dx, dy);
           if (dist > 6 && wState.moveTimer > 0) {
+            const nextVx = approachAxisVelocity(body.velocity.x, (dx / dist) * speedPxFrame, wAccel, wDamp, wDamp);
+            const nextVy = approachAxisVelocity(body.velocity.y, (dy / dist) * speedPxFrame, wAccel, wDamp, wDamp);
             Body.setVelocity(body, {
-              x: (dx / dist) * speedPxFrame,
-              y: (dy / dist) * speedPxFrame,
+              x: nextVx,
+              y: nextVy,
             });
             if (wandering.orientToMovement && !physics?.freezeRotation) {
               const targetAngle = Math.atan2(dy, dx);
@@ -891,7 +1277,7 @@ export function stepMatterPhysics(params: {
             }
           } else if (maxPause > 0 && Math.random() < 0.7) {
             wState.pauseTimer = maxPause * (0.25 + Math.random() * 0.75);
-            Body.setVelocity(body, { x: 0, y: 0 });
+            Body.setVelocity(body, { x: body.velocity.x * wDamp, y: body.velocity.y * wDamp });
           } else {
             pickNextWanderTarget();
           }
@@ -974,12 +1360,15 @@ export function stepMatterPhysics(params: {
         const dx = targetX - currentEntityX;
         const dy = targetY - currentEntityY;
         const dist = Math.hypot(dx, dy);
+        const dampStop = moveTo.damping ?? 0;
 
         if (dist > 4) {
           const speed = (moveTo.speed ?? 120) / 60; // px/s -> px/frame
-          Body.setVelocity(body, { x: (dx / dist) * speed, y: (dy / dist) * speed });
+          const nextVx = approachAxisVelocity(body.velocity.x, (dx / dist) * speed, moveTo.acceleration, dampStop, 0);
+          const nextVy = approachAxisVelocity(body.velocity.y, (dy / dist) * speed, moveTo.acceleration, dampStop, 0);
+          Body.setVelocity(body, { x: nextVx, y: nextVy });
         } else {
-          Body.setVelocity(body, { x: 0, y: 0 });
+          Body.setVelocity(body, { x: body.velocity.x * dampStop, y: body.velocity.y * dampStop });
         }
       }
     }
@@ -1021,12 +1410,16 @@ export function stepMatterPhysics(params: {
         const dy = targetY - body.position.y;
         const dist = Math.hypot(dx, dy);
         const minDistance = follow.minDistance ?? 40;
+        const followAccel = follow.acceleration ?? (follow.smoothing !== undefined ? Math.max(0.04, Math.min(1, follow.smoothing)) : undefined);
+        const followDamp = follow.damping ?? 0.8;
 
         if (dist > minDistance) {
           const speed = (follow.speed ?? 150) / 60; // px/s -> px/frame
-          Body.setVelocity(body, { x: (dx / dist) * speed, y: (dy / dist) * speed });
+          const nextVx = approachAxisVelocity(body.velocity.x, (dx / dist) * speed, followAccel, followDamp, 0.8);
+          const nextVy = approachAxisVelocity(body.velocity.y, (dy / dist) * speed, followAccel, followDamp, 0.8);
+          Body.setVelocity(body, { x: nextVx, y: nextVy });
         } else {
-          Body.setVelocity(body, { x: body.velocity.x * 0.8, y: body.velocity.y * 0.8 });
+          Body.setVelocity(body, { x: body.velocity.x * followDamp, y: body.velocity.y * followDamp });
         }
       }
     }

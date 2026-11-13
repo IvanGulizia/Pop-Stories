@@ -118,6 +118,8 @@ export interface ConstantVelocityBehaviorConfig extends BaseBehaviorConfig {
   vx: number;        // px/s
   vy: number;        // px/s
   angularVelocity?: number; // deg/s
+  acceleration?: number; // 0.05..1 (réactivité vers la vitesse cible, 1 = instantané)
+  damping?: number;      // 0..0.99 (inertie / amortissement de dérive)
   flipOnMove?: boolean;
   flipInvert?: boolean;
 }
@@ -141,6 +143,8 @@ export interface FollowBehaviorConfig extends BaseBehaviorConfig {
   speed: number;       // px/s, default 150
   minDistance: number; // stop distance, default 40
   smoothing: number;   // lerp factor 0..1, default 0.1
+  acceleration?: number; // 0.05..1 (réactivité au démarrage)
+  damping?: number;      // 0..0.99 (inertie / glisse à l'arrêt)
   flipOnMove?: boolean;
   flipInvert?: boolean;
 }
@@ -154,6 +158,8 @@ export interface MoveToBehaviorConfig extends BaseBehaviorConfig {
   targetTag?: string;
   speed: number;       // px/s, default 120
   stopOnArrival: boolean;
+  acceleration?: number; // 0.05..1 (réactivité)
+  damping?: number;      // 0..0.99 (inertie à l'arrivée)
   flipOnMove?: boolean;
   flipInvert?: boolean;
 }
@@ -164,6 +170,8 @@ export interface PatrolBehaviorConfig extends BaseBehaviorConfig {
   range: number;       // px, default 120
   speed: number;       // px/s, default 100
   pauseDuration: number; // seconds, default 0.5
+  acceleration?: number; // 0.05..1 (réactivité aux demi-tours)
+  damping?: number;      // 0..0.99 (inertie en pause)
   flipOnMove?: boolean;
   flipInvert?: boolean;
 }
@@ -176,6 +184,8 @@ export interface WanderingBehaviorConfig extends BaseBehaviorConfig {
   randomness: number;      // Niveau d'aléatoire (0..100%), défaut 65
   changeInterval: number;  // Fréquence de changement de cap (s), défaut 1.5
   pauseDuration: number;   // Pause aléatoire max (s), défaut 0.8
+  acceleration?: number;   // 0.05..1 (douceur des virages / accélérations)
+  damping?: number;        // 0..0.99 (glisse en pause)
   orientToMovement?: boolean; // Orienter dans le sens du déplacement
   flipOnMove?: boolean;
   flipInvert?: boolean;
@@ -190,6 +200,8 @@ export interface KeyboardControlBehaviorConfig extends BaseBehaviorConfig {
   allowHorizontal?: boolean; // default true
   allowVertical?: boolean;   // default true (used in top_down)
   allowJump?: boolean;       // default true (used in platformer)
+  acceleration?: number;     // 0.05..1 (réactivité au démarrage)
+  damping?: number;          // 0..0.99 (inertie / glisse au relâchement)
   flipOnMove?: boolean;
   flipInvert?: boolean;
 }
@@ -297,6 +309,8 @@ export interface Entity {
   flipX?: boolean;
   parentId?: EntityId;
   parentOffset?: ParentOffset;
+  sharedCollider?: boolean;          // Conserver le même collider physique même si l'état/dessin change
+  colliderReferenceStateId?: StateId; // État de référence pour la géométrie du collider partagé
 }
 
 export type TriggerType =
@@ -545,7 +559,8 @@ export interface CursorPackExportData {
   customCursorHotspots?: Record<string, { x: number; y: number }>;
 }
 
-export type SceneLayerKind = 'background' | 'foreground' | 'custom';
+export type SceneLayerKind = 'background' | 'foreground' | 'collider' | 'custom';
+export type SceneLayerRole = 'visual' | 'collider';
 
 export interface SceneLayer {
   id: string;
@@ -554,6 +569,13 @@ export interface SceneLayer {
   opacity: number;
   locked?: boolean;
   parallaxFactor?: number; // 0 = statique, 0.5 = demi-vitesse, 1 = normal
+  coordinateSpace?: 'world' | 'legacy_200'; // 'world' = repère WYSIWYG 1px = 1 unité SVG (prêt caméra)
+  role?: SceneLayerRole;          // 'visual' (décor) ou 'collider' (trait physique précis)
+  colliderTags?: string[];        // Tags intégrés au calque collider (ex: ['sol', 'lave'])
+  colliderIsTrigger?: boolean;    // false = solide infranchissable, true = zone trigger
+  colliderFriction?: number;      // 0..1 (défaut 0.9)
+  colliderBounce?: number;        // 0..1 (défaut 0)
+  showColliderInPlay?: boolean;   // Afficher ou masquer le trait collider pendant le Mode Play
   vectorPaths: VectorPath[];
 }
 

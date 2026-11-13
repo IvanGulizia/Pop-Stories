@@ -1,3 +1,22 @@
+## [Phase 10.12] - 2026-11-13
+### Ajouté & Corrigé
+- **Écran d'accueil au démarrage (`Scene.tsx` / `App.tsx`)** :
+  - L'écran d'accueil centré sur la création de la première entité s'affiche désormais immédiatement au démarrage lorsque le projet est vide (sans ouverture forcée du modal).
+  - Masquage temporaire des boutons de lancement de la scène démo sur les écrans d'accueil et catalogues vides.
+- **Calques Colliders de Décor précis avec `#Tags` intégrés (`SceneLayer` role `'collider'`)** :
+  - Ajout d'un groupe natif *« Colliders de Décor (Murs / Sols) »* dans `SceneLayerManager.tsx` et d'une section dédiée dans `DrawingToolsPanel.tsx` : tags de détection (`#sol`, `#mur`, `#lave`…), mode Obstacle Solide vs Capteur/Trigger traversable, visibilité en mode Play, adhérence et rebond.
+  - Génération de corps statiques Matter.js fidèles aux tracés dans `matterPhysicsEngine.ts` (rectangles, cercles, lignes et polylignes libres décimées en capsules segmentées `Body.create({ parts })`, sans englobant rectangulaire grossier) et détection segment-par-segment (`checkEntityAgainstColliderLayer`) prise en compte dans les déclencheurs `on_collision` par `#Tag` ou `🌐 Tous les objets` avec position exacte d'impact.
+- **Rendu 100 % WYSIWYG des Calques en coordonnées Monde (`coordinateSpace: 'world'`)** :
+  - Suppression de l'étirement `viewBox="0 0 200 200" preserveAspectRatio="none"` sur `renderLayerSvg` et `DirectCanvasDrawingOverlay` : les nouveaux calques utilisent un repère exact `1 unité SVG = 1 pixel CSS` sans aucune déformation selon le ratio du canvas ou la largeur des panneaux latéraux (préparé pour le futur déplacement de caméra), tout en conservant une rétrocompatibilité pour d'éventuels anciens calques `legacy_200`.
+- **Épuration de l'interface de dessin sur calque** :
+  - Suppression du badge flottant *« Dessin Direct / Terminer »* sur le canvas ainsi que du bandeau d'en-tête *« Fermer »* dans `DrawingToolsPanel.tsx` ; la sélection/désélection directe du calque dans la pile suffit.
+- **Paramètres d'Accélération & Damping / Inertie sur tous les comportements de mouvement** :
+  - Ajout des curseurs **Accélération (Réactivité)** et **Inertie / Glisse (Damping)** dans `BehaviorManager.tsx` et application physique douce axe par axe (`approachAxisVelocity`) dans `matterPhysicsEngine.ts` pour `constant_velocity`, `keyboard_control`, `patrol`, `wandering`, `move_to` et `follow`.
+- **Correction de la boucle/scintillement en Collision + Changement d'état + Auto-remise / Exit** :
+  - Ajout de l'option **« Collider commun entre les états »** (`sharedCollider` + `colliderReferenceStateId`) dans l'Inspecteur (`Inspector.tsx`) et `collider.ts` pour verrouiller la géométrie de collision d'une entité même lorsque l'apparence change d'état.
+  - Ajout d'un garde anti-scintillement dans `useSceneStore.ts` (`lastOverlapPosA` / `lastOverlapPosB` dans `handleCollisionPair`) : si un changement d'état modifie le collider en place (`déplacement < 2.5px`) et provoque une micro-perte de chevauchement instantanée, le contact reste maintenu sans déclencher de faux événement `Exit` ni d'auto-remise en boucle.
+  - Suppression du double/triple appel à `evaluateRules()` par frame entre `App.tsx` et `Scene.tsx`.
+
 ## [Phase 10.11] - 2026-11-12
 ### Corrigé & Ajouté
 - **Mode `🌐 Tous les objets` (`SelectionMode = 'any'`) & Sujet explicite sur les Bords de Scène** :
