@@ -238,6 +238,8 @@ interface WizardData {
   variableOperator?: '>=' | '==' | '<=';
   variableValue?: number;
   autoRevert?: boolean;
+  collisionExitMargin?: number;
+  collisionTriggerOnce?: boolean;
 }
 
 export function RuleBook() {
@@ -724,6 +726,8 @@ export function RuleBook() {
         variableOperator: activeWizard.variableOperator,
         variableValue: activeWizard.variableValue,
         autoRevert: activeWizard.autoRevert,
+        collisionExitMargin: activeWizard.collisionExitMargin,
+        collisionTriggerOnce: activeWizard.collisionTriggerOnce,
       },
       actions,
     });
@@ -1788,7 +1792,48 @@ export function RuleBook() {
                               />
                             </div>
                           )}
-                          {rule.trigger.type !== 'timer' && rule.trigger.type !== 'keyboard' && rule.trigger.type !== 'proximity' && rule.trigger.type !== 'boundary' && rule.trigger.type !== 'variable' && (
+                          {rule.trigger.type === 'collision' && (
+                            <div className="mt-1 flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="number"
+                                min={0}
+                                max={60}
+                                step={2}
+                                value={rule.trigger.collisionExitMargin ?? 10}
+                                onChange={(e) =>
+                                  updateRule(rule.id, {
+                                    trigger: {
+                                      ...rule.trigger,
+                                      collisionExitMargin: Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)),
+                                    },
+                                  })
+                                }
+                                title="Marge anti-rebond de sortie (px)"
+                                className="w-10 text-center text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-0.5 py-0.5 outline-none"
+                              />
+                              <span className="text-[8px] text-slate-400">px</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateRule(rule.id, {
+                                    trigger: {
+                                      ...rule.trigger,
+                                      collisionTriggerOnce: !rule.trigger.collisionTriggerOnce,
+                                    },
+                                  })
+                                }
+                                title="Limiter à 1 seul déclenchement par paire d'objets"
+                                className={`px-1.5 py-0.5 rounded text-[8px] font-black cursor-pointer border transition-colors ${
+                                  rule.trigger.collisionTriggerOnce
+                                    ? 'bg-emerald-500 text-white border-emerald-400'
+                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                                }`}
+                              >
+                                1×
+                              </button>
+                            </div>
+                          )}
+                          {rule.trigger.type !== 'timer' && rule.trigger.type !== 'keyboard' && rule.trigger.type !== 'proximity' && rule.trigger.type !== 'boundary' && rule.trigger.type !== 'variable' && rule.trigger.type !== 'collision' && (
                             <div className="text-[9px] text-slate-400 truncate mt-0.5">
                               {eventSub}
                             </div>
@@ -3173,6 +3218,44 @@ export function RuleBook() {
                             Relâchement du sujet pendant la collision
                           </div>
                         </div>
+                      </button>
+                    </div>
+
+                    {/* Options anti-boucle Collision (Hystérésis & 1x par paire) */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-indigo-200/70">
+                      <label className="flex items-center gap-2 text-[11px] font-bold text-indigo-900">
+                        <span>Marge anti-rebond sortie :</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={60}
+                          step={2}
+                          value={activeWizard.collisionExitMargin ?? 10}
+                          onChange={(e) =>
+                            setActiveWizard({
+                              ...activeWizard,
+                              collisionExitMargin: Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)),
+                            })
+                          }
+                          className="w-14 px-2 py-1 text-center text-xs font-bold bg-white border border-indigo-200 rounded-lg outline-none focus:border-indigo-500"
+                        />
+                        <span className="text-[10px] text-indigo-600 font-normal">px (évite les boucles si l'état change de taille)</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveWizard({
+                            ...activeWizard,
+                            collisionTriggerOnce: !activeWizard.collisionTriggerOnce,
+                          })
+                        }
+                        className={`px-3 py-1.5 rounded-xl text-[11px] font-black border transition-all cursor-pointer ${
+                          activeWizard.collisionTriggerOnce
+                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                            : 'bg-white text-slate-700 border-indigo-200 hover:bg-indigo-100/60'
+                        }`}
+                      >
+                        {activeWizard.collisionTriggerOnce ? '✓ 1 seule fois par paire' : '1× par paire (Optionnel)'}
                       </button>
                     </div>
                   </div>
@@ -6309,6 +6392,48 @@ export function RuleBook() {
                             </div>
                             <div className="text-[10px] text-slate-500">Relâché au-dessus</div>
                           </div>
+                        </button>
+                      </div>
+
+                      {/* Options avancées anti-boucle & stabilité collision */}
+                      <div className="mt-2 pt-2.5 border-t border-indigo-200/70 flex flex-wrap items-center justify-between gap-2.5">
+                        <label className="flex items-center gap-2 text-[11px] font-bold text-indigo-900">
+                          <span>Marge séparation (anti-boucle) :</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={60}
+                            step={2}
+                            value={rule.trigger.collisionExitMargin ?? 10}
+                            onChange={(e) =>
+                              updateRule(rule.id, {
+                                trigger: {
+                                  ...rule.trigger,
+                                  collisionExitMargin: Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)),
+                                },
+                              })
+                            }
+                            className="w-14 px-2 py-1 text-center text-xs font-bold bg-white border border-indigo-200 rounded-lg outline-none focus:border-indigo-500"
+                          />
+                          <span className="text-[10px] font-normal text-indigo-700">px</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateRule(rule.id, {
+                              trigger: {
+                                ...rule.trigger,
+                                collisionTriggerOnce: !rule.trigger.collisionTriggerOnce,
+                              },
+                            })
+                          }
+                          className={`px-3 py-1.5 rounded-xl text-[11px] font-black border transition-all cursor-pointer ${
+                            rule.trigger.collisionTriggerOnce
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                              : 'bg-white text-slate-700 border-indigo-200 hover:bg-indigo-100/60'
+                          }`}
+                        >
+                          {rule.trigger.collisionTriggerOnce ? '✓ Déclencher 1 seule fois par paire' : '1× seule fois par paire'}
                         </button>
                       </div>
                     </div>

@@ -30,6 +30,7 @@ export function Plant({ entity, style }: PlantProps) {
   const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
   const pointerDownTimeRef = useRef<number>(0);
   const lastHandledClickTimeRef = useRef<number>(0);
+  const upHandledForPointerRef = useRef<boolean>(false);
   const dragControls = useDragControls();
   const { setCursorState, setIsDragging } = useAppCursor();
 
@@ -338,15 +339,16 @@ export function Plant({ entity, style }: PlantProps) {
             if (appMode === 'play') setCursorState('click');
           }
           if (appMode === 'play') {
+            upHandledForPointerRef.current = false;
             const pt = getSceneEventPosition(e.clientX, e.clientY);
             triggerPointerEvent(entity.id, 'mouse_down', pt);
-            triggerPointerEvent(entity.id, 'down', pt);
 
             const handleGlobalUp = (upEvent: PointerEvent) => {
               window.removeEventListener('pointerup', handleGlobalUp);
+              if (upHandledForPointerRef.current) return;
+              upHandledForPointerRef.current = true;
               const upPt = getSceneEventPosition(upEvent.clientX, upEvent.clientY);
               triggerPointerEvent(entity.id, 'mouse_up', upPt);
-              triggerPointerEvent(entity.id, 'up', upPt);
             };
             window.addEventListener('pointerup', handleGlobalUp, { once: true });
           }
@@ -369,6 +371,7 @@ export function Plant({ entity, style }: PlantProps) {
             return;
           }
 
+          upHandledForPointerRef.current = true;
           const pt = getSceneEventPosition(e.clientX, e.clientY);
           const duration = Date.now() - (pointerDownTimeRef.current || 0);
           const dist = pointerDownPosRef.current
@@ -391,6 +394,7 @@ export function Plant({ entity, style }: PlantProps) {
               triggerPointerEvent(entity.id, 'mouse_up', pt);
             } else {
               setCursorState('idle');
+              triggerPointerEvent(entity.id, 'mouse_up', pt);
             }
           }
         }}

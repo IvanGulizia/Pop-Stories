@@ -110,43 +110,60 @@ export function Inspector() {
   return (
     <div className="bg-white rounded-3xl border border-slate-200 p-4 shadow-2xs space-y-5 text-slate-800">
       {/* Modal d'édition de dessin par état en plein écran */}
-      {editingStateDrawingId && (
-        <FullScreenDrawingModal
-          title={`Dessiner l'état "${editingState?.name || editingStateDrawingId}"`}
-          subtitle={`Objet : ${selectedEntity.name}`}
-          currentEditingStateName={editingState?.name || editingStateDrawingId}
-          onionStates={onionStates}
-          initialColliderType={editingState?.colliderType || selectedEntity.colliderType || 'box'}
-          initialPaths={JSON.parse(
-            JSON.stringify(
-              selectedEntity.states[editingStateDrawingId]?.vectorPaths ||
-                (selectedEntity.currentStateId === editingStateDrawingId ? selectedEntity.vectorPaths : []) ||
-                []
-            )
-          )}
-          initialLayers={
-            selectedEntity.states[editingStateDrawingId]?.drawingLayers ||
-            (selectedEntity.currentStateId === editingStateDrawingId ? selectedEntity.drawingLayers : undefined)
-          }
-          onSave={(paths, _dataUrl, colliderType, stateName, _hotspot, layers) => {
-            updateStateProperties(selectedEntity.id, editingStateDrawingId, {
-              vectorPaths: paths,
-              drawingLayers: layers,
-              colliderType: colliderType || 'box',
-              ...(stateName ? { name: stateName } : {}),
-            });
-            if (selectedEntity.currentStateId === editingStateDrawingId) {
-              updateEntityDetails(selectedEntity.id, {
+      {editingStateDrawingId && (() => {
+        const refStateId =
+          selectedEntity.colliderReferenceStateId ||
+          Object.keys(selectedEntity.states)[0] ||
+          selectedEntity.currentStateId;
+        const isRefState = editingStateDrawingId === refStateId;
+        return (
+          <FullScreenDrawingModal
+            title={`Dessiner l'état "${editingState?.name || editingStateDrawingId}"`}
+            subtitle={`Objet : ${selectedEntity.name}`}
+            currentEditingStateName={editingState?.name || editingStateDrawingId}
+            onionStates={onionStates}
+            initialColliderType={editingState?.colliderType || selectedEntity.colliderType || 'box'}
+            initialColliderBounds={
+              editingState?.colliderBounds ||
+              (selectedEntity.currentStateId === editingStateDrawingId ? selectedEntity.colliderBounds : undefined)
+            }
+            isSharedColliderEntity={Boolean(selectedEntity.sharedCollider)}
+            isReferenceStateForSharedCollider={isRefState}
+            initialOverrideCollider={Boolean(editingState?.overrideCollider)}
+            initialPaths={JSON.parse(
+              JSON.stringify(
+                selectedEntity.states[editingStateDrawingId]?.vectorPaths ||
+                  (selectedEntity.currentStateId === editingStateDrawingId ? selectedEntity.vectorPaths : []) ||
+                  []
+              )
+            )}
+            initialLayers={
+              selectedEntity.states[editingStateDrawingId]?.drawingLayers ||
+              (selectedEntity.currentStateId === editingStateDrawingId ? selectedEntity.drawingLayers : undefined)
+            }
+            onSave={(paths, _dataUrl, colliderType, stateName, _hotspot, layers, colliderBounds, overrideCollider) => {
+              updateStateProperties(selectedEntity.id, editingStateDrawingId, {
                 vectorPaths: paths,
                 drawingLayers: layers,
                 colliderType: colliderType || 'box',
+                ...(colliderBounds !== undefined ? { colliderBounds } : {}),
+                overrideCollider,
+                ...(stateName ? { name: stateName } : {}),
               });
-            }
-            setEditingStateDrawingId(null);
-          }}
-          onClose={() => setEditingStateDrawingId(null)}
-        />
-      )}
+              if (selectedEntity.currentStateId === editingStateDrawingId) {
+                updateEntityDetails(selectedEntity.id, {
+                  vectorPaths: paths,
+                  drawingLayers: layers,
+                  colliderType: colliderType || 'box',
+                  ...(colliderBounds !== undefined ? { colliderBounds } : {}),
+                });
+              }
+              setEditingStateDrawingId(null);
+            }}
+            onClose={() => setEditingStateDrawingId(null)}
+          />
+        );
+      })()}
 
       {/* Header with Prominent Entity Name Editing */}
       <div className="border-b border-slate-100 pb-3 space-y-2">
@@ -644,62 +661,147 @@ export function Inspector() {
           })}
         </div>
 
-        {/* Option Collider unifié entre les états (évite les boucles Enter/Exit si les dessins ont des tailles différentes) */}
-        {Object.keys(selectedEntity.states).length > 1 && (
-          <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="font-bold text-slate-700 text-xs">
-                  Collider commun entre les états
+        {/* Option Collider unifié & Surcharge par état */}
+        <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
+          {Object.keys(selectedEntity.states).length > 1 && (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-bold text-slate-700 text-xs">
+                    Collider commun entre les états
+                  </div>
+                  <div className="text-[10px] text-slate-400 leading-snug">
+                    Conserve la même hitbox quand l'état change (évite les boucles Enter/Exit).
+                  </div>
                 </div>
-                <div className="text-[10px] text-slate-400 leading-snug">
-                  Conserve la même hitbox même quand l'état change de dessin (évite les boucles Enter/Exit).
-                </div>
-              </div>
-              <input
-                type="checkbox"
-                checked={Boolean(selectedEntity.sharedCollider)}
-                onChange={(e) =>
-                  updateEntityDetails(selectedEntity.id, {
-                    sharedCollider: e.target.checked,
-                    colliderReferenceStateId:
-                      selectedEntity.colliderReferenceStateId ||
-                      Object.keys(selectedEntity.states)[0] ||
-                      selectedEntity.currentStateId,
-                  })
-                }
-                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
-              />
-            </div>
-
-            {selectedEntity.sharedCollider && (
-              <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-200/70">
-                <span className="text-[11px] font-semibold text-slate-600">
-                  État de référence :
-                </span>
-                <select
-                  value={
-                    selectedEntity.colliderReferenceStateId ||
-                    Object.keys(selectedEntity.states)[0] ||
-                    selectedEntity.currentStateId
-                  }
+                <input
+                  type="checkbox"
+                  checked={Boolean(selectedEntity.sharedCollider)}
                   onChange={(e) =>
                     updateEntityDetails(selectedEntity.id, {
-                      colliderReferenceStateId: e.target.value,
+                      sharedCollider: e.target.checked,
+                      colliderReferenceStateId:
+                        selectedEntity.colliderReferenceStateId ||
+                        Object.keys(selectedEntity.states)[0] ||
+                        selectedEntity.currentStateId,
                     })
                   }
-                  className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 max-w-[140px]"
-                >
-                  {Object.values(selectedEntity.states).map((st) => (
-                    <option key={st.id} value={st.id}>
-                      État {st.name}
-                    </option>
-                  ))}
-                </select>
+                  className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
+                />
               </div>
-            )}
-          </div>
-        )}
+
+              {selectedEntity.sharedCollider && (
+                <div className="space-y-2 pt-1.5 border-t border-slate-200/70">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold text-slate-600">
+                      État de référence :
+                    </span>
+                    <select
+                      value={
+                        selectedEntity.colliderReferenceStateId ||
+                        Object.keys(selectedEntity.states)[0] ||
+                        selectedEntity.currentStateId
+                      }
+                      onChange={(e) =>
+                        updateEntityDetails(selectedEntity.id, {
+                          colliderReferenceStateId: e.target.value,
+                        })
+                      }
+                      className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 max-w-[140px]"
+                    >
+                      {Object.values(selectedEntity.states).map((st) => (
+                        <option key={st.id} value={st.id}>
+                          État {st.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Surcharge du collider sur l'état actuellement sélectionné */}
+                  {(() => {
+                    const curSt = selectedEntity.states[selectedEntity.currentStateId];
+                    const refId =
+                      selectedEntity.colliderReferenceStateId ||
+                      Object.keys(selectedEntity.states)[0] ||
+                      selectedEntity.currentStateId;
+                    if (!curSt || curSt.id === refId) return null;
+                    const isOverridden = Boolean(curSt.overrideCollider);
+                    const ovrShape = curSt.colliderBounds?.shape || curSt.colliderType || 'box';
+                    const ovrMode = curSt.colliderBounds?.mode || 'auto';
+                    return (
+                      <div className="p-2 bg-white rounded-xl border border-indigo-200/80 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <div className="text-[11px] font-bold text-indigo-950">
+                              Surcharger sur « {curSt.name} »
+                            </div>
+                            <div className="text-[9px] text-slate-500">
+                              Utiliser un collider propre (auto ou manuel) pour cet état
+                            </div>
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={isOverridden}
+                            onChange={(e) =>
+                              updateStateProperties(selectedEntity.id, curSt.id, {
+                                overrideCollider: e.target.checked,
+                              })
+                            }
+                            className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
+                          />
+                        </div>
+                        {isOverridden && (
+                          <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-100 text-[10px]">
+                            <span className="font-semibold text-emerald-700">
+                              Mode : {ovrMode === 'manual' ? 'Manuel' : 'Auto'} ({ovrShape === 'circle' ? 'Cercle' : ovrShape === 'polygon' ? 'Polyligne' : 'Rectangle'})
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setEditingStateDrawingId(curSt.id)}
+                              className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg font-bold cursor-pointer"
+                            >
+                              Ajuster dans Dessin
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Raccourci édition collider (même avec 1 seul état) */}
+          {(() => {
+            const curSt = selectedEntity.states[selectedEntity.currentStateId];
+            const activeMode = curSt?.colliderBounds?.mode || selectedEntity.colliderBounds?.mode || 'auto';
+            const activeShape =
+              curSt?.colliderBounds?.shape ||
+              curSt?.colliderType ||
+              selectedEntity.colliderBounds?.shape ||
+              selectedEntity.colliderType ||
+              (selectedEntity.type === 'apple' ? 'circle' : 'box');
+            return (
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60 text-[10px]">
+                <span className="font-semibold text-slate-600">
+                  Hitbox actuelle :{' '}
+                  <strong className="text-emerald-700">
+                    {activeMode === 'manual' ? 'Manuel' : 'Auto'} •{' '}
+                    {activeShape === 'circle' ? 'Cercle' : activeShape === 'polygon' ? 'Polyligne' : 'Rectangle'}
+                  </strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setEditingStateDrawingId(selectedEntity.currentStateId)}
+                  className="px-2 py-1 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-bold cursor-pointer shadow-2xs"
+                >
+                  Configurer
+                </button>
+              </div>
+            );
+          })()}
+        </div>
       </div>
     </div>
   );

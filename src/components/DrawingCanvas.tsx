@@ -33,8 +33,9 @@ import {
   ChevronDown,
   Plus,
 } from 'lucide-react';
-import { VectorPath, VectorPoint, VectorRect, ColliderType, DrawingLayer } from '../types';
+import { VectorPath, VectorPoint, VectorRect, ColliderType, ColliderBounds, DrawingLayer } from '../types';
 import { floodFillRegion, applyBucketFill } from '../utils/floodFill';
+import { computeAutoColliderBoundsFromPaths } from '../utils/collider';
 import { useSceneStore, DEFAULT_PROJECT_PALETTE } from '../store/useSceneStore';
 
 export interface OnionStateOption {
@@ -57,11 +58,16 @@ interface DrawingCanvasProps {
   initialLayers?: DrawingLayer[];
   onLayersChange?: (layers: DrawingLayer[]) => void;
   initialColliderType?: ColliderType;
+  initialColliderBounds?: ColliderBounds;
   initialStrokeColor?: string;
   initialFillColor?: string;
   onionStates?: OnionStateOption[];
   currentEditingStateName?: string;
-  onColliderChange?: (colliderType: ColliderType) => void;
+  onColliderChange?: (colliderType: ColliderType, colliderBounds?: ColliderBounds) => void;
+  isSharedColliderEntity?: boolean;
+  isReferenceStateForSharedCollider?: boolean;
+  initialOverrideCollider?: boolean;
+  onOverrideColliderChange?: (override: boolean) => void;
   referenceGuide?: ReferenceGuideOption;
   availableReferenceGuides?: ReferenceGuideOption[];
   initialHotspot?: { x: number; y: number };
@@ -168,11 +174,16 @@ export function DrawingCanvas({
   initialLayers = [],
   onLayersChange,
   initialColliderType = 'box',
+  initialColliderBounds,
   initialStrokeColor = '#000000',
   initialFillColor = 'none',
   onionStates = [],
   currentEditingStateName,
   onColliderChange,
+  isSharedColliderEntity = false,
+  isReferenceStateForSharedCollider = false,
+  initialOverrideCollider = false,
+  onOverrideColliderChange,
   referenceGuide,
   initialHotspot,
   onHotspotChange,
@@ -328,7 +339,50 @@ export function DrawingCanvas({
   });
   const [cornerRadius, setCornerRadius] = useState<number>(0);
   const [tool, setTool] = useState<DrawTool>('pencil');
-  const [colliderType, setColliderType] = useState<ColliderType>(initialColliderType);
+  const [colliderType, setColliderType] = useState<ColliderType>(
+    initialColliderBounds?.shape || initialColliderType
+  );
+  const [colliderMode, setColliderMode] = useState<'auto' | 'manual'>(
+    initialColliderBounds?.mode === 'manual' ? 'manual' : 'auto'
+  );
+  const [overrideCollider, setOverrideCollider] = useState<boolean>(initialOverrideCollider);
+  const [manualCollider, setManualCollider] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    centerX: number;
+    centerY: number;
+    radius: number;
+  }>(() => {
+    const autoInit = computeAutoColliderBoundsFromPaths(
+      initialPaths,
+      initialColliderBounds?.shape || initialColliderType
+    );
+    const x = initialColliderBounds?.x ?? autoInit.x ?? 20;
+    const y = initialColliderBounds?.y ?? autoInit.y ?? 20;
+    const width = initialColliderBounds?.width ?? autoInit.width ?? 160;
+    const height = initialColliderBounds?.height ?? autoInit.height ?? 160;
+    const centerX = initialColliderBounds?.centerX ?? x + width / 2;
+    const centerY = initialColliderBounds?.centerY ?? y + height / 2;
+    const radius = initialColliderBounds?.radius ?? Math.max(width, height) / 2;
+    return { x, y, width, height, centerX, centerY, radius };
+  });
+  const [isColliderBodyDraggable, setIsColliderBodyDraggable] = useState(false);
+  const [colliderDragAction, setColliderDragAction] = useState<
+    | null
+    | 'move_box'
+    | 'resize_nw'
+    | 'resize_ne'
+    | 'resize_se'
+    | 'resize_sw'
+    | 'move_circle'
+    | 'resize_circle_r'
+  >(null);
+  const colliderDragOriginRef = useRef<{
+    mouse: VectorPoint;
+    initial: { x: number; y: number; width: number; height: number; centerX: number; centerY: number; radius: number };
+  } | null>(null);
   const [showColliderPreview, setShowColliderPreview] = useState(true);
 
   // Reference Guide & Hotspot state (Repère de dessin & point d'impact)
@@ -485,10 +539,81 @@ export function DrawingCanvas({
     onVectorChange(updatedPaths, dataUrl);
   };
 
-  const handleColliderTypeSelect = (type: ColliderType) => {
-    setColliderType(type);
+  const buildColliderBoundsPayload = (
+    shape: ColliderType,
+    mode: 'auto' | 'manual',
+    manual = manualCollider
+  ): ColliderBounds => {
+    if (mode === 'auto') {
+      return { mode: 'auto', shape };
+    }
+    return {
+      mode: 'manual',
+      shape: shape === 'polygon' ? 'box' : shape,
+      x: Math.round(manual.x * 10) / 10,
+      y: Math.round(manual.y * 10) / 10,
+      width: Math.max(8, Math.round(manual.width * 10) / 10),
+      height: Math.max(8, Math.round(manual.height * 10) / 10),
+      centerX: Math.round(manual.centerX * 10) / 10,
+      centerY: Math.round(manual.centerY * 10) / 10,
+      radius: Math.max(4, Math.round(manual.radius * 10) / 10),
+    };
+  };
+
+  const emitColliderUpdate = (
+    nextShape: ColliderType,
+    nextMode: 'auto' | 'manual',
+    nextManual = manualCollider
+  ) => {
     if (onColliderChange) {
-      onColliderChange(type);
+      onColliderChange(nextShape, buildColliderBoundsPayload(nextShape, nextMode, nextManual));
+    }
+  };
+
+  const handleColliderTypeSelect = (type: ColliderType) => {
+    const resolvedType = colliderMode === 'manual' && type === 'polygon' ? 'box' : type;
+    setColliderType(resolvedType);
+    emitColliderUpdate(resolvedType, colliderMode, manualCollider);
+  };
+
+  const handleInitManualFromDrawing = (targetShape?: ColliderType) => {
+    const shapeToUse = (targetShape || (colliderType === 'polygon' ? 'box' : colliderType)) as ColliderType;
+    const autoBounds = computeAutoColliderBoundsFromPaths(paths, shapeToUse);
+    const nextManual = {
+      x: autoBounds.x ?? 20,
+      y: autoBounds.y ?? 20,
+      width: autoBounds.width ?? 160,
+      height: autoBounds.height ?? 160,
+      centerX: autoBounds.centerX ?? 100,
+      centerY: autoBounds.centerY ?? 100,
+      radius: autoBounds.radius ?? 80,
+    };
+    setColliderMode('manual');
+    setColliderType(shapeToUse);
+    setManualCollider(nextManual);
+    setShowColliderPreview(true);
+    emitColliderUpdate(shapeToUse, 'manual', nextManual);
+  };
+
+  const handleSwitchColliderMode = (mode: 'auto' | 'manual') => {
+    if (mode === 'manual') {
+      const nextShape: ColliderType = colliderType === 'circle' ? 'circle' : 'box';
+      setColliderMode('manual');
+      setColliderType(nextShape);
+      setShowColliderPreview(true);
+      setIsColliderBodyDraggable(true);
+      emitColliderUpdate(nextShape, 'manual', manualCollider);
+    } else {
+      setColliderMode('auto');
+      setIsColliderBodyDraggable(false);
+      emitColliderUpdate(colliderType, 'auto', manualCollider);
+    }
+  };
+
+  const handleToggleOverrideCollider = (nextOverride: boolean) => {
+    setOverrideCollider(nextOverride);
+    if (onOverrideColliderChange) {
+      onOverrideColliderChange(nextOverride);
     }
   };
 
@@ -514,6 +639,12 @@ export function DrawingCanvas({
     const w = Math.max(10, maxX - minX);
     const h = Math.max(10, maxY - minY);
     const ratio = w / h;
+
+    if (colliderMode === 'manual') {
+      const detectedShape: ColliderType = ratio >= 0.8 && ratio <= 1.25 ? 'circle' : 'box';
+      handleInitManualFromDrawing(detectedShape);
+      return;
+    }
 
     if (hasPolyline) {
       handleColliderTypeSelect('polygon');
@@ -791,6 +922,63 @@ export function DrawingCanvas({
   const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const pt = getSVGCoordinates(e);
 
+    if (colliderDragAction && colliderDragOriginRef.current) {
+      const { mouse, initial } = colliderDragOriginRef.current;
+      const dx = pt.x - mouse.x;
+      const dy = pt.y - mouse.y;
+      const next = { ...manualCollider };
+
+      if (colliderDragAction === 'move_box') {
+        next.x = Math.max(0, Math.min(200 - initial.width, initial.x + dx));
+        next.y = Math.max(0, Math.min(200 - initial.height, initial.y + dy));
+        next.centerX = next.x + next.width / 2;
+        next.centerY = next.y + next.height / 2;
+      } else if (colliderDragAction === 'resize_se') {
+        next.width = Math.max(10, Math.min(200 - initial.x, initial.width + dx));
+        next.height = Math.max(10, Math.min(200 - initial.y, initial.height + dy));
+        next.centerX = next.x + next.width / 2;
+        next.centerY = next.y + next.height / 2;
+      } else if (colliderDragAction === 'resize_nw') {
+        const right = initial.x + initial.width;
+        const bottom = initial.y + initial.height;
+        next.x = Math.max(0, Math.min(right - 10, initial.x + dx));
+        next.y = Math.max(0, Math.min(bottom - 10, initial.y + dy));
+        next.width = right - next.x;
+        next.height = bottom - next.y;
+        next.centerX = next.x + next.width / 2;
+        next.centerY = next.y + next.height / 2;
+      } else if (colliderDragAction === 'resize_ne') {
+        const bottom = initial.y + initial.height;
+        next.width = Math.max(10, Math.min(200 - initial.x, initial.width + dx));
+        next.y = Math.max(0, Math.min(bottom - 10, initial.y + dy));
+        next.height = bottom - next.y;
+        next.centerX = next.x + next.width / 2;
+        next.centerY = next.y + next.height / 2;
+      } else if (colliderDragAction === 'resize_sw') {
+        const right = initial.x + initial.width;
+        next.x = Math.max(0, Math.min(right - 10, initial.x + dx));
+        next.width = right - next.x;
+        next.height = Math.max(10, Math.min(200 - initial.y, initial.height + dy));
+        next.centerX = next.x + next.width / 2;
+        next.centerY = next.y + next.height / 2;
+      } else if (colliderDragAction === 'move_circle') {
+        next.centerX = Math.max(8, Math.min(192, initial.centerX + dx));
+        next.centerY = Math.max(8, Math.min(192, initial.centerY + dy));
+        next.x = next.centerX - next.radius;
+        next.y = next.centerY - next.radius;
+      } else if (colliderDragAction === 'resize_circle_r') {
+        const dist = Math.hypot(pt.x - initial.centerX, pt.y - initial.centerY);
+        next.radius = Math.max(6, Math.min(130, dist));
+        next.width = next.radius * 2;
+        next.height = next.radius * 2;
+        next.x = next.centerX - next.radius;
+        next.y = next.centerY - next.radius;
+      }
+
+      setManualCollider(next);
+      return;
+    }
+
     // Mettre à jour cursorPos UNIQUEMENT pour la gomme pour supprimer tout re-render à 120Hz
     if (tool === 'eraser_partial' || tool === 'eraser_stroke') {
       setCursorPos(pt);
@@ -957,6 +1145,13 @@ export function DrawingCanvas({
       try {
         (e.target as Element).releasePointerCapture?.(e.pointerId);
       } catch (_) {}
+    }
+
+    if (colliderDragAction) {
+      setColliderDragAction(null);
+      colliderDragOriginRef.current = null;
+      emitColliderUpdate(colliderType, 'manual', manualCollider);
+      return;
     }
 
     if (isDraggingHotspot) {
@@ -1503,47 +1698,216 @@ export function DrawingCanvas({
               </g>
             )}
 
-            {/* Aperçu du Collider actif */}
-            {showColliderPreview && (
-              <g className="pointer-events-none select-none opacity-80">
-                {colliderType === 'circle' && (
-                  <circle
-                    cx={overallBounds.x + overallBounds.width / 2}
-                    cy={overallBounds.y + overallBounds.height / 2}
-                    r={Math.max(overallBounds.width, overallBounds.height) / 2}
-                    fill="rgba(16, 185, 129, 0.05)"
-                    stroke="#10b981"
-                    strokeWidth="1.5"
-                    strokeDasharray="4 3"
-                  />
-                )}
-                {colliderType === 'box' && (
-                  <rect
-                    x={overallBounds.x}
-                    y={overallBounds.y}
-                    width={overallBounds.width}
-                    height={overallBounds.height}
-                    fill="rgba(16, 185, 129, 0.05)"
-                    stroke="#10b981"
-                    strokeWidth="1.5"
-                    strokeDasharray="4 3"
-                    rx="4"
-                  />
-                )}
-                {colliderType === 'polygon' && (
-                  <rect
-                    x={overallBounds.x}
-                    y={overallBounds.y}
-                    width={overallBounds.width}
-                    height={overallBounds.height}
-                    fill="rgba(16, 185, 129, 0.05)"
-                    stroke="#10b981"
-                    strokeWidth="1.5"
-                    strokeDasharray="3 3"
-                  />
-                )}
-              </g>
-            )}
+            {/* Aperçu du Collider actif (Auto ou Manuel interactif) */}
+            {showColliderPreview && (() => {
+              const isInheritedShared = isSharedColliderEntity && !isReferenceStateForSharedCollider && !overrideCollider;
+              const isManualEditable = colliderMode === 'manual' && !isInheritedShared;
+              const startColliderDrag = (
+                action: NonNullable<typeof colliderDragAction>,
+                e: React.PointerEvent<SVGElement>
+              ) => {
+                e.stopPropagation();
+                try {
+                  (e.target as Element).setPointerCapture?.(e.pointerId);
+                } catch (_) {}
+                setColliderDragAction(action);
+                colliderDragOriginRef.current = {
+                  mouse: getSVGCoordinates(e),
+                  initial: { ...manualCollider },
+                };
+              };
+
+              if (colliderMode === 'manual' && !isInheritedShared) {
+                if (colliderType === 'circle') {
+                  const cx = manualCollider.centerX;
+                  const cy = manualCollider.centerY;
+                  const r = manualCollider.radius;
+                  return (
+                    <g className="select-none">
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={r}
+                        fill={isColliderBodyDraggable ? 'rgba(16, 185, 129, 0.14)' : 'rgba(16, 185, 129, 0.05)'}
+                        stroke="#10b981"
+                        strokeWidth="1.8"
+                        strokeDasharray="4 3"
+                        className={isColliderBodyDraggable ? 'cursor-move' : undefined}
+                        style={{ pointerEvents: isColliderBodyDraggable ? 'auto' : 'none' }}
+                        onPointerDown={(e) => isColliderBodyDraggable && startColliderDrag('move_circle', e)}
+                      />
+                      {/* Anneau de bordure cliquable pour déplacer le cercle à tout moment */}
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={r}
+                        fill="none"
+                        stroke="transparent"
+                        strokeWidth="8"
+                        className="cursor-move"
+                        style={{ pointerEvents: 'stroke' }}
+                        onPointerDown={(e) => startColliderDrag('move_circle', e)}
+                      />
+                      {/* Poignée centrale de déplacement */}
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r="4.5"
+                        fill="#10b981"
+                        stroke="#ffffff"
+                        strokeWidth="1.5"
+                        className="cursor-move"
+                        style={{ pointerEvents: isManualEditable ? 'auto' : 'none' }}
+                        onPointerDown={(e) => startColliderDrag('move_circle', e)}
+                      />
+                      {/* Poignée droite de rayon */}
+                      <circle
+                        cx={Math.min(196, cx + r)}
+                        cy={cy}
+                        r="5"
+                        fill="#ffffff"
+                        stroke="#059669"
+                        strokeWidth="2"
+                        className="cursor-ew-resize"
+                        style={{ pointerEvents: 'auto' }}
+                        onPointerDown={(e) => startColliderDrag('resize_circle_r', e)}
+                      />
+                    </g>
+                  );
+                }
+
+                // Manuel Rectangle (Box)
+                const bx = manualCollider.x;
+                const by = manualCollider.y;
+                const bw = manualCollider.width;
+                const bh = manualCollider.height;
+                return (
+                  <g className="select-none">
+                    <rect
+                      x={bx}
+                      y={by}
+                      width={bw}
+                      height={bh}
+                      fill={isColliderBodyDraggable ? 'rgba(16, 185, 129, 0.14)' : 'rgba(16, 185, 129, 0.05)'}
+                      stroke="#10b981"
+                      strokeWidth="1.8"
+                      strokeDasharray="4 3"
+                      rx="3"
+                      className={isColliderBodyDraggable ? 'cursor-move' : undefined}
+                      style={{ pointerEvents: isColliderBodyDraggable ? 'auto' : 'none' }}
+                      onPointerDown={(e) => isColliderBodyDraggable && startColliderDrag('move_box', e)}
+                    />
+                    {/* Contour transparent saisissable pour déplacer le rectangle */}
+                    <rect
+                      x={bx}
+                      y={by}
+                      width={bw}
+                      height={bh}
+                      fill="none"
+                      stroke="transparent"
+                      strokeWidth="8"
+                      className="cursor-move"
+                      style={{ pointerEvents: 'stroke' }}
+                      onPointerDown={(e) => startColliderDrag('move_box', e)}
+                    />
+                    {/* 4 Poignées d'angle pour redimensionner */}
+                    <rect
+                      x={bx - 4}
+                      y={by - 4}
+                      width="8"
+                      height="8"
+                      rx="2"
+                      fill="#ffffff"
+                      stroke="#059669"
+                      strokeWidth="2"
+                      className="cursor-nwse-resize"
+                      style={{ pointerEvents: 'auto' }}
+                      onPointerDown={(e) => startColliderDrag('resize_nw', e)}
+                    />
+                    <rect
+                      x={bx + bw - 4}
+                      y={by - 4}
+                      width="8"
+                      height="8"
+                      rx="2"
+                      fill="#ffffff"
+                      stroke="#059669"
+                      strokeWidth="2"
+                      className="cursor-nesw-resize"
+                      style={{ pointerEvents: 'auto' }}
+                      onPointerDown={(e) => startColliderDrag('resize_ne', e)}
+                    />
+                    <rect
+                      x={bx + bw - 4}
+                      y={by + bh - 4}
+                      width="8"
+                      height="8"
+                      rx="2"
+                      fill="#ffffff"
+                      stroke="#059669"
+                      strokeWidth="2"
+                      className="cursor-nwse-resize"
+                      style={{ pointerEvents: 'auto' }}
+                      onPointerDown={(e) => startColliderDrag('resize_se', e)}
+                    />
+                    <rect
+                      x={bx - 4}
+                      y={by + bh - 4}
+                      width="8"
+                      height="8"
+                      rx="2"
+                      fill="#ffffff"
+                      stroke="#059669"
+                      strokeWidth="2"
+                      className="cursor-nesw-resize"
+                      style={{ pointerEvents: 'auto' }}
+                      onPointerDown={(e) => startColliderDrag('resize_sw', e)}
+                    />
+                  </g>
+                );
+              }
+
+              return (
+                <g className={`pointer-events-none select-none ${isInheritedShared ? 'opacity-45' : 'opacity-80'}`}>
+                  {colliderType === 'circle' && (
+                    <circle
+                      cx={overallBounds.x + overallBounds.width / 2}
+                      cy={overallBounds.y + overallBounds.height / 2}
+                      r={Math.max(overallBounds.width, overallBounds.height) / 2}
+                      fill="rgba(16, 185, 129, 0.05)"
+                      stroke="#10b981"
+                      strokeWidth="1.5"
+                      strokeDasharray="4 3"
+                    />
+                  )}
+                  {colliderType === 'box' && (
+                    <rect
+                      x={overallBounds.x}
+                      y={overallBounds.y}
+                      width={overallBounds.width}
+                      height={overallBounds.height}
+                      fill="rgba(16, 185, 129, 0.05)"
+                      stroke="#10b981"
+                      strokeWidth="1.5"
+                      strokeDasharray="4 3"
+                      rx="4"
+                    />
+                  )}
+                  {colliderType === 'polygon' && (
+                    <rect
+                      x={overallBounds.x}
+                      y={overallBounds.y}
+                      width={overallBounds.width}
+                      height={overallBounds.height}
+                      fill="rgba(16, 185, 129, 0.05)"
+                      stroke="#10b981"
+                      strokeWidth="1.5"
+                      strokeDasharray="3 3"
+                    />
+                  )}
+                </g>
+              );
+            })()}
 
             {/* Tracés existants groupés par calques (rendus de bas en haut) */}
             {[...layers].reverse().map((layer) => {
@@ -2188,60 +2552,292 @@ export function DrawingCanvas({
             )}
           </div>
 
-          {/* Section Définition des Colliders */}
-          <div className="bg-white p-3 rounded-2xl border border-emerald-100 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between">
+          {/* Section Définition des Colliders (Automatique ou Manuel + Partage / Surcharge) */}
+          <div className="bg-white p-3 rounded-2xl border border-emerald-200/80 shadow-2xs space-y-2.5">
+            <div className="flex items-center justify-between gap-1.5">
               <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5 text-emerald-600" /> Forme du Collider
+                <Shield className="w-3.5 h-3.5 text-emerald-600" /> Collider
               </span>
-              <button
-                type="button"
-                onClick={handleAutoDetectCollider}
-                className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200 flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                title="Détecter automatiquement d'après le tracé de votre dessin"
-              >
-                <Sparkles className="w-3 h-3 text-emerald-600" /> Tracé auto
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setShowColliderPreview(!showColliderPreview)}
+                  className={`p-1 rounded-lg border text-[10px] cursor-pointer transition-colors ${
+                    showColliderPreview
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-slate-50 text-slate-400 border-slate-200'
+                  }`}
+                  title={showColliderPreview ? 'Masquer la zone collider' : 'Afficher la zone collider'}
+                >
+                  {showColliderPreview ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAutoDetectCollider}
+                  className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200 flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                  title="Calculer/détecter automatiquement d'après le dessin"
+                >
+                  <Sparkles className="w-3 h-3 text-emerald-600" /> Auto-dessin
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-1.5">
-              <button
-                type="button"
-                onClick={() => handleColliderTypeSelect('box')}
-                className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                  colliderType === 'box'
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200 shadow-2xs'
-                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                }`}
-                title="Collider Rectangle"
-              >
-                <Square className="w-3 h-3" /> Rectangle
-              </button>
-              <button
-                type="button"
-                onClick={() => handleColliderTypeSelect('circle')}
-                className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                  colliderType === 'circle'
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200 shadow-2xs'
-                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                }`}
-                title="Collider Cercle"
-              >
-                <Circle className="w-3 h-3" /> Cercle
-              </button>
-              <button
-                type="button"
-                onClick={() => handleColliderTypeSelect('polygon')}
-                className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                  colliderType === 'polygon'
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200 shadow-2xs'
-                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                }`}
-                title="Collider Polyligne / Polygone"
-              >
-                <Shapes className="w-3 h-3" /> Polyligne
-              </button>
-            </div>
+            {/* Statut Partagé / Surcharge d'état */}
+            {isSharedColliderEntity && (
+              <div className="p-2 rounded-xl bg-indigo-50/70 border border-indigo-200/80 space-y-1.5">
+                {isReferenceStateForSharedCollider ? (
+                  <div className="text-[10px] font-bold text-indigo-800 leading-snug">
+                    🔗 État de référence du collider partagé : toute modification ici s'applique aux états qui n'ont pas de surcharge.
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[10px] font-bold text-indigo-900 leading-tight">
+                      {overrideCollider
+                        ? '✏️ Surcharge active pour cet état'
+                        : '🔗 Hérite du collider partagé'}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleOverrideCollider(!overrideCollider)}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-black border cursor-pointer transition-all shrink-0 ${
+                        overrideCollider
+                          ? 'bg-indigo-600 text-white border-indigo-700'
+                          : 'bg-white text-indigo-700 border-indigo-300 hover:bg-indigo-100'
+                      }`}
+                    >
+                      {overrideCollider ? 'Surchargé ✓' : 'Surcharger'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Sélecteur Mode Auto vs Manuel (masqué uniquement si héritage strict sans surcharge) */}
+            {!(isSharedColliderEntity && !isReferenceStateForSharedCollider && !overrideCollider) && (
+              <>
+                <div className="grid grid-cols-2 p-0.5 bg-slate-100 rounded-xl gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchColliderMode('auto')}
+                    className={`py-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
+                      colliderMode === 'auto'
+                        ? 'bg-white text-emerald-700 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Automatique
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchColliderMode('manual')}
+                    className={`py-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
+                      colliderMode === 'manual'
+                        ? 'bg-white text-emerald-700 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Manuel (Sur mesure)
+                  </button>
+                </div>
+
+                {/* Forme du Collider */}
+                <div className={`grid ${colliderMode === 'manual' ? 'grid-cols-2' : 'grid-cols-3'} gap-1.5`}>
+                  <button
+                    type="button"
+                    onClick={() => handleColliderTypeSelect('box')}
+                    className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                      colliderType === 'box'
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200 shadow-2xs'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                    title="Collider Rectangle"
+                  >
+                    <Square className="w-3 h-3" /> Rectangle
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleColliderTypeSelect('circle')}
+                    className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                      colliderType === 'circle'
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200 shadow-2xs'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                    title="Collider Cercle"
+                  >
+                    <Circle className="w-3 h-3" /> Cercle
+                  </button>
+                  {colliderMode === 'auto' && (
+                    <button
+                      type="button"
+                      onClick={() => handleColliderTypeSelect('polygon')}
+                      className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                        colliderType === 'polygon'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200 shadow-2xs'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                      title="Collider Polyligne / Polygone"
+                    >
+                      <Shapes className="w-3 h-3" /> Polyligne
+                    </button>
+                  )}
+                </div>
+
+                {/* Réglages précis en mode Manuel */}
+                {colliderMode === 'manual' && (
+                  <div className="p-2 bg-emerald-50/50 rounded-xl border border-emerald-200/80 space-y-2">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setIsColliderBodyDraggable(!isColliderBodyDraggable)}
+                        className={`flex-1 py-1 px-2 rounded-lg text-[10px] font-bold border cursor-pointer transition-all ${
+                          isColliderBodyDraggable
+                            ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
+                            : 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                        }`}
+                        title="Permet de saisir l'intérieur de la forme verte pour la déplacer (désactivez pour dessiner dedans)"
+                      >
+                        {isColliderBodyDraggable ? '✋ Déplacement actif' : '✋ Déplacer la zone'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleInitManualFromDrawing()}
+                        className="py-1 px-2 rounded-lg text-[10px] font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 cursor-pointer"
+                        title="Recaler sur les bords exacts du dessin"
+                      >
+                        Caler
+                      </button>
+                    </div>
+
+                    {colliderType === 'circle' ? (
+                      <div className="grid grid-cols-3 gap-1.5 text-[10px]">
+                        <label className="space-y-0.5">
+                          <span className="font-bold text-slate-500 block">Centre X</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={200}
+                            value={Math.round(manualCollider.centerX)}
+                            onChange={(e) => {
+                              const cx = Math.max(0, Math.min(200, Number(e.target.value) || 0));
+                              const next = { ...manualCollider, centerX: cx, x: cx - manualCollider.radius };
+                              setManualCollider(next);
+                              emitColliderUpdate('circle', 'manual', next);
+                            }}
+                            className="w-full px-1.5 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
+                          />
+                        </label>
+                        <label className="space-y-0.5">
+                          <span className="font-bold text-slate-500 block">Centre Y</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={200}
+                            value={Math.round(manualCollider.centerY)}
+                            onChange={(e) => {
+                              const cy = Math.max(0, Math.min(200, Number(e.target.value) || 0));
+                              const next = { ...manualCollider, centerY: cy, y: cy - manualCollider.radius };
+                              setManualCollider(next);
+                              emitColliderUpdate('circle', 'manual', next);
+                            }}
+                            className="w-full px-1.5 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
+                          />
+                        </label>
+                        <label className="space-y-0.5">
+                          <span className="font-bold text-slate-500 block">Rayon</span>
+                          <input
+                            type="number"
+                            min={6}
+                            max={130}
+                            value={Math.round(manualCollider.radius)}
+                            onChange={(e) => {
+                              const r = Math.max(6, Math.min(130, Number(e.target.value) || 10));
+                              const next = {
+                                ...manualCollider,
+                                radius: r,
+                                width: r * 2,
+                                height: r * 2,
+                                x: manualCollider.centerX - r,
+                                y: manualCollider.centerY - r,
+                              };
+                              setManualCollider(next);
+                              emitColliderUpdate('circle', 'manual', next);
+                            }}
+                            className="w-full px-1.5 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
+                          />
+                        </label>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-4 gap-1 text-[10px]">
+                        <label className="space-y-0.5">
+                          <span className="font-bold text-slate-500 block">X</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={190}
+                            value={Math.round(manualCollider.x)}
+                            onChange={(e) => {
+                              const nx = Math.max(0, Math.min(190, Number(e.target.value) || 0));
+                              const next = { ...manualCollider, x: nx, centerX: nx + manualCollider.width / 2 };
+                              setManualCollider(next);
+                              emitColliderUpdate('box', 'manual', next);
+                            }}
+                            className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
+                          />
+                        </label>
+                        <label className="space-y-0.5">
+                          <span className="font-bold text-slate-500 block">Y</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={190}
+                            value={Math.round(manualCollider.y)}
+                            onChange={(e) => {
+                              const ny = Math.max(0, Math.min(190, Number(e.target.value) || 0));
+                              const next = { ...manualCollider, y: ny, centerY: ny + manualCollider.height / 2 };
+                              setManualCollider(next);
+                              emitColliderUpdate('box', 'manual', next);
+                            }}
+                            className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
+                          />
+                        </label>
+                        <label className="space-y-0.5">
+                          <span className="font-bold text-slate-500 block">Larg.</span>
+                          <input
+                            type="number"
+                            min={10}
+                            max={200}
+                            value={Math.round(manualCollider.width)}
+                            onChange={(e) => {
+                              const nw = Math.max(10, Math.min(200, Number(e.target.value) || 10));
+                              const next = { ...manualCollider, width: nw, centerX: manualCollider.x + nw / 2 };
+                              setManualCollider(next);
+                              emitColliderUpdate('box', 'manual', next);
+                            }}
+                            className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
+                          />
+                        </label>
+                        <label className="space-y-0.5">
+                          <span className="font-bold text-slate-500 block">Haut.</span>
+                          <input
+                            type="number"
+                            min={10}
+                            max={200}
+                            value={Math.round(manualCollider.height)}
+                            onChange={(e) => {
+                              const nh = Math.max(10, Math.min(200, Number(e.target.value) || 10));
+                              const next = { ...manualCollider, height: nh, centerY: manualCollider.y + nh / 2 };
+                              setManualCollider(next);
+                              emitColliderUpdate('box', 'manual', next);
+                            }}
+                            className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           {/* Inspecteur des formes sélectionnées */}

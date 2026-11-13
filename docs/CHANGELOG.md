@@ -1,3 +1,19 @@
+## [Phase 10.14] - 2026-11-13
+### Ajouté & Corrigé
+- **Correction des déclenchements multiples au clic & réentrance (`useSceneStore.ts` / `CustomShape.tsx` / `Apple.tsx` / `Plant.tsx`)** :
+  - Séparation stricte des phases `click`, `down` (`mouse_down`) et `up` (`mouse_up`) dans `triggerPointerEvent` avec clé de cooldown canonique (`40ms`) empêchant un clic simple de déclencher simultanément les règles `down` et `click` (fin des doubles créations d'objet au clic).
+  - Déduplication `pointerup` / `window.pointerup` (`upHandledForPointerRef`) sur les entités interactives et suppression des appels alias redondants.
+  - Suppression du repli `'enter'` dans `triggerDragRelease` (limité strictement à `collision_release`) et garde anti-réentrance `isEvaluatingRules` empêchant `spawnEntity` / `duplicateEntity` de ré-évaluer prématurément les règles au milieu d'une boucle d'actions.
+- **Collision Entrée / Sortie sans boucle (Option B — Hystérésis & 1× par paire) (`useSceneStore.ts` / `matterPhysicsEngine.ts` / `RuleBook.tsx`)** :
+  - Hystérésis géométrique de séparation configurable (`collisionExitMargin`, `10 px` par défaut) appliquée aux paires entité-entité et aux calques colliders dès qu'un contact est actif, plus pontage `activeEntityContactPairs` garantissant qu'une règle `Exit` se verrouille même si une règle `Enter` rétrécit l'entité dans la même frame.
+  - Option **« 1× seule fois par paire »** (`collisionTriggerOnce` réinitialisée au Stop), seuil anti-scintillement sur place porté à `< 10 px` et cooldown anti-rebond sur `Exit` (`120 ms`), configurables directement dans les cartes du `RuleBook`, l'assistant et la modale d'événement.
+- **Sound Studio Pro : Réverbe, Écho, Filtre, Drive, Inversion, Normalisation & Queue préservée (`audioEditor.ts` / `SoundRecorderModal.tsx`)** :
+  - Ajout d'une Réverbe stéréo synthétique à convolution (`ConvolverNode` avec Mix, Decay `0.2–3.5s`, Damping/Chaleur), d'un Écho/Delay avec feedback (`0–85%`), d'un Filtre tonalité (`Passe-Bas` / `Passe-Haut` + fréquence), d'une Saturation douce (`WaveShaperNode`), de l'inversion du segment (`Inverser`) et de la normalisation automatique du pic (`Normaliser`).
+  - Calcul dynamique de la durée de queue (`computeEffectTailDuration`) préservée intégralement sans coupure ni en écoute live (`setTimeout` sur durée totale) ni à l'encodage WAV `OfflineAudioContext` (avec fondu anti-clic de 35ms).
+- **Colliders Rectangle / Cercle Manuels & Automatique, Partage et Override par État (`types/index.ts` / `collider.ts` / `DrawingCanvas.tsx` / `FullScreenDrawingModal.tsx` / `CreateEntityModal.tsx` / `Inspector.tsx`)** :
+  - Éditeur vectoriel interactif dans `DrawingCanvas` permettant de basculer entre mode `Automatique (dessin)` et `Manuel`, choisir Rectangle, Cercle ou Polyligne, déplacer/redimensionner à la souris (poignées de coin / rayon) ou au pixel près, ou recaler sur le dessin (*« Caler »*).
+  - Support du partage inter-états (`sharedCollider`) avec possibilité de **Surcharger / Override** localement sur n'importe quel état (`overrideCollider`, en mode automatique ou manuel) depuis le panneau latéral de l'Atelier de dessin et l'Inspecteur.
+
 ## [Phase 10.13] - 2026-11-13
 ### Ajouté & Corrigé
 - **Calibrage Physique Matter.js & Roulement sur Calques Colliders (`matterPhysicsEngine.ts` / `BehaviorManager.tsx`)** :

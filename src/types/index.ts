@@ -59,12 +59,15 @@ export interface ProjectPaletteColor {
 export type ColliderType = 'box' | 'circle' | 'polygon';
 
 export interface ColliderBounds {
+  mode?: 'auto' | 'manual'; // 'auto' = calculé depuis le dessin, 'manual' = position/taille définie à la main
   shape: ColliderType;
-  x?: number;      // offset or center in 0-200 canvas
-  y?: number;
-  width?: number;  // for box
-  height?: number;
-  radius?: number; // for circle
+  x?: number;      // offset X en espace 0..200 (pour box)
+  y?: number;      // offset Y en espace 0..200 (pour box)
+  width?: number;  // largeur en espace 0..200 (pour box)
+  height?: number; // hauteur en espace 0..200 (pour box)
+  centerX?: number; // centre X en espace 0..200 (pour circle)
+  centerY?: number; // centre Y en espace 0..200 (pour circle)
+  radius?: number; // rayon en espace 0..200 (pour circle)
 }
 
 // ==========================================
@@ -287,6 +290,7 @@ export interface EntityState {
   rotation: number;
   colliderType?: ColliderType;
   colliderBounds?: ColliderBounds;
+  overrideCollider?: boolean; // Lorsque sharedCollider est actif sur l'entité, force cet état à utiliser son propre collider
   // Vector drawing overrides per state
   vectorPaths?: VectorPath[];
   drawingLayers?: DrawingLayer[];
@@ -330,6 +334,8 @@ export interface Entity {
   parentOffset?: ParentOffset;
   sharedCollider?: boolean;          // Conserver le même collider physique même si l'état/dessin change
   colliderReferenceStateId?: StateId; // État de référence pour la géométrie du collider partagé
+  sharedColliderType?: ColliderType;
+  sharedColliderBounds?: ColliderBounds;
 }
 
 export type TriggerType =
@@ -373,6 +379,8 @@ export interface RuleTrigger {
   phase?: TriggerPhase; // Phase optionnelle (défaut: 'click' pour clic, 'enter' pour collision)
   revertOnExit?: boolean; // Pour 'stay' : revenir à l'état précédent quand le contact cesse (Toggle)
   autoRevert?: boolean;   // Restauration automatique de l'état initial lors de la fin d'événement (Hover Exit, Mouse Up, Key Up, etc.)
+  collisionExitMargin?: number;   // Marge d'hystérésis supplémentaire (px) exigée pour quitter la collision (anti-scintillement)
+  collisionTriggerOnce?: boolean; // Si true, la collision ne se déclenche qu'une seule fois par paire pendant la session Play
   
   // Sujet (Qui déclenche)
   subjectMode?: SelectionMode; // 'type', 'tag' ou 'instance'
@@ -449,6 +457,17 @@ export interface CustomSoundEditParams {
   release: number;      // seconds (ADSR)
   gain: number;         // 0.1..2.5 volume boost
   playbackRate: number; // 0.5..2.0 speed/pitch
+  // Effets Studio avancés (rétrocompatibles)
+  reverbMix?: number;     // 0..1
+  reverbDecay?: number;   // 0.2..3.5s
+  reverbDamping?: number; // 0..1
+  delayMix?: number;      // 0..1
+  delayTime?: number;     // 0.04..0.8s
+  delayFeedback?: number; // 0..0.85
+  filterType?: 'none' | 'lowpass' | 'highpass';
+  filterFreq?: number;    // 150..12000 Hz
+  drive?: number;         // 0..1 saturation douce
+  reverse?: boolean;      // lecture inversée
 }
 
 export interface CustomSound {

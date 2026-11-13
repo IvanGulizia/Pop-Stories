@@ -1,6 +1,11 @@
 # État du Projet
 
 ## Complété
+- **Fiabilisation Clics/Collisions (Option B), Sound Studio Réverbe/FX & Colliders Manuels/Partagés (Phase 10.14)** :
+  - **Déduplication Clic & Spawn** : Séparation stricte `click` / `down` / `up`, suppression des doubles appels `pointerup`/`mouse_up` et garde anti-réentrance `isEvaluatingRules` garantissant 1 seule exécution/création par clic.
+  - **Anti-boucle Collision Entrée/Sortie (Option B)** : Marge d'hystérésis de séparation configurable (`collisionExitMargin`, 10px par défaut), pontage des règles `Enter`→`Exit`, option `1× par paire` (`collisionTriggerOnce`) et cooldown anti-rebond dans `RuleBook`, `useSceneStore` et `matterPhysicsEngine`.
+  - **Sound Studio Complet sans coupure** : Réverbe à convolution (`Mix/Decay/Chaleur`), Écho/Delay (`Mix/Temps/Feedback`), Filtre LP/HP, Saturation douce (`Drive`), `Inverser` et `Normaliser`, avec préservation complète de la queue d'effet en écoute directe et dans le rendu WAV.
+  - **Colliders Manuels / Automatiques & Override par État** : Édition directe Rectangle/Cercle dans `DrawingCanvas` (poignées interactives, coordonnées précises, recalage auto), partage inter-états (`sharedCollider`) et surcharge locale par état (`overrideCollider`).
 - **Physique Roulante, Sound Studio ADSR, Export Nommé, Duplication d'État, Opacité des Calques, Comportement Flee & Éditeur de Particules (Phase 10.13)** :
   - **Physique Matter.js & Plages étendues** : Correction de l'adhérence (`0..1` direct sans inversion `1 - x`) sur les entités et calques colliders avec chanfreins anti-accrochage sur segments, gravité (`-2000..2000`), masse (`0.1..50`) et résistance de l'air (`frictionAir`).
   - **Sound Studio complet** : Forme d'onde interactive, découpe Trim début/fin, Fade In/Out, enveloppe ADSR, Gain & Pitch, aperçu Web Audio et export WAV non-destructif (`rawDataUrl` + `editParams` rééditables).

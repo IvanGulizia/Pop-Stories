@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Paintbrush, X } from 'lucide-react';
 import { DrawingCanvas, OnionStateOption, ReferenceGuideOption } from './DrawingCanvas';
-import { VectorPath, ColliderType, DrawingLayer } from '../types';
+import { VectorPath, ColliderType, ColliderBounds, DrawingLayer } from '../types';
 
 interface FullScreenDrawingModalProps {
   title?: string;
@@ -10,6 +10,10 @@ interface FullScreenDrawingModalProps {
   initialPaths?: VectorPath[];
   initialLayers?: DrawingLayer[];
   initialColliderType?: ColliderType;
+  initialColliderBounds?: ColliderBounds;
+  isSharedColliderEntity?: boolean;
+  isReferenceStateForSharedCollider?: boolean;
+  initialOverrideCollider?: boolean;
   onionStates?: OnionStateOption[];
   currentEditingStateName?: string;
   referenceGuide?: ReferenceGuideOption;
@@ -22,7 +26,9 @@ interface FullScreenDrawingModalProps {
     colliderType?: ColliderType,
     stateName?: string,
     hotspot?: { x: number; y: number },
-    layers?: DrawingLayer[]
+    layers?: DrawingLayer[],
+    colliderBounds?: ColliderBounds,
+    overrideCollider?: boolean
   ) => void;
   onClose: () => void;
 }
@@ -33,6 +39,10 @@ export function FullScreenDrawingModal({
   initialPaths = [],
   initialLayers = [],
   initialColliderType = 'box',
+  initialColliderBounds,
+  isSharedColliderEntity = false,
+  isReferenceStateForSharedCollider = false,
+  initialOverrideCollider = false,
   onionStates = [],
   currentEditingStateName,
   referenceGuide,
@@ -45,7 +55,15 @@ export function FullScreenDrawingModal({
   const [currentPaths, setCurrentPaths] = useState<VectorPath[]>(initialPaths);
   const [currentLayers, setCurrentLayers] = useState<DrawingLayer[] | undefined>(initialLayers);
   const [currentDataUrl, setCurrentDataUrl] = useState<string | undefined>(undefined);
-  const [currentColliderType, setCurrentColliderType] = useState<ColliderType>(initialColliderType);
+  const [currentColliderType, setCurrentColliderType] = useState<ColliderType>(
+    initialColliderBounds?.shape || initialColliderType
+  );
+  const [currentColliderBounds, setCurrentColliderBounds] = useState<ColliderBounds | undefined>(
+    initialColliderBounds
+  );
+  const [currentOverrideCollider, setCurrentOverrideCollider] = useState<boolean>(
+    initialOverrideCollider
+  );
   const [currentHotspot, setCurrentHotspot] = useState<{ x: number; y: number }>(
     initialHotspot || referenceGuide?.hotspot || { x: 75, y: 25 }
   );
@@ -71,7 +89,9 @@ export function FullScreenDrawingModal({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-500">Atelier de Dessin •</span>
+                <span className="text-xs font-bold text-slate-500">
+                  {title || 'Atelier de Dessin •'}
+                </span>
                 {isEditingName ? (
                   <div className="flex items-center gap-1">
                     <span className="text-xs font-bold text-slate-700">État :</span>
@@ -122,7 +142,9 @@ export function FullScreenDrawingModal({
                   currentColliderType,
                   stateName.trim() || undefined,
                   currentHotspot,
-                  currentLayers
+                  currentLayers,
+                  currentColliderBounds,
+                  currentOverrideCollider
                 )
               }
               className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer active:scale-95"
@@ -146,11 +168,19 @@ export function FullScreenDrawingModal({
             initialLayers={initialLayers}
             onLayersChange={setCurrentLayers}
             initialColliderType={initialColliderType}
+            initialColliderBounds={initialColliderBounds}
+            isSharedColliderEntity={isSharedColliderEntity}
+            isReferenceStateForSharedCollider={isReferenceStateForSharedCollider}
+            initialOverrideCollider={initialOverrideCollider}
+            onOverrideColliderChange={(ovr) => setCurrentOverrideCollider(ovr)}
             initialStrokeColor="#000000"
             onionStates={onionStates}
             currentEditingStateName={currentEditingStateName}
             onVectorChange={handleVectorChange}
-            onColliderChange={(type) => setCurrentColliderType(type)}
+            onColliderChange={(type, bounds) => {
+              setCurrentColliderType(type);
+              setCurrentColliderBounds(bounds);
+            }}
             referenceGuide={referenceGuide}
             availableReferenceGuides={availableReferenceGuides}
             initialHotspot={currentHotspot}

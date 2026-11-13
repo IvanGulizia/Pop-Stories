@@ -223,7 +223,8 @@ export function checkEntityAgainstColliderLayer(
   entityBounds: { x: number; y: number; width: number; height: number; centerX: number; centerY: number; radius: number; colliderType: string },
   entityId: string,
   layer: SceneLayer,
-  canvasBounds: { width: number; height: number }
+  canvasBounds: { width: number; height: number },
+  tolerancePx: number = 3
 ): { colliding: boolean; contactPoint?: Position } {
   const layerBodyLabel = `layercol::${layer.id}`;
   if (
@@ -244,7 +245,7 @@ export function checkEntityAgainstColliderLayer(
   const isLegacy200 = layer.coordinateSpace === 'legacy_200';
   const sx = isLegacy200 ? Math.max(100, canvasBounds.width) / 200 : 1;
   const sy = isLegacy200 ? Math.max(100, canvasBounds.height) / 200 : 1;
-  const tol = 3;
+  const tol = tolerancePx;
 
   const entIsCircle = entityBounds.colliderType === 'circle';
   const entHalfW = entityBounds.width / 2;

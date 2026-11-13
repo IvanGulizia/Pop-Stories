@@ -30,6 +30,8 @@ import {
   ParentOffset,
   SpawnReferenceMode,
   CustomParticlePreset,
+  ColliderType,
+  ColliderBounds,
 } from '../types';
 import { soundSynth } from '../utils/sound';
 import { getEntityWorldColliderBounds } from '../utils/collider';
@@ -229,6 +231,8 @@ interface SceneState {
     drawingLayers?: DrawingLayer[];
     color?: string;
     tags?: string[];
+    colliderType?: ColliderType;
+    colliderBounds?: ColliderBounds;
   }) => void;
   deleteCustomArchetype: (type: string) => void;
   spawnEntity: (params: {
@@ -504,7 +508,9 @@ const preCollisionStates: Record<
 > = {};
 const preEventAutoRevertStates: Record<string, string> = {};
 const lastCollisionContacts: Record<string, Position> = {};
+const firedCollisionOnceKeys: Record<string, boolean> = {};
 const activeDelayTimers = new Set<ReturnType<typeof setTimeout>>();
+let isEvaluatingRules = false;
 const RULE_COOLDOWN_MS = 350; // Minimum interval between identical rule trigger on same entities
 const ENTITY_STATE_COOLDOWN_MS = 250; // Prevents oscillating state ping-pong
 
@@ -516,11 +522,12 @@ function clearPlayRuntimeState() {
   Object.keys(preCollisionStates).forEach((k) => delete preCollisionStates[k]);
   Object.keys(preEventAutoRevertStates).forEach((k) => delete preEventAutoRevertStates[k]);
   Object.keys(lastCollisionContacts).forEach((k) => delete lastCollisionContacts[k]);
+  Object.keys(firedCollisionOnceKeys).forEach((k) => delete firedCollisionOnceKeys[k]);
   lastSpawnedEntityId = null;
 }
 
 // Vérification de la collision avec support précis des Colliders (flipX + scale centrée) et écoute native Matter.js
-const checkCollision = (ent1: Entity, ent2: Entity) => {
+const checkCollision = (ent1: Entity, ent2: Entity, tolerancePx: number = 3) => {
   // 1. Détection prioritaire directe depuis le moteur physique Matter.js
   const activePairs = getActivePhysicsCollisionPairs();
   if (activePairs.has(`${ent1.id}:::${ent2.id}`) || activePairs.has(`${ent2.id}:::${ent1.id}`)) {
@@ -530,8 +537,8 @@ const checkCollision = (ent1: Entity, ent2: Entity) => {
   const b1 = getEntityWorldColliderBounds(ent1);
   const b2 = getEntityWorldColliderBounds(ent2);
 
-  // Marge de contact (3px) garantissant la détection même à très faible vitesse ou au repos
-  const tol = 3;
+  // Marge de contact (3px par défaut, ou augmentée par hystérésis lors de la sortie)
+  const tol = tolerancePx;
 
   // Cercle vs Cercle
   if (b1.colliderType === 'circle' && b2.colliderType === 'circle') {
@@ -1137,7 +1144,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         selectedEntityId: newId,
       };
     });
-    get().evaluateRules();
+    if (get().appMode === 'play' && !isEvaluatingRules) {
+      get().evaluateRules();
+    }
     return newId;
   },
 
@@ -1446,11 +1455,13 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           const isCurrentState = e.currentStateId === stateId;
           const newVectorPaths = partial.vectorPaths !== undefined ? partial.vectorPaths : e.vectorPaths;
           const newColliderType = partial.colliderType !== undefined ? partial.colliderType : e.colliderType;
+          const newColliderBounds = partial.colliderBounds !== undefined ? partial.colliderBounds : e.colliderBounds;
 
           updatedEntities[e.id] = {
             ...e,
             vectorPaths: isCurrentState ? newVectorPaths : e.vectorPaths,
             colliderType: isCurrentState ? newColliderType : e.colliderType,
+            colliderBounds: isCurrentState ? newColliderBounds : e.colliderBounds,
             states: {
               ...e.states,
               [stateId]: updatedState,
@@ -1478,11 +1489,14 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
             [stateId]: updatedArchState,
           },
         };
-        if (partial.vectorPaths) {
+        if (partial.vectorPaths !== undefined) {
           updatedArchetypes[targetType].vectorPaths = partial.vectorPaths;
         }
-        if (partial.colliderType) {
+        if (partial.colliderType !== undefined) {
           updatedArchetypes[targetType].colliderType = partial.colliderType;
+        }
+        if (partial.colliderBounds !== undefined) {
+          updatedArchetypes[targetType].colliderBounds = partial.colliderBounds;
         }
       }
 
@@ -2051,7 +2065,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     });
   },
 
-  addCustomEntity: ({ name, type, icon, drawingDataUrl, vectorPaths, drawingLayers, color, tags }) => {
+  addCustomEntity: ({ name, type, icon, drawingDataUrl, vectorPaths, drawingLayers, color, tags, colliderType, colliderBounds }) => {
     const cleanName = (name && name.trim()) || 'Mon Dessin';
     const slug = cleanName.toLowerCase().replace(/[^a-z0-9]/gi, '_') || 'dessin';
     const uniqueType = type || `custom_${slug}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
@@ -2062,6 +2076,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     const clonedLayers = drawingLayers && drawingLayers.length > 0
       ? JSON.parse(JSON.stringify(drawingLayers))
       : undefined;
+    const clonedColliderBounds = colliderBounds
+      ? JSON.parse(JSON.stringify(colliderBounds))
+      : undefined;
 
     const newEntity: Entity = {
       id,
@@ -2071,6 +2088,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       drawingDataUrl,
       vectorPaths: vectorPaths ? JSON.parse(JSON.stringify(vectorPaths)) : [],
       ...(clonedLayers ? { drawingLayers: clonedLayers } : {}),
+      ...(colliderType ? { colliderType } : {}),
+      ...(clonedColliderBounds ? { colliderBounds: clonedColliderBounds } : {}),
       tags: tags && tags.length > 0 ? tags : [slug, 'custom'],
       position: { x: 180 + ((count * 35) % 220), y: 140 + ((count * 30) % 180) },
       size: { width: 256, height: 256 },
@@ -2085,6 +2104,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           rotation: 0,
           vectorPaths: vectorPaths ? JSON.parse(JSON.stringify(vectorPaths)) : [],
           ...(clonedLayers ? { drawingLayers: JSON.parse(JSON.stringify(clonedLayers)) } : {}),
+          ...(colliderType ? { colliderType } : {}),
+          ...(clonedColliderBounds ? { colliderBounds: JSON.parse(JSON.stringify(clonedColliderBounds)) } : {}),
         },
       },
     };
@@ -2106,7 +2127,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         selectedEntityId: id,
       };
     });
-    get().evaluateRules();
+    if (get().appMode === 'play' && !isEvaluatingRules) {
+      get().evaluateRules();
+    }
   },
 
   deleteCustomArchetype: (type: string) => {
@@ -2248,7 +2271,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         selectedEntityId: state.appMode === 'play' ? state.selectedEntityId : id,
       };
     });
-    get().evaluateRules();
+    // Ne pas ré-évaluer de manière réentrante pendant une boucle d'actions en Play (la frame RAF suivante s'en chargera proprement)
     return id;
   },
 
@@ -2863,11 +2886,14 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         }
       } else if (r.trigger.type === 'click') {
         if (phase === 'click') {
-          phaseMatch = rulePhase === 'click' || rulePhase === 'down' || rulePhase === 'mouse_down';
+          phaseMatch = rulePhase === 'click';
         } else if (phase === 'down' || phase === 'mouse_down') {
-          phaseMatch = rulePhase === 'down' || rulePhase === 'mouse_down' || rulePhase === 'click';
+          phaseMatch = rulePhase === 'down' || rulePhase === 'mouse_down';
         } else if (phase === 'up' || phase === 'mouse_up') {
-          phaseMatch = rulePhase === 'up' || rulePhase === 'mouse_up' || r.trigger.autoRevert === true;
+          phaseMatch =
+            rulePhase === 'up' ||
+            rulePhase === 'mouse_up' ||
+            (r.trigger.autoRevert === true && (rulePhase === 'down' || rulePhase === 'mouse_down'));
         }
       }
 
@@ -2889,10 +2915,19 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     });
 
     activePointerRules.forEach((rule) => {
-      const cooldownKey = `ptr_${rule.id}_${subject.id}_${phase}`;
-      const isHoverType = phase === 'enter' || phase === 'hover_enter' || phase === 'exit' || phase === 'hover_exit';
-      const isClickType = phase === 'click' || phase === 'down' || phase === 'up' || phase === 'mouse_down' || phase === 'mouse_up';
-      const cooldownMs = (phase === 'up' || phase === 'mouse_up' || isHoverType) ? 0 : (phase === 'down' || phase === 'mouse_down') ? 0 : isClickType ? 20 : RULE_COOLDOWN_MS;
+      const canonicalPhase =
+        phase === 'mouse_down'
+          ? 'down'
+          : phase === 'mouse_up'
+          ? 'up'
+          : phase === 'hover_enter'
+          ? 'enter'
+          : phase === 'hover_exit'
+          ? 'exit'
+          : phase;
+      const cooldownKey = `ptr_${rule.id}_${subject.id}_${canonicalPhase}`;
+      const isHoverType = canonicalPhase === 'enter' || canonicalPhase === 'exit';
+      const cooldownMs = isHoverType ? 60 : canonicalPhase === 'up' ? 20 : 40;
 
       if (now - (ruleCooldowns[cooldownKey] || 0) < cooldownMs) {
         return;
@@ -2902,7 +2937,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const revertKey = `${subject.id}_${rule.id}`;
 
       if (rule.trigger.autoRevert) {
-        if (phase === 'enter' || phase === 'hover_enter' || phase === 'down' || phase === 'mouse_down' || phase === 'click') {
+        if (phase === 'enter' || phase === 'hover_enter' || phase === 'down' || phase === 'mouse_down') {
           if (!preEventAutoRevertStates[revertKey]) {
             preEventAutoRevertStates[revertKey] = subject.currentStateId;
           }
@@ -2993,12 +3028,12 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       });
     });
 
-    // 2. Règles de collision avec phase 'collision_release' ou 'release' (Relâchement au-dessus d'une cible)
+    // 2. Règles de collision avec phase stricte 'collision_release' (Relâchement au-dessus d'une cible)
     const collisionReleaseRules = rules.filter(
       (r) =>
         r.enabled &&
         r.trigger.type === 'collision' &&
-        (r.trigger.phase === 'collision_release' || r.trigger.phase === 'release' || r.trigger.phase === 'enter')
+        r.trigger.phase === 'collision_release'
     );
 
     collisionReleaseRules.forEach((rule) => {
@@ -3078,191 +3113,222 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   evaluateRulesWithTemp: (tempPositions) => {
     // Les règles de collision et d'animation ne s'exécutent QU'EN mode PLAY
     if (get().appMode !== 'play') return;
+    if (isEvaluatingRules) return;
+    isEvaluatingRules = true;
+    try {
+      const { entities, rules, activeCollisions, sceneBounds, layerGroups, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
+      const collisionRules = rules.filter((r) => r.enabled && r.trigger.type === 'collision');
 
-    const { entities, rules, activeCollisions, sceneBounds, layerGroups, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
-    const collisionRules = rules.filter((r) => r.enabled && r.trigger.type === 'collision');
+      const nextCollisions: Record<string, boolean> = { ...activeCollisions };
+      const allEntitiesList = Object.values(entities);
+      const now = Date.now();
+      const sceneW = Math.max(100, sceneBounds?.width || 800);
+      const sceneH = Math.max(100, sceneBounds?.height || 500);
 
-    const nextCollisions: Record<string, boolean> = { ...activeCollisions };
-    const allEntitiesList = Object.values(entities);
-    const now = Date.now();
-    const sceneW = Math.max(100, sceneBounds?.width || 800);
-    const sceneH = Math.max(100, sceneBounds?.height || 500);
+      // Index des paires d'IDs déjà en contact actif sur au moins une règle (évite qu'une règle Exit rate le verrou après un rétrécissement dû à une règle Enter)
+      const activeEntityContactPairs = new Set<string>();
+      Object.entries(activeCollisions).forEach(([k, val]) => {
+        if (!val) return;
+        const idx1 = k.indexOf('_');
+        if (idx1 === -1) return;
+        const rest = k.slice(idx1 + 1);
+        const idx2 = rest.indexOf('_');
+        if (idx2 === -1) return;
+        const id1 = rest.slice(0, idx2);
+        const id2 = rest.slice(idx2 + 1);
+        activeEntityContactPairs.add(`${id1}:::${id2}`);
+        activeEntityContactPairs.add(`${id2}:::${id1}`);
+      });
 
-    // Calques Colliders actifs portant des tracés
-    const activeColliderLayers = (layerGroups || []).flatMap((g) =>
-      (g.layers || [])
-        .filter(
-          (l) =>
-            (l.role === 'collider' || g.kind === 'collider') &&
-            l.visible &&
-            (l.vectorPaths?.length || 0) > 0
-        )
-        .map((l) => ({ layer: l, groupKind: g.kind }))
-    );
+      // Calques Colliders actifs portant des tracés
+      const activeColliderLayers = (layerGroups || []).flatMap((g) =>
+        (g.layers || [])
+          .filter(
+            (l) =>
+              (l.role === 'collider' || g.kind === 'collider') &&
+              l.visible &&
+              (l.vectorPaths?.length || 0) > 0
+          )
+          .map((l) => ({ layer: l, groupKind: g.kind }))
+      );
 
-    if (collisionRules.length > 0) {
-      collisionRules.forEach((rule) => {
-        // A. Collisions Entité <-> Entité
-        for (let i = 0; i < allEntitiesList.length; i++) {
-          for (let j = i + 1; j < allEntitiesList.length; j++) {
-            const entA = allEntitiesList[i];
-            const entB = allEntitiesList[j];
+      if (collisionRules.length > 0) {
+        collisionRules.forEach((rule) => {
+          const exitMargin = Math.max(0, rule.trigger.collisionExitMargin ?? 10);
 
-            let posA = entA.position;
-            if (tempPositions && tempPositions[entA.id]) {
-              posA = tempPositions[entA.id];
-            }
+          // A. Collisions Entité <-> Entité
+          for (let i = 0; i < allEntitiesList.length; i++) {
+            for (let j = i + 1; j < allEntitiesList.length; j++) {
+              const entA = allEntitiesList[i];
+              const entB = allEntitiesList[j];
 
-            let posB = entB.position;
-            if (tempPositions && tempPositions[entB.id]) {
-              posB = tempPositions[entB.id];
-            }
-
-            const tempA = { ...entA, position: posA };
-            const tempB = { ...entB, position: posB };
-
-            const isColliding = checkCollision(tempA, tempB);
-
-            // Vérifier dans le Sens 1 : entA = Sujet, entB = Cible
-            const matchAAsSubject = matchesEntityFilter(
-              entA,
-              rule.trigger.subjectMode,
-              rule.trigger.subjectId,
-              rule.trigger.subjectType,
-              rule.trigger.subjectTag
-            );
-            const matchBAsTarget = matchesEntityFilter(
-              entB,
-              rule.trigger.targetMode,
-              rule.trigger.targetId,
-              rule.trigger.targetType,
-              rule.trigger.targetTag
-            );
-
-            if (matchAAsSubject && matchBAsTarget) {
-              handleCollisionPair(
-                rule,
-                tempA,
-                tempB,
-                isColliding,
-                nextCollisions,
-                activeCollisions,
-                now,
-                {
-                  entities,
-                  updateEntityState,
-                  updateEntityDetails,
-                  deleteEntity,
-                  spawnEntity,
-                }
-              );
-            }
-
-            // Vérifier dans le Sens 2 (Bidirectionnel) : entB = Sujet, entA = Cible
-            const matchBAsSubject = matchesEntityFilter(
-              entB,
-              rule.trigger.subjectMode,
-              rule.trigger.subjectId,
-              rule.trigger.subjectType,
-              rule.trigger.subjectTag
-            );
-            const matchAAsTarget = matchesEntityFilter(
-              entA,
-              rule.trigger.targetMode,
-              rule.trigger.targetId,
-              rule.trigger.targetType,
-              rule.trigger.targetTag
-            );
-
-            if (matchBAsSubject && matchAAsTarget && entA.id !== entB.id) {
-              handleCollisionPair(
-                rule,
-                tempB,
-                tempA,
-                isColliding,
-                nextCollisions,
-                activeCollisions,
-                now,
-                {
-                  entities,
-                  updateEntityState,
-                  updateEntityDetails,
-                  deleteEntity,
-                  spawnEntity,
-                }
-              );
-            }
-          }
-        }
-
-        // B. Collisions Entité <-> Calques Colliders de décor (via #Tags ou 'any')
-        if (activeColliderLayers.length > 0) {
-          for (const ent of allEntitiesList) {
-            const matchAsSubject = matchesEntityFilter(
-              ent,
-              rule.trigger.subjectMode,
-              rule.trigger.subjectId,
-              rule.trigger.subjectType,
-              rule.trigger.subjectTag
-            );
-            if (!matchAsSubject) continue;
-
-            const tempEnt = tempPositions && tempPositions[ent.id]
-              ? { ...ent, position: tempPositions[ent.id] }
-              : ent;
-            const entBounds = getEntityWorldColliderBounds(tempEnt);
-
-            for (const { layer } of activeColliderLayers) {
-              const layerProxy: Entity = {
-                id: `layercol::${layer.id}`,
-                name: layer.name,
-                type: '__collider_layer__',
-                tags: layer.colliderTags || [],
-                position: { x: 0, y: 0 },
-                size: { width: sceneW, height: sceneH },
-                currentStateId: 'A',
-                isDraggable: false,
-                states: {
-                  A: {
-                    id: 'A',
-                    name: 'A',
-                    color: 'transparent',
-                    scale: 1,
-                    rotation: 0,
-                  },
-                },
-              };
-
-              const matchLayerAsTarget =
-                (rule.trigger.targetMode === 'any' || rule.trigger.targetMode === 'tag') &&
-                matchesEntityFilter(
-                  layerProxy,
-                  rule.trigger.targetMode,
-                  rule.trigger.targetId,
-                  rule.trigger.targetType,
-                  rule.trigger.targetTag
-                );
-
-              if (!matchLayerAsTarget) continue;
-
-              const hit = checkEntityAgainstColliderLayer(entBounds, tempEnt.id, layer, {
-                width: sceneW,
-                height: sceneH,
-              });
-
-              const cKey = `${rule.id}_${tempEnt.id}_${layerProxy.id}`;
-              if (hit.colliding && hit.contactPoint) {
-                lastCollisionContacts[cKey] = hit.contactPoint;
+              let posA = entA.position;
+              if (tempPositions && tempPositions[entA.id]) {
+                posA = tempPositions[entA.id];
               }
 
-              handleCollisionPair(
-                rule,
-                tempEnt,
-                layerProxy,
-                hit.colliding,
-                nextCollisions,
-                activeCollisions,
-                now,
+              let posB = entB.position;
+              if (tempPositions && tempPositions[entB.id]) {
+                posB = tempPositions[entB.id];
+              }
+
+              const tempA = { ...entA, position: posA };
+              const tempB = { ...entB, position: posB };
+
+              const keyAB = `${rule.id}_${entA.id}_${entB.id}`;
+              const keyBA = `${rule.id}_${entB.id}_${entA.id}`;
+              const wasPairColliding =
+                Boolean(activeCollisions[keyAB] || activeCollisions[keyBA]) ||
+                activeEntityContactPairs.has(`${entA.id}:::${entB.id}`);
+              const effectiveTol = wasPairColliding ? 3 + exitMargin : 3;
+
+              const isColliding = checkCollision(tempA, tempB, effectiveTol);
+
+              // Vérifier dans le Sens 1 : entA = Sujet, entB = Cible
+              const matchAAsSubject = matchesEntityFilter(
+                entA,
+                rule.trigger.subjectMode,
+                rule.trigger.subjectId,
+                rule.trigger.subjectType,
+                rule.trigger.subjectTag
+              );
+              const matchBAsTarget = matchesEntityFilter(
+                entB,
+                rule.trigger.targetMode,
+                rule.trigger.targetId,
+                rule.trigger.targetType,
+                rule.trigger.targetTag
+              );
+
+              if (matchAAsSubject && matchBAsTarget) {
+                handleCollisionPair(
+                  rule,
+                  tempA,
+                  tempB,
+                  isColliding,
+                  nextCollisions,
+                  activeCollisions,
+                  now,
+                  {
+                    entities,
+                    updateEntityState,
+                    updateEntityDetails,
+                    deleteEntity,
+                    spawnEntity,
+                  }
+                );
+              }
+
+              // Vérifier dans le Sens 2 (Bidirectionnel) : entB = Sujet, entA = Cible
+              const matchBAsSubject = matchesEntityFilter(
+                entB,
+                rule.trigger.subjectMode,
+                rule.trigger.subjectId,
+                rule.trigger.subjectType,
+                rule.trigger.subjectTag
+              );
+              const matchAAsTarget = matchesEntityFilter(
+                entA,
+                rule.trigger.targetMode,
+                rule.trigger.targetId,
+                rule.trigger.targetType,
+                rule.trigger.targetTag
+              );
+
+              if (matchBAsSubject && matchAAsTarget && entA.id !== entB.id) {
+                handleCollisionPair(
+                  rule,
+                  tempB,
+                  tempA,
+                  isColliding,
+                  nextCollisions,
+                  activeCollisions,
+                  now,
+                  {
+                    entities,
+                    updateEntityState,
+                    updateEntityDetails,
+                    deleteEntity,
+                    spawnEntity,
+                  }
+                );
+              }
+            }
+          }
+
+          // B. Collisions Entité <-> Calques Colliders de décor (via #Tags ou 'any')
+          if (activeColliderLayers.length > 0) {
+            for (const ent of allEntitiesList) {
+              const matchAsSubject = matchesEntityFilter(
+                ent,
+                rule.trigger.subjectMode,
+                rule.trigger.subjectId,
+                rule.trigger.subjectType,
+                rule.trigger.subjectTag
+              );
+              if (!matchAsSubject) continue;
+
+              const tempEnt = tempPositions && tempPositions[ent.id]
+                ? { ...ent, position: tempPositions[ent.id] }
+                : ent;
+              const entBounds = getEntityWorldColliderBounds(tempEnt);
+
+              for (const { layer } of activeColliderLayers) {
+                const layerProxy: Entity = {
+                  id: `layercol::${layer.id}`,
+                  name: layer.name,
+                  type: '__collider_layer__',
+                  tags: layer.colliderTags || [],
+                  position: { x: 0, y: 0 },
+                  size: { width: sceneW, height: sceneH },
+                  currentStateId: 'A',
+                  isDraggable: false,
+                  states: {
+                    A: {
+                      id: 'A',
+                      name: 'A',
+                      color: 'transparent',
+                      scale: 1,
+                      rotation: 0,
+                    },
+                  },
+                };
+
+                const matchLayerAsTarget =
+                  (rule.trigger.targetMode === 'any' || rule.trigger.targetMode === 'tag') &&
+                  matchesEntityFilter(
+                    layerProxy,
+                    rule.trigger.targetMode,
+                    rule.trigger.targetId,
+                    rule.trigger.targetType,
+                    rule.trigger.targetTag
+                  );
+
+                if (!matchLayerAsTarget) continue;
+
+                const cKey = `${rule.id}_${tempEnt.id}_${layerProxy.id}`;
+                const wasLayerColliding =
+                  Boolean(activeCollisions[cKey]) ||
+                  activeEntityContactPairs.has(`${tempEnt.id}:::${layerProxy.id}`);
+                const layerTol = wasLayerColliding ? 3 + exitMargin : 3;
+
+                const hit = checkEntityAgainstColliderLayer(entBounds, tempEnt.id, layer, {
+                  width: sceneW,
+                  height: sceneH,
+                }, layerTol);
+
+                if (hit.colliding && hit.contactPoint) {
+                  lastCollisionContacts[cKey] = hit.contactPoint;
+                }
+
+                handleCollisionPair(
+                  rule,
+                  tempEnt,
+                  layerProxy,
+                  hit.colliding,
+                  nextCollisions,
+                  activeCollisions,
+                  now,
                 {
                   entities,
                   updateEntityState,
@@ -3430,8 +3496,11 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         }
       }
     }
-    if (collisionsChanged) {
-      set({ activeCollisions: nextCollisions });
+      if (collisionsChanged) {
+        set({ activeCollisions: nextCollisions });
+      }
+    } finally {
+      isEvaluatingRules = false;
     }
   },
 }));
@@ -3616,7 +3685,7 @@ function handleCollisionPair(
         const distB = pre.lastOverlapPosB
           ? Math.hypot(target.position.x - pre.lastOverlapPosB.x, target.position.y - pre.lastOverlapPosB.y)
           : 999;
-        if (distA < 2.5 && distB < 2.5) {
+        if (distA < 10 && distB < 10) {
           isColliding = true;
         }
       }
@@ -3713,13 +3782,21 @@ function handleCollisionPair(
   }
 
   if (shouldExecute) {
-    // Cooldown séparé enter vs exit pour réactivité immédiate à la séparation
+    if (rule.trigger.collisionTriggerOnce && firedCollisionOnceKeys[collisionKey]) {
+      return;
+    }
+
+    // Cooldown séparé enter vs exit (avec amortissement anti-rebond sur exit)
     const cooldownKey = `collision_${rule.id}_${subject.id}_${target.id}_${isExiting ? 'exit' : 'enter'}`;
-    const cooldownDuration = isExiting ? 0 : RULE_COOLDOWN_MS;
+    const cooldownDuration = isExiting ? 120 : RULE_COOLDOWN_MS;
     if (now - (ruleCooldowns[cooldownKey] || 0) < cooldownDuration) {
       return;
     }
     ruleCooldowns[cooldownKey] = now;
+
+    if (rule.trigger.collisionTriggerOnce) {
+      firedCollisionOnceKeys[collisionKey] = true;
+    }
 
     executeRuleActions(rule.actions, {
       subject,

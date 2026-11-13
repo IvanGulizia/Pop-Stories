@@ -11,6 +11,16 @@ export const DEFAULT_SOUND_EDIT_PARAMS: CustomSoundEditParams = {
   release: 0,
   gain: 1,
   playbackRate: 1,
+  reverbMix: 0,
+  reverbDecay: 1.2,
+  reverbDamping: 0.4,
+  delayMix: 0,
+  delayTime: 0.22,
+  delayFeedback: 0.35,
+  filterType: 'none',
+  filterFreq: 3200,
+  drive: 0,
+  reverse: false,
 };
 
 export async function decodeDataUrlToAudioBuffer(dataUrl: string): Promise<AudioBuffer> {
@@ -111,9 +121,220 @@ export function getTrimmedTiming(buffer: AudioBuffer, params: CustomSoundEditPar
   return { sourceOffset, sourceDuration, playbackRate, outputDuration };
 }
 
+export function computeEffectTailDuration(params: CustomSoundEditParams): number {
+  const reverbMix = Math.max(0, Math.min(1, params.reverbMix ?? 0));
+  const reverbDecay = Math.max(0.2, Math.min(3.5, params.reverbDecay ?? 1.2));
+  const revTail = reverbMix > 0.01 ? Math.min(4.5, reverbDecay * 1.15) : 0;
+
+  const delayMix = Math.max(0, Math.min(1, params.delayMix ?? 0));
+  const delayTime = Math.max(0.04, Math.min(0.8, params.delayTime ?? 0.22));
+  const delayFeedback = Math.max(0, Math.min(0.85, params.delayFeedback ?? 0.35));
+  const echoCount = Math.max(2, Math.ceil(Math.log(0.005) / Math.log(Math.max(0.05, delayFeedback))));
+  const delTail = delayMix > 0.01 ? Math.min(4.0, delayTime * echoCount) : 0;
+
+  const rawTail = Math.max(revTail, delTail);
+  return rawTail > 0 ? Number((rawTail + 0.08).toFixed(3)) : 0;
+}
+
+export function computeNormalizedGain(buffer: AudioBuffer, params: CustomSoundEditParams): number {
+  const safeStart = Math.max(0, Math.min(0.98, params.trimStart));
+  const safeEnd = Math.max(safeStart + 0.02, Math.min(1, params.trimEnd));
+  const startSample = Math.floor(safeStart * buffer.length);
+  const endSample = Math.min(buffer.length, Math.ceil(safeEnd * buffer.length));
+
+  let peak = 0;
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = startSample; i < endSample; i++) {
+      const abs = Math.abs(data[i]);
+      if (abs > peak) peak = abs;
+    }
+  }
+
+  if (peak < 0.01) return 2.5;
+  return Math.max(0.2, Math.min(2.5, Number((0.95 / peak).toFixed(2))));
+}
+
+function createReversedSliceAudioBuffer(
+  ctx: BaseAudioContext,
+  sourceBuffer: AudioBuffer,
+  sourceOffset: number,
+  sourceDuration: number
+): AudioBuffer {
+  const sampleRate = sourceBuffer.sampleRate;
+  const startSample = Math.max(0, Math.floor(sourceOffset * sampleRate));
+  const endSample = Math.min(sourceBuffer.length, Math.ceil((sourceOffset + sourceDuration) * sampleRate));
+  const frameCount = Math.max(1, endSample - startSample);
+  const channels = sourceBuffer.numberOfChannels;
+
+  const outBuffer = ctx.createBuffer(channels, frameCount, sampleRate);
+  for (let ch = 0; ch < channels; ch++) {
+    const src = sourceBuffer.getChannelData(ch);
+    const dst = outBuffer.getChannelData(ch);
+    for (let i = 0; i < frameCount; i++) {
+      dst[i] = src[endSample - 1 - i] ?? 0;
+    }
+  }
+  return outBuffer;
+}
+
+function createReverbImpulseResponse(
+  ctx: BaseAudioContext,
+  decaySeconds: number,
+  damping: number
+): AudioBuffer {
+  const sampleRate = ctx.sampleRate;
+  const duration = Math.max(0.25, Math.min(4.0, decaySeconds * 1.1));
+  const length = Math.max(1, Math.floor(sampleRate * duration));
+  const ir = ctx.createBuffer(2, length, sampleRate);
+  const clampedDamping = Math.max(0, Math.min(1, damping));
+  const lpAlpha = 1 - clampedDamping * 0.88;
+
+  for (let ch = 0; ch < 2; ch++) {
+    const data = ir.getChannelData(ch);
+    let prev = 0;
+    for (let i = 0; i < length; i++) {
+      const progress = i / length;
+      // Enveloppe exponentielle naturelle avec légère montée initiale (10ms)
+      const env = Math.pow(1 - progress, 2.4) * Math.exp(-2.8 * progress);
+      const white = Math.random() * 2 - 1;
+      const filtered = prev + lpAlpha * (white - prev);
+      prev = filtered;
+      data[i] = filtered * env * 0.7;
+    }
+  }
+  return ir;
+}
+
+function createWaveShaperCurve(drive: number): Float32Array<ArrayBuffer> {
+  const samples = 1024;
+  const buffer = new ArrayBuffer(samples * 4);
+  const curve = new Float32Array(buffer);
+  const amount = Math.max(0.01, Math.min(1, drive));
+  const driveGain = 1 + amount * 9;
+  const norm = Math.tanh(driveGain);
+
+  for (let i = 0; i < samples; i++) {
+    const x = (i * 2) / (samples - 1) - 1;
+    curve[i] = Math.tanh(x * driveGain) / norm;
+  }
+  return curve;
+}
+
+function scheduleAudioGraph(
+  ctx: BaseAudioContext,
+  buffer: AudioBuffer,
+  params: CustomSoundEditParams,
+  startTime: number
+) {
+  const { sourceOffset, sourceDuration, playbackRate, outputDuration } = getTrimmedTiming(buffer, params);
+  const tailDuration = computeEffectTailDuration(params);
+  const totalDuration = outputDuration + tailDuration;
+
+  const source = ctx.createBufferSource();
+  source.playbackRate.value = playbackRate;
+
+  if (params.reverse) {
+    const revBuffer = createReversedSliceAudioBuffer(ctx, buffer, sourceOffset, sourceDuration);
+    source.buffer = revBuffer;
+    source.start(startTime, 0, revBuffer.duration);
+  } else {
+    source.buffer = buffer;
+    source.start(startTime, sourceOffset, sourceDuration);
+  }
+
+  // 1. Enveloppe ADSR + Fades + Gain
+  const envGain = ctx.createGain();
+  const curve = buildGainCurve(outputDuration, params);
+  envGain.gain.setValueCurveAtTime(curve, startTime, outputDuration);
+  // Assurer le silence absolu sur la branche sèche après outputDuration pour laisser chanter la queue des effets
+  envGain.gain.setValueAtTime(0, startTime + outputDuration + 0.002);
+
+  let currentNode: AudioNode = envGain;
+  source.connect(envGain);
+
+  // 2. Saturation douce (Drive)
+  const drive = Math.max(0, Math.min(1, params.drive ?? 0));
+  if (drive > 0.01) {
+    const shaper = ctx.createWaveShaper();
+    shaper.curve = createWaveShaperCurve(drive);
+    shaper.oversample = '2x';
+    currentNode.connect(shaper);
+    currentNode = shaper;
+  }
+
+  // 3. Filtre Tonalité (Lowpass / Highpass)
+  const filterType = params.filterType || 'none';
+  if (filterType === 'lowpass' || filterType === 'highpass') {
+    const filter = ctx.createBiquadFilter();
+    filter.type = filterType;
+    filter.frequency.value = Math.max(120, Math.min(16000, params.filterFreq ?? 3200));
+    filter.Q.value = 0.85;
+    currentNode.connect(filter);
+    currentNode = filter;
+  }
+
+  // 4. Bus Master avec fondu de queue anti-clic
+  const masterGain = ctx.createGain();
+  masterGain.gain.setValueAtTime(1, startTime);
+  if (totalDuration > 0.05) {
+    const fadeTailStart = startTime + Math.max(0, totalDuration - 0.035);
+    masterGain.gain.setValueAtTime(1, fadeTailStart);
+    masterGain.gain.linearRampToValueAtTime(0, startTime + totalDuration);
+  }
+  masterGain.connect(ctx.destination);
+
+  // Signal sec (Dry)
+  const dryGain = ctx.createGain();
+  dryGain.gain.value = 1;
+  currentNode.connect(dryGain);
+  dryGain.connect(masterGain);
+
+  // 5. Réverbe à convolution stéréo (Wet)
+  const reverbMix = Math.max(0, Math.min(1, params.reverbMix ?? 0));
+  if (reverbMix > 0.01) {
+    const convolver = ctx.createConvolver();
+    convolver.buffer = createReverbImpulseResponse(
+      ctx,
+      params.reverbDecay ?? 1.2,
+      params.reverbDamping ?? 0.4
+    );
+    const reverbWet = ctx.createGain();
+    reverbWet.gain.value = reverbMix * 1.15;
+    currentNode.connect(convolver);
+    convolver.connect(reverbWet);
+    reverbWet.connect(masterGain);
+  }
+
+  // 6. Écho / Delay avec Feedback
+  const delayMix = Math.max(0, Math.min(1, params.delayMix ?? 0));
+  if (delayMix > 0.01) {
+    const delayTime = Math.max(0.04, Math.min(0.8, params.delayTime ?? 0.22));
+    const delayFeedback = Math.max(0, Math.min(0.85, params.delayFeedback ?? 0.35));
+
+    const delayNode = ctx.createDelay(1.0);
+    delayNode.delayTime.value = delayTime;
+
+    const feedbackGain = ctx.createGain();
+    feedbackGain.gain.value = delayFeedback;
+
+    const delayWet = ctx.createGain();
+    delayWet.gain.value = delayMix;
+
+    currentNode.connect(delayNode);
+    delayNode.connect(feedbackGain);
+    feedbackGain.connect(delayNode);
+    delayNode.connect(delayWet);
+    delayWet.connect(masterGain);
+  }
+
+  return { source, outputDuration, tailDuration, totalDuration };
+}
+
 export interface LivePreviewHandle {
   stop: () => void;
   duration: number;
+  totalDuration: number;
 }
 
 export function playEditedAudioPreview(
@@ -123,24 +344,19 @@ export function playEditedAudioPreview(
 ): LivePreviewHandle {
   const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   const ctx = new AudioCtx();
-  const { sourceOffset, sourceDuration, playbackRate, outputDuration } = getTrimmedTiming(buffer, params);
-
-  const source = ctx.createBufferSource();
-  source.buffer = buffer;
-  source.playbackRate.value = playbackRate;
-
-  const gainNode = ctx.createGain();
-  const curve = buildGainCurve(outputDuration, params);
   const now = ctx.currentTime;
-  gainNode.gain.setValueCurveAtTime(curve, now, outputDuration);
-
-  source.connect(gainNode);
-  gainNode.connect(ctx.destination);
+  const { source, outputDuration, totalDuration } = scheduleAudioGraph(ctx, buffer, params, now);
 
   let cleaned = false;
+  let endTimer: number | null = null;
+
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
+    if (endTimer !== null) {
+      window.clearTimeout(endTimer);
+      endTimer = null;
+    }
     try {
       source.stop();
     } catch {
@@ -149,15 +365,15 @@ export function playEditedAudioPreview(
     ctx.close().catch(() => {});
   };
 
-  source.onended = () => {
+  // Ne PAS fermer le contexte sur source.onended : attendre la fin complète de la queue Réverbe / Écho !
+  endTimer = window.setTimeout(() => {
     cleanup();
     onEnded?.();
-  };
-
-  source.start(now, sourceOffset, sourceDuration);
+  }, Math.ceil(totalDuration * 1000) + 45);
 
   return {
     duration: outputDuration,
+    totalDuration,
     stop: () => {
       cleanup();
       onEnded?.();
@@ -224,32 +440,24 @@ export async function renderEditedAudioToWavDataUrl(
   buffer: AudioBuffer,
   params: CustomSoundEditParams
 ): Promise<{ dataUrl: string; duration: number }> {
-  const { sourceOffset, sourceDuration, playbackRate, outputDuration } = getTrimmedTiming(buffer, params);
   const sampleRate = buffer.sampleRate || 44100;
-  const frameCount = Math.max(1, Math.ceil(outputDuration * sampleRate));
   const numChannels = Math.min(2, Math.max(1, buffer.numberOfChannels));
+  const { outputDuration } = getTrimmedTiming(buffer, params);
+  const tailDuration = computeEffectTailDuration(params);
+  const totalDuration = outputDuration + tailDuration;
+  const frameCount = Math.max(1, Math.ceil(totalDuration * sampleRate));
 
   const OfflineCtx =
     window.OfflineAudioContext ||
     (window as unknown as { webkitOfflineAudioContext: typeof OfflineAudioContext }).webkitOfflineAudioContext;
 
   const offlineCtx = new OfflineCtx(numChannels, frameCount, sampleRate);
-  const source = offlineCtx.createBufferSource();
-  source.buffer = buffer;
-  source.playbackRate.value = playbackRate;
-
-  const gainNode = offlineCtx.createGain();
-  const curve = buildGainCurve(outputDuration, params);
-  gainNode.gain.setValueCurveAtTime(curve, 0, outputDuration);
-
-  source.connect(gainNode);
-  gainNode.connect(offlineCtx.destination);
-  source.start(0, sourceOffset, sourceDuration);
+  scheduleAudioGraph(offlineCtx, buffer, params, 0);
 
   const rendered = await offlineCtx.startRendering();
   const dataUrl = encodeAudioBufferToWavDataUrl(rendered);
   return {
     dataUrl,
-    duration: Number(outputDuration.toFixed(2)),
+    duration: Number(totalDuration.toFixed(2)),
   };
 }

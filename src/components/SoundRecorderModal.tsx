@@ -20,7 +20,9 @@ import {
 import {
   DEFAULT_SOUND_EDIT_PARAMS,
   LivePreviewHandle,
+  computeEffectTailDuration,
   computeEnvelopeMultiplierAt,
+  computeNormalizedGain,
   decodeDataUrlToAudioBuffer,
   extractWaveformPeaks,
   getTrimmedTiming,
@@ -421,7 +423,7 @@ export function SoundRecorderModal({ isOpen, onClose, onSelectSound }: SoundReco
       const elapsed = (now - startTs) / 1000;
       const prog = Math.min(1, elapsed / Math.max(0.05, handle.duration));
       setPlayheadProgress(prog);
-      if (prog < 1 && studioPreviewRef.current) {
+      if (elapsed < handle.totalDuration && studioPreviewRef.current) {
         playheadRafRef.current = requestAnimationFrame(animatePlayhead);
       }
     };
@@ -791,6 +793,8 @@ export function SoundRecorderModal({ isOpen, onClose, onSelectSound }: SoundReco
           {activeTab === 'studio' && studio && (() => {
             const { outputDuration } = getTrimmedTiming(studio.buffer, studio.params);
             const p = studio.params;
+            const tailDuration = computeEffectTailDuration(p);
+            const totalWithEffects = outputDuration + tailDuration;
             return (
               <div className="space-y-3.5 pb-1">
                 {/* Nom + Barre lecture */}
@@ -851,7 +855,8 @@ export function SoundRecorderModal({ isOpen, onClose, onSelectSound }: SoundReco
                       {(p.trimEnd * studio.buffer.duration).toFixed(2)}s
                     </span>
                     <span className="text-emerald-400 font-bold">
-                      Durée finale : {outputDuration.toFixed(2)}s
+                      Durée totale : {totalWithEffects.toFixed(2)}s
+                      {tailDuration > 0.01 ? ` (dont +${tailDuration.toFixed(2)}s d'effets)` : ''}
                     </span>
                   </div>
                 </div>
@@ -969,6 +974,31 @@ export function SoundRecorderModal({ isOpen, onClose, onSelectSound }: SoundReco
                         className="w-full accent-indigo-600 cursor-pointer"
                       />
                     </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => updateStudioParams({ reverse: !p.reverse })}
+                        className={`flex-1 py-1.5 px-2.5 rounded-xl text-[11px] font-bold border transition-all cursor-pointer ${
+                          p.reverse
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50'
+                        }`}
+                      >
+                        🔁 {p.reverse ? 'Inversé (Actif)' : 'Inverser'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateStudioParams({
+                            gain: computeNormalizedGain(studio.buffer, p),
+                          })
+                        }
+                        className="flex-1 py-1.5 px-2.5 rounded-xl text-[11px] font-bold bg-white text-slate-700 border border-slate-200 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-800 transition-all cursor-pointer"
+                        title="Ajuster automatiquement le gain pour optimiser le volume sans saturation"
+                      >
+                        📏 Normaliser
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -1037,6 +1067,179 @@ export function SoundRecorderModal({ isOpen, onClose, onSelectSound }: SoundReco
                         onChange={(e) => updateStudioParams({ release: parseFloat(e.target.value) })}
                         className="w-full accent-emerald-600 cursor-pointer"
                       />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 5 : Effets Audio & Espace (Réverbe, Écho, Filtre, Saturation) */}
+                <div className="p-3 bg-violet-50/50 rounded-2xl border border-violet-200 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-violet-900">
+                      5. Effets Audio &amp; Espace (Réverbe • Écho • Filtre • Saturation)
+                    </div>
+                    {tailDuration > 0.01 && (
+                      <span className="text-[10px] font-bold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full">
+                        Queue préservée : +{tailDuration.toFixed(2)}s
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Réverbe */}
+                  <div className="p-2.5 bg-white/80 rounded-xl border border-violet-100 space-y-1.5">
+                    <div className="text-[10px] font-black text-violet-800 uppercase">Réverbe</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      <div>
+                        <div className="flex justify-between text-[10px] font-bold text-slate-700">
+                          <span>Mix</span>
+                          <span className="font-mono text-violet-700">{Math.round((p.reverbMix ?? 0) * 100)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.02}
+                          value={p.reverbMix ?? 0}
+                          onChange={(e) => updateStudioParams({ reverbMix: parseFloat(e.target.value) })}
+                          className="w-full accent-violet-600 cursor-pointer"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-[10px] font-bold text-slate-700">
+                          <span>Durée (Decay)</span>
+                          <span className="font-mono text-violet-700">{(p.reverbDecay ?? 1.2).toFixed(2)}s</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0.2}
+                          max={3.5}
+                          step={0.05}
+                          value={p.reverbDecay ?? 1.2}
+                          onChange={(e) => updateStudioParams({ reverbDecay: parseFloat(e.target.value) })}
+                          className="w-full accent-violet-600 cursor-pointer"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-[10px] font-bold text-slate-700">
+                          <span>Chaleur (Damping)</span>
+                          <span className="font-mono text-violet-700">{Math.round((p.reverbDamping ?? 0.4) * 100)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={p.reverbDamping ?? 0.4}
+                          onChange={(e) => updateStudioParams({ reverbDamping: parseFloat(e.target.value) })}
+                          className="w-full accent-violet-600 cursor-pointer"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Écho / Delay */}
+                  <div className="p-2.5 bg-white/80 rounded-xl border border-violet-100 space-y-1.5">
+                    <div className="text-[10px] font-black text-sky-800 uppercase">Écho / Delay</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      <div>
+                        <div className="flex justify-between text-[10px] font-bold text-slate-700">
+                          <span>Mix</span>
+                          <span className="font-mono text-sky-700">{Math.round((p.delayMix ?? 0) * 100)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.02}
+                          value={p.delayMix ?? 0}
+                          onChange={(e) => updateStudioParams({ delayMix: parseFloat(e.target.value) })}
+                          className="w-full accent-sky-600 cursor-pointer"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-[10px] font-bold text-slate-700">
+                          <span>Temps</span>
+                          <span className="font-mono text-sky-700">{Math.round((p.delayTime ?? 0.22) * 1000)}ms</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0.04}
+                          max={0.8}
+                          step={0.01}
+                          value={p.delayTime ?? 0.22}
+                          onChange={(e) => updateStudioParams({ delayTime: parseFloat(e.target.value) })}
+                          className="w-full accent-sky-600 cursor-pointer"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-[10px] font-bold text-slate-700">
+                          <span>Répétitions</span>
+                          <span className="font-mono text-sky-700">{Math.round((p.delayFeedback ?? 0.35) * 100)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={0.85}
+                          step={0.02}
+                          value={p.delayFeedback ?? 0.35}
+                          onChange={(e) => updateStudioParams({ delayFeedback: parseFloat(e.target.value) })}
+                          className="w-full accent-sky-600 cursor-pointer"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Filtre Tonalité & Saturation Douce */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div className="p-2.5 bg-white/80 rounded-xl border border-violet-100 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-black text-slate-800 uppercase">Filtre Tonalité</span>
+                        <select
+                          value={p.filterType || 'none'}
+                          onChange={(e) =>
+                            updateStudioParams({ filterType: e.target.value as 'none' | 'lowpass' | 'highpass' })
+                          }
+                          className="text-[10px] font-bold bg-slate-50 border border-slate-200 rounded-lg px-2 py-0.5 outline-none cursor-pointer"
+                        >
+                          <option value="none">Aucun</option>
+                          <option value="lowpass">Passe-Bas (Doux)</option>
+                          <option value="highpass">Passe-Haut (Clair)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-[10px] font-bold text-slate-700">
+                          <span>Fréquence de coupure</span>
+                          <span className="font-mono text-indigo-700">{Math.round(p.filterFreq ?? 3200)} Hz</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={150}
+                          max={12000}
+                          step={50}
+                          disabled={!p.filterType || p.filterType === 'none'}
+                          value={p.filterFreq ?? 3200}
+                          onChange={(e) => updateStudioParams({ filterFreq: parseFloat(e.target.value) })}
+                          className="w-full accent-indigo-600 cursor-pointer disabled:opacity-40"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 bg-white/80 rounded-xl border border-violet-100 space-y-1.5">
+                      <div className="text-[10px] font-black text-rose-800 uppercase">Saturation Douce (Drive)</div>
+                      <div>
+                        <div className="flex justify-between text-[10px] font-bold text-slate-700">
+                          <span>Intensité</span>
+                          <span className="font-mono text-rose-700">{Math.round((p.drive ?? 0) * 100)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.02}
+                          value={p.drive ?? 0}
+                          onChange={(e) => updateStudioParams({ drive: parseFloat(e.target.value) })}
+                          className="w-full accent-rose-600 cursor-pointer"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>

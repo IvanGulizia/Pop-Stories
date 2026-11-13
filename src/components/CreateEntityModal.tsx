@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useSceneStore } from '../store/useSceneStore';
 import { X, Sparkles, Tag, Paintbrush } from 'lucide-react';
 import { DrawingCanvas } from './DrawingCanvas';
-import { VectorPath, DrawingLayer } from '../types';
+import { VectorPath, DrawingLayer, ColliderType, ColliderBounds } from '../types';
 
 interface CreateEntityModalProps {
   isOpen: boolean;
@@ -18,6 +18,8 @@ export function CreateEntityModal({ isOpen, onClose }: CreateEntityModalProps) {
   const [drawingDataUrl, setDrawingDataUrl] = useState<string | undefined>(undefined);
   const [vectorPaths, setVectorPaths] = useState<VectorPath[]>([]);
   const [drawingLayers, setDrawingLayers] = useState<DrawingLayer[] | undefined>(undefined);
+  const [colliderType, setColliderType] = useState<ColliderType>('box');
+  const [colliderBounds, setColliderBounds] = useState<ColliderBounds | undefined>(undefined);
   const [color] = useState('transparent');
   const [tagInput, setTagInput] = useState('');
 
@@ -40,6 +42,8 @@ export function CreateEntityModal({ isOpen, onClose }: CreateEntityModalProps) {
       drawingDataUrl,
       vectorPaths,
       drawingLayers,
+      colliderType,
+      colliderBounds,
       color,
       tags: tags.length > 0 ? tags : [slug, 'custom'],
     });
@@ -116,6 +120,10 @@ export function CreateEntityModal({ isOpen, onClose }: CreateEntityModalProps) {
                 setDrawingDataUrl(dataUrl);
               }}
               onLayersChange={setDrawingLayers}
+              onColliderChange={(type, bounds) => {
+                setColliderType(type);
+                setColliderBounds(bounds);
+              }}
               initialStrokeColor="#6366f1"
             />
           </div>

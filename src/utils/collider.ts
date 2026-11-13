@@ -1,4 +1,4 @@
-import { ColliderType, Entity, EntityState, VectorPath } from '../types';
+import { ColliderBounds, ColliderType, Entity, EntityState, VectorPath } from '../types';
 
 export interface EntityColliderGeometry {
   x: number;
@@ -62,13 +62,17 @@ export function extractPathsBounds(paths: VectorPath[]): { minX: number; maxX: n
 }
 
 /**
- * Resolves which EntityState supplies the collider geometry (supports entity.sharedCollider).
+ * Resolves which EntityState supplies the collider geometry (supports entity.sharedCollider and state.overrideCollider).
  */
 export function resolveColliderState(
   entity: Entity,
   currentState?: EntityState
 ): EntityState | undefined {
   const activeState = currentState || entity.states[entity.currentStateId];
+  // Si cet état possède explicitement une surcharge de collider, il est prioritaire même en mode Collider commun
+  if (activeState?.overrideCollider) {
+    return activeState;
+  }
   if (!entity.sharedCollider) {
     return activeState;
   }
@@ -80,6 +84,52 @@ export function resolveColliderState(
 }
 
 /**
+ * Computes auto ColliderBounds (0..200 space) from a list of VectorPaths.
+ */
+export function computeAutoColliderBoundsFromPaths(
+  paths: VectorPath[] | undefined,
+  shape: ColliderType = 'box',
+  entityType?: string
+): ColliderBounds {
+  let rawX = 20;
+  let rawY = 20;
+  let width = 160;
+  let height = 160;
+
+  if (paths && paths.length > 0) {
+    const { minX, maxX, minY, maxY, hasBounds } = extractPathsBounds(paths);
+    if (hasBounds && maxX > minX && maxY > minY) {
+      rawX = Math.max(0, Math.round(minX));
+      rawY = Math.max(0, Math.round(minY));
+      width = Math.min(200, Math.max(8, Math.round(maxX - minX)));
+      height = Math.min(200, Math.max(8, Math.round(maxY - minY)));
+    }
+  } else if (entityType === 'apple') {
+    width = 170;
+    height = 170;
+    rawX = 15;
+    rawY = 15;
+  } else if (entityType === 'plant') {
+    width = 150;
+    height = 170;
+    rawX = 25;
+    rawY = 15;
+  }
+
+  return {
+    mode: 'auto',
+    shape,
+    x: rawX,
+    y: rawY,
+    width,
+    height,
+    centerX: rawX + width / 2,
+    centerY: rawY + height / 2,
+    radius: Math.max(width, height) / 2,
+  };
+}
+
+/**
  * Calculates the exact collider geometry in 200x200 canvas space.
  */
 export function getEntityColliderBounds(
@@ -87,9 +137,63 @@ export function getEntityColliderBounds(
   currentState?: EntityState,
   flipX: boolean = Boolean(entity.flipX)
 ): EntityColliderGeometry {
-  const effectiveState = resolveColliderState(entity, currentState);
+  const activeState = currentState || entity.states[entity.currentStateId];
+  const isUsingSharedWithoutOverride = Boolean(entity.sharedCollider && !activeState?.overrideCollider);
+  const effectiveState = resolveColliderState(entity, activeState);
+
+  const bounds: ColliderBounds | undefined = isUsingSharedWithoutOverride
+    ? effectiveState?.colliderBounds || entity.sharedColliderBounds || entity.colliderBounds
+    : effectiveState?.colliderBounds || entity.colliderBounds;
+
   const colliderType: ColliderType =
-    effectiveState?.colliderType || entity.colliderType || (entity.type === 'apple' ? 'circle' : 'box');
+    bounds?.shape ||
+    effectiveState?.colliderType ||
+    (isUsingSharedWithoutOverride ? entity.sharedColliderType : undefined) ||
+    entity.colliderType ||
+    (entity.type === 'apple' ? 'circle' : 'box');
+
+  if (bounds?.mode === 'manual') {
+    if (colliderType === 'circle') {
+      const rawCenterX = bounds.centerX ?? ((bounds.x ?? 20) + (bounds.width ?? 160) / 2);
+      const rawCenterY = bounds.centerY ?? ((bounds.y ?? 20) + (bounds.height ?? 160) / 2);
+      const radius = Math.max(
+        4,
+        Math.min(140, bounds.radius ?? Math.max(bounds.width ?? 160, bounds.height ?? 160) / 2)
+      );
+      const centerX = flipX ? 200 - rawCenterX : rawCenterX;
+      const centerY = rawCenterY;
+      return {
+        x: centerX - radius,
+        y: centerY - radius,
+        width: radius * 2,
+        height: radius * 2,
+        centerX,
+        centerY,
+        radius,
+        colliderType,
+      };
+    }
+
+    const rawX = bounds.x ?? 20;
+    const rawY = bounds.y ?? 20;
+    const width = Math.max(8, bounds.width ?? 160);
+    const height = Math.max(8, bounds.height ?? 160);
+    const x = flipX ? 200 - (rawX + width) : rawX;
+    const y = rawY;
+    const centerX = x + width / 2;
+    const centerY = y + height / 2;
+    const radius = Math.max(width, height) / 2;
+    return {
+      x,
+      y,
+      width,
+      height,
+      centerX,
+      centerY,
+      radius,
+      colliderType,
+    };
+  }
 
   const paths = effectiveState?.vectorPaths || entity.vectorPaths;
 
@@ -163,7 +267,7 @@ export function getEntityWorldColliderBounds(
 } {
   const effectiveState = resolveColliderState(entity, currentState);
   const s = effectiveState?.scale ?? 1;
-  const geom = getEntityColliderBounds(entity, effectiveState, Boolean(entity.flipX));
+  const geom = getEntityColliderBounds(entity, currentState, Boolean(entity.flipX));
   const scaleX = (entity.size.width * s) / 200;
   const scaleY = (entity.size.height * s) / 200;
 
@@ -201,14 +305,9 @@ export function isPointInsideEntityCollider(
   const rect = element.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return true;
 
-  // Local coordinates relative to entity bounding box container [0, rect.width] x [0, rect.height]
+  // Local coordinates relative to entity bounding box container
   const localX = clientX - rect.left;
   const localY = clientY - rect.top;
-
-  // If completely outside the container
-  if (localX < 0 || localX > rect.width || localY < 0 || localY > rect.height) {
-    return false;
-  }
 
   const geometry = getEntityColliderBounds(entity, currentState, Boolean(entity.flipX));
 
