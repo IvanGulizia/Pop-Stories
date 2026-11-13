@@ -333,7 +333,7 @@ export type TriggerPhase =
   | 'proximity_enter'   // Approche / Proximité
   | 'boundary_hit';     // Contact bord de scène
 
-export type SelectionMode = 'type' | 'tag' | 'instance';
+export type SelectionMode = 'type' | 'tag' | 'instance' | 'any';
 
 export interface RuleTrigger {
   type: TriggerType;

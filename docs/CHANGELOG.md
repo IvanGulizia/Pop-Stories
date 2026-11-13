@@ -1,5 +1,16 @@
+## [Phase 10.11] - 2026-11-12
+### Corrigé & Ajouté
+- **Mode `🌐 Tous les objets` (`SelectionMode = 'any'`) & Sujet explicite sur les Bords de Scène** :
+  - Ajout du mode de sélection `'any'` (*« 🌐 Tous les objets »*) dans `src/types/index.ts`, `useSceneStore.ts` (`matchesEntityFilter`) et `RuleBook.tsx` (onglet dédié dans l'assistant de création, la modale d'édition, le filtrage et l'affichage sur les cartes du Storyboard) pour les déclencheurs Sujet et Cible (collisions, proximité, bords, etc.).
+  - Retrait de `'boundary'` de `isGlobalTrigger` dans `RuleBook.tsx` : les règles « Toucher le bord » conservent ou permettent désormais de choisir explicitement un Sujet précis (par Type, `#Tag`, Instance ou `🌐 Tous objets`), tout en initialisant par défaut `subjectMode: 'any'` lorsqu'on passe par l'entrée rapide *Événement Global → Bord de Scène*.
+- **Détection exacte des Bords de Scène & Adaptation dynamique au redimensionnement du Canvas** :
+  - Remplacement de la détection sur boîte fixe `256×256` (+ marge `15px`) par les limites réelles du collider (`getEntityWorldColliderBounds` dans `useSceneStore.ts` avec tolérance de `2px`, et `body.bounds` dans `matterPhysicsEngine.ts` pour `boundary_behavior` : rebond sensor, wrap, clamp).
+  - Mesure des dimensions internes exactes du canvas (`clientWidth` / `clientHeight`) via `ResizeObserver`, `window.resize`, et resynchronisation immédiate à chaque frame dans la boucle 60 FPS de `Scene.tsx` (y compris pendant les transitions CSS et l'extension des murs statiques Matter.js).
+
 ## [Phase 10.10] - 2026-11-12
 ### Corrigé (Audit Lot 1)
+- **Édition complète des Modèles (Archétypes) sans instance sur le Canvas** :
+  - Correction du helper `findTargetEntityOrArchetype` dans `useSceneStore.ts` (recherche par `a.id` en plus de `a.type`) et prise en charge de `updateEntityState` sur les modèles hors scène : il est désormais possible d'attribuer des comportements, overrides par état, tags, états et dessins directement depuis le catalogue `EntityGallery` même lorsqu'aucune instance n'est posée sur la scène (badge *« Modèle (hors scène) »* dans `Inspector` et surbrillance active dans le catalogue).
 - **Alignement strict des Colliders avec Scale & Flip horizontal (`flipX`)** :
   - Correction dans `collider.ts`, `matterPhysicsEngine.ts`, `useSceneStore.ts`, `Apple.tsx` et `Plant.tsx` : calcul centralisé `getEntityWorldColliderBounds` tenant compte du `scale` (transform centré DOM) et du miroir horizontal `flipX`, préservation de la vélocité lors des changements d'offset ou de reconstruction du corps Matter.js, et correction de la conservation de vélocité orthogonale en pause de patrouille.
 - **Nettoyage complet du cycle Play/Stop & Évaluation des Règles** :

@@ -376,26 +376,27 @@ function ensurePhysicsWorld(canvasBounds: { width: number; height: number }, ent
   const h = Math.max(100, canvasBounds.height);
 
   if (boundaryBodies.length === 0) {
+    const span = Math.max(10000, w * 4, h * 4);
     // Murs avec restitution neutre 0.0 : le rebond est déterminé par la variable rebond de l'entité
-    const ground = Bodies.rectangle(w / 2, h + wallThickness / 2, w * 3, wallThickness, {
+    const ground = Bodies.rectangle(w / 2, h + wallThickness / 2, span, wallThickness, {
       isStatic: true,
       label: 'boundary_ground',
       restitution: 0.0,
       friction: 0.1,
     });
-    const ceiling = Bodies.rectangle(w / 2, -wallThickness / 2, w * 3, wallThickness, {
+    const ceiling = Bodies.rectangle(w / 2, -wallThickness / 2, span, wallThickness, {
       isStatic: true,
       label: 'boundary_ceiling',
       restitution: 0.0,
       friction: 0.1,
     });
-    const leftWall = Bodies.rectangle(-wallThickness / 2, h / 2, wallThickness, h * 3, {
+    const leftWall = Bodies.rectangle(-wallThickness / 2, h / 2, wallThickness, span, {
       isStatic: true,
       label: 'boundary_left',
       restitution: 0.0,
       friction: 0.1,
     });
-    const rightWall = Bodies.rectangle(w + wallThickness / 2, h / 2, wallThickness, h * 3, {
+    const rightWall = Bodies.rectangle(w + wallThickness / 2, h / 2, wallThickness, span, {
       isStatic: true,
       label: 'boundary_right',
       restitution: 0.0,
@@ -1099,10 +1100,10 @@ export function stepMatterPhysics(params: {
     // 8. Gestion des bords de scène spéciaux (Bounce pour sensors, Wrap, Clamp)
     if (boundary) {
       const mode = boundary.mode || 'bounce';
+      const halfW = Math.max(4, (body.bounds.max.x - body.bounds.min.x) / 2);
+      const halfH = Math.max(4, (body.bounds.max.y - body.bounds.min.y) / 2);
       if (mode === 'bounce' && body.isSensor) {
         const bounceRest = boundary.bounciness ?? 0.8;
-        const halfW = (entity.size.width * (currentState?.scale ?? 1)) / 2;
-        const halfH = (entity.size.height * (currentState?.scale ?? 1)) / 2;
         let vx = body.velocity.x;
         let vy = body.velocity.y;
         let nx = body.position.x;
@@ -1126,8 +1127,6 @@ export function stepMatterPhysics(params: {
           Body.setVelocity(body, { x: vx, y: vy });
         }
       } else if (mode === 'wrap') {
-        const halfW = entity.size.width / 2;
-        const halfH = entity.size.height / 2;
         let newX = body.position.x;
         let newY = body.position.y;
 
@@ -1141,10 +1140,10 @@ export function stepMatterPhysics(params: {
           Body.setPosition(body, { x: newX, y: newY });
         }
       } else if (mode === 'clamp') {
-        const minX = entity.size.width / 2;
-        const maxX = canvasBounds.width - entity.size.width / 2;
-        const minY = entity.size.height / 2;
-        const maxY = canvasBounds.height - entity.size.height / 2;
+        const minX = halfW;
+        const maxX = Math.max(minX, canvasBounds.width - halfW);
+        const minY = halfH;
+        const maxY = Math.max(minY, canvasBounds.height - halfH);
 
         const clampedX = Math.max(minX, Math.min(maxX, body.position.x));
         const clampedY = Math.max(minY, Math.min(maxY, body.position.y));

@@ -94,15 +94,20 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
     const el = canvasContainerRef.current;
     if (!el) return;
     const updateBounds = () => {
-      const rect = el.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        setSceneBounds({ width: rect.width, height: rect.height });
+      const w = el.clientWidth || Math.round(el.getBoundingClientRect().width);
+      const h = el.clientHeight || Math.round(el.getBoundingClientRect().height);
+      if (w > 0 && h > 0) {
+        setSceneBounds({ width: w, height: h });
       }
     };
     updateBounds();
     const ro = new ResizeObserver(updateBounds);
     ro.observe(el);
-    return () => ro.disconnect();
+    window.addEventListener('resize', updateBounds);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', updateBounds);
+    };
   }, [setSceneBounds, ratio]);
 
   // Boucle de simulation physique Matter.js & contrôles joueur en mode Play (60 FPS)
@@ -121,12 +126,22 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
       lastTime = currentTime;
 
       if (canvasContainerRef.current) {
-        const rect = canvasContainerRef.current.getBoundingClientRect();
+        const el = canvasContainerRef.current;
+        const rect = el.getBoundingClientRect();
+        const liveW = el.clientWidth || rect.width;
+        const liveH = el.clientHeight || rect.height;
+
+        // Garder sceneBounds strictement à jour à chaque frame même pendant un redimensionnement
+        const prevBounds = useSceneStore.getState().sceneBounds;
+        if (Math.round(liveW) !== prevBounds.width || Math.round(liveH) !== prevBounds.height) {
+          setSceneBounds({ width: liveW, height: liveH });
+        }
+
         const currentEntities = useSceneStore.getState().entities;
         const result = stepMatterPhysics({
           entities: currentEntities,
           deltaTime,
-          canvasBounds: { width: rect.width, height: rect.height },
+          canvasBounds: { width: liveW, height: liveH },
           mousePos: mousePosRef.current,
         });
 
@@ -153,7 +168,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
       cancelAnimationFrame(animId);
       stopKeyboardListening();
     };
-  }, [isPlayMode, batchUpdateEntityTransforms]);
+  }, [isPlayMode, batchUpdateEntityTransforms, setSceneBounds]);
 
   // Calcul des styles d'aspect ratio pour ancrage en haut & centré horizontalement
   const getAspectRatioStyle = (): React.CSSProperties => {

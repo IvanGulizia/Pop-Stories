@@ -217,12 +217,18 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
               </div>
             ) : (
               catalog.map((item) => {
+                const instanceOnScene = entityList.find((e) => e.type === item.type);
                 const representativeEntity =
-                  entityList.find((e) => e.type === item.type) ||
+                  instanceOnScene ||
                   item.archetypeData ||
                   customArchetypes[item.type];
 
-                const isSelected = representativeEntity && selectedEntityId === representativeEntity.id;
+                const isSelected = Boolean(
+                  (instanceOnScene && selectedEntityId === instanceOnScene.id) ||
+                    (!instanceOnScene &&
+                      (selectedEntityId === item.type ||
+                        (representativeEntity && selectedEntityId === representativeEntity.id)))
+                );
                 const isRenaming = renamingType === item.type;
                 const isSavedInCollection = !!localEntityCollection[item.type];
 

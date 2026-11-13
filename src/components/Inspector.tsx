@@ -149,16 +149,28 @@ export function Inspector() {
       {/* Header with Prominent Entity Name Editing */}
       <div className="border-b border-slate-100 pb-3 space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-            Paramètres de l'objet
-          </span>
-          <button
-            onClick={() => deleteEntity(selectedEntity.id)}
-            className="text-slate-400 hover:text-rose-600 p-1.5 rounded-xl hover:bg-rose-50 transition-colors cursor-pointer"
-            title="Supprimer cet objet de la scène"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              Paramètres de l'objet
+            </span>
+            {!entities[selectedEntity.id] && (
+              <span
+                className="text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-md"
+                title="Aucune instance sur la scène : les réglages et comportements s'appliqueront automatiquement à chaque apparition (Spawn ou glisser-déposer)."
+              >
+                Modèle (hors scène)
+              </span>
+            )}
+          </div>
+          {Boolean(entities[selectedEntity.id]) && (
+            <button
+              onClick={() => deleteEntity(selectedEntity.id)}
+              className="text-slate-400 hover:text-rose-600 p-1.5 rounded-xl hover:bg-rose-50 transition-colors cursor-pointer"
+              title="Supprimer cet objet de la scène"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         <div

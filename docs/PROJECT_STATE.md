@@ -1,8 +1,11 @@
 # État du Projet
 
 ## Complété
+- **Ciblage `🌐 Tous objets`, Sujet sur Bords de Scène & Précision Dynamique des Bordures (Phase 10.11)** :
+  - **Ciblage `'any'` (`🌐 Tous les objets`)** : Nouvel onglet *Tous objets* pour le Sujet et la Cible dans `RuleBook.tsx` (`matchesEntityFilter`), et désactivation du blocage global forcé sur `boundary` afin de cibler une entité précise ou tous les objets sur les collisions avec les bords.
+  - **Détection exacte sur bord réel & Resize en direct** : Calibrage des règles `boundary` sur `getEntityWorldColliderBounds` (`tol = 2px`) et de `boundary_behavior` sur `body.bounds`, avec synchronisation `clientWidth`/`clientHeight` à 60 FPS dans `Scene.tsx` et murs Matter.js adaptatifs.
 - **Audit Fiabilité (Lot 1) & Spawn/Particules au Point Exact, Tags sur Déclencheurs, État Initial & Particules Dessinées (Phase 10.10)** :
-  - **Audit & Correctifs Moteur (Lot 1)** : Alignement exact des colliders avec `scale` et `flipX` (`getEntityWorldColliderBounds`), nettoyage complet de l'état runtime au Stop (`clearPlayRuntimeState` + annulation des timers), nettoyage `collisionEnd` Matter.js, `sceneBounds` réactifs via `ResizeObserver` partout (bordures, spawn aléatoire, `SpawnLocationPicker`), correction `evaluateRulesWithTemp` & `DirectCanvasDrawingOverlay` (`strokeColorId` + `layer.locked`).
+  - **Audit & Correctifs Moteur (Lot 1)** : Alignement exact des colliders avec `scale` et `flipX` (`getEntityWorldColliderBounds`), édition des comportements/overrides/états/tags sur les modèles sans instance sur le canvas (`findTargetEntityOrArchetype`), nettoyage complet de l'état runtime au Stop (`clearPlayRuntimeState` + annulation des timers), nettoyage `collisionEnd` Matter.js, `sceneBounds` réactifs via `ResizeObserver` partout (bordures, spawn aléatoire, `SpawnLocationPicker`), correction `evaluateRulesWithTemp` & `DirectCanvasDrawingOverlay` (`strokeColorId` + `layer.locked`).
   - **Position exacte d'événement (`eventPosition`)** : Capture des coordonnées de contact physique/AABB ou de pointeur pour spawner (`at_event_point` / `offset_event_point`) ou émettre des particules (`event_point`) exactement à l'endroit de la collision ou du clic.
   - **État initial au Spawn restauré** : Sélecteur d'état initial directement dans `SpawnLocationPicker`, étape dédiée dans le `RuleBook` et rendu de la miniature exacte dans les cartes.
   - **Ciblage `#Tag` & `Instance précise` sur les déclencheurs** : Support complet Sujet & Cible par Type, `#Tag` ou Instance dans la création, l'édition et le Storyboard du `RuleBook`.

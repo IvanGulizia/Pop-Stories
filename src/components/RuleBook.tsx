@@ -701,12 +701,12 @@ export function RuleBook() {
         subjectType: subMode === 'type' ? resolvedSubType : undefined,
         subjectId: subMode === 'instance' ? activeWizard.subjectId : undefined,
         subjectTag: subMode === 'tag' ? activeWizard.subjectTag : undefined,
-        subjectStateId: activeWizard.subjectStateId,
+        subjectStateId: subMode === 'any' || subMode === 'tag' ? undefined : activeWizard.subjectStateId,
         targetMode: needsTarget ? tarMode : undefined,
         targetType: needsTarget && tarMode === 'type' ? resolvedTarType : undefined,
         targetId: needsTarget && tarMode === 'instance' ? activeWizard.targetId : undefined,
         targetTag: needsTarget && tarMode === 'tag' ? activeWizard.targetTag : undefined,
-        targetStateId: needsTarget ? activeWizard.targetStateId : undefined,
+        targetStateId: needsTarget && tarMode !== 'any' && tarMode !== 'tag' ? activeWizard.targetStateId : undefined,
         timerInterval: activeWizard.timerInterval,
         timerType: activeWizard.timerType,
         keyName: activeWizard.keyName,
@@ -830,8 +830,8 @@ export function RuleBook() {
 
     // 3. Filtrage par Entité (Bandeau 1-clic racine)
     if (filterObject !== 'all') {
-      const matchSubject = rule.trigger.subjectType === filterObject;
-      const matchTarget = rule.trigger.targetType === filterObject;
+      const matchSubject = rule.trigger.subjectType === filterObject || rule.trigger.subjectMode === 'any';
+      const matchTarget = rule.trigger.targetType === filterObject || rule.trigger.targetMode === 'any';
       const matchAction = rule.actions.some(
         (a) => a.targetType === filterObject || a.spawnEntityType === filterObject
       );
@@ -1192,14 +1192,16 @@ export function RuleBook() {
           paginatedRules.map((rule) => {
             const isCollision = rule.trigger.type === 'collision' || rule.trigger.type === 'proximity';
 
-            // Find subject display info (Type / #Tag / Instance)
+            // Find subject display info (Type / #Tag / Instance / Tous)
             const subjectMode = rule.trigger.subjectMode || 'type';
             const subjectInst = subjectMode === 'instance' && rule.trigger.subjectId ? entities[rule.trigger.subjectId] : undefined;
             const subjectType = subjectInst?.type || rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
             const subjectOpt = availableEntityOptions.find((o) => o.type === subjectType);
             const subjectEntity = subjectInst || getEntityObj(subjectType);
             const subjectDisplayLabel =
-              subjectMode === 'tag'
+              subjectMode === 'any'
+                ? 'Tous les objets'
+                : subjectMode === 'tag'
                 ? `#${rule.trigger.subjectTag || 'tag'}`
                 : subjectMode === 'instance'
                 ? subjectInst?.name || 'Instance précise'
@@ -1208,14 +1210,16 @@ export function RuleBook() {
               ? subjectEntity?.states[rule.trigger.subjectStateId]?.name || rule.trigger.subjectStateId
               : 'Tous les états';
 
-            // Find target display info (Type / #Tag / Instance)
+            // Find target display info (Type / #Tag / Instance / Tous)
             const targetMode = rule.trigger.targetMode || 'type';
             const targetInst = targetMode === 'instance' && rule.trigger.targetId ? entities[rule.trigger.targetId] : undefined;
             const targetType = targetInst?.type || rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
             const targetOpt = availableEntityOptions.find((o) => o.type === targetType);
             const targetEntity = targetInst || getEntityObj(targetType);
             const targetDisplayLabel =
-              targetMode === 'tag'
+              targetMode === 'any'
+                ? 'Tous les objets'
+                : targetMode === 'tag'
                 ? `#${rule.trigger.targetTag || 'tag'}`
                 : targetMode === 'instance'
                 ? targetInst?.name || 'Instance précise'
@@ -1304,7 +1308,7 @@ export function RuleBook() {
             const targetSlotKey = `${rule.id}-target`;
             // Default rules to collapsed state (Request 3)
             const isCollapsed = collapsedRuleIds[rule.id] !== false;
-            const isGlobalTrigger = ['keyboard', 'timer', 'variable', 'boundary'].includes(rule.trigger.type);
+            const isGlobalTrigger = ['keyboard', 'timer', 'variable'].includes(rule.trigger.type);
 
             const isRuleTargeted = dragOverRuleTarget?.id === rule.id;
             const showGapAbove = isRuleTargeted && dragOverRuleTarget.position === 'above';
@@ -1475,7 +1479,11 @@ export function RuleBook() {
                         </div>
                       ) : (
                         <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                          {subjectMode === 'tag' ? (
+                          {subjectMode === 'any' ? (
+                            <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-200 font-black">
+                              🌐 {subjectDisplayLabel}
+                            </span>
+                          ) : subjectMode === 'tag' ? (
                             <span className="px-2 py-0.5 rounded-lg bg-purple-100 text-purple-800 border border-purple-200 font-black">
                               🏷️ {subjectDisplayLabel}
                             </span>
@@ -1487,7 +1495,7 @@ export function RuleBook() {
                               <span>{subjectDisplayLabel}</span>
                             </>
                           )}
-                          {rule.trigger.subjectStateId && (
+                          {rule.trigger.subjectStateId && subjectMode !== 'any' && (
                             <span className="text-[10px] text-indigo-700 bg-indigo-50 px-1 py-0.2 rounded font-medium">({subjectStateName})</span>
                           )}
                         </div>
@@ -1504,7 +1512,11 @@ export function RuleBook() {
                         <>
                           <span className="text-slate-400">➔</span>
                           <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                            {targetMode === 'tag' ? (
+                            {targetMode === 'any' ? (
+                              <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-200 font-black">
+                                🌐 {targetDisplayLabel}
+                              </span>
+                            ) : targetMode === 'tag' ? (
                               <span className="px-2 py-0.5 rounded-lg bg-purple-100 text-purple-800 border border-purple-200 font-black">
                                 🏷️ {targetDisplayLabel}
                               </span>
@@ -1516,7 +1528,7 @@ export function RuleBook() {
                                 <span>{targetDisplayLabel}</span>
                               </>
                             )}
-                            {rule.trigger.targetStateId && (
+                            {rule.trigger.targetStateId && targetMode !== 'any' && (
                               <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded font-medium">({targetStateName})</span>
                             )}
                           </div>
@@ -1593,7 +1605,11 @@ export function RuleBook() {
                           </>
                         ) : (
                           <>
-                            {subjectMode === 'tag' ? (
+                            {subjectMode === 'any' ? (
+                              <div className="w-14 h-14 rounded-xl bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                🌐
+                              </div>
+                            ) : subjectMode === 'tag' ? (
                               <div className="w-14 h-14 rounded-xl bg-purple-100 text-purple-700 border border-purple-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
                                 🏷️
                               </div>
@@ -1615,12 +1631,12 @@ export function RuleBook() {
                               <div
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (subjectMode === 'tag') {
+                                  if (subjectMode === 'any' || subjectMode === 'tag') {
                                     setActiveModal({
                                       type: 'subject',
                                       ruleId: rule.id,
                                       subStep: 'choose_object',
-                                      selectionMode: 'tag',
+                                      selectionMode: subjectMode,
                                       tagInput: rule.trigger.subjectTag || '',
                                     });
                                     return;
@@ -1634,10 +1650,22 @@ export function RuleBook() {
                                     selectedEntityId: rule.trigger.subjectId,
                                   });
                                 }}
-                                className="text-[9px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer"
-                                title={subjectMode === 'tag' ? 'Cliquer pour modifier le tag' : "Cliquer pour changer l'état requis"}
+                                className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer border ${
+                                  subjectMode === 'any'
+                                    ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200/70'
+                                    : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-indigo-200/60'
+                                }`}
+                                title={
+                                  subjectMode === 'any'
+                                    ? 'Cliquer pour restreindre à un objet ou tag'
+                                    : subjectMode === 'tag'
+                                    ? 'Cliquer pour modifier le tag'
+                                    : "Cliquer pour changer l'état requis"
+                                }
                               >
-                                {subjectMode === 'tag'
+                                {subjectMode === 'any'
+                                  ? 'N\'importe quel objet'
+                                  : subjectMode === 'tag'
                                   ? 'Filtre #Tag'
                                   : subjectMode === 'instance'
                                   ? `Instance • ${subjectStateName}`
@@ -1791,7 +1819,11 @@ export function RuleBook() {
                             Cible touchée
                           </div>
 
-                          {targetMode === 'tag' ? (
+                          {targetMode === 'any' ? (
+                            <div className="w-14 h-14 rounded-xl bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                              🌐
+                            </div>
+                          ) : targetMode === 'tag' ? (
                             <div className="w-14 h-14 rounded-xl bg-purple-100 text-purple-700 border border-purple-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
                               🏷️
                             </div>
@@ -1813,12 +1845,12 @@ export function RuleBook() {
                             <div
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (targetMode === 'tag') {
+                                if (targetMode === 'any' || targetMode === 'tag') {
                                   setActiveModal({
                                     type: 'target',
                                     ruleId: rule.id,
                                     subStep: 'choose_object',
-                                    selectionMode: 'tag',
+                                    selectionMode: targetMode,
                                     tagInput: rule.trigger.targetTag || '',
                                   });
                                   return;
@@ -1832,10 +1864,22 @@ export function RuleBook() {
                                   selectedEntityId: rule.trigger.targetId,
                                 });
                               }}
-                              className="text-[9px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer"
-                              title={targetMode === 'tag' ? 'Cliquer pour modifier le tag' : "Cliquer pour changer l'état requis de la cible"}
+                              className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer border ${
+                                targetMode === 'any'
+                                  ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200/70'
+                                  : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-indigo-200/60'
+                              }`}
+                              title={
+                                targetMode === 'any'
+                                  ? 'Cliquer pour choisir un objet ou tag spécifique'
+                                  : targetMode === 'tag'
+                                  ? 'Cliquer pour modifier le tag'
+                                  : "Cliquer pour changer l'état requis de la cible"
+                              }
                             >
-                              {targetMode === 'tag'
+                              {targetMode === 'any'
+                                ? 'N\'importe quel objet'
+                                : targetMode === 'tag'
                                 ? 'Filtre #Tag'
                                 : targetMode === 'instance'
                                 ? `Instance • ${targetStateName}`
@@ -2428,6 +2472,11 @@ export function RuleBook() {
                           onClick={() => {
                             setActiveWizard({
                               ...activeWizard,
+                              subjectMode: 'any',
+                              subjectType: undefined,
+                              subjectId: undefined,
+                              subjectTag: undefined,
+                              subjectStateId: undefined,
                               triggerType: 'boundary',
                               boundaryEdge: 'any',
                               step: 2,
@@ -2515,12 +2564,12 @@ export function RuleBook() {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {/* Sélecteur Type / #Tag / Instance précise (Sujet) */}
+                      {/* Sélecteur Type / #Tag / Instance précise / Tous objets (Sujet) */}
                       <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200">
                         <button
                           type="button"
                           onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'type' })}
-                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             (activeWizard.subjectMode || 'type') === 'type'
                               ? 'bg-white text-indigo-700 shadow-xs'
                               : 'text-slate-600 hover:text-slate-900'
@@ -2531,7 +2580,7 @@ export function RuleBook() {
                         <button
                           type="button"
                           onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'tag' })}
-                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             activeWizard.subjectMode === 'tag'
                               ? 'bg-white text-purple-700 shadow-xs'
                               : 'text-slate-600 hover:text-slate-900'
@@ -2542,17 +2591,59 @@ export function RuleBook() {
                         <button
                           type="button"
                           onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'instance' })}
-                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             activeWizard.subjectMode === 'instance'
                               ? 'bg-white text-cyan-700 shadow-xs'
                               : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
-                          📍 Instance précise
+                          📍 Instance
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'any' })}
+                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            activeWizard.subjectMode === 'any'
+                              ? 'bg-white text-emerald-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          🌐 Tous objets
                         </button>
                       </div>
 
-                      {activeWizard.subjectMode === 'tag' ? (
+                      {activeWizard.subjectMode === 'any' ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveWizard({
+                              ...activeWizard,
+                              subjectMode: 'any',
+                              subjectType: undefined,
+                              subjectId: undefined,
+                              subjectTag: undefined,
+                              subjectStateId: undefined,
+                              step: 2,
+                            })
+                          }
+                          className="w-full p-6 bg-emerald-50/70 hover:bg-emerald-100/70 border-2 border-emerald-300 hover:border-emerald-500 rounded-3xl flex items-center justify-between gap-4 cursor-pointer transition-all shadow-xs group text-left"
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition-transform">
+                              🌐
+                            </div>
+                            <div>
+                              <div className="text-sm font-black text-emerald-950">
+                                Tous les objets de la scène
+                              </div>
+                              <div className="text-xs text-emerald-700 mt-1">
+                                La règle s'appliquera à n'importe quelle entité (présente ou créée en cours de partie).
+                              </div>
+                            </div>
+                          </div>
+                          <ChevronRight className="w-5 h-5 text-emerald-700 shrink-0" />
+                        </button>
+                      ) : activeWizard.subjectMode === 'tag' ? (
                         <div className="p-4 bg-purple-50/50 border-2 border-purple-200 rounded-3xl space-y-3">
                           <div className="text-xs font-bold text-purple-950">
                             Cibler toutes les entités (existantes ou créées en jeu) portant un #Tag :
@@ -3520,12 +3611,12 @@ export function RuleBook() {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {/* Sélecteur Type / #Tag / Instance précise (Cible) */}
+                      {/* Sélecteur Type / #Tag / Instance précise / Tous objets (Cible) */}
                       <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200">
                         <button
                           type="button"
                           onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'type' })}
-                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             (activeWizard.targetMode || 'type') === 'type'
                               ? 'bg-white text-indigo-700 shadow-xs'
                               : 'text-slate-600 hover:text-slate-900'
@@ -3536,7 +3627,7 @@ export function RuleBook() {
                         <button
                           type="button"
                           onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'tag' })}
-                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             activeWizard.targetMode === 'tag'
                               ? 'bg-white text-purple-700 shadow-xs'
                               : 'text-slate-600 hover:text-slate-900'
@@ -3547,17 +3638,60 @@ export function RuleBook() {
                         <button
                           type="button"
                           onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'instance' })}
-                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             activeWizard.targetMode === 'instance'
                               ? 'bg-white text-cyan-700 shadow-xs'
                               : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
-                          📍 Instance précise
+                          📍 Instance
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'any' })}
+                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            activeWizard.targetMode === 'any'
+                              ? 'bg-white text-emerald-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          🌐 Tous objets
                         </button>
                       </div>
 
-                      {activeWizard.targetMode === 'tag' ? (
+                      {activeWizard.targetMode === 'any' ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveWizard({
+                              ...activeWizard,
+                              targetMode: 'any',
+                              targetType: undefined,
+                              targetId: undefined,
+                              targetTag: undefined,
+                              targetStateId: undefined,
+                              step: 4,
+                              actionSubStep: 'main',
+                            })
+                          }
+                          className="w-full p-6 bg-emerald-50/70 hover:bg-emerald-100/70 border-2 border-emerald-300 hover:border-emerald-500 rounded-3xl flex items-center justify-between gap-4 cursor-pointer transition-all shadow-xs group text-left"
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition-transform">
+                              🌐
+                            </div>
+                            <div>
+                              <div className="text-sm font-black text-emerald-950">
+                                N'importe quel autre objet (Tous les objets)
+                              </div>
+                              <div className="text-xs text-emerald-700 mt-1">
+                                Déclencher la collision ou proximité avec tout autre objet sur le canvas (y compris ceux créés en jeu).
+                              </div>
+                            </div>
+                          </div>
+                          <ChevronRight className="w-5 h-5 text-emerald-700 shrink-0" />
+                        </button>
+                      ) : activeWizard.targetMode === 'tag' ? (
                         <div className="p-4 bg-purple-50/50 border-2 border-purple-200 rounded-3xl space-y-3">
                           <div className="text-xs font-bold text-purple-950">
                             Déclencher lorsque le Sujet touche n'importe quel objet portant ce #Tag (ex: projectiles, ennemis créés en jeu) :
@@ -5721,7 +5855,7 @@ export function RuleBook() {
                         <button
                           type="button"
                           onClick={() => setActiveModal({ ...activeModal, selectionMode: 'type' })}
-                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             activeSelMode === 'type'
                               ? 'bg-white text-indigo-700 shadow-xs'
                               : 'text-slate-600 hover:text-slate-900'
@@ -5732,7 +5866,7 @@ export function RuleBook() {
                         <button
                           type="button"
                           onClick={() => setActiveModal({ ...activeModal, selectionMode: 'tag' })}
-                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             activeSelMode === 'tag'
                               ? 'bg-white text-purple-700 shadow-xs'
                               : 'text-slate-600 hover:text-slate-900'
@@ -5743,17 +5877,74 @@ export function RuleBook() {
                         <button
                           type="button"
                           onClick={() => setActiveModal({ ...activeModal, selectionMode: 'instance' })}
-                          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             activeSelMode === 'instance'
                               ? 'bg-white text-cyan-700 shadow-xs'
                               : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
-                          📍 Instance précise
+                          📍 Instance
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveModal({ ...activeModal, selectionMode: 'any' })}
+                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            activeSelMode === 'any'
+                              ? 'bg-white text-emerald-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          🌐 Tous objets
                         </button>
                       </div>
 
-                      {activeSelMode === 'tag' ? (
+                      {activeSelMode === 'any' ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isSubject) {
+                              updateRule(rule.id, {
+                                trigger: {
+                                  ...rule.trigger,
+                                  subjectMode: 'any',
+                                  subjectType: undefined,
+                                  subjectId: undefined,
+                                  subjectTag: undefined,
+                                  subjectStateId: undefined,
+                                },
+                              });
+                            } else {
+                              updateRule(rule.id, {
+                                trigger: {
+                                  ...rule.trigger,
+                                  targetMode: 'any',
+                                  targetType: undefined,
+                                  targetId: undefined,
+                                  targetTag: undefined,
+                                  targetStateId: undefined,
+                                },
+                              });
+                            }
+                            setActiveModal(null);
+                          }}
+                          className="w-full p-5 bg-emerald-50/70 hover:bg-emerald-100/70 border-2 border-emerald-300 hover:border-emerald-500 rounded-3xl flex items-center justify-between gap-4 cursor-pointer transition-all shadow-xs text-left"
+                        >
+                          <div className="flex items-center gap-3.5">
+                            <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-2xl shrink-0">
+                              🌐
+                            </div>
+                            <div>
+                              <div className="text-sm font-black text-emerald-950">
+                                Tous les objets (N'importe quel objet)
+                              </div>
+                              <div className="text-xs text-emerald-700 mt-0.5">
+                                Inclut tous les objets actuels et futurs sur le canvas.
+                              </div>
+                            </div>
+                          </div>
+                          <Check className="w-5 h-5 text-emerald-700 shrink-0" />
+                        </button>
+                      ) : activeSelMode === 'tag' ? (
                         <div className="p-4 bg-purple-50/50 border-2 border-purple-200 rounded-3xl space-y-3">
                           <div className="text-xs font-bold text-purple-950">
                             Cibler par #Tag (inclut les instances créées dynamiquement) :
@@ -6244,33 +6435,58 @@ export function RuleBook() {
                         </div>
                       </div>
 
-                      {/* GLISSER-DÉPOSER */}
+                      {/* GLISSER-DÉPOSER & BORDS DU CANVAS */}
                       <div className="bg-emerald-50/50 p-3.5 rounded-2xl border border-emerald-200/80 space-y-2">
                         <div className="text-xs font-black uppercase text-emerald-800 tracking-wider">
-                          🫳 Glisser-Déposer libre
+                          🫳 Glisser-Déposer &amp; Bords
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            updateRule(rule.id, {
-                              trigger: {
-                                ...rule.trigger,
-                                type: 'drag',
-                                phase: 'drag_release',
-                              },
-                            });
-                            setActiveModal(null);
-                          }}
-                          className="w-full p-2.5 bg-white hover:bg-emerald-100/60 border border-emerald-200 rounded-xl flex items-center gap-2.5 text-left cursor-pointer transition-all shadow-2xs group"
-                        >
-                          <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-lg shrink-0">
-                            🫳
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900">Relâcher libre (Drop)</div>
-                            <div className="text-[10px] text-slate-500">Lâcher dans le vide</div>
-                          </div>
-                        </button>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateRule(rule.id, {
+                                trigger: {
+                                  ...rule.trigger,
+                                  type: 'drag',
+                                  phase: 'drag_release',
+                                },
+                              });
+                              setActiveModal(null);
+                            }}
+                            className="w-full p-2.5 bg-white hover:bg-emerald-100/60 border border-emerald-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
+                          >
+                            <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-lg shrink-0">
+                              🫳
+                            </div>
+                            <div>
+                              <div className="text-xs font-black text-slate-900">Relâcher libre</div>
+                              <div className="text-[10px] text-slate-500">Lâcher dans le vide</div>
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateRule(rule.id, {
+                                trigger: {
+                                  ...rule.trigger,
+                                  type: 'boundary',
+                                  boundaryEdge: rule.trigger.boundaryEdge || 'any',
+                                },
+                              });
+                              setActiveModal(null);
+                            }}
+                            className="w-full p-2.5 bg-white hover:bg-rose-100/60 border border-rose-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
+                          >
+                            <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center text-lg shrink-0">
+                              🖼️
+                            </div>
+                            <div>
+                              <div className="text-xs font-black text-slate-900">Bord de Scène</div>
+                              <div className="text-[10px] text-slate-500">Touche le cadre</div>
+                            </div>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -6349,13 +6565,25 @@ export function RuleBook() {
 
                   <div className="overflow-y-auto pr-1 flex-1 py-1">
                     {(!activeModal.subStep || activeModal.subStep === 'main') && (() => {
-                      const modalSubjectEntity = getEntityObj(subjectType);
+                      const modalSubjectIsAny = rule.trigger.subjectMode === 'any';
+                      const modalSubjectIsTag = rule.trigger.subjectMode === 'tag';
+                      const modalSubjectEntity = modalSubjectIsAny || modalSubjectIsTag ? undefined : getEntityObj(subjectType);
                       const modalSubjectOpt = availableEntityOptions.find((o) => o.type === subjectType);
-                      const modalSubjectName = modalSubjectEntity?.name || modalSubjectOpt?.label || subjectType;
+                      const modalSubjectName = modalSubjectIsAny
+                        ? 'Tous les objets'
+                        : modalSubjectIsTag
+                        ? `#${rule.trigger.subjectTag || 'tag'}`
+                        : modalSubjectEntity?.name || modalSubjectOpt?.label || subjectType;
 
-                      const modalTargetEntity = getEntityObj(targetType);
+                      const modalTargetIsAny = rule.trigger.targetMode === 'any';
+                      const modalTargetIsTag = rule.trigger.targetMode === 'tag';
+                      const modalTargetEntity = modalTargetIsAny || modalTargetIsTag ? undefined : getEntityObj(targetType);
                       const modalTargetOpt = availableEntityOptions.find((o) => o.type === targetType);
-                      const modalTargetName = modalTargetEntity?.name || modalTargetOpt?.label || targetType;
+                      const modalTargetName = modalTargetIsAny
+                        ? 'Tous les objets'
+                        : modalTargetIsTag
+                        ? `#${rule.trigger.targetTag || 'tag'}`
+                        : modalTargetEntity?.name || modalTargetOpt?.label || targetType;
 
                       return (
                         <div className={`grid grid-cols-1 ${isCollision ? 'lg:grid-cols-3 md:grid-cols-2' : 'md:grid-cols-2'} gap-4 items-start`}>
@@ -6363,13 +6591,19 @@ export function RuleBook() {
                           <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-3xl border border-slate-200/90 flex flex-col h-full shadow-2xs">
                             {/* En-tête Sujet avec miniature et nom de l'entité */}
                             <div className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-indigo-50 border border-indigo-200/80 shadow-2xs">
-                              <div className="w-10 h-10 rounded-xl bg-white border border-indigo-200 flex items-center justify-center p-1 shadow-2xs shrink-0">
-                                <EntityMiniPreview
-                                  entity={modalSubjectEntity}
-                                  type={subjectType}
-                                  stateId={rule.trigger.subjectStateId}
-                                  size={36}
-                                />
+                              <div className="w-10 h-10 rounded-xl bg-white border border-indigo-200 flex items-center justify-center p-1 shadow-2xs shrink-0 text-lg">
+                                {modalSubjectIsAny ? (
+                                  '🌐'
+                                ) : modalSubjectIsTag ? (
+                                  '🏷️'
+                                ) : (
+                                  <EntityMiniPreview
+                                    entity={modalSubjectEntity}
+                                    type={subjectType}
+                                    stateId={rule.trigger.subjectStateId}
+                                    size={36}
+                                  />
+                                )}
                               </div>
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-1.5">
@@ -6471,13 +6705,19 @@ export function RuleBook() {
                             <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-3xl border border-slate-200/90 flex flex-col h-full shadow-2xs">
                               {/* En-tête Cible avec miniature et nom de l'entité */}
                               <div className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-emerald-50 border border-emerald-200/80 shadow-2xs">
-                                <div className="w-10 h-10 rounded-xl bg-white border border-emerald-200 flex items-center justify-center p-1 shadow-2xs shrink-0">
-                                  <EntityMiniPreview
-                                    entity={modalTargetEntity}
-                                    type={targetType}
-                                    stateId={rule.trigger.targetStateId}
-                                    size={36}
-                                  />
+                                <div className="w-10 h-10 rounded-xl bg-white border border-emerald-200 flex items-center justify-center p-1 shadow-2xs shrink-0 text-lg">
+                                  {modalTargetIsAny ? (
+                                    '🌐'
+                                  ) : modalTargetIsTag ? (
+                                    '🏷️'
+                                  ) : (
+                                    <EntityMiniPreview
+                                      entity={modalTargetEntity}
+                                      type={targetType}
+                                      stateId={rule.trigger.targetStateId}
+                                      size={36}
+                                    />
+                                  )}
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-1.5">

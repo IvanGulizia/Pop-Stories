@@ -278,6 +278,7 @@ export function matchesEntityFilter(
   tag?: string
 ): boolean {
   if (!entity) return false;
+  if (mode === 'any') return true;
   if (mode === 'instance' && id) {
     return entity.id === id;
   }
@@ -591,6 +592,18 @@ function getCollisionContactPoint(ent1: Entity, ent2: Entity): Position {
     x: Math.round(((b1.centerX + b2.centerX) / 2) * 10) / 10,
     y: Math.round(((b1.centerY + b2.centerY) / 2) * 10) / 10,
   };
+}
+
+function findTargetEntityOrArchetype(
+  state: { entities: Record<EntityId, Entity>; customArchetypes: Record<string, Entity> },
+  idOrType: string
+): Entity | undefined {
+  return (
+    state.entities[idOrType] ||
+    state.customArchetypes[idOrType] ||
+    Object.values(state.entities).find((e) => e.type === idOrType) ||
+    Object.values(state.customArchetypes).find((a) => a.id === idOrType || a.type === idOrType)
+  );
 }
 
 export const useSceneStore = create<SceneState>()((set, get) => ({
@@ -1222,13 +1235,31 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   updateEntityState: (id, stateId) => {
     set((state) => {
       const entity = state.entities[id];
-      if (!entity || !entity.states[stateId]) return state;
-      return {
-        entities: {
-          ...state.entities,
-          [id]: { ...entity, currentStateId: stateId },
-        },
-      };
+      if (entity && entity.states[stateId]) {
+        return {
+          entities: {
+            ...state.entities,
+            [id]: { ...entity, currentStateId: stateId },
+          },
+        };
+      }
+      // Si l'entité sélectionnée est un modèle sans instance sur la scène,
+      // permettre de basculer l'état inspecté directement sur son archétype en mode édition.
+      if (state.appMode === 'edit') {
+        const arch = findTargetEntityOrArchetype(state, id);
+        if (arch && arch.states[stateId] && state.customArchetypes[arch.type]) {
+          return {
+            customArchetypes: {
+              ...state.customArchetypes,
+              [arch.type]: {
+                ...state.customArchetypes[arch.type],
+                currentStateId: stateId,
+              },
+            },
+          };
+        }
+      }
+      return state;
     });
   },
 
@@ -1253,11 +1284,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   updateEntityDetails: (id, partial) => {
     set((state) => {
-      const entity =
-        state.entities[id] ||
-        state.customArchetypes[id] ||
-        Object.values(state.entities).find((e) => e.type === id) ||
-        Object.values(state.customArchetypes).find((a) => a.type === id);
+      const entity = findTargetEntityOrArchetype(state, id);
 
       if (!entity) return state;
       const targetType = entity.type;
@@ -1296,7 +1323,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     const cleanTag = rawTag.toLowerCase().trim().replace(/^#/, '');
     if (!cleanTag) return;
     set((state) => {
-      const targetEntity = state.entities[id] || state.customArchetypes[id];
+      const targetEntity = findTargetEntityOrArchetype(state, id);
       if (!targetEntity) return state;
       const targetType = targetEntity.type;
 
@@ -1327,7 +1354,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   removeTagFromEntity: (id, tagToRemove) => {
     set((state) => {
-      const targetEntity = state.entities[id] || state.customArchetypes[id];
+      const targetEntity = findTargetEntityOrArchetype(state, id);
       if (!targetEntity) return state;
       const targetType = targetEntity.type;
 
@@ -1355,11 +1382,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   updateStateProperties: (entityId, stateId, partial) => {
     set((state) => {
-      const targetEntity =
-        state.entities[entityId] ||
-        state.customArchetypes[entityId] ||
-        Object.values(state.entities).find((e) => e.type === entityId) ||
-        Object.values(state.customArchetypes).find((a) => a.type === entityId);
+      const targetEntity = findTargetEntityOrArchetype(state, entityId);
 
       if (!targetEntity) return state;
       const targetType = targetEntity.type;
@@ -1426,11 +1449,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   updateEntityBehaviors: (entityId, behaviors) => {
     set((state) => {
-      const target =
-        state.entities[entityId] ||
-        state.customArchetypes[entityId] ||
-        Object.values(state.entities).find((e) => e.type === entityId) ||
-        Object.values(state.customArchetypes).find((a) => a.type === entityId);
+      const target = findTargetEntityOrArchetype(state, entityId);
 
       if (!target) return state;
       const targetType = target.type;
@@ -1464,11 +1483,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   updateStateBehaviorOverride: (entityId, stateId, behaviorId, override) => {
     set((state) => {
-      const target =
-        state.entities[entityId] ||
-        state.customArchetypes[entityId] ||
-        Object.values(state.entities).find((e) => e.type === entityId) ||
-        Object.values(state.customArchetypes).find((a) => a.type === entityId);
+      const target = findTargetEntityOrArchetype(state, entityId);
 
       if (!target) return state;
       const targetType = target.type;
@@ -1530,11 +1545,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   removeStateBehaviorOverride: (entityId, stateId, behaviorId) => {
     set((state) => {
-      const target =
-        state.entities[entityId] ||
-        state.customArchetypes[entityId] ||
-        Object.values(state.entities).find((e) => e.type === entityId) ||
-        Object.values(state.customArchetypes).find((a) => a.type === entityId);
+      const target = findTargetEntityOrArchetype(state, entityId);
 
       if (!target) return state;
       const targetType = target.type;
@@ -1739,11 +1750,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   addStateToEntity: (entityId, name) => {
-    const targetEntity =
-      get().entities[entityId] ||
-      get().customArchetypes[entityId] ||
-      Object.values(get().entities).find((e) => e.type === entityId) ||
-      Object.values(get().customArchetypes).find((a) => a.type === entityId);
+    const targetEntity = findTargetEntityOrArchetype(get(), entityId);
 
     if (!targetEntity) return '';
     const targetType = targetEntity.type;
@@ -1799,11 +1806,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   removeStateFromEntity: (entityId, stateId) => {
     set((state) => {
-      const targetEntity =
-        state.entities[entityId] ||
-        state.customArchetypes[entityId] ||
-        Object.values(state.entities).find((e) => e.type === entityId) ||
-        Object.values(state.customArchetypes).find((a) => a.type === entityId);
+      const targetEntity = findTargetEntityOrArchetype(state, entityId);
 
       if (!targetEntity) return state;
       const targetType = targetEntity.type;
@@ -3126,21 +3129,25 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       });
     });
 
-    // 5. Règles de Bords de Scène / Canvas (Boundary dynamiquement calibré sur sceneBounds)
+    // 5. Règles de Bords de Scène / Canvas (Calibrées sur le collider réel et sceneBounds en direct)
     const boundaryRules = rules.filter((r) => r.enabled && r.trigger.type === 'boundary');
     const sceneW = Math.max(100, sceneBounds?.width || 800);
     const sceneH = Math.max(100, sceneBounds?.height || 500);
-    const edgeMargin = 15;
+    const edgeTol = 2;
 
     boundaryRules.forEach((rule) => {
       const edge = rule.trigger.boundaryEdge || 'any';
       allEntitiesList.forEach((subject) => {
         if (!matchesEntityFilter(subject, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)) return;
 
-        const hitLeft = subject.position.x <= edgeMargin;
-        const hitRight = subject.position.x + subject.size.width >= sceneW - edgeMargin;
-        const hitTop = subject.position.y <= edgeMargin;
-        const hitBottom = subject.position.y + subject.size.height >= sceneH - edgeMargin;
+        // État spécifique requis si défini
+        if (rule.trigger.subjectStateId && subject.currentStateId !== rule.trigger.subjectStateId) return;
+
+        const wb = getEntityWorldColliderBounds(subject);
+        const hitLeft = wb.x <= edgeTol;
+        const hitRight = wb.x + wb.width >= sceneW - edgeTol;
+        const hitTop = wb.y <= edgeTol;
+        const hitBottom = wb.y + wb.height >= sceneH - edgeTol;
 
         let hitEdge = false;
         if (edge === 'left' && hitLeft) hitEdge = true;
@@ -3153,11 +3160,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           const cooldownKey = `bound_${rule.id}_${subject.id}`;
           if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
             ruleCooldowns[cooldownKey] = now;
-            const cx = subject.position.x + subject.size.width / 2;
-            const cy = subject.position.y + subject.size.height / 2;
             const boundaryPt: Position = {
-              x: hitLeft && (edge === 'left' || edge === 'any') ? 0 : hitRight && (edge === 'right' || edge === 'any') ? sceneW : Math.round(cx),
-              y: hitTop && (edge === 'top' || edge === 'any') ? 0 : hitBottom && (edge === 'bottom' || edge === 'any') ? sceneH : Math.round(cy),
+              x: hitLeft && (edge === 'left' || edge === 'any') ? 0 : hitRight && (edge === 'right' || edge === 'any') ? sceneW : Math.round(wb.centerX),
+              y: hitTop && (edge === 'top' || edge === 'any') ? 0 : hitBottom && (edge === 'bottom' || edge === 'any') ? sceneH : Math.round(wb.centerY),
             };
             executeRuleActions(rule.actions, {
               subject,
