@@ -17,9 +17,10 @@ import {
   BoundaryBehaviorConfig,
   AutoDestroyBehaviorConfig,
   ParticleEmitterBehaviorConfig,
+  HealthBehaviorConfig,
   SceneLayer,
 } from '../types';
-import { getEntityColliderBounds, resolveColliderState } from './collider';
+import { getEntityColliderBounds, getEntityWorldColliderBounds, resolveColliderState } from './collider';
 import { emitParticlesBurst } from './particleSystem';
 
 const { Engine, World, Bodies, Body } = Matter;
@@ -147,6 +148,32 @@ const autoDestroyTimers = new Map<string, number>();
 const particleEmitterAccumulators = new Map<string, number>();
 const hierarchyGroupIds = new Map<string, number>();
 let nextNegativeGroupId = -100;
+
+interface HealthRuntimeState {
+  hp: number;
+  maxHp: number;
+  invincibilityTimer: number;
+  preHurtStateId?: string;
+  hurtStateId?: string;
+  dead: boolean;
+}
+const healthRuntimeMap = new Map<string, HealthRuntimeState>();
+
+export function getEntityRuntimeHealth(entityId: string): {
+  hp: number;
+  maxHp: number;
+  isInvincible: boolean;
+  dead: boolean;
+} | null {
+  const rt = healthRuntimeMap.get(entityId);
+  if (!rt) return null;
+  return {
+    hp: rt.hp,
+    maxHp: rt.maxHp,
+    isInvincible: rt.invincibilityTimer > 0,
+    dead: rt.dead,
+  };
+}
 
 function getRootAncestorId(entityId: string, entities: Record<string, Entity>): string {
   let curr = entities[entityId];
@@ -394,6 +421,7 @@ export function resetMatterPhysicsRuntime() {
   autoDestroyTimers.clear();
   particleEmitterAccumulators.clear();
   hierarchyGroupIds.clear();
+  healthRuntimeMap.clear();
   nextNegativeGroupId = -100;
 }
 
@@ -496,6 +524,7 @@ export function syncEntityDragPosition(
 export interface PhysicsTickResult {
   updatedTransforms: Record<string, { position: Position; rotation?: number; flipX?: boolean }>;
   entitiesToDestroy?: string[];
+  stateChanges?: Record<string, string>;
 }
 
 /**
@@ -1051,6 +1080,7 @@ export function stepMatterPhysics(params: {
   const updatedTransforms: Record<string, { position: Position; rotation?: number; flipX?: boolean }> = {};
   const flipUpdates = new Map<string, boolean>();
   const entitiesToDestroy: string[] = [];
+  const stateChanges: Record<string, string> = {};
   const entityList = Object.values(entities);
 
   for (const entity of entityList) {
@@ -1937,10 +1967,187 @@ export function stepMatterPhysics(params: {
         });
       }
     }
+    // Cas 4 : Composant Santé / Dégâts (Health) — modulaire & coopératif avec le Character Controller
+    const health = effectiveBehaviors.find((b) => b.type === 'health') as HealthBehaviorConfig | undefined;
+    if (health && health.enabled !== false) {
+      const maxHp = Math.max(1, Math.round(health.maxHp || 3));
+      let rt = healthRuntimeMap.get(entity.id);
+      if (!rt) {
+        rt = { hp: maxHp, maxHp, invincibilityTimer: 0, dead: false };
+        healthRuntimeMap.set(entity.id, rt);
+      } else {
+        rt.maxHp = maxHp;
+        if (rt.hp > maxHp) rt.hp = maxHp;
+      }
+
+      if (rt.invincibilityTimer > 0) {
+        rt.invincibilityTimer = Math.max(0, rt.invincibilityTimer - dt);
+        if (rt.invincibilityTimer === 0 && !rt.dead && rt.hurtStateId) {
+          // Restaure l'état de locomotion/repos pour redonner la main au Character Controller
+          if (entity.currentStateId === rt.hurtStateId) {
+            const fallbackState =
+              (health.recoverStateId && entity.states[health.recoverStateId] ? health.recoverStateId : undefined) ||
+              (rt.preHurtStateId && entity.states[rt.preHurtStateId] ? rt.preHurtStateId : undefined);
+            if (fallbackState && fallbackState !== entity.currentStateId) {
+              stateChanges[entity.id] = fallbackState;
+            }
+          }
+          rt.hurtStateId = undefined;
+          rt.preHurtStateId = undefined;
+        }
+      }
+
+      if (!rt.dead && rt.invincibilityTimer <= 0 && health.damageTag) {
+        const cleanTag = health.damageTag.toLowerCase().trim().replace(/^#/, '');
+        if (cleanTag) {
+          let hitHazardCenter: Position | null = null;
+          const worldBounds = getEntityWorldColliderBounds(
+            { ...entity, position: { x: newX, y: newY } },
+            currentState
+          );
+
+          // 1) Vérifier collision avec des entités portant le tag danger
+          for (const other of entityList) {
+            if (other.id === entity.id) continue;
+            const otherTags = (other.tags || []).map((t) => t.toLowerCase().trim().replace(/^#/, ''));
+            if (!otherTags.includes(cleanTag)) continue;
+
+            const hasPhysicsContact =
+              activePhysicsCollisionPairs.has(`${entity.id}:::${other.id}`) ||
+              activePhysicsCollisionPairs.has(`${other.id}:::${entity.id}`);
+
+            let colliding = hasPhysicsContact;
+            if (!colliding) {
+              const ob = getEntityWorldColliderBounds(other, other.states[other.currentStateId]);
+              if (worldBounds.colliderType === 'circle' && ob.colliderType === 'circle') {
+                const maxR = worldBounds.radius + ob.radius + 2;
+                colliding = Math.hypot(worldBounds.centerX - ob.centerX, worldBounds.centerY - ob.centerY) <= maxR;
+              } else {
+                colliding =
+                  worldBounds.x <= ob.x + ob.width + 2 &&
+                  worldBounds.x + worldBounds.width + 2 >= ob.x &&
+                  worldBounds.y <= ob.y + ob.height + 2 &&
+                  worldBounds.y + worldBounds.height + 2 >= ob.y;
+              }
+            }
+
+            if (colliding) {
+              hitHazardCenter = {
+                x: other.position.x + other.size.width / 2,
+                y: other.position.y + other.size.height / 2,
+              };
+              break;
+            }
+          }
+
+          // 2) Vérifier collision avec des calques Colliders portant le tag danger
+          if (!hitHazardCenter && colliderLayers.length > 0) {
+            for (const layer of colliderLayers) {
+              const lTags = (layer.colliderTags || []).map((t) => t.toLowerCase().trim().replace(/^#/, ''));
+              if (!lTags.includes(cleanTag)) continue;
+              const check = checkEntityAgainstColliderLayer(worldBounds, entity.id, layer, canvasBounds, 2);
+              if (check.colliding) {
+                hitHazardCenter = check.contactPoint || {
+                  x: worldBounds.centerX,
+                  y: worldBounds.centerY + 12,
+                };
+                break;
+              }
+            }
+          }
+
+          if (hitHazardCenter) {
+            rt.hp = Math.max(0, rt.hp - 1);
+
+            // Recul physique (Knockback)
+            const kb = health.knockbackForce ?? 220;
+            if (body && !body.isStatic && kb > 0) {
+              const entCx = newX + entity.size.width / 2;
+              const entCy = newY + entity.size.height / 2;
+              const dx = entCx - hitHazardCenter.x;
+              const dy = entCy - hitHazardCenter.y;
+              const dist = Math.hypot(dx, dy);
+              const kbStep = kb / 60;
+              const nx = dist > 1 ? dx / dist : (nextFlipX ? 1 : -1);
+              const ny = dist > 1 ? Math.min(-0.45, dy / dist) : -0.65;
+              const nLen = Math.hypot(nx, ny) || 1;
+              Body.setVelocity(body, {
+                x: (nx / nLen) * kbStep,
+                y: (ny / nLen) * kbStep,
+              });
+            }
+
+            if (rt.hp <= 0) {
+              rt.dead = true;
+              if (health.onDeath === 'destroy') {
+                entitiesToDestroy.push(entity.id);
+              } else if (
+                health.onDeath === 'change_state' &&
+                health.deathStateId &&
+                entity.states[health.deathStateId]
+              ) {
+                stateChanges[entity.id] = health.deathStateId;
+              }
+            } else {
+              rt.invincibilityTimer = Math.max(0.1, health.damageCooldown ?? 1.0);
+              if (health.hurtStateId && entity.states[health.hurtStateId]) {
+                rt.preHurtStateId = entity.currentStateId;
+                rt.hurtStateId = health.hurtStateId;
+                stateChanges[entity.id] = health.hurtStateId;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Cas 5 : Character Controller — Liaisons d'états visuels avec garde-fou non-écrasant
+    const keyboardCtrl = effectiveBehaviors.find((b) => b.type === 'keyboard_control') as
+      | KeyboardControlBehaviorConfig
+      | undefined;
+    if (keyboardCtrl && keyboardCtrl.enabled !== false && keyboardCtrl.stateBindings && !stateChanges[entity.id] && body) {
+      const sb = keyboardCtrl.stateBindings;
+      const boundIds = new Set(
+        [sb.idleStateId, sb.moveStateId, sb.jumpStateId, sb.fallStateId].filter(
+          (sid): sid is string => Boolean(sid && entity.states[sid])
+        )
+      );
+
+      // Garde-fou strict : ne jamais écraser un état hors locomotion (ex: Blessé, Attaque, Mort)
+      if (boundIds.size > 0 && boundIds.has(entity.currentStateId)) {
+        const isBottomFloor = !body.isSensor && body.bounds.max.y >= canvasBounds.height - 3;
+        const isGrounded = (groundedEntityIds.has(entity.id) || isBottomFloor) && body.velocity.y >= -0.6;
+        let desiredStateId: string | undefined;
+
+        if (keyboardCtrl.mode === 'platformer') {
+          if (!isGrounded && body.velocity.y < -0.55 && sb.jumpStateId && entity.states[sb.jumpStateId]) {
+            desiredStateId = sb.jumpStateId;
+          } else if (!isGrounded && body.velocity.y > 0.75 && sb.fallStateId && entity.states[sb.fallStateId]) {
+            desiredStateId = sb.fallStateId;
+          } else if (Math.abs(body.velocity.x) > 0.35 && sb.moveStateId && entity.states[sb.moveStateId]) {
+            desiredStateId = sb.moveStateId;
+          } else if (sb.idleStateId && entity.states[sb.idleStateId]) {
+            desiredStateId = sb.idleStateId;
+          }
+        } else {
+          const speedMag = Math.hypot(body.velocity.x, body.velocity.y);
+          if (speedMag > 0.35 && sb.moveStateId && entity.states[sb.moveStateId]) {
+            desiredStateId = sb.moveStateId;
+          } else if (sb.idleStateId && entity.states[sb.idleStateId]) {
+            desiredStateId = sb.idleStateId;
+          }
+        }
+
+        if (desiredStateId && desiredStateId !== entity.currentStateId) {
+          stateChanges[entity.id] = desiredStateId;
+        }
+      }
+    }
   }
 
   return {
     updatedTransforms,
     ...(entitiesToDestroy.length > 0 ? { entitiesToDestroy } : {}),
+    ...(Object.keys(stateChanges).length > 0 ? { stateChanges } : {}),
   };
 }

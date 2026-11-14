@@ -992,6 +992,7 @@ export function ParticleEditorModal({
               : 'Dessiner une particule'
           }
           subtitle="Dessinez votre particule personnalisée"
+          enableFlipbook={false}
           initialPaths={drawerTarget.editingPreset?.vectorPaths || []}
           currentEditingStateName={
             drawerTarget.editingPreset?.name || `Particule ${customParticles.length + 1}`

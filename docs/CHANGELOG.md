@@ -1,3 +1,9 @@
+## [Phase 10.17] - 2026-11-14
+### Ajouté
+- **Mini-Timeline Flipbook par État (`types/index.ts`, `DrawingCanvas.tsx`, `FullScreenDrawingModal.tsx`, `Inspector.tsx`, `CustomShape.tsx`)** : Ajout des frames d'animation (`frames`, `frameRate`, `animationLoop`), barre timeline complète dans l'atelier plein écran (*Aperçu Play/Pause*, *FPS*, *Boucle / Aller-retour / Une fois*, *Dupliquer*, *+ Vide*, réordonnancement, pelure d'oignon automatique de la frame précédente), préservation des outils lors du changement de frame via `frameSyncKey`, badge compteur sur les cartes d'états et lecture animée en Mode Play.
+- **Character Controller à États Visuels & Garde-fou (`types/index.ts`, `matterPhysicsEngine.ts`, `BehaviorManager.tsx`, `Scene.tsx`)** : Liaison des états *Repos*, *Marche*, *Saut* et *Chute* sur `keyboard_control` avec garde-fou strict empêchant d'écraser tout état externe (ex. *Blessé*, *Mort*).
+- **Composant Modulaire `Santé & Dégâts` (`health`) (`types/index.ts`, `matterPhysicsEngine.ts`, `BehaviorManager.tsx`, `CustomShape.tsx`, `Apple.tsx`, `Plant.tsx`)** : Gestion autonome des PV, détection de danger par `#tag` sur entités et calques colliders, invincibilité temporisée avec clignotement, recul physique, état *Blessé* coopératif avec retour automatique, affichage des cœurs/jauge en jeu et action à 0 PV.
+
 ## [Phase 10.16] - 2026-11-14
 ### Ajouté & Corrigé
 - **Sous-stepping Matter.js (`matterPhysicsEngine.ts`)** : Découpage automatique des pas physiques dépassant `16.666 ms` pour éliminer l'avertissement `Matter.Engine.update: delta argument is recommended to be less than or equal to 16.667 ms.`

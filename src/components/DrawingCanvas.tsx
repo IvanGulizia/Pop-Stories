@@ -73,6 +73,7 @@ interface DrawingCanvasProps {
   initialHotspot?: { x: number; y: number };
   onHotspotChange?: (pos: { x: number; y: number }) => void;
   isCursorMode?: boolean;
+  frameSyncKey?: string;
 }
 
 export const FINE_CROSSHAIR_CURSOR =
@@ -189,6 +190,7 @@ export function DrawingCanvas({
   onHotspotChange,
   isCursorMode = false,
   availableReferenceGuides,
+  frameSyncKey,
 }: DrawingCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [paths, setPaths] = useState<VectorPath[]>(initialPaths);
@@ -457,8 +459,37 @@ export function DrawingCanvas({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  const lastFrameSyncKeyRef = useRef<string | undefined>(frameSyncKey);
   useEffect(() => {
-    if (!selectedOnionStateId && availableOnionStates.length > 0) {
+    if (frameSyncKey === undefined || frameSyncKey === lastFrameSyncKeyRef.current) return;
+    lastFrameSyncKeyRef.current = frameSyncKey;
+    setPaths(initialPaths);
+    historyRef.current = [initialPaths];
+    historyIndexRef.current = 0;
+    setHistoryVersion((v) => v + 1);
+    const nextLayers =
+      initialLayers && initialLayers.length > 0
+        ? initialLayers
+        : [{ id: 'layer-1', name: 'Calque 1', visible: true, locked: false, opacity: 1 }];
+    setLayers(nextLayers);
+    setActiveLayerId(nextLayers[0]?.id || 'layer-1');
+    setSelectedPathIds([]);
+    setActivePolylinePoints([]);
+    const prevOnion = onionStates.find(
+      (s) => s.id === '__prev_frame__' && s.vectorPaths && s.vectorPaths.length > 0
+    );
+    if (prevOnion) {
+      setSelectedOnionStateId('__prev_frame__');
+      setOnionSkinEnabled(true);
+    }
+  }, [frameSyncKey]);
+
+  useEffect(() => {
+    if (availableOnionStates.length === 0) {
+      if (selectedOnionStateId !== '') setSelectedOnionStateId('');
+      return;
+    }
+    if (!availableOnionStates.some((s) => s.id === selectedOnionStateId)) {
       setSelectedOnionStateId(availableOnionStates[0].id);
     }
   }, [availableOnionStates, selectedOnionStateId]);

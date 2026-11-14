@@ -141,7 +141,10 @@ export function Inspector() {
               selectedEntity.states[editingStateDrawingId]?.drawingLayers ||
               (selectedEntity.currentStateId === editingStateDrawingId ? selectedEntity.drawingLayers : undefined)
             }
-            onSave={(paths, _dataUrl, colliderType, stateName, _hotspot, layers, colliderBounds, overrideCollider) => {
+            initialFrames={selectedEntity.states[editingStateDrawingId]?.frames}
+            initialFrameRate={selectedEntity.states[editingStateDrawingId]?.frameRate}
+            initialAnimationLoop={selectedEntity.states[editingStateDrawingId]?.animationLoop}
+            onSave={(paths, _dataUrl, colliderType, stateName, _hotspot, layers, colliderBounds, overrideCollider, animationData) => {
               updateStateProperties(selectedEntity.id, editingStateDrawingId, {
                 vectorPaths: paths,
                 drawingLayers: layers,
@@ -149,6 +152,13 @@ export function Inspector() {
                 ...(colliderBounds !== undefined ? { colliderBounds } : {}),
                 overrideCollider,
                 ...(stateName ? { name: stateName } : {}),
+                ...(animationData
+                  ? {
+                      frames: animationData.frames,
+                      frameRate: animationData.frameRate,
+                      animationLoop: animationData.animationLoop,
+                    }
+                  : {}),
               });
               if (selectedEntity.currentStateId === editingStateDrawingId) {
                 updateEntityDetails(selectedEntity.id, {
@@ -637,6 +647,14 @@ export function Inspector() {
                   ) : (
                     <span className="text-[10px] text-slate-400 font-medium italic">
                       Vide
+                    </span>
+                  )}
+                  {(st.frames?.length || 0) > 1 && (
+                    <span
+                      className="absolute bottom-0.5 right-0.5 bg-violet-600/90 text-white text-[9px] font-mono font-bold px-1 rounded shadow-2xs pointer-events-none"
+                      title={`Animation Flipbook : ${st.frames?.length} frames (${st.frameRate || 8} FPS)`}
+                    >
+                      🎞️{st.frames?.length}
                     </span>
                   )}
                 </div>

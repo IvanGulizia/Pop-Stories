@@ -4,7 +4,15 @@ import { useSceneStore } from '../store/useSceneStore';
 import { useEffect, useRef, useState } from 'react';
 import { isPointInsideEntityCollider, getEntityColliderBounds, getEntityColliderClipPath } from '../utils/collider';
 import { useAppCursor } from '../context/CursorContext';
-import { isEntityDraggable, setEntityRuntimeVelocity, syncEntityDragPosition, setActiveDragPosition } from '../utils/matterPhysicsEngine';
+import {
+  isEntityDraggable,
+  setEntityRuntimeVelocity,
+  syncEntityDragPosition,
+  setActiveDragPosition,
+  getEntityRuntimeHealth,
+  getEffectiveBehaviors,
+} from '../utils/matterPhysicsEngine';
+import { HealthBehaviorConfig } from '../types';
 
 interface CustomShapeProps {
   entity: Entity;
@@ -48,6 +56,65 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
   const canDrag = !isResizing && (appMode !== 'play' || canDragFromBehavior);
   const dragSamplesRef = useRef<{ x: number; y: number; time: number }[]>([]);
   const rules = useSceneStore((state) => state.rules);
+
+  // Animation Flipbook par état en mode Play
+  const [animFrameIndex, setAnimFrameIndex] = useState(0);
+  const stateFrames = currentState?.frames;
+  const hasFlipbook = Boolean(stateFrames && stateFrames.length > 1);
+
+  useEffect(() => {
+    setAnimFrameIndex(0);
+    if (appMode !== 'play' || !stateFrames || stateFrames.length <= 1) return;
+
+    const total = stateFrames.length;
+    const fps = Math.max(1, Math.min(24, currentState.frameRate || 8));
+    const loopMode = currentState.animationLoop || 'loop';
+    let idx = 0;
+    let dir: 1 | -1 = 1;
+
+    const timer = window.setInterval(() => {
+      if (loopMode === 'ping_pong') {
+        let next = idx + dir;
+        if (next >= total) {
+          dir = -1;
+          next = Math.max(0, total - 2);
+        } else if (next < 0) {
+          dir = 1;
+          next = Math.min(total - 1, 1);
+        }
+        idx = next;
+        setAnimFrameIndex(idx);
+      } else if (loopMode === 'once') {
+        if (idx + 1 >= total) return;
+        idx = idx + 1;
+        setAnimFrameIndex(idx);
+      } else {
+        idx = (idx + 1) % total;
+        setAnimFrameIndex(idx);
+      }
+    }, Math.max(35, Math.round(1000 / fps)));
+
+    return () => window.clearInterval(timer);
+  }, [appMode, currentState.id, stateFrames?.length, currentState.frameRate, currentState.animationLoop]);
+
+  const activeAnimFrame =
+    appMode === 'play' && hasFlipbook && stateFrames
+      ? stateFrames[Math.max(0, Math.min(animFrameIndex, stateFrames.length - 1))]
+      : undefined;
+  const activeVectorPaths = activeAnimFrame?.vectorPaths || currentState?.vectorPaths;
+  const activeDrawingLayers =
+    activeAnimFrame?.drawingLayers ??
+    currentState?.drawingLayers ??
+    (currentState.id === 'state_1' ? entity.drawingLayers : undefined);
+
+  // Santé & invincibilité runtime
+  const healthConfig =
+    appMode === 'play'
+      ? (getEffectiveBehaviors(entity, currentState).find((b) => b.type === 'health') as
+          | HealthBehaviorConfig
+          | undefined)
+      : undefined;
+  const runtimeHealth = appMode === 'play' && healthConfig ? getEntityRuntimeHealth(entity.id) : null;
 
   const hasClickRules = rules.some(
     (r) =>
@@ -523,20 +590,52 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
         </>
       )}
 
+      {/* Barre / Cœurs de PV en mode Play */}
+      {appMode === 'play' && healthConfig && healthConfig.showHealthBar !== false && runtimeHealth && (
+        <div className="absolute -top-5 left-1/2 -translate-x-1/2 pointer-events-none z-50 flex items-center gap-0.5 bg-white/90 backdrop-blur-xs px-1.5 py-0.5 rounded-full border border-rose-200 shadow-xs whitespace-nowrap">
+          {runtimeHealth.maxHp <= 6 ? (
+            Array.from({ length: runtimeHealth.maxHp }).map((_, idx) => (
+              <span
+                key={idx}
+                className={`text-[10px] leading-none ${
+                  idx < runtimeHealth.hp ? 'text-rose-500' : 'text-slate-300'
+                }`}
+              >
+                ♥
+              </span>
+            ))
+          ) : (
+            <div className="flex items-center gap-1">
+              <div className="w-12 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-rose-500 transition-all duration-150"
+                  style={{ width: `${Math.max(0, Math.min(100, (runtimeHealth.hp / runtimeHealth.maxHp) * 100))}%` }}
+                />
+              </div>
+              <span className="text-[9px] font-mono font-bold text-rose-700">
+                {runtimeHealth.hp}/{runtimeHealth.maxHp}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Visuel personnalisé : Vectoriel SVG, Image, Icône ou Forme SVG par défaut */}
       <div
-        className="relative w-full h-full flex items-center justify-center"
+        className={`relative w-full h-full flex items-center justify-center ${
+          runtimeHealth?.isInvincible ? 'animate-pulse opacity-65' : ''
+        }`}
         style={{ transform: entity.flipX ? 'scaleX(-1)' : undefined }}
       >
-        {(currentState?.vectorPaths && currentState.vectorPaths.length > 0) ? (
+        {(activeVectorPaths && activeVectorPaths.length > 0) ? (
           <div className="w-full h-full flex items-center justify-center select-none p-1">
             <svg
               viewBox="0 0 200 200"
               className="w-full h-full pointer-events-none overflow-visible"
             >
               {(() => {
-                const layers = currentState.drawingLayers || (currentState.id === 'state_1' ? entity.drawingLayers : undefined);
-                const paths = currentState.vectorPaths;
+                const layers = activeDrawingLayers;
+                const paths = activeVectorPaths;
                 if (!layers || layers.length === 0) {
                   return paths.map((p) => (
                     <path

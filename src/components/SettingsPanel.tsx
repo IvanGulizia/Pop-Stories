@@ -265,6 +265,7 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
             referenceGuide={activeGuide}
             availableReferenceGuides={availableGuides}
             isCursorMode={true}
+            enableFlipbook={false}
             onSave={(paths, _dataUrl, _colliderType, _stateName, hotspot) => {
               if (paths && paths.length > 0) {
                 const combinedD = paths.map((p) => p.d).join(' ');

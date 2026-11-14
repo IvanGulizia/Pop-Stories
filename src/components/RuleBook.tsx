@@ -9438,6 +9438,7 @@ export function RuleBook() {
               : 'Dessiner une particule'
           }
           subtitle="Dessinez votre particule personnalisée"
+          enableFlipbook={false}
           initialPaths={particleDrawingTarget.editingPreset?.vectorPaths || []}
           currentEditingStateName={
             particleDrawingTarget.editingPreset?.name || `Particule ${customParticles.length + 1}`

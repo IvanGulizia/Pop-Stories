@@ -87,7 +87,8 @@ export type BehaviorType =
   | 'flee'
   | 'keyboard_control'
   | 'boundary_behavior'
-  | 'particle_emitter';
+  | 'particle_emitter'
+  | 'health';
 
 export interface BaseBehaviorConfig {
   id: string;
@@ -211,6 +212,12 @@ export interface KeyboardControlBehaviorConfig extends BaseBehaviorConfig {
   damping?: number;          // 0..0.99 (inertie / glisse au relâchement)
   flipOnMove?: boolean;
   flipInvert?: boolean;
+  stateBindings?: {
+    idleStateId?: StateId;
+    moveStateId?: StateId;
+    jumpStateId?: StateId;
+    fallStateId?: StateId;
+  };
 }
 
 export interface BoundaryBehaviorConfig extends BaseBehaviorConfig {
@@ -265,6 +272,19 @@ export interface FleeBehaviorConfig extends BaseBehaviorConfig {
   flipInvert?: boolean;
 }
 
+export interface HealthBehaviorConfig extends BaseBehaviorConfig {
+  type: 'health';
+  maxHp: number;
+  damageTag?: string;
+  damageCooldown?: number;
+  hurtStateId?: StateId;
+  recoverStateId?: StateId;
+  knockbackForce?: number;
+  showHealthBar?: boolean;
+  onDeath: 'destroy' | 'change_state' | 'none';
+  deathStateId?: StateId;
+}
+
 export type EntityBehavior =
   | PhysicsBehaviorConfig
   | DraggableBehaviorConfig
@@ -278,13 +298,22 @@ export type EntityBehavior =
   | FleeBehaviorConfig
   | KeyboardControlBehaviorConfig
   | BoundaryBehaviorConfig
-  | ParticleEmitterBehaviorConfig;
+  | ParticleEmitterBehaviorConfig
+  | HealthBehaviorConfig;
 
 export type BehaviorOverride = {
   enabled?: boolean;
   type?: BehaviorType;
   [key: string]: any;
 };
+
+export type AnimationLoopMode = 'loop' | 'ping_pong' | 'once';
+
+export interface AnimationFrame {
+  id: string;
+  vectorPaths: VectorPath[];
+  drawingLayers?: DrawingLayer[];
+}
 
 export interface EntityState {
   id: StateId;
@@ -299,6 +328,10 @@ export interface EntityState {
   vectorPaths?: VectorPath[];
   drawingLayers?: DrawingLayer[];
   drawingDataUrl?: string;
+  // Flipbook animation frames per state (frame 0 synchronisé avec vectorPaths / drawingLayers)
+  frames?: AnimationFrame[];
+  frameRate?: number;
+  animationLoop?: AnimationLoopMode;
   // Surcharges de comportements par état
   behaviorOverrides?: Record<string, BehaviorOverride>;
   // Specific visual properties for drawing customization

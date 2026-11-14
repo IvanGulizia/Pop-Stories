@@ -4,7 +4,15 @@ import { useSceneStore } from '../store/useSceneStore';
 import { useEffect, useRef, useState } from 'react';
 import { isPointInsideEntityCollider, getEntityColliderBounds, getEntityColliderClipPath } from '../utils/collider';
 import { useAppCursor } from '../context/CursorContext';
-import { isEntityDraggable, setEntityRuntimeVelocity, syncEntityDragPosition, setActiveDragPosition } from '../utils/matterPhysicsEngine';
+import {
+  isEntityDraggable,
+  setEntityRuntimeVelocity,
+  syncEntityDragPosition,
+  setActiveDragPosition,
+  getEntityRuntimeHealth,
+  getEffectiveBehaviors,
+} from '../utils/matterPhysicsEngine';
+import { HealthBehaviorConfig } from '../types';
 
 interface AppleProps {
   entity: Entity;
@@ -47,6 +55,13 @@ export function Apple({ entity, style }: AppleProps) {
   const { canDrag: canDragFromBehavior, throwable, maxThrowSpeed } = isEntityDraggable(entity, currentState);
   const canDrag = !isResizing && (appMode !== 'play' || canDragFromBehavior);
   const dragSamplesRef = useRef<{ x: number; y: number; time: number }[]>([]);
+  const healthConfig =
+    appMode === 'play'
+      ? (getEffectiveBehaviors(entity, currentState).find((b) => b.type === 'health') as
+          | HealthBehaviorConfig
+          | undefined)
+      : undefined;
+  const runtimeHealth = appMode === 'play' && healthConfig ? getEntityRuntimeHealth(entity.id) : null;
 
   const x = useMotionValue(entity.position.x);
   const y = useMotionValue(entity.position.y);
@@ -495,8 +510,31 @@ export function Apple({ entity, style }: AppleProps) {
         </>
       )}
 
+      {appMode === 'play' && healthConfig && healthConfig.showHealthBar !== false && runtimeHealth && (
+        <div className="absolute -top-5 left-1/2 -translate-x-1/2 pointer-events-none z-50 flex items-center gap-0.5 bg-white/90 backdrop-blur-xs px-1.5 py-0.5 rounded-full border border-rose-200 shadow-xs whitespace-nowrap">
+          {runtimeHealth.maxHp <= 6 ? (
+            Array.from({ length: runtimeHealth.maxHp }).map((_, idx) => (
+              <span
+                key={idx}
+                className={`text-[10px] leading-none ${
+                  idx < runtimeHealth.hp ? 'text-rose-500' : 'text-slate-300'
+                }`}
+              >
+                ♥
+              </span>
+            ))
+          ) : (
+            <span className="text-[9px] font-mono font-bold text-rose-700">
+              ♥ {runtimeHealth.hp}/{runtimeHealth.maxHp}
+            </span>
+          )}
+        </div>
+      )}
+
       <div
-        className="relative w-full h-full flex items-center justify-center"
+        className={`relative w-full h-full flex items-center justify-center ${
+          runtimeHealth?.isInvincible ? 'animate-pulse opacity-65' : ''
+        }`}
         style={{ transform: entity.flipX ? 'scaleX(-1)' : undefined }}
       >
         {/* Corps de la pomme */}

@@ -158,7 +158,14 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           batchUpdateEntityTransforms(result.updatedTransforms);
         }
 
-        // Suppression automatique des entités expirées (Composant Auto-Destroy)
+        if (result.stateChanges) {
+          const updateEntityState = useSceneStore.getState().updateEntityState;
+          Object.entries(result.stateChanges).forEach(([entId, nextStateId]) => {
+            updateEntityState(entId, nextStateId);
+          });
+        }
+
+        // Suppression automatique des entités expirées (Composant Auto-Destroy / Santé à 0 PV)
         if (result.entitiesToDestroy && result.entitiesToDestroy.length > 0) {
           const deleteEntity = useSceneStore.getState().deleteEntity;
           result.entitiesToDestroy.forEach((id) => deleteEntity(id));

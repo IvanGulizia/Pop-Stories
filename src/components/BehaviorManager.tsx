@@ -17,6 +17,8 @@ import {
   AutoDestroyBehaviorConfig,
   ParticleEmitterBehaviorConfig,
   FleeBehaviorConfig,
+  HealthBehaviorConfig,
+  EntityState,
   ParticleShape,
   CustomParticlePreset,
   CustomParticleUsageMode,
@@ -49,6 +51,7 @@ import {
   Pencil,
   Wind,
   Sliders,
+  Heart,
 } from 'lucide-react';
 
 interface BehaviorManagerProps {
@@ -296,6 +299,19 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
           offsetY: 0,
         } as ParticleEmitterBehaviorConfig;
         break;
+      case 'health':
+        newBehavior = {
+          id: generateBehaviorId('health'),
+          type: 'health',
+          enabled: true,
+          maxHp: 3,
+          damageTag: 'danger',
+          damageCooldown: 1.0,
+          knockbackForce: 220,
+          showHealthBar: true,
+          onDeath: 'destroy',
+        } as HealthBehaviorConfig;
+        break;
     }
 
     const updated = [...baseBehaviors, newBehavior];
@@ -367,6 +383,8 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
         return <Clock className="w-4 h-4 text-orange-600" />;
       case 'particle_emitter':
         return <Sparkles className="w-4 h-4 text-amber-500" />;
+      case 'health':
+        return <Heart className="w-4 h-4 text-rose-500" />;
     }
   };
 
@@ -398,6 +416,8 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
         return 'Bords de Scène';
       case 'particle_emitter':
         return 'Émetteur de Particules';
+      case 'health':
+        return 'Santé & Dégâts';
     }
   };
 
@@ -610,6 +630,7 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
                       targetEntityOptions,
                       entityTypeOptions,
                       availableTags,
+                      stateList,
                       customParticles,
                       onOpenParticleDrawer: (editingPreset) =>
                         setParticleDrawerState({
@@ -886,6 +907,26 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
                   </div>
                 </button>
               </div>
+
+              {/* Catégorie 8: Jeu & Survie (Modulaire) */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                  Jeu & Survie
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleAddBehavior('health')}
+                  className="w-full p-2.5 rounded-2xl border border-slate-200 hover:border-rose-400 hover:bg-rose-50/30 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                >
+                  <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                    <Heart className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-800 text-xs">Santé & Dégâts (PV / Invincibilité)</div>
+                    <div className="text-[11px] text-slate-500">Cœurs/PV, contact par #tag (ex: #danger), clignotement, recul et état Blessé coopératif.</div>
+                  </div>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -900,6 +941,7 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
               : 'Dessiner une particule'
           }
           subtitle="Dessinez votre particule personnalisée"
+          enableFlipbook={false}
           initialPaths={particleDrawerState.editingPreset?.vectorPaths || []}
           currentEditingStateName={
             particleDrawerState.editingPreset?.name || `Particule ${customParticles.length + 1}`
@@ -1024,6 +1066,7 @@ function renderBehaviorControls({
   targetEntityOptions,
   entityTypeOptions,
   availableTags,
+  stateList,
   customParticles,
   onOpenParticleDrawer,
   onOpenParticleEditor,
@@ -1037,6 +1080,7 @@ function renderBehaviorControls({
   targetEntityOptions: Entity[];
   entityTypeOptions: { type: string; label: string }[];
   availableTags: string[];
+  stateList: EntityState[];
   customParticles: CustomParticlePreset[];
   onOpenParticleDrawer: (editingPreset?: CustomParticlePreset) => void;
   onOpenParticleEditor: () => void;
@@ -1596,6 +1640,117 @@ function renderBehaviorControls({
 
           {renderInertiaControls(b, 0.8)}
           {renderFlipControls(b)}
+
+          {/* Ligne 8: Liaisons automatiques d'états visuels + Garde-fou */}
+          <div className="p-2.5 bg-indigo-50/50 rounded-xl border border-indigo-200/80 space-y-2">
+            <div>
+              <div className="font-bold text-indigo-900 text-xs flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                <span>États visuels automatiques (Garde-fou actif)</span>
+              </div>
+              <div className="text-[10px] text-indigo-700/80 leading-snug mt-0.5">
+                Change d'état automatiquement selon le mouvement. Ne remplace jamais les autres états (ex : Blessé, Attaque).
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-indigo-100">
+                <span className="text-[11px] font-bold text-slate-700">Repos (Idle)</span>
+                <select
+                  value={b.stateBindings?.idleStateId || ''}
+                  onChange={(e) =>
+                    update({
+                      stateBindings: {
+                        ...(b.stateBindings || {}),
+                        idleStateId: e.target.value || undefined,
+                      },
+                    })
+                  }
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[155px]"
+                >
+                  <option value="">-- Non défini --</option>
+                  {stateList.map((st) => (
+                    <option key={st.id} value={st.id}>
+                      État {st.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-indigo-100">
+                <span className="text-[11px] font-bold text-slate-700">Marche / Mouvement</span>
+                <select
+                  value={b.stateBindings?.moveStateId || ''}
+                  onChange={(e) =>
+                    update({
+                      stateBindings: {
+                        ...(b.stateBindings || {}),
+                        moveStateId: e.target.value || undefined,
+                      },
+                    })
+                  }
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[155px]"
+                >
+                  <option value="">-- Non défini --</option>
+                  {stateList.map((st) => (
+                    <option key={st.id} value={st.id}>
+                      État {st.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {b.mode === 'platformer' && (
+                <>
+                  <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-indigo-100">
+                    <span className="text-[11px] font-bold text-slate-700">Saut (Montée)</span>
+                    <select
+                      value={b.stateBindings?.jumpStateId || ''}
+                      onChange={(e) =>
+                        update({
+                          stateBindings: {
+                            ...(b.stateBindings || {}),
+                            jumpStateId: e.target.value || undefined,
+                          },
+                        })
+                      }
+                      className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[155px]"
+                    >
+                      <option value="">-- Non défini --</option>
+                      {stateList.map((st) => (
+                        <option key={st.id} value={st.id}>
+                          État {st.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-indigo-100">
+                    <span className="text-[11px] font-bold text-slate-700">Chute (Descente)</span>
+                    <select
+                      value={b.stateBindings?.fallStateId || ''}
+                      onChange={(e) =>
+                        update({
+                          stateBindings: {
+                            ...(b.stateBindings || {}),
+                            fallStateId: e.target.value || undefined,
+                          },
+                        })
+                      }
+                      className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[155px]"
+                    >
+                      <option value="">-- Non défini --</option>
+                      {stateList.map((st) => (
+                        <option key={st.id} value={st.id}>
+                          État {st.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       );
     }
@@ -2742,6 +2897,179 @@ function renderBehaviorControls({
               />
               <span className="text-slate-400 text-xs">px</span>
             </div>
+          </div>
+        </div>
+      );
+    }
+
+    case 'health': {
+      const b = { ...behavior, ...(override || {}) } as HealthBehaviorConfig;
+      return (
+        <div className="space-y-1.5">
+          {/* Points de vie max */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Points de vie max (PV)</span>
+              <span className="font-mono font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.maxHp ?? 3} PV
+              </span>
+            </div>
+            <input
+              type="range"
+              min="1"
+              max="20"
+              step="1"
+              value={b.maxHp ?? 3}
+              onChange={(e) => update({ maxHp: parseInt(e.target.value, 10) || 1 })}
+              className="w-full accent-rose-500"
+            />
+          </div>
+
+          {/* Tag danger au contact */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <div>
+              <span className="font-bold text-slate-700 text-xs block">Tag de danger (#tag)</span>
+              <span className="text-[10px] text-slate-400">Entités ou calques colliders qui blessent</span>
+            </div>
+            <input
+              type="text"
+              list={`tags-health-${b.id}`}
+              placeholder="ex: danger, ennemi"
+              value={b.damageTag || ''}
+              onChange={(e) => update({ damageTag: e.target.value.replace(/^#/, '') })}
+              className="w-32 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            />
+            <datalist id={`tags-health-${b.id}`}>
+              {availableTags.map((t) => (
+                <option key={t} value={t} />
+              ))}
+            </datalist>
+          </div>
+
+          {/* Durée d'invincibilité */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Invincibilité après choc</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {(b.damageCooldown ?? 1.0).toFixed(1)} s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0.2"
+              max="4.0"
+              step="0.1"
+              value={b.damageCooldown ?? 1.0}
+              onChange={(e) => update({ damageCooldown: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* Recul (Knockback) */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Recul au choc (Knockback)</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.knockbackForce ?? 220} px/s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="600"
+              step="20"
+              value={b.knockbackForce ?? 220}
+              onChange={(e) => update({ knockbackForce: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          {/* État Blessé temporaire */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <div>
+              <span className="font-bold text-slate-700 text-xs block">État « Blessé » (Optionnel)</span>
+              <span className="text-[10px] text-slate-400">Protégé par le garde-fou pendant l'invincibilité</span>
+            </div>
+            <select
+              value={b.hurtStateId || ''}
+              onChange={(e) => update({ hurtStateId: e.target.value || undefined })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[140px]"
+            >
+              <option value="">-- Aucun --</option>
+              {stateList.map((st) => (
+                <option key={st.id} value={st.id}>
+                  État {st.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* État de retour après blessure */}
+          {b.hurtStateId && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <div>
+                <span className="font-bold text-slate-700 text-xs block">Retour après blessure</span>
+                <span className="text-[10px] text-slate-400">Redonne la main au contrôleur</span>
+              </div>
+              <select
+                value={b.recoverStateId || ''}
+                onChange={(e) => update({ recoverStateId: e.target.value || undefined })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[140px]"
+              >
+                <option value="">État précédent (auto)</option>
+                {stateList.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    État {st.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Action à 0 PV */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Quand PV = 0</span>
+            <select
+              value={b.onDeath || 'destroy'}
+              onChange={(e) => update({ onDeath: e.target.value as any })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              <option value="destroy">Détruire l'entité</option>
+              <option value="change_state">Passer à un état (Mort)</option>
+              <option value="none">Ne rien faire (0 PV)</option>
+            </select>
+          </div>
+
+          {b.onDeath === 'change_state' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">État « Mort / K.O. »</span>
+              <select
+                value={b.deathStateId || ''}
+                onChange={(e) => update({ deathStateId: e.target.value || undefined })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[140px]"
+              >
+                <option value="">-- Choisir --</option>
+                {stateList.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    État {st.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Afficher barre / cœurs en jeu */}
+          <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+            <div>
+              <div className="font-bold text-slate-700 text-xs">Afficher les PV en Mode Play</div>
+              <div className="text-[10px] text-slate-400">Cœurs / jauge au-dessus de l'objet</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={b.showHealthBar !== false}
+              onChange={(e) => update({ showHealthBar: e.target.checked })}
+              className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
+            />
           </div>
         </div>
       );

@@ -1,6 +1,10 @@
 # État du Projet
 
 ## Complété
+- **Flipbook par État, Contrôleur Joueur & Composant Modulaire Santé / Dégâts (Phase 10.17)** :
+  - **Mini-Timeline Flipbook par État (`EntityState.frames`, `FullScreenDrawingModal`, `CustomShape`, `Inspector`)** : Support multi-frames par état (`frameRate` 1–24 FPS, modes `loop` / `ping_pong` / `once`), pelure d'oignon automatique sur la frame précédente, duplication/ajout/réordonnancement/suppression de frames avec préservation des outils actifs (`frameSyncKey`), aperçu animé en direct et lecture temps réel en Mode Play (Frame 0 synchronisée avec `vectorPaths` / `drawingLayers` pour rétrocompatibilité totale).
+  - **Liaisons d'états visuels sur `keyboard_control` + Garde-fou non-écrasant (`BehaviorManager`, `matterPhysicsEngine`, `Scene`)** : Association optionnelle des états *Repos (Idle)*, *Marche*, *Saut* et *Chute* ; transitions automatiques uniquement lorsque l'état courant appartient au jeu d'états de locomotion afin de ne jamais écraser les états prioritaires (*Blessé*, *Attaque*, *Mort*).
+  - **Composant Modulaire `Santé & Dégâts` (`health`)** : Points de vie max, détection de danger par `#tag` (entités et calques colliders), période d'invincibilité avec clignotement, recul physique (knockback), état *Blessé* temporaire avec retour automatique vers l'état de locomotion, barre/cœurs de PV en Mode Play et comportement à 0 PV (*Détruire*, *État Mort*, *Rien*).
 - **Correctifs Workflow, IndexedDB Local, Raccourcis Studio, Multi-Particules & Action Déplacement (Phase 10.16)** :
   - **Sous-pas Matter.js (`<= 16.666 ms`)** : Élimination des avertissements `delta > 16.667 ms` lors de frames longues.
   - **Persistance 100 % locale IndexedDB (`localStorageDB.ts`) & Quota configurable** : Migration automatique depuis `localStorage` (~5 Mo) vers IndexedDB local sur machine (`50 Mo` par défaut, extensible à `100/250/500/1000 Mo` ou `Illimité` dans la limite disque navigateur) avec jauge et alerte interactive d'extension dans `ProjectSlotsModal`.

@@ -49,8 +49,8 @@ interface Rule {
 ```
 
 ## Systèmes
-1. **Renderer :** Affiche les SVG en fonction de l'état courant avec calques multiples (`DrawingLayers`) et interpolated transforms.
+1. **Renderer :** Affiche les SVG en fonction de l'état courant avec calques multiples (`DrawingLayers`), animations Flipbook multi-frames par état (`frames`, `frameRate`, `animationLoop`) et transformations interpolées.
 2. **Interaction System :** Gère le drag à la souris avec échantillonnage de vélocité pour l'inertie de lâcher, les clics et le survol.
-3. **Moteur Physique 2D (Matter.js) :** Simulation réaliste de corps rigides (`matterPhysicsEngine.ts`), gestion de la gravité, impulsion de choc solide, friction, restitution et capteurs fantômes (`isTrigger` / `isSensor`).
-4. **Moteur de Comportements (ECS) :** Comportements configurables au niveau entité et surchargeables par état (`getEffectiveBehaviors`) : contrôles joueur, patrouille, visée, suivi, vitesse continue, bordures et déplaçable.
+3. **Moteur Physique 2D (Matter.js) :** Simulation réaliste de corps rigides (`matterPhysicsEngine.ts`) avec sous-stepping `<= 16.666 ms`, gestion de la gravité, impulsion de choc solide, friction, restitution et capteurs fantômes (`isTrigger` / `isSensor`).
+4. **Moteur de Comportements (ECS) :** Comportements configurables au niveau entité et surchargeables par état (`getEffectiveBehaviors`) : contrôles joueur (avec liaisons d'états visuels et garde-fou non-écrasant), santé/dégâts, patrouille, balade aléatoire, fuite, visée, suivi, vitesse continue, bordures, émetteur de particules et déplaçable.
 5. **Rule Engine :** Écoute les déclencheurs (collisions, clics, survols, chronos, touches clavier, seuils de score, changements d'état) et exécute les chaînes d'actions séquentielles.
