@@ -197,18 +197,26 @@ export type BucketFillResult =
   | { type: 'update_path'; pathId: string; updatedPath: VectorPath }
   | { type: 'new_path'; newPath: VectorPath };
 
+export interface BucketFillBounds {
+  width: number;
+  height: number;
+  originX?: number;
+  originY?: number;
+}
+
 /**
  * Option B - Hybride Haute Fidélité:
  * 1. Détection directe sur forme fermée existante (100% vectoriel pur, sans aucun polygone créé).
- * 2. Détection haute fidélité (1000×1000 px, 5× supersampling) pour les zones d'intersections de traits multiples
- *    (comme le U rouge et le trait vert), préservant les segments droits sans les déformer.
+ * 2. Détection haute fidélité pour les zones d'intersections de traits multiples,
+ *    compatible espace 200×200 ET espace scène monde (calques).
  */
 export function applyBucketFill(
   clickX: number,
   clickY: number,
   paths: VectorPath[],
   fillColor: string,
-  targetLayerId?: string
+  targetLayerId?: string,
+  bounds?: BucketFillBounds
 ): BucketFillResult | null {
   if (!fillColor || fillColor === 'none') return null;
 
@@ -217,7 +225,6 @@ export function applyBucketFill(
   // =========================================================================
   // NIVEAU 1 : FORMES FERMÉES EXISTANTES (Rectangle, Cercle, Boucle Fermée)
   // =========================================================================
-  // Vérifie du dernier tracé vers le premier (ordre z-index descendant)
   for (let i = paths.length - 1; i >= 0; i--) {
     const p = paths[i];
 
@@ -233,7 +240,19 @@ export function applyBucketFill(
       };
     }
 
-    // Cas 1.2 : Tracé avec points (cercle, polygone ou boucle fermée à main levée)
+    // Cas 1.1b : Cercle vectoriel
+    if (p.circle && Math.hypot(clickPt.x - p.circle.cx, clickPt.y - p.circle.cy) <= p.circle.r) {
+      return {
+        type: 'update_path',
+        pathId: p.id,
+        updatedPath: {
+          ...p,
+          fill: fillColor,
+        },
+      };
+    }
+
+    // Cas 1.2 : Tracé avec points (polygone ou boucle fermée à main levée)
     if (p.points && p.points.length >= 3) {
       const first = p.points[0];
       const last = p.points[p.points.length - 1];
@@ -256,13 +275,20 @@ export function applyBucketFill(
   }
 
   // =========================================================================
-  // NIVEAU 2 : ZONES DÉLIMITÉES PAR INTERSECTION DE PLUSIEURS TRACÉS (1000×1000)
+  // NIVEAU 2 : ZONES DÉLIMITÉES PAR INTERSECTION DE PLUSIEURS TRACÉS
   // =========================================================================
   if (typeof document === 'undefined') return null;
 
-  const SCALE = 5; // 200 * 5 = 1000 px pour une précision au 1/5ème de pixel
-  const width = 200 * SCALE;
-  const height = 200 * SCALE;
+  const domainWidth = Math.max(100, bounds?.width ?? 200);
+  const domainHeight = Math.max(100, bounds?.height ?? 200);
+  const originX = bounds?.originX ?? 0;
+  const originY = bounds?.originY ?? 0;
+
+  // Pour 200×200 on garde SCALE=5 (1000×1000), pour les grandes scènes monde on plafonne à ~1000px max
+  const maxDim = Math.max(domainWidth, domainHeight);
+  const SCALE = maxDim <= 220 ? 5 : Math.min(2, Math.max(1, 950 / maxDim));
+  const width = Math.max(100, Math.round(domainWidth * SCALE));
+  const height = Math.max(100, Math.round(domainHeight * SCALE));
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -274,8 +300,10 @@ export function applyBucketFill(
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, height);
 
-  // Échelle 5× pour rasteriser en haute définition
   ctx.scale(SCALE, SCALE);
+  if (originX !== 0 || originY !== 0) {
+    ctx.translate(-originX, -originY);
+  }
 
   // Dessin des barrières avec épaisseur fidèle
   paths.forEach((p) => {
@@ -298,15 +326,14 @@ export function applyBucketFill(
   const imgData = ctx.getImageData(0, 0, width, height);
   const data = imgData.data;
 
-  let startX = Math.round(Math.max(0, Math.min(width - 1, clickX * SCALE)));
-  let startY = Math.round(Math.max(0, Math.min(height - 1, clickY * SCALE)));
+  let startX = Math.round(Math.max(0, Math.min(width - 1, (clickX - originX) * SCALE)));
+  let startY = Math.round(Math.max(0, Math.min(height - 1, (clickY - originY) * SCALE)));
 
   const isStrokePixel = (x: number, y: number) => {
     const idx = (y * width + x) * 4;
-    return data[idx] < 150; // Sombre = barrière
+    return data[idx] < 150;
   };
 
-  // Si on clique directement sur un trait, chercher dans un rayon de 15px (3 SVG units)
   if (isStrokePixel(startX, startY)) {
     let found = false;
     for (let r = 1; r <= 15; r++) {
@@ -330,7 +357,6 @@ export function applyBucketFill(
     if (!found) return null;
   }
 
-  // Flood fill BFS
   const visited = new Uint8Array(width * height);
   const mask = new Uint8Array(width * height);
   const queue = new Int32Array(width * height * 2);
@@ -359,7 +385,6 @@ export function applyBucketFill(
     if (y < minY) minY = y;
     if (y > maxY) maxY = y;
 
-    // Si on atteint les bords de la zone de dessin, ce n'est pas une cavité fermée
     if (x <= 2 || x >= width - 3 || y <= 2 || y >= height - 3) {
       isBoundaryReached = true;
       break;
@@ -386,15 +411,13 @@ export function applyBucketFill(
     }
   }
 
-  // Si ouvert vers l'extérieur ou trop minuscule (< 250px à 1000px = 10px² SVG)
-  if (isBoundaryReached || filledCount < 250) {
+  const minFilledPixels = Math.round(10 * SCALE * SCALE);
+  if (isBoundaryReached || filledCount < minFilledPixels) {
     return null;
   }
 
-  // Dilater légèrement le masque (7 pixels à échelle 5× = 1.4 unité SVG)
-  // pour que la couleur se glisse proprement sous le tracé sans laisser de liseré blanc
   const dilatedMask = new Uint8Array(width * height);
-  const DILATE_R = 7;
+  const DILATE_R = Math.max(2, Math.round(1.4 * SCALE));
   for (let y = minY; y <= maxY; y++) {
     for (let x = minX; x <= maxX; x++) {
       const idx = y * width + x;
@@ -415,7 +438,6 @@ export function applyBucketFill(
     }
   }
 
-  // Trouver le premier pixel du contour
   let contourStartX = -1;
   let contourStartY = -1;
 
@@ -432,21 +454,18 @@ export function applyBucketFill(
 
   if (contourStartX === -1) return null;
 
-  // Extraire le contour ordonné
   const rawContour = traceMaskContour(dilatedMask, width, height, contourStartX, contourStartY);
   if (rawContour.length < 4) return null;
 
-  // Convertir les coordonnées du contour de 1000×1000 vers 200×200
   const svgContour = rawContour.map((p) => ({
-    x: p.x / SCALE,
-    y: p.y / SCALE,
+    x: p.x / SCALE + originX,
+    y: p.y / SCALE + originY,
   }));
 
-  // Simplification RDP avec un epsilon calibré (0.6px SVG) : conserve les segments droits
-  const simplified = simplifyPoints(svgContour, 0.6);
+  const rdpEpsilon = maxDim <= 220 ? 0.6 : 1.2;
+  const simplified = simplifyPoints(svgContour, rdpEpsilon);
   if (simplified.length < 3) return null;
 
-  // Conversion en chemin SVG adaptatif (segments droits = L, angles lissés = C)
   const pathD = pointsToAdaptivePath(simplified);
 
   return {
@@ -472,9 +491,10 @@ export function floodFillRegion(
   clickY: number,
   paths: VectorPath[],
   fillColor: string,
-  targetLayerId?: string
+  targetLayerId?: string,
+  bounds?: BucketFillBounds
 ): VectorPath | null {
-  const res = applyBucketFill(clickX, clickY, paths, fillColor, targetLayerId);
+  const res = applyBucketFill(clickX, clickY, paths, fillColor, targetLayerId, bounds);
   if (!res) return null;
   if (res.type === 'new_path') return res.newPath;
   return res.updatedPath;

@@ -1,13 +1,17 @@
 import { useState } from 'react';
 import { useSceneStore, DEFAULT_PROJECT_PALETTE } from '../store/useSceneStore';
-import { SceneLayer, SceneLayerGroup } from '../types';
+import { SceneLayer, SceneLayerGroup, UnifiedDrawTool } from '../types';
 import {
+  MousePointer,
   Pencil,
+  Slash,
   GitCommit,
   Square,
   Circle,
+  Lasso,
   PaintBucket,
   Eraser,
+  Scissors,
   Undo2,
   Redo2,
   Trash2,
@@ -17,6 +21,8 @@ import {
   Tag,
   Plus,
   X,
+  Grid,
+  Magnet,
 } from 'lucide-react';
 
 interface DrawingToolsPanelProps {
@@ -41,10 +47,14 @@ export function DrawingToolsPanel({
   const drawingStrokeColor = useSceneStore((state) => state.drawingStrokeColor);
   const drawingFillColor = useSceneStore((state) => state.drawingFillColor);
   const drawingStrokeWidth = useSceneStore((state) => state.drawingStrokeWidth);
+  const drawingShowGrid = useSceneStore((state) => state.drawingShowGrid);
+  const drawingSnapToGrid = useSceneStore((state) => state.drawingSnapToGrid);
   const setDrawingTool = useSceneStore((state) => state.setDrawingTool);
   const setDrawingStrokeColor = useSceneStore((state) => state.setDrawingStrokeColor);
   const setDrawingFillColor = useSceneStore((state) => state.setDrawingFillColor);
   const setDrawingStrokeWidth = useSceneStore((state) => state.setDrawingStrokeWidth);
+  const setDrawingShowGrid = useSceneStore((state) => state.setDrawingShowGrid);
+  const setDrawingSnapToGrid = useSceneStore((state) => state.setDrawingSnapToGrid);
   const updateLayer = useSceneStore((state) => state.updateLayer);
 
   const projectPalette = useSceneStore((state) => state.projectPalette || DEFAULT_PROJECT_PALETTE);
@@ -97,18 +107,27 @@ export function DrawingToolsPanel({
     });
   };
 
-  const tools = [
-    { id: 'pencil', label: 'Crayon (Libre)', icon: Pencil },
-    { id: 'line', label: 'Ligne Droite', icon: GitCommit },
-    { id: 'rectangle', label: 'Rectangle', icon: Square },
-    { id: 'circle', label: 'Cercle', icon: Circle },
-    { id: 'bucket', label: 'Remplir (Pot)', icon: PaintBucket },
-    { id: 'eraser_partial', label: 'Gomme Précise', icon: Eraser },
-    { id: 'eraser_stroke', label: 'Gomme Trait', icon: Trash2 },
+  const tools: Array<{
+    id: UnifiedDrawTool;
+    shortLabel: string;
+    title: string;
+    icon: typeof Pencil;
+    activeClass?: string;
+  }> = [
+    { id: 'select', shortLabel: 'Sélect', title: 'Sélection, déplacement & redimensionnement', icon: MousePointer },
+    { id: 'pencil', shortLabel: 'Crayon', title: 'Crayon / Dessin libre', icon: Pencil },
+    { id: 'line', shortLabel: 'Ligne', title: 'Ligne droite (2 points)', icon: Slash },
+    { id: 'polyline', shortLabel: 'Poly', title: 'Polyligne (cliquez point par point)', icon: GitCommit },
+    { id: 'rectangle', shortLabel: 'Rect', title: 'Rectangle', icon: Square },
+    { id: 'circle', shortLabel: 'Cercle', title: 'Cercle', icon: Circle },
+    { id: 'lasso_fill', shortLabel: 'Lasso', title: 'Lasso / Pinceau plein (Remplissage fermé)', icon: Lasso },
+    { id: 'bucket', shortLabel: 'Pot', title: 'Pot de peinture (Remplir une forme ou zone fermée)', icon: PaintBucket, activeClass: 'bg-teal-600 text-white shadow-2xs' },
+    { id: 'eraser_partial', shortLabel: 'Gomme', title: 'Gomme Précise (Efface les bouts de traits)', icon: Eraser, activeClass: 'bg-rose-600 text-white shadow-2xs' },
+    { id: 'eraser_stroke', shortLabel: 'Objet', title: 'Gomme Trait (Efface la forme entière)', icon: Scissors, activeClass: 'bg-rose-600 text-white shadow-2xs' },
   ];
 
   return (
-    <div id="drawing-tools-panel" className="space-y-4 flex flex-col h-full text-slate-800 select-none">
+    <div id="drawing-tools-panel" className="space-y-3.5 flex flex-col h-full text-slate-800 select-none">
       {/* Barre rapide en haut : Annuler / Rétablir / Vider */}
       {(onUndo || onRedo || onClearLayer) && (
         <div className="grid grid-cols-3 gap-1.5">
@@ -117,7 +136,7 @@ export function DrawingToolsPanel({
               type="button"
               onClick={onUndo}
               disabled={canUndo === false}
-              className="py-2 px-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer border border-slate-200 active:scale-95"
+              className="py-1.5 px-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer border border-slate-200 active:scale-95"
               title="Annuler le dernier tracé (Cmd/Ctrl+Z)"
             >
               <Undo2 className="w-3.5 h-3.5" />
@@ -129,7 +148,7 @@ export function DrawingToolsPanel({
               type="button"
               onClick={onRedo}
               disabled={canRedo === false}
-              className="py-2 px-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer border border-slate-200 active:scale-95"
+              className="py-1.5 px-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer border border-slate-200 active:scale-95"
               title="Rétablir le tracé annulé (Cmd/Ctrl+Shift+Z)"
             >
               <Redo2 className="w-3.5 h-3.5" />
@@ -140,7 +159,7 @@ export function DrawingToolsPanel({
             <button
               type="button"
               onClick={onClearLayer}
-              className="py-2 px-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer border border-rose-200 active:scale-95"
+              className="py-1.5 px-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer border border-rose-200 active:scale-95"
               title="Effacer tous les tracés de ce calque"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -150,9 +169,69 @@ export function DrawingToolsPanel({
         </div>
       )}
 
+      {/* Outils de Dessin Vectoriel Unifiés (10 outils) */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">
+            1. Outils de Dessin
+          </label>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setDrawingShowGrid(!drawingShowGrid)}
+              className={`px-2 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1 border cursor-pointer transition-all ${
+                drawingShowGrid
+                  ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
+                  : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800'
+              }`}
+              title="Afficher/Masquer la grille de repère"
+            >
+              <Grid className="w-3 h-3" />
+              <span>Grille</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDrawingSnapToGrid(!drawingSnapToGrid)}
+              className={`px-2 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1 border cursor-pointer transition-all ${
+                drawingSnapToGrid
+                  ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
+                  : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800'
+              }`}
+              title="Activer/Désactiver le magnétisme sur la grille"
+            >
+              <Magnet className="w-3 h-3" />
+              <span>Snap</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-5 gap-1 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
+          {tools.map((t) => {
+            const Icon = t.icon;
+            const isActive = drawingTool === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setDrawingTool(t.id)}
+                title={t.title}
+                className={`p-1.5 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
+                  isActive
+                    ? t.activeClass || 'bg-indigo-600 text-white font-bold shadow-2xs'
+                    : 'text-slate-600 hover:bg-white'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5 shrink-0" />
+                <span className="text-[9px] font-semibold truncate max-w-full">{t.shortLabel}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Opacité du calque actif (arrière-plan, premier-plan, collider) */}
       {activeLayer && (
-        <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5">
+        <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-1">
           <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
             <span className="truncate">Opacité ({activeLayer.name})</span>
             <span className="font-mono text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
@@ -168,29 +247,28 @@ export function DrawingToolsPanel({
             onChange={(e) =>
               updateLayer(activeLayer!.id, { opacity: parseFloat(e.target.value) })
             }
-            className="w-full accent-indigo-600 cursor-pointer"
+            className="w-full accent-indigo-600 cursor-pointer h-1.5"
           />
         </div>
       )}
 
       {/* Propriétés spécifiques aux Calques Colliders */}
       {isColliderLayer && activeLayer && (
-        <div className="p-3 bg-orange-50/70 border border-orange-200/90 rounded-2xl space-y-3">
+        <div className="p-3 bg-orange-50/70 border border-orange-200/90 rounded-2xl space-y-2.5">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-extrabold text-orange-800 uppercase tracking-wider flex items-center gap-1.5">
               <Shield className="w-3.5 h-3.5 text-orange-600" />
               Collider de Décor
             </span>
-            <span className="text-[10px] font-semibold text-orange-700 bg-white px-2 py-0.5 rounded-full border border-orange-200 truncate max-w-[130px]">
+            <span className="text-[10px] font-semibold text-orange-700 bg-white px-2 py-0.5 rounded-full border border-orange-200 truncate max-w-[120px]">
               {activeLayer.name}
             </span>
           </div>
 
-          {/* Tags intégrés */}
           <div className="space-y-1.5">
             <label className="text-[10px] font-bold text-slate-600 flex items-center gap-1">
               <Tag className="w-3 h-3 text-orange-600" />
-              Tags de détection (#sol, #mur, #lave...)
+              Tags (#sol, #mur, #lave...)
             </label>
             <div className="flex gap-1.5">
               <input
@@ -236,7 +314,6 @@ export function DrawingToolsPanel({
             )}
           </div>
 
-          {/* Solide vs Trigger & Visibilité Play */}
           <div className="space-y-1.5 pt-1 border-t border-orange-200/60">
             <label className="flex items-center justify-between gap-2 text-xs text-slate-700 cursor-pointer">
               <span className="font-semibold text-[11px]">Capteur / Trigger uniquement (traversable)</span>
@@ -259,7 +336,6 @@ export function DrawingToolsPanel({
             </label>
           </div>
 
-          {/* Friction & Rebond si obstacle solide */}
           {!activeLayer.colliderIsTrigger && (
             <div className="grid grid-cols-2 gap-2 pt-1 border-t border-orange-200/60">
               <div>
@@ -301,231 +377,213 @@ export function DrawingToolsPanel({
         </div>
       )}
 
-      {/* Outils de Dessin Vectoriel */}
-      <div className="space-y-2">
-        <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider block">
-          1. Outils de Dessin
-        </label>
-        <div className="grid grid-cols-2 gap-2">
-          {tools.map((t) => {
-            const Icon = t.icon;
-            const isActive = drawingTool === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setDrawingTool(t.id as any)}
-                className={`p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
-                  isActive
-                    ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                }`}
-              >
-                <Icon className="w-4 h-4 shrink-0" />
-                <span className="truncate">{t.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Couleur de Contour / Trait (Stroke) */}
-      <div className="space-y-2">
+      {/* Palette Projet 16 Couleurs Simultanée : Contour + Remplissage */}
+      <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
         <div className="flex items-center justify-between">
-          <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+          <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
             <Palette className="w-3.5 h-3.5 text-indigo-600" />
-            2. Couleur du trait (Palette Projet)
-          </label>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={resetProjectPalette}
-              title="Réinitialiser les 16 couleurs de la palette du projet"
-              className="text-[10px] font-semibold text-slate-400 hover:text-indigo-600 flex items-center gap-0.5 cursor-pointer"
-            >
-              <RotateCcw className="w-3 h-3" />
-            </button>
-            <div
-              className="w-5 h-5 rounded-lg border border-slate-300 shadow-2xs"
-              style={{ backgroundColor: drawingStrokeColor }}
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-8 gap-1.5 p-2 bg-slate-50 rounded-2xl border border-slate-200">
-          {projectPalette.map((palItem, idx) => {
-            const isSelectedSlot =
-              selectedStrokePaletteId === palItem.id ||
-              (!selectedStrokePaletteId && drawingStrokeColor.toLowerCase() === palItem.color.toLowerCase());
-            const validHex =
-              palItem.color.startsWith('#') && palItem.color.length === 7
-                ? palItem.color
-                : palItem.color.length === 4
-                ? `#${palItem.color[1]}${palItem.color[1]}${palItem.color[2]}${palItem.color[2]}${palItem.color[3]}${palItem.color[3]}`
-                : '#6366f1';
-            return (
-              <label
-                key={palItem.id}
-                className={`w-7 h-7 rounded-xl border-2 transition-transform cursor-pointer shadow-2xs relative overflow-hidden flex items-center justify-center ${
-                  isSelectedSlot
-                    ? 'border-indigo-600 scale-115 ring-2 ring-indigo-300/50 z-10'
-                    : 'border-white hover:scale-105'
-                }`}
-                style={{ backgroundColor: palItem.color }}
-                title={`${palItem.name || `Couleur #${idx + 1}`} (${palItem.color}) — Appuyez directement pour choisir/modifier la couleur`}
-              >
-                <input
-                  type="color"
-                  value={validHex}
-                  onClick={() => {
-                    setSelectedStrokePaletteId(palItem.id);
-                    setDrawingStrokeColor(palItem.color);
-                  }}
-                  onChange={(e) => {
-                    const nextHex = e.target.value;
-                    setSelectedStrokePaletteId(palItem.id);
-                    setDrawingStrokeColor(nextHex);
-                    updateProjectPaletteColor(palItem.id, nextHex);
-                  }}
-                  className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
-                />
-              </label>
-            );
-          })}
-        </div>
-
-        <div className="flex items-center justify-between gap-2 px-2 py-1.5 bg-indigo-50/50 rounded-xl border border-indigo-100">
-          <span className="text-[10px] font-bold text-indigo-700 truncate">
-            {selectedStrokePaletteId
-              ? `Modifier ${projectPalette.find((p) => p.id === selectedStrokePaletteId)?.name || 'ce slot'} (partagé)`
-              : 'Couleur libre :'}
+            2. Couleurs (Palette Projet)
           </span>
-          <input
-            type="color"
-            value={drawingStrokeColor.startsWith('#') ? drawingStrokeColor : '#6366f1'}
-            onChange={(e) => {
-              const nextHex = e.target.value;
-              setDrawingStrokeColor(nextHex);
-              if (selectedStrokePaletteId) {
-                updateProjectPaletteColor(selectedStrokePaletteId, nextHex);
-              }
-            }}
-            className="w-6 h-6 rounded-lg border border-slate-300 p-0 cursor-pointer overflow-hidden shadow-2xs shrink-0"
-            title="Modifier cette couleur de la palette pour tout le projet"
-          />
+          <button
+            type="button"
+            onClick={resetProjectPalette}
+            title="Réinitialiser les 16 couleurs de la palette du projet"
+            className="text-[10px] font-semibold text-slate-400 hover:text-indigo-600 flex items-center gap-0.5 cursor-pointer"
+          >
+            <RotateCcw className="w-3 h-3" />
+          </button>
         </div>
-      </div>
 
-      {/* Couleur de Remplissage (Fill) */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider">
-            3. Couleur de Remplissage
-          </label>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedFillPaletteId(undefined);
-                setDrawingFillColor('none');
-              }}
-              className={`px-2 py-0.5 text-[10px] font-bold rounded-md border transition-all cursor-pointer ${
-                drawingFillColor === 'none'
-                  ? 'bg-rose-100 text-rose-700 border-rose-200 font-black'
-                  : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
-              }`}
-            >
-              Transparent
-            </button>
-            {drawingFillColor !== 'none' && (
+        {/* Contour */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
               <div
-                className="w-5 h-5 rounded-lg border border-slate-300 shadow-2xs"
-                style={{ backgroundColor: drawingFillColor }}
+                className="w-4 h-4 rounded-md border border-slate-300 shadow-2xs"
+                style={{
+                  backgroundColor: drawingStrokeColor === 'none' ? 'transparent' : drawingStrokeColor,
+                }}
               />
-            )}
+              <span className="text-[11px] font-bold text-slate-700">Contour</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedStrokePaletteId(undefined);
+                  setDrawingStrokeColor('none');
+                }}
+                className={`px-2 py-0.5 text-[10px] font-bold rounded-md border transition-all cursor-pointer ${
+                  drawingStrokeColor === 'none'
+                    ? 'bg-rose-100 text-rose-700 border-rose-200 font-black'
+                    : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                Sans trait
+              </button>
+              <input
+                type="color"
+                value={drawingStrokeColor.startsWith('#') ? drawingStrokeColor : '#000000'}
+                onChange={(e) => {
+                  const nextHex = e.target.value;
+                  setDrawingStrokeColor(nextHex);
+                  if (selectedStrokePaletteId) {
+                    updateProjectPaletteColor(selectedStrokePaletteId, nextHex);
+                  }
+                }}
+                className="w-5 h-5 rounded-md border border-slate-300 p-0 cursor-pointer overflow-hidden shadow-2xs shrink-0"
+                title="Modifier cette couleur"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-8 gap-1">
+            {projectPalette.map((palItem, idx) => {
+              const isSelectedSlot =
+                drawingStrokeColor !== 'none' &&
+                (selectedStrokePaletteId === palItem.id ||
+                  (!selectedStrokePaletteId && drawingStrokeColor.toLowerCase() === palItem.color.toLowerCase()));
+              const validHex =
+                palItem.color.startsWith('#') && palItem.color.length === 7
+                  ? palItem.color
+                  : palItem.color.length === 4
+                  ? `#${palItem.color[1]}${palItem.color[1]}${palItem.color[2]}${palItem.color[2]}${palItem.color[3]}${palItem.color[3]}`
+                  : '#6366f1';
+              return (
+                <label
+                  key={palItem.id}
+                  className={`w-6 h-6 rounded-lg border-2 transition-transform cursor-pointer shadow-2xs relative overflow-hidden flex items-center justify-center ${
+                    isSelectedSlot
+                      ? 'border-indigo-600 scale-110 ring-2 ring-indigo-300/50 z-10'
+                      : 'border-white hover:scale-105'
+                  }`}
+                  style={{ backgroundColor: palItem.color }}
+                  title={`${palItem.name || `Couleur #${idx + 1}`} (${palItem.color})`}
+                >
+                  <input
+                    type="color"
+                    value={validHex}
+                    onClick={() => {
+                      setSelectedStrokePaletteId(palItem.id);
+                      setDrawingStrokeColor(palItem.color);
+                    }}
+                    onChange={(e) => {
+                      const nextHex = e.target.value;
+                      setSelectedStrokePaletteId(palItem.id);
+                      setDrawingStrokeColor(nextHex);
+                      updateProjectPaletteColor(palItem.id, nextHex);
+                    }}
+                    className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                  />
+                </label>
+              );
+            })}
           </div>
         </div>
 
-        <div className="grid grid-cols-8 gap-1.5 p-2 bg-slate-50 rounded-2xl border border-slate-200">
-          {projectPalette.map((palItem, idx) => {
-            const isSelectedSlot =
-              drawingFillColor !== 'none' &&
-              (selectedFillPaletteId === palItem.id ||
-                (!selectedFillPaletteId && drawingFillColor.toLowerCase() === palItem.color.toLowerCase()));
-            const validHex =
-              palItem.color.startsWith('#') && palItem.color.length === 7
-                ? palItem.color
-                : palItem.color.length === 4
-                ? `#${palItem.color[1]}${palItem.color[1]}${palItem.color[2]}${palItem.color[2]}${palItem.color[3]}${palItem.color[3]}`
-                : '#6366f1';
-            return (
-              <label
-                key={palItem.id}
-                className={`w-7 h-7 rounded-xl border-2 transition-transform cursor-pointer shadow-2xs relative overflow-hidden flex items-center justify-center ${
-                  isSelectedSlot
-                    ? 'border-indigo-600 scale-115 ring-2 ring-indigo-300/50 z-10'
-                    : 'border-white hover:scale-105'
+        {/* Remplissage */}
+        <div className="space-y-1.5 pt-2 border-t border-slate-200/70">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <div
+                className="w-4 h-4 rounded-md border border-slate-300 shadow-2xs"
+                style={{
+                  backgroundColor: drawingFillColor === 'none' ? 'transparent' : drawingFillColor,
+                }}
+              />
+              <span className="text-[11px] font-bold text-slate-700">Remplissage</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedFillPaletteId(undefined);
+                  setDrawingFillColor('none');
+                }}
+                className={`px-2 py-0.5 text-[10px] font-bold rounded-md border transition-all cursor-pointer ${
+                  drawingFillColor === 'none'
+                    ? 'bg-rose-100 text-rose-700 border-rose-200 font-black'
+                    : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'
                 }`}
-                style={{ backgroundColor: palItem.color }}
-                title={`${palItem.name || `Couleur #${idx + 1}`} (${palItem.color}) — Appuyez directement pour choisir/modifier la couleur`}
               >
-                <input
-                  type="color"
-                  value={validHex}
-                  onClick={() => {
-                    setSelectedFillPaletteId(palItem.id);
-                    setDrawingFillColor(palItem.color);
-                  }}
-                  onChange={(e) => {
-                    const nextHex = e.target.value;
-                    setSelectedFillPaletteId(palItem.id);
-                    setDrawingFillColor(nextHex);
-                    updateProjectPaletteColor(palItem.id, nextHex);
-                  }}
-                  className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
-                />
-              </label>
-            );
-          })}
-        </div>
+                Transparent
+              </button>
+              <input
+                type="color"
+                value={drawingFillColor.startsWith('#') ? drawingFillColor : '#6366f1'}
+                onChange={(e) => {
+                  const nextHex = e.target.value;
+                  setDrawingFillColor(nextHex);
+                  if (selectedFillPaletteId) {
+                    updateProjectPaletteColor(selectedFillPaletteId, nextHex);
+                  }
+                }}
+                className="w-5 h-5 rounded-md border border-slate-300 p-0 cursor-pointer overflow-hidden shadow-2xs shrink-0"
+                title="Modifier cette couleur"
+              />
+            </div>
+          </div>
 
-        <div className="flex items-center justify-between gap-2 px-2 py-1.5 bg-indigo-50/50 rounded-xl border border-indigo-100">
-          <span className="text-[10px] font-bold text-indigo-700 truncate">
-            {selectedFillPaletteId && drawingFillColor !== 'none'
-              ? `Modifier ${projectPalette.find((p) => p.id === selectedFillPaletteId)?.name || 'ce slot'} (partagé)`
-              : 'Remplissage personnalisé :'}
-          </span>
-          <input
-            type="color"
-            value={drawingFillColor.startsWith('#') ? drawingFillColor : '#6366f1'}
-            onChange={(e) => {
-              const nextHex = e.target.value;
-              setDrawingFillColor(nextHex);
-              if (selectedFillPaletteId) {
-                updateProjectPaletteColor(selectedFillPaletteId, nextHex);
-              }
-            }}
-            className="w-6 h-6 rounded-lg border border-slate-300 p-0 cursor-pointer overflow-hidden shadow-2xs shrink-0"
-            title="Modifier cette couleur de la palette pour tout le projet"
-          />
+          <div className="grid grid-cols-8 gap-1">
+            {projectPalette.map((palItem, idx) => {
+              const isSelectedSlot =
+                drawingFillColor !== 'none' &&
+                (selectedFillPaletteId === palItem.id ||
+                  (!selectedFillPaletteId && drawingFillColor.toLowerCase() === palItem.color.toLowerCase()));
+              const validHex =
+                palItem.color.startsWith('#') && palItem.color.length === 7
+                  ? palItem.color
+                  : palItem.color.length === 4
+                  ? `#${palItem.color[1]}${palItem.color[1]}${palItem.color[2]}${palItem.color[2]}${palItem.color[3]}${palItem.color[3]}`
+                  : '#6366f1';
+              return (
+                <label
+                  key={palItem.id}
+                  className={`w-6 h-6 rounded-lg border-2 transition-transform cursor-pointer shadow-2xs relative overflow-hidden flex items-center justify-center ${
+                    isSelectedSlot
+                      ? 'border-indigo-600 scale-110 ring-2 ring-indigo-300/50 z-10'
+                      : 'border-white hover:scale-105'
+                  }`}
+                  style={{ backgroundColor: palItem.color }}
+                  title={`${palItem.name || `Couleur #${idx + 1}`} (${palItem.color})`}
+                >
+                  <input
+                    type="color"
+                    value={validHex}
+                    onClick={() => {
+                      setSelectedFillPaletteId(palItem.id);
+                      setDrawingFillColor(palItem.color);
+                    }}
+                    onChange={(e) => {
+                      const nextHex = e.target.value;
+                      setSelectedFillPaletteId(palItem.id);
+                      setDrawingFillColor(nextHex);
+                      updateProjectPaletteColor(palItem.id, nextHex);
+                    }}
+                    className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                  />
+                </label>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Épaisseur du Trait */}
-      <div className="space-y-2">
+      {/* Épaisseur du Trait (Tailles rapides + Slider fin) */}
+      <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider">
-            4. Épaisseur du trait ({drawingStrokeWidth}px)
+            3. Épaisseur ({drawingStrokeWidth}px)
           </label>
         </div>
 
-        <div className="flex items-center gap-1.5 bg-slate-50 p-2 rounded-2xl border border-slate-200">
+        <div className="grid grid-cols-6 gap-1">
           {[2, 4, 8, 12, 20, 32].map((w) => (
             <button
               key={w}
               type="button"
               onClick={() => setDrawingStrokeWidth(w)}
-              className={`flex-1 py-1 text-xs font-mono font-bold rounded-xl border transition-all cursor-pointer ${
+              className={`py-1 text-[11px] font-mono font-bold rounded-lg border transition-all cursor-pointer ${
                 drawingStrokeWidth === w
                   ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
@@ -535,8 +593,16 @@ export function DrawingToolsPanel({
             </button>
           ))}
         </div>
-      </div>
 
+        <input
+          type="range"
+          min={2}
+          max={32}
+          value={drawingStrokeWidth}
+          onChange={(e) => setDrawingStrokeWidth(Number(e.target.value))}
+          className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+        />
+      </div>
     </div>
   );
 }

@@ -177,9 +177,9 @@ export default function App() {
         return;
       }
 
-      // Cmd/Ctrl + D : Dupliquer l'entité sélectionnée
+      // Cmd/Ctrl + D : Dupliquer l'entité sélectionnée (hors mode dessin de calque)
       if (mod && key === 'd') {
-        if (st.selectedEntityId) {
+        if (st.selectedEntityId && !st.selectedLayerId) {
           e.preventDefault();
           st.duplicateEntity(st.selectedEntityId);
         }

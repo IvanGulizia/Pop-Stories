@@ -1,3 +1,15 @@
+## [Phase 10.18] - 2026-11-14
+### Ajouté & Unifié
+- **Moteur Vectoriel & Mode Dessin Unifié (`utils/vectorDrawing.ts`, `utils/floodFill.ts`, `DrawingCanvas.tsx`, `DrawingToolsPanel.tsx`, `Scene.tsx`, `useSceneStore.ts`)** :
+  - Extraction des utilitaires géométriques et d'effacement (`erasePathsAtPoint`, `eraseWholeStrokesAtPoint`, `translatePath`, `resizeShapeToRect`) dans un module partagé avec support complet du nouvel outil `circle` et `line` dans les deux ateliers.
+  - Paramétrage des bornes du pot de peinture hybride (`applyBucketFill`, `floodFillRegion`) pour fonctionner autant en `200×200` (entités et anciens calques) qu'en espace monde sur les calques de décor/colliders.
+  - Harmonisation totale des 10 outils, barre supérieure *Annuler / Rétablir / Vider*, grille/snap, palettes simultanées Contour (`Sans trait`) & Remplissage (`Transparent`), et épaisseurs rapides `[2, 4, 8, 12, 20, 32]` entre états d'entité et calques de scène.
+  - Protection du raccourci `Cmd/Ctrl+D` lors de l'édition d'un calque pour dupliquer les tracés sélectionnés plutôt que l'entité parente, et snapshot Undo unique sur les déplacements, redimensionnements et traits de gomme continus.
+- **Unification Création / Édition d'Entités (`CreateEntityModal.tsx`, `FullScreenDrawingModal.tsx`, `useSceneStore.ts`)** :
+  - `CreateEntityModal` délègue désormais intégralement à `FullScreenDrawingModal` (`mode="create"`), garantissant exactement la même interface, la couleur noire par défaut et la sauvegarde directe des frames/FPS/mode de boucle dès la création.
+- **Timeline Easy • Frame par Frame (`FullScreenDrawingModal.tsx`)** :
+  - Nouveau dock de timeline ergonomique avec commandes de transport complètes, raccourcis `Alt+←` / `Alt+→`, présélections FPS (`4 / 8 / 12 / 24`), sélecteur segmenté (`Boucle`, `Aller-retour`, `1×`), bascule `Pelure`, actions rapides `Dupliquer` / `Vide` et barre de frames auto-défilante.
+
 ## [Phase 10.17] - 2026-11-14
 ### Ajouté
 - **Mini-Timeline Flipbook par État (`types/index.ts`, `DrawingCanvas.tsx`, `FullScreenDrawingModal.tsx`, `Inspector.tsx`, `CustomShape.tsx`)** : Ajout des frames d'animation (`frames`, `frameRate`, `animationLoop`), barre timeline complète dans l'atelier plein écran (*Aperçu Play/Pause*, *FPS*, *Boucle / Aller-retour / Une fois*, *Dupliquer*, *+ Vide*, réordonnancement, pelure d'oignon automatique de la frame précédente), préservation des outils lors du changement de frame via `frameSyncKey`, badge compteur sur les cartes d'états et lecture animée en Mode Play.

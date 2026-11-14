@@ -47,8 +47,21 @@ export interface VectorPath {
   type?: 'freehand' | 'polyline' | 'rectangle' | 'circle' | 'straight' | 'fill_bucket';
   points?: VectorPoint[];
   rect?: VectorRect;
+  circle?: { cx: number; cy: number; r: number };
   layerId?: string;
 }
+
+export type UnifiedDrawTool =
+  | 'select'
+  | 'pencil'
+  | 'line'
+  | 'polyline'
+  | 'rectangle'
+  | 'circle'
+  | 'lasso_fill'
+  | 'bucket'
+  | 'eraser_partial'
+  | 'eraser_stroke';
 
 export interface ProjectPaletteColor {
   id: string;

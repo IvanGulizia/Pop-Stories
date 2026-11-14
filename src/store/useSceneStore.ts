@@ -32,6 +32,9 @@ import {
   CustomParticlePreset,
   ColliderType,
   ColliderBounds,
+  UnifiedDrawTool,
+  AnimationFrame,
+  AnimationLoopMode,
 } from '../types';
 import { soundSynth } from '../utils/sound';
 import { getEntityWorldColliderBounds } from '../utils/collider';
@@ -207,16 +210,20 @@ interface SceneState {
   triggerKeyEvent: (keyName: string, phase?: 'down' | 'up') => void;
 
   // Direct scene canvas drawing tools state
-  drawingTool: 'pencil' | 'line' | 'rectangle' | 'circle' | 'bucket' | 'eraser_stroke' | 'eraser_partial' | 'select';
+  drawingTool: UnifiedDrawTool;
   drawingStrokeColor: string;
   drawingStrokeColorId?: string;
   drawingFillColor: string;
   drawingFillColorId?: string;
   drawingStrokeWidth: number;
-  setDrawingTool: (tool: 'pencil' | 'line' | 'rectangle' | 'circle' | 'bucket' | 'eraser_stroke' | 'eraser_partial' | 'select') => void;
+  drawingShowGrid: boolean;
+  drawingSnapToGrid: boolean;
+  setDrawingTool: (tool: UnifiedDrawTool) => void;
   setDrawingStrokeColor: (color: string, colorId?: string) => void;
   setDrawingFillColor: (color: string, colorId?: string) => void;
   setDrawingStrokeWidth: (width: number) => void;
+  setDrawingShowGrid: (show: boolean) => void;
+  setDrawingSnapToGrid: (snap: boolean) => void;
 
   updateSettings: (partial: Partial<AppSettings>) => void;
   setAspectRatio: (ratio: SceneAspectRatio) => void;
@@ -228,7 +235,7 @@ interface SceneState {
   addLayerToGroup: (groupId: string, name?: string) => string;
   deleteLayer: (layerId: string) => void;
   updateLayer: (layerId: string, partial: Partial<SceneLayer>) => void;
-  setLayerVectorPaths: (layerId: string, vectorPaths: VectorPath[]) => void;
+  setLayerVectorPaths: (layerId: string, vectorPaths: VectorPath[], skipHistory?: boolean) => void;
   selectLayer: (layerId: string | null) => void;
 
   // Z-Index and Layer Ordering
@@ -272,6 +279,9 @@ interface SceneState {
     tags?: string[];
     colliderType?: ColliderType;
     colliderBounds?: ColliderBounds;
+    frames?: AnimationFrame[];
+    frameRate?: number;
+    animationLoop?: AnimationLoopMode;
   }) => void;
   deleteCustomArchetype: (type: string) => void;
   spawnEntity: (params: {
@@ -975,6 +985,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   drawingFillColor: 'none',
   drawingFillColorId: undefined,
   drawingStrokeWidth: 6,
+  drawingShowGrid: false,
+  drawingSnapToGrid: false,
   setDrawingTool: (tool) => set({ drawingTool: tool }),
   setDrawingStrokeColor: (color, colorId) =>
     set((state) => ({
@@ -995,6 +1007,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           : state.projectPalette.find((p) => p.color.toLowerCase() === color.toLowerCase())?.id,
     })),
   setDrawingStrokeWidth: (width) => set({ drawingStrokeWidth: width }),
+  setDrawingShowGrid: (show) => set({ drawingShowGrid: show }),
+  setDrawingSnapToGrid: (snap) => set({ drawingSnapToGrid: snap }),
 
   projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
 
@@ -1215,8 +1229,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     }));
   },
 
-  setLayerVectorPaths: (layerId, vectorPaths) => {
-    get().pushSceneHistory();
+  setLayerVectorPaths: (layerId, vectorPaths, skipHistory = false) => {
+    if (!skipHistory) {
+      get().pushSceneHistory();
+    }
     set((state) => ({
       layerGroups: state.layerGroups.map((g) => ({
         ...g,
@@ -2244,7 +2260,21 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     });
   },
 
-  addCustomEntity: ({ name, type, icon, drawingDataUrl, vectorPaths, drawingLayers, color, tags, colliderType, colliderBounds }) => {
+  addCustomEntity: ({
+    name,
+    type,
+    icon,
+    drawingDataUrl,
+    vectorPaths,
+    drawingLayers,
+    color,
+    tags,
+    colliderType,
+    colliderBounds,
+    frames,
+    frameRate,
+    animationLoop,
+  }) => {
     const cleanName = (name && name.trim()) || 'Mon Dessin';
     const slug = cleanName.toLowerCase().replace(/[^a-z0-9]/gi, '_') || 'dessin';
     const uniqueType = type || `custom_${slug}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
@@ -2257,6 +2287,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       : undefined;
     const clonedColliderBounds = colliderBounds
       ? JSON.parse(JSON.stringify(colliderBounds))
+      : undefined;
+    const clonedFrames = frames && frames.length > 0
+      ? JSON.parse(JSON.stringify(frames))
       : undefined;
 
     const newEntity: Entity = {
@@ -2285,6 +2318,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           ...(clonedLayers ? { drawingLayers: JSON.parse(JSON.stringify(clonedLayers)) } : {}),
           ...(colliderType ? { colliderType } : {}),
           ...(clonedColliderBounds ? { colliderBounds: JSON.parse(JSON.stringify(clonedColliderBounds)) } : {}),
+          ...(clonedFrames ? { frames: clonedFrames } : {}),
+          ...(frameRate !== undefined ? { frameRate } : {}),
+          ...(animationLoop !== undefined ? { animationLoop } : {}),
         },
       },
     };
