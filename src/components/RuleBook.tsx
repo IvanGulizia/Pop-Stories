@@ -171,7 +171,8 @@ type ActiveModal =
   | null;
 
 interface WizardData {
-  step: 1 | 2 | 3 | 4; // 1: Sujet, 2: Event, 3: Cible, 4: Action
+  step: 1 | 2 | 3; // 1: Condition, 2: Objets (Sujet / Cible), 3: Action
+  objectPhase?: 'subject' | 'target';
   subjectSubStep?: 'choose_object' | 'choose_state';
   targetSubStep?: 'choose_object' | 'choose_state';
   actionSubStep?:
@@ -319,7 +320,6 @@ export function RuleBook() {
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
   const [activeWizard, setActiveWizard] = useState<WizardData | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
-  const [wizardEntryTab, setWizardEntryTab] = useState<'subject' | 'global_event'>('subject');
   const [particleDrawingTarget, setParticleDrawingTarget] = useState<{
     context: 'wizard' | 'modal';
     editingPreset?: CustomParticlePreset;
@@ -427,8 +427,20 @@ export function RuleBook() {
     return stateId;
   };
 
-  // Action badge renderer for compact view - matching left side condition visual language
-  const renderActionSummary = (act: RuleAction, trigger: RuleTrigger) => {
+  // Action badge renderer for compact view - supports 1-click jump to action or sub-step
+  const renderActionSummary = (act: RuleAction, trigger: RuleTrigger, rule?: DynamicRule, actIdx?: number) => {
+    const canJump = Boolean(rule && actIdx !== undefined);
+    const jumpMain = (e: React.MouseEvent) => {
+      if (!rule || actIdx === undefined) return;
+      e.stopPropagation();
+      openRuleActionModal(rule, act, actIdx, 'main');
+    };
+    const jumpSub = (e: React.MouseEvent, sub: Extract<NonNullable<ActiveModal>, { type: 'action' }>['subStep']) => {
+      if (!rule || actIdx === undefined) return;
+      e.stopPropagation();
+      openRuleActionModal(rule, act, actIdx, sub);
+    };
+
     if (act.type === 'change_state') {
       const targetType = act.targetMode === 'subject' || (!act.targetMode && !act.targetType)
         ? trigger.subjectType
@@ -442,16 +454,29 @@ export function RuleBook() {
           : act.targetMode === 'tag' && act.targetTag
           ? `#${act.targetTag}`
           : targetEntObj?.name || targetType || 'Objet';
+      const hasMultiStates = Object.keys(targetEntObj?.states || {}).length > 1;
 
       return (
-        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+        <div
+          role={canJump ? 'button' : undefined}
+          tabIndex={canJump ? 0 : undefined}
+          onClick={canJump ? jumpMain : undefined}
+          className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+            canJump ? 'hover:border-indigo-400 hover:bg-indigo-50/40 cursor-pointer transition-colors' : ''
+          }`}
+        >
           <div className="w-5 h-5 rounded-md bg-slate-50 border border-slate-200 flex items-center justify-center p-0.5 shrink-0 overflow-hidden">
             <EntityMiniPreview entity={targetEntObj} type={targetType} stateId={act.targetStateId} size={18} />
           </div>
           <span className="text-xs truncate">{targetLabel}</span>
-          <span className="text-[10px] text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded font-medium truncate">
+          <button
+            type="button"
+            onClick={(e) => jumpSub(e, hasMultiStates ? 'choose_state' : 'main')}
+            className="text-[10px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.2 rounded font-medium truncate cursor-pointer"
+            title="Changer l'état appliqué"
+          >
             ({humanStateName})
-          </span>
+          </button>
         </div>
       );
     }
@@ -476,14 +501,26 @@ export function RuleBook() {
       }
 
       return (
-        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+        <div
+          role={canJump ? 'button' : undefined}
+          tabIndex={canJump ? 0 : undefined}
+          onClick={canJump ? jumpMain : undefined}
+          className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+            canJump ? 'hover:border-purple-400 hover:bg-purple-50/40 cursor-pointer transition-colors' : ''
+          }`}
+        >
           <div className="w-5 h-5 rounded-md bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] shrink-0 font-black">
             🔄
           </div>
           <span className="text-xs truncate">{targetLabel}</span>
-          <span className="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.2 rounded font-medium truncate">
+          <button
+            type="button"
+            onClick={(e) => jumpSub(e, Object.keys(targetEntObj?.states || {}).length >= 2 ? 'choose_toggle_states' : 'choose_toggle_entity')}
+            className="text-[10px] text-purple-700 bg-purple-50 hover:bg-purple-100 px-1.5 py-0.2 rounded font-medium truncate cursor-pointer"
+            title="Configurer la bascule d'états"
+          >
             ({detail})
-          </span>
+          </button>
         </div>
       );
     }
@@ -497,7 +534,14 @@ export function RuleBook() {
           ? `#${act.targetTag}`
           : targetEntObj?.name || targetType || 'Objet';
       return (
-        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+        <div
+          role={canJump ? 'button' : undefined}
+          tabIndex={canJump ? 0 : undefined}
+          onClick={canJump ? jumpMain : undefined}
+          className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+            canJump ? 'hover:border-rose-400 hover:bg-rose-50/40 cursor-pointer transition-colors' : ''
+          }`}
+        >
           <div className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center text-[10px] shrink-0 font-black">
             💥
           </div>
@@ -528,14 +572,33 @@ export function RuleBook() {
           ? ` @${getEntityObj(act.spawnReferenceEntityType)?.name || act.spawnReferenceEntityType}`
           : '';
       return (
-        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+        <div
+          role={canJump ? 'button' : undefined}
+          tabIndex={canJump ? 0 : undefined}
+          onClick={canJump ? jumpMain : undefined}
+          className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+            canJump ? 'hover:border-emerald-400 hover:bg-emerald-50/40 cursor-pointer transition-colors' : ''
+          }`}
+        >
           <div className="w-5 h-5 rounded-md bg-slate-50 border border-slate-200 flex items-center justify-center p-0.5 shrink-0 overflow-hidden">
             <EntityMiniPreview entity={spawnEntObj} type={spawnType} stateId={act.spawnInitialStateId} size={18} />
           </div>
-          <span className="text-xs truncate">{spawnLabel}</span>
-          <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded font-medium truncate">
+          <button
+            type="button"
+            onClick={(e) => jumpSub(e, 'choose_spawn_entity')}
+            className="text-xs truncate hover:underline cursor-pointer"
+            title="Changer l'objet créé"
+          >
+            {spawnLabel}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => jumpSub(e, 'choose_spawn_location')}
+            className="text-[10px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.2 rounded font-medium truncate cursor-pointer"
+            title="Régler l'état, l'emplacement et la taille"
+          >
             (Créer - {humanStateName}{tagsBadge}{refBadge})
-          </span>
+          </button>
         </div>
       );
     }
@@ -559,7 +622,14 @@ export function RuleBook() {
             : customParticles.find((p) => p.id === selectedCustomIds[0])?.name || 'Dessin'
           : `${act.particleCount ?? 18}x`;
       return (
-        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+        <div
+          role={canJump ? 'button' : undefined}
+          tabIndex={canJump ? 0 : undefined}
+          onClick={canJump ? (e) => jumpSub(e, 'choose_particles') : undefined}
+          className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+            canJump ? 'hover:border-amber-400 hover:bg-amber-50/40 cursor-pointer transition-colors' : ''
+          }`}
+        >
           <div className="w-5 h-5 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center text-[10px] shrink-0 font-black">
             ✨
           </div>
@@ -594,7 +664,14 @@ export function RuleBook() {
           ? entities[act.parentEntityId]?.name || 'Entité'
           : getEntityObj(act.parentEntityType)?.name || 'Parent';
       return (
-        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+        <div
+          role={canJump ? 'button' : undefined}
+          tabIndex={canJump ? 0 : undefined}
+          onClick={canJump ? (e) => jumpSub(e, 'choose_attach_parent') : undefined}
+          className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+            canJump ? 'hover:border-indigo-400 hover:bg-indigo-50/40 cursor-pointer transition-colors' : ''
+          }`}
+        >
           <div className="w-5 h-5 rounded-md bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px] shrink-0 font-black">
             🔗
           </div>
@@ -617,7 +694,14 @@ export function RuleBook() {
           ? `#${act.targetTag}`
           : getEntityObj(act.targetType)?.name || 'Objet';
       return (
-        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+        <div
+          role={canJump ? 'button' : undefined}
+          tabIndex={canJump ? 0 : undefined}
+          onClick={canJump ? (e) => jumpSub(e, 'choose_detach_parent') : undefined}
+          className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+            canJump ? 'hover:border-rose-400 hover:bg-rose-50/40 cursor-pointer transition-colors' : ''
+          }`}
+        >
           <div className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center text-[10px] shrink-0 font-black">
             ✂️
           </div>
@@ -657,7 +741,14 @@ export function RuleBook() {
           ? '↓'
           : '→';
       return (
-        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+        <div
+          role={canJump ? 'button' : undefined}
+          tabIndex={canJump ? 0 : undefined}
+          onClick={canJump ? (e) => jumpSub(e, 'choose_move_entity') : undefined}
+          className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+            canJump ? 'hover:border-sky-400 hover:bg-sky-50/40 cursor-pointer transition-colors' : ''
+          }`}
+        >
           <div className="w-5 h-5 rounded-md bg-sky-100 text-sky-700 flex items-center justify-center text-[10px] shrink-0 font-black">
             🏃
           </div>
@@ -673,7 +764,14 @@ export function RuleBook() {
         ? (customSounds.find((s) => s.id === act.customSoundId)?.name || 'Audio')
         : (act.soundType || 'Audio');
       return (
-        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+        <div
+          role={canJump ? 'button' : undefined}
+          tabIndex={canJump ? 0 : undefined}
+          onClick={canJump ? (e) => jumpSub(e, 'choose_sound') : undefined}
+          className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+            canJump ? 'hover:border-purple-400 hover:bg-purple-50/40 cursor-pointer transition-colors' : ''
+          }`}
+        >
           <div className="w-5 h-5 rounded-md bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] shrink-0 font-black">
             🎵
           </div>
@@ -686,7 +784,14 @@ export function RuleBook() {
     }
     if (act.type === 'add_score') {
       return (
-        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+        <div
+          role={canJump ? 'button' : undefined}
+          tabIndex={canJump ? 0 : undefined}
+          onClick={canJump ? jumpMain : undefined}
+          className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+            canJump ? 'hover:border-amber-400 hover:bg-amber-50/40 cursor-pointer transition-colors' : ''
+          }`}
+        >
           <div className="w-5 h-5 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center text-[10px] shrink-0 font-black">
             🏆
           </div>
@@ -699,7 +804,14 @@ export function RuleBook() {
     }
     if (act.type === 'delay') {
       return (
-        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+        <div
+          role={canJump ? 'button' : undefined}
+          tabIndex={canJump ? 0 : undefined}
+          onClick={canJump ? (e) => jumpSub(e, 'choose_delay_duration') : undefined}
+          className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+            canJump ? 'hover:border-cyan-400 hover:bg-cyan-50/40 cursor-pointer transition-colors' : ''
+          }`}
+        >
           <div className="w-5 h-5 rounded-md bg-cyan-100 text-cyan-700 flex items-center justify-center text-[10px] shrink-0 font-black">
             ⏱️
           </div>
@@ -711,7 +823,14 @@ export function RuleBook() {
       );
     }
     return (
-      <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+      <div
+        role={canJump ? 'button' : undefined}
+        tabIndex={canJump ? 0 : undefined}
+        onClick={canJump ? jumpMain : undefined}
+        className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+          canJump ? 'hover:border-indigo-400 cursor-pointer transition-colors' : ''
+        }`}
+      >
         <span className="text-xs">⚡ {act.type}</span>
       </div>
     );
@@ -741,14 +860,161 @@ export function RuleBook() {
   // Check if filters should be displayed
   const areFiltersVisible = settings?.showRuleFilters || showFiltersManual;
 
-  // Start guided sequential wizard (Sujet > Event > Cible > Action)
+  // Helpers d'ouverture directe en 1 clic vers les modales d'édition de règle
+  const openRuleSubjectModal = (
+    rule: DynamicRule,
+    subStep: 'choose_object' | 'choose_state' = 'choose_object'
+  ) => {
+    const mode = rule.trigger.subjectMode || 'type';
+    const inst = mode === 'instance' && rule.trigger.subjectId ? entities[rule.trigger.subjectId] : undefined;
+    const type = inst?.type || rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
+    setActiveModal({
+      type: 'subject',
+      ruleId: rule.id,
+      subStep,
+      selectionMode: mode,
+      selectedEntityType: type,
+      selectedEntityId: rule.trigger.subjectId,
+      tagInput: rule.trigger.subjectTag || '',
+    });
+  };
+
+  const openRuleTargetModal = (
+    rule: DynamicRule,
+    subStep: 'choose_object' | 'choose_state' = 'choose_object'
+  ) => {
+    const mode = rule.trigger.targetMode || 'type';
+    const inst = mode === 'instance' && rule.trigger.targetId ? entities[rule.trigger.targetId] : undefined;
+    const type = inst?.type || rule.trigger.targetType || availableEntityOptions[1]?.type || availableEntityOptions[0]?.type || 'plant';
+    setActiveModal({
+      type: 'target',
+      ruleId: rule.id,
+      subStep,
+      selectionMode: mode,
+      selectedEntityType: type,
+      selectedEntityId: rule.trigger.targetId,
+      tagInput: rule.trigger.targetTag || '',
+    });
+  };
+
+  const openRuleEventModal = (
+    rule: DynamicRule,
+    subStep: 'main' | 'key_picker' | 'config_event_params' = 'main'
+  ) => {
+    setActiveModal({
+      type: 'event',
+      ruleId: rule.id,
+      subStep,
+      triggerType: rule.trigger.type,
+      triggerPhase: rule.trigger.phase,
+      timerInterval: rule.trigger.timerInterval ?? 2,
+      timerType: rule.trigger.timerType ?? 'repeat',
+      keyName: rule.trigger.keyName ?? 'Space',
+      proximityDistance: rule.trigger.proximityDistance ?? 80,
+      boundaryEdge: rule.trigger.boundaryEdge ?? 'any',
+      variableName: rule.trigger.variableName ?? 'score',
+      variableOperator: rule.trigger.variableOperator ?? '>=',
+      variableValue: rule.trigger.variableValue ?? 5,
+      autoRevert: rule.trigger.autoRevert ?? false,
+      collisionExitMargin: rule.trigger.collisionExitMargin ?? 10,
+      collisionTriggerOnce: rule.trigger.collisionTriggerOnce ?? false,
+    });
+  };
+
+  const openRuleActionModal = (
+    rule: DynamicRule,
+    act: RuleAction,
+    actIdx: number,
+    overrideSubStep?: Extract<NonNullable<ActiveModal>, { type: 'action' }>['subStep']
+  ) => {
+    const isCollisionOrProx = rule.trigger.type === 'collision' || rule.trigger.type === 'proximity';
+    const subType = rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
+    const tarType = rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
+    const resolvedTargetType =
+      act.targetMode === 'subject'
+        ? subType
+        : act.targetMode === 'target'
+        ? tarType
+        : act.targetType || subType;
+
+    const defaultSubStep: Extract<NonNullable<ActiveModal>, { type: 'action' }>['subStep'] =
+      act.type === 'delay'
+        ? 'choose_delay_duration'
+        : act.type === 'emit_particles'
+        ? 'choose_particles'
+        : act.type === 'attach_to_parent'
+        ? 'choose_attach_parent'
+        : act.type === 'detach_parent'
+        ? 'choose_detach_parent'
+        : act.type === 'move_entity'
+        ? 'choose_move_entity'
+        : 'main';
+
+    setActiveModal({
+      type: 'action',
+      ruleId: rule.id,
+      actionIndex: actIdx,
+      actionId: act.id,
+      actionType: act.type,
+      targetMode: act.targetMode || (isCollisionOrProx ? 'target' : 'subject'),
+      selectedTargetType: resolvedTargetType,
+      targetTag: act.targetTag,
+      pendingSpawnType: act.spawnEntityType || availableEntityOptions[0]?.type,
+      pendingSpawnInitialStateId: act.spawnInitialStateId,
+      toggleStateA: act.toggleStateAId,
+      toggleStateB: act.toggleStateBId,
+      toggleTargetStateId: act.toggleTargetStateId,
+      toggleMode: act.toggleMode,
+      subStep: overrideSubStep || defaultSubStep,
+      delayDuration: act.delayDuration || 1,
+      particleOriginMode: act.particleOriginMode,
+      particleOriginEntityId: act.particleOriginEntityId,
+      particleOriginEntityType: act.particleOriginEntityType,
+      particleOriginTag: act.particleOriginTag,
+      particleCount: act.particleCount,
+      particleColor: act.particleColor,
+      particleColor2: act.particleColor2,
+      particleShape: act.particleShape,
+      customParticleId: act.customParticleId,
+      customParticleIds: act.customParticleIds,
+      customParticleMode: act.customParticleMode,
+      useParticleTint: act.useParticleTint,
+      particleSpeed: act.particleSpeed,
+      particleSize: act.particleSize,
+      particleLifetime: act.particleLifetime,
+      particleGravity: act.particleGravity,
+      particleSpread: act.particleSpread,
+      particleAngle: act.particleAngle,
+      parentChildMode: act.targetMode,
+      parentChildType: act.targetType,
+      parentChildTag: act.targetTag,
+      parentTargetMode: act.parentTargetMode,
+      parentEntityId: act.parentEntityId,
+      parentEntityType: act.parentEntityType,
+      parentEntityTag: act.parentEntityTag,
+      parentOffset: act.parentOffset,
+      moveDistance: act.moveDistance ?? 40,
+      moveDirectionMode: act.moveDirectionMode || 'cardinal',
+      moveCardinal: act.moveCardinal || 'right',
+      moveAngle: act.moveAngle ?? 0,
+      moveApplyMode: act.moveApplyMode || 'instant',
+      moveTargetMode: act.moveTargetMode || (isCollisionOrProx ? 'target' : 'entity'),
+      moveTargetEntityId: act.moveTargetEntityId,
+      moveTargetEntityType: act.moveTargetEntityType,
+      moveTargetTag: act.moveTargetTag,
+    });
+  };
+
+  // Start guided sequential wizard (1. Condition > 2. Objets > 3. Action)
   const startCreationWizard = () => {
     const defaultSub = availableEntityOptions[0]?.type || 'apple';
     const defaultTar = availableEntityOptions[1]?.type || availableEntityOptions[0]?.type || 'plant';
 
     setActiveWizard({
       step: 1,
+      objectPhase: 'subject',
       subjectSubStep: 'choose_object',
+      targetSubStep: 'choose_object',
       name: `Règle #${rules.length + 1}`,
       subjectMode: 'type',
       subjectType: defaultSub,
@@ -1571,70 +1837,149 @@ export function RuleBook() {
                   </div>
                 </div>
 
-                {/* 2. Compact View when Collapsed (Accordéon fermé) */}
+                {/* 2. Compact View when Collapsed (Accordéon fermé) — Ordre: QUAND [Condition] -> [Objets] -> [Actions] */}
                 {isCollapsed ? (
                   <div
                     onClick={() => toggleCollapseRule(rule.id)}
                     className="flex items-center justify-between gap-3 px-3 py-2 bg-slate-50 hover:bg-indigo-50/40 rounded-2xl border border-slate-200/80 cursor-pointer transition-all"
                   >
                     <div className="flex items-center gap-2 flex-wrap text-xs">
-                      {isGlobalTrigger ? (
-                        <div className="flex items-center gap-1.5 font-extrabold text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-2 py-0.5 rounded-xl">
-                          <span>⚡ Système / Global</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                          {subjectMode === 'any' ? (
-                            <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-200 font-black">
-                              🌐 {subjectDisplayLabel}
-                            </span>
-                          ) : subjectMode === 'tag' ? (
-                            <span className="px-2 py-0.5 rounded-lg bg-purple-100 text-purple-800 border border-purple-200 font-black">
-                              🏷️ {subjectDisplayLabel}
-                            </span>
-                          ) : (
-                            <>
-                              <div className="w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center p-0.5 shadow-2xs">
-                                <EntityMiniPreview entity={subjectEntity} type={subjectType} stateId={rule.trigger.subjectStateId} size={20} />
-                              </div>
-                              <span>{subjectDisplayLabel}</span>
-                            </>
-                          )}
-                          {rule.trigger.subjectStateId && subjectMode !== 'any' && (
-                            <span className="text-[10px] text-indigo-700 bg-indigo-50 px-1 py-0.2 rounded font-medium">({subjectStateName})</span>
-                          )}
-                        </div>
-                      )}
-
-                      <span className="text-slate-400">➔</span>
-
-                      <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900 text-white font-bold text-[11px]">
-                        <span>{eventIcon}</span>
-                        <span>{eventName}</span>
+                      {/* 1. QUAND [Condition] */}
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                        QUAND
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openRuleEventModal(rule, 'main');
+                          }}
+                          className="flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-slate-900 hover:bg-indigo-700 text-white font-bold text-[11px] transition-colors cursor-pointer"
+                          title="Changer la condition déclencheur"
+                        >
+                          <span>{eventIcon}</span>
+                          <span>{eventName}</span>
+                        </button>
+                        {['timer', 'keyboard', 'proximity', 'boundary', 'variable', 'collision'].includes(rule.trigger.type) && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openRuleEventModal(
+                                rule,
+                                rule.trigger.type === 'keyboard' ? 'key_picker' : 'config_event_params'
+                              );
+                            }}
+                            className="px-1.5 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300/80 font-bold text-[10px] transition-colors cursor-pointer"
+                            title="Configurer les paramètres de la condition"
+                          >
+                            ⚙️
+                          </button>
+                        )}
                       </div>
 
-                      {isCollision && (
-                        <>
-                          <span className="text-slate-400">➔</span>
-                          <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                            {targetMode === 'any' ? (
+                      <span className="text-slate-400 font-bold">➔</span>
+
+                      {/* 2. [Objets : Sujet / Cible] */}
+                      {isGlobalTrigger ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openRuleEventModal(rule, 'main');
+                          }}
+                          className="flex items-center gap-1.5 font-extrabold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 px-2 py-0.5 rounded-xl transition-colors cursor-pointer"
+                          title="Événement global (aucun objet requis)"
+                        >
+                          <span>⚡ Système / Global</span>
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openRuleSubjectModal(rule, 'choose_object');
+                            }}
+                            className="flex items-center gap-1.5 hover:bg-white rounded-lg px-1 py-0.5 transition-colors cursor-pointer"
+                            title="Changer le Sujet"
+                          >
+                            {subjectMode === 'any' ? (
                               <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-200 font-black">
-                                🌐 {targetDisplayLabel}
+                                🌐 {subjectDisplayLabel}
                               </span>
-                            ) : targetMode === 'tag' ? (
+                            ) : subjectMode === 'tag' ? (
                               <span className="px-2 py-0.5 rounded-lg bg-purple-100 text-purple-800 border border-purple-200 font-black">
-                                🏷️ {targetDisplayLabel}
+                                🏷️ {subjectDisplayLabel}
                               </span>
                             ) : (
                               <>
                                 <div className="w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center p-0.5 shadow-2xs">
-                                  <EntityMiniPreview entity={targetEntity} type={targetType} stateId={rule.trigger.targetStateId} size={20} />
+                                  <EntityMiniPreview entity={subjectEntity} type={subjectType} stateId={rule.trigger.subjectStateId} size={20} />
                                 </div>
-                                <span>{targetDisplayLabel}</span>
+                                <span>{subjectDisplayLabel}</span>
                               </>
                             )}
-                            {rule.trigger.targetStateId && targetMode !== 'any' && (
-                              <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded font-medium">({targetStateName})</span>
+                          </button>
+                          {rule.trigger.subjectStateId && subjectMode !== 'any' && subjectMode !== 'tag' && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openRuleSubjectModal(rule, 'choose_state');
+                              }}
+                              className="text-[10px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded font-medium cursor-pointer"
+                              title="Changer l'état requis du Sujet"
+                            >
+                              ({subjectStateName})
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {isCollision && (
+                        <>
+                          <span className="text-slate-400 font-bold">↔</span>
+                          <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openRuleTargetModal(rule, 'choose_object');
+                              }}
+                              className="flex items-center gap-1.5 hover:bg-white rounded-lg px-1 py-0.5 transition-colors cursor-pointer"
+                              title="Changer la Cible"
+                            >
+                              {targetMode === 'any' ? (
+                                <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-200 font-black">
+                                  🌐 {targetDisplayLabel}
+                                </span>
+                              ) : targetMode === 'tag' ? (
+                                <span className="px-2 py-0.5 rounded-lg bg-purple-100 text-purple-800 border border-purple-200 font-black">
+                                  🏷️ {targetDisplayLabel}
+                                </span>
+                              ) : (
+                                <>
+                                  <div className="w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center p-0.5 shadow-2xs">
+                                    <EntityMiniPreview entity={targetEntity} type={targetType} stateId={rule.trigger.targetStateId} size={20} />
+                                  </div>
+                                  <span>{targetDisplayLabel}</span>
+                                </>
+                              )}
+                            </button>
+                            {rule.trigger.targetStateId && targetMode !== 'any' && targetMode !== 'tag' && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openRuleTargetModal(rule, 'choose_state');
+                                }}
+                                className="text-[10px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded font-medium cursor-pointer"
+                                title="Changer l'état requis de la Cible"
+                              >
+                                ({targetStateName})
+                              </button>
                             )}
                           </div>
                         </>
@@ -1642,11 +1987,11 @@ export function RuleBook() {
 
                       <span className="text-indigo-500 font-bold ml-1">➔</span>
 
-                      {/* Visuel complet des actions en mode compact */}
+                      {/* 3. Visuel complet et cliquable en 1 clic des actions en mode compact */}
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        {rule.actions.map((act) => (
+                        {rule.actions.map((act, actIdx) => (
                           <React.Fragment key={act.id}>
-                            {renderActionSummary(act, rule.trigger)}
+                            {renderActionSummary(act, rule.trigger, rule, actIdx)}
                           </React.Fragment>
                         ))}
                         {rule.trigger.autoRevert && (
@@ -1660,156 +2005,45 @@ export function RuleBook() {
                     <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 shrink-0" />
                   </div>
                 ) : (
-                  /* 3. Horizontal Storyboard Flow with Large Cards in One Line (Déplié) */
+                  /* 3. Horizontal Storyboard Flow (Déplié) — Ordre: QUAND [Condition] -> [Objets] -> [Actions] */
                   <div className="flex items-center gap-3 overflow-x-auto pb-1 pt-1 scrollbar-thin">
-                    {/* --- DÉCLENCHEUR SECTION --- */}
+                    {/* --- SECTION QUAND & OBJETS --- */}
                     <div className="flex items-center gap-2.5 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/90 shrink-0">
-                      {/* CASE 1: SUJET (Large Card) */}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          !isGlobalTrigger &&
-                          setActiveModal({
-                            type: 'subject',
-                            ruleId: rule.id,
-                            subStep: 'choose_object',
-                          })
-                        }
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          if (!isGlobalTrigger) setDragOverSlot(subjectSlotKey);
+                      {/* CASE 1: CONDITION (Large Card) */}
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => openRuleEventModal(rule, 'main')}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            openRuleEventModal(rule, 'main');
+                          }
                         }}
-                        onDragLeave={() => setDragOverSlot(null)}
-                        onDrop={(e) => !isGlobalTrigger && handleDropOnSlot(e, rule.id, 'subject')}
-                        className={`w-32 h-36 bg-white border rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all text-center group ${
-                          isGlobalTrigger
-                            ? 'border-indigo-200 bg-indigo-50/20 cursor-default'
-                            : dragOverSlot === subjectSlotKey
-                            ? 'border-indigo-500 ring-4 ring-indigo-300/50 bg-indigo-50/40 scale-105 cursor-pointer'
-                            : 'border-slate-200 hover:border-slate-400 cursor-pointer'
-                        }`}
-                        title={isGlobalTrigger ? 'Événement Global / Système' : "Cliquer pour changer l'objet ou son état requis"}
+                        className="w-36 h-36 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group"
+                        title="Cliquer pour changer le type de condition"
                       >
-                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600">
-                          Sujet
+                        <div className="flex items-center justify-between w-full">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                            1. Quand
+                          </span>
+                          {['timer', 'keyboard', 'proximity', 'boundary', 'variable', 'collision'].includes(rule.trigger.type) && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openRuleEventModal(
+                                  rule,
+                                  rule.trigger.type === 'keyboard' ? 'key_picker' : 'config_event_params'
+                                );
+                              }}
+                              className="text-[9px] font-bold bg-white/10 hover:bg-amber-400 hover:text-slate-900 text-amber-300 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+                              title="Ouvrir les réglages de cette condition"
+                            >
+                              ⚙️
+                            </button>
+                          )}
                         </div>
-
-                        {isGlobalTrigger ? (
-                          <>
-                            <div className="w-14 h-14 rounded-2xl bg-indigo-100/90 text-indigo-700 border border-indigo-200 flex items-center justify-center text-2xl shadow-inner font-black">
-                              ⚡
-                            </div>
-                            <div className="w-full">
-                              <div className="text-xs font-black text-indigo-900 truncate">
-                                Système
-                              </div>
-                              <div className="text-[9px] text-indigo-600 bg-indigo-50 border border-indigo-200/60 px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5">
-                                Événement Global
-                              </div>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            {subjectMode === 'any' ? (
-                              <div className="w-14 h-14 rounded-xl bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
-                                🌐
-                              </div>
-                            ) : subjectMode === 'tag' ? (
-                              <div className="w-14 h-14 rounded-xl bg-purple-100 text-purple-700 border border-purple-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
-                                🏷️
-                              </div>
-                            ) : (
-                              <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
-                                <EntityMiniPreview
-                                  entity={subjectEntity}
-                                  type={subjectType}
-                                  stateId={rule.trigger.subjectStateId}
-                                  size={48}
-                                />
-                              </div>
-                            )}
-
-                            <div className="w-full">
-                              <div className="text-xs font-bold text-slate-800 truncate">
-                                {subjectDisplayLabel}
-                              </div>
-                              <div
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (subjectMode === 'any' || subjectMode === 'tag') {
-                                    setActiveModal({
-                                      type: 'subject',
-                                      ruleId: rule.id,
-                                      subStep: 'choose_object',
-                                      selectionMode: subjectMode,
-                                      tagInput: rule.trigger.subjectTag || '',
-                                    });
-                                    return;
-                                  }
-                                  setActiveModal({
-                                    type: 'subject',
-                                    ruleId: rule.id,
-                                    subStep: 'choose_state',
-                                    selectionMode: subjectMode,
-                                    selectedEntityType: subjectType,
-                                    selectedEntityId: rule.trigger.subjectId,
-                                  });
-                                }}
-                                className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer border ${
-                                  subjectMode === 'any'
-                                    ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200/70'
-                                    : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-indigo-200/60'
-                                }`}
-                                title={
-                                  subjectMode === 'any'
-                                    ? 'Cliquer pour restreindre à un objet ou tag'
-                                    : subjectMode === 'tag'
-                                    ? 'Cliquer pour modifier le tag'
-                                    : "Cliquer pour changer l'état requis"
-                                }
-                              >
-                                {subjectMode === 'any'
-                                  ? 'N\'importe quel objet'
-                                  : subjectMode === 'tag'
-                                  ? 'Filtre #Tag'
-                                  : subjectMode === 'instance'
-                                  ? `Instance • ${subjectStateName}`
-                                  : subjectStateName}
-                              </div>
-                            </div>
-                          </>
-                        )}
-                      </button>
-
-                      {/* CASE 2: ÉVÉNEMENT (Large Card) */}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setActiveModal({
-                            type: 'event',
-                            ruleId: rule.id,
-                            subStep: 'main',
-                            triggerType: rule.trigger.type,
-                            triggerPhase: rule.trigger.phase,
-                            timerInterval: rule.trigger.timerInterval ?? 2,
-                            timerType: rule.trigger.timerType ?? 'repeat',
-                            keyName: rule.trigger.keyName ?? 'Space',
-                            proximityDistance: rule.trigger.proximityDistance ?? 80,
-                            boundaryEdge: rule.trigger.boundaryEdge ?? 'any',
-                            variableName: rule.trigger.variableName ?? 'score',
-                            variableOperator: rule.trigger.variableOperator ?? '>=',
-                            variableValue: rule.trigger.variableValue ?? 5,
-                            autoRevert: rule.trigger.autoRevert ?? false,
-                            collisionExitMargin: rule.trigger.collisionExitMargin ?? 10,
-                            collisionTriggerOnce: rule.trigger.collisionTriggerOnce ?? false,
-                          })
-                        }
-                        className="w-32 h-36 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group"
-                        title="Cliquer pour changer le type d'événement"
-                      >
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                          Événement
-                        </span>
                         <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center text-2xl shadow-inner group-hover:scale-110 transition-transform">
                           {eventIcon}
                         </div>
@@ -1817,7 +2051,7 @@ export function RuleBook() {
                           <div className="text-xs font-black uppercase tracking-tight text-amber-300 truncate">
                             {eventName}
                           </div>
-                          {/* Contrôles interactifs inline pour modifier les valeurs de conditions (Minuteur, Touche, Proximité, Score, Bords) */}
+                          {/* Contrôles interactifs inline pour modifier les valeurs de conditions */}
                           {rule.trigger.type === 'timer' && (
                             <div className="mt-1 flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
                               <input
@@ -1832,11 +2066,11 @@ export function RuleBook() {
                             </div>
                           )}
                           {rule.trigger.type === 'keyboard' && (
-                            <div className="mt-1" onClick={(e) => e.stopPropagation()}>
+                            <div className="mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                               <select
                                 value={rule.trigger.keyName || 'Space'}
                                 onChange={(e) => updateRule(rule.id, { trigger: { ...rule.trigger, keyName: e.target.value } })}
-                                className="text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none cursor-pointer w-full text-center"
+                                className="text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none cursor-pointer flex-1 text-center"
                               >
                                 <option value="Space">Espace</option>
                                 <option value="ArrowUp">↑ Haut</option>
@@ -1946,22 +2180,124 @@ export function RuleBook() {
                             </div>
                           )}
                         </div>
-                      </button>
+                      </div>
 
-                      {/* CASE 3: CIBLE (Seulement si Collision) */}
-                      {isCollision && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setActiveModal({
-                              type: 'target',
-                              ruleId: rule.id,
-                              subStep: 'choose_object',
-                              selectionMode: targetMode,
-                              selectedEntityId: rule.trigger.targetId,
-                              tagInput: rule.trigger.targetTag || '',
-                            })
+                      {/* CASE 2: SUJET (Large Card) */}
+                      <div
+                        role={isGlobalTrigger ? undefined : 'button'}
+                        tabIndex={isGlobalTrigger ? undefined : 0}
+                        onClick={() => !isGlobalTrigger && openRuleSubjectModal(rule, 'choose_object')}
+                        onKeyDown={(e) => {
+                          if (!isGlobalTrigger && (e.key === 'Enter' || e.key === ' ')) {
+                            e.preventDefault();
+                            openRuleSubjectModal(rule, 'choose_object');
                           }
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          if (!isGlobalTrigger) setDragOverSlot(subjectSlotKey);
+                        }}
+                        onDragLeave={() => setDragOverSlot(null)}
+                        onDrop={(e) => !isGlobalTrigger && handleDropOnSlot(e, rule.id, 'subject')}
+                        className={`w-32 h-36 bg-white border rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all text-center group ${
+                          isGlobalTrigger
+                            ? 'border-indigo-200 bg-indigo-50/20 cursor-default'
+                            : dragOverSlot === subjectSlotKey
+                            ? 'border-indigo-500 ring-4 ring-indigo-300/50 bg-indigo-50/40 scale-105 cursor-pointer'
+                            : 'border-slate-200 hover:border-slate-400 cursor-pointer'
+                        }`}
+                        title={isGlobalTrigger ? 'Événement Global / Système' : "Cliquer pour changer l'objet ou son état requis"}
+                      >
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600">
+                          {isGlobalTrigger ? '2. Portée' : '2. Sujet'}
+                        </div>
+
+                        {isGlobalTrigger ? (
+                          <>
+                            <div className="w-14 h-14 rounded-2xl bg-indigo-100/90 text-indigo-700 border border-indigo-200 flex items-center justify-center text-2xl shadow-inner font-black">
+                              ⚡
+                            </div>
+                            <div className="w-full">
+                              <div className="text-xs font-black text-indigo-900 truncate">
+                                Système
+                              </div>
+                              <div className="text-[9px] text-indigo-600 bg-indigo-50 border border-indigo-200/60 px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5">
+                                Événement Global
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            {subjectMode === 'any' ? (
+                              <div className="w-14 h-14 rounded-xl bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                🌐
+                              </div>
+                            ) : subjectMode === 'tag' ? (
+                              <div className="w-14 h-14 rounded-xl bg-purple-100 text-purple-700 border border-purple-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                🏷️
+                              </div>
+                            ) : (
+                              <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
+                                <EntityMiniPreview
+                                  entity={subjectEntity}
+                                  type={subjectType}
+                                  stateId={rule.trigger.subjectStateId}
+                                  size={48}
+                                />
+                              </div>
+                            )}
+
+                            <div className="w-full">
+                              <div className="text-xs font-bold text-slate-800 truncate">
+                                {subjectDisplayLabel}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openRuleSubjectModal(
+                                    rule,
+                                    subjectMode === 'any' || subjectMode === 'tag' ? 'choose_object' : 'choose_state'
+                                  );
+                                }}
+                                className={`w-full text-[9px] px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer border ${
+                                  subjectMode === 'any'
+                                    ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200/70'
+                                    : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-indigo-200/60'
+                                }`}
+                                title={
+                                  subjectMode === 'any'
+                                    ? 'Cliquer pour restreindre à un objet ou tag'
+                                    : subjectMode === 'tag'
+                                    ? 'Cliquer pour modifier le tag'
+                                    : "Cliquer pour changer l'état requis"
+                                }
+                              >
+                                {subjectMode === 'any'
+                                  ? 'N\'importe quel objet'
+                                  : subjectMode === 'tag'
+                                  ? 'Filtre #Tag'
+                                  : subjectMode === 'instance'
+                                  ? `Instance • ${subjectStateName}`
+                                  : subjectStateName}
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      {/* CASE 3: CIBLE (Seulement si Collision ou Proximité) */}
+                      {isCollision && (
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openRuleTargetModal(rule, 'choose_object')}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              openRuleTargetModal(rule, 'choose_object');
+                            }
+                          }}
                           onDragOver={(e) => {
                             e.preventDefault();
                             setDragOverSlot(targetSlotKey);
@@ -1976,7 +2312,7 @@ export function RuleBook() {
                           title="Cliquer pour changer la cible, son tag ou son état requis"
                         >
                           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600">
-                            Cible touchée
+                            Cible
                           </div>
 
                           {targetMode === 'any' ? (
@@ -2002,29 +2338,16 @@ export function RuleBook() {
                             <div className="text-xs font-bold text-slate-800 truncate">
                               {targetDisplayLabel}
                             </div>
-                            <div
+                            <button
+                              type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (targetMode === 'any' || targetMode === 'tag') {
-                                  setActiveModal({
-                                    type: 'target',
-                                    ruleId: rule.id,
-                                    subStep: 'choose_object',
-                                    selectionMode: targetMode,
-                                    tagInput: rule.trigger.targetTag || '',
-                                  });
-                                  return;
-                                }
-                                setActiveModal({
-                                  type: 'target',
-                                  ruleId: rule.id,
-                                  subStep: 'choose_state',
-                                  selectionMode: targetMode,
-                                  selectedEntityType: targetType,
-                                  selectedEntityId: rule.trigger.targetId,
-                                });
+                                openRuleTargetModal(
+                                  rule,
+                                  targetMode === 'any' || targetMode === 'tag' ? 'choose_object' : 'choose_state'
+                                );
                               }}
-                              className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer border ${
+                              className={`w-full text-[9px] px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer border ${
                                 targetMode === 'any'
                                   ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200/70'
                                   : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-indigo-200/60'
@@ -2044,9 +2367,9 @@ export function RuleBook() {
                                 : targetMode === 'instance'
                                 ? `Instance • ${targetStateName}`
                                 : targetStateName}
-                            </div>
+                            </button>
                           </div>
-                        </button>
+                        </div>
                       )}
                     </div>
 
@@ -2086,6 +2409,16 @@ export function RuleBook() {
                               ? `#${act.targetTag}`
                               : getEntityObj(act.targetType)?.name || act.targetType || 'Objet';
                           actionDetail = `${targetLabel} → ${actStateObj?.name || 'État ' + (act.targetStateId || '...')}`;
+                        } else if (act.type === 'toggle_state') {
+                          actionBadge = 'Basculer État';
+                          const stAName = actEntity?.states[act.toggleStateAId || '']?.name || 'État A';
+                          const stBName = actEntity?.states[act.toggleStateBId || '']?.name || 'État B';
+                          actionDetail =
+                            act.toggleMode === 'two_states' || (act.toggleStateAId && act.toggleStateBId)
+                              ? `${stAName} ⇄ ${stBName}`
+                              : act.toggleMode === 'current_and_target' || act.toggleTargetStateId
+                              ? `Actuel ⇄ ${actEntity?.states[act.toggleTargetStateId || '']?.name || 'État'}`
+                              : 'Cycle tous les états';
                         } else if (act.type === 'delete_entity') {
                           actionBadge = 'Détruire';
                           const targetLabel =
@@ -2184,10 +2517,34 @@ export function RuleBook() {
                         } else if (act.type === 'play_sound') {
                           actionBadge = 'Jouer Son';
                           actionDetail = customSound ? `Son vocal : ${customSound.name}` : act.soundType ? `Son ${act.soundType}` : 'Effet sonore';
+                        } else if (act.type === 'add_score') {
+                          actionBadge = 'Score';
+                          actionDetail = `+${act.scoreAmount || 1} point(s)`;
                         } else if (act.type === 'delay') {
                           actionBadge = 'Attendre (Pause)';
                           actionDetail = `Délai : ${act.delayDuration || 1}s`;
                         }
+
+                        const detailSubStep: Extract<NonNullable<ActiveModal>, { type: 'action' }>['subStep'] =
+                          act.type === 'change_state'
+                            ? 'choose_state'
+                            : act.type === 'toggle_state'
+                            ? 'choose_toggle_states'
+                            : act.type === 'spawn_entity'
+                            ? 'choose_spawn_location'
+                            : act.type === 'emit_particles'
+                            ? 'choose_particles'
+                            : act.type === 'attach_to_parent'
+                            ? 'choose_attach_parent'
+                            : act.type === 'detach_parent'
+                            ? 'choose_detach_parent'
+                            : act.type === 'move_entity'
+                            ? 'choose_move_entity'
+                            : act.type === 'play_sound'
+                            ? 'choose_sound'
+                            : act.type === 'delay'
+                            ? 'choose_delay_duration'
+                            : 'main';
 
                         const actionSlotKey = `${rule.id}-act-${act.id}`;
 
@@ -2207,68 +2564,16 @@ export function RuleBook() {
                               <X className="w-3 h-3" />
                             </button>
 
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setActiveModal({
-                                  type: 'action',
-                                  ruleId: rule.id,
-                                  actionIndex: actIdx,
-                                  actionId: act.id,
-                                  actionType: act.type,
-                                  targetMode: act.targetMode || 'target',
-                                  selectedTargetType: act.targetType,
-                                  targetTag: act.targetTag,
-                                  subStep:
-                                    act.type === 'delay'
-                                      ? 'choose_delay_duration'
-                                      : act.type === 'emit_particles'
-                                      ? 'choose_particles'
-                                      : act.type === 'attach_to_parent'
-                                      ? 'choose_attach_parent'
-                                      : act.type === 'detach_parent'
-                                      ? 'choose_detach_parent'
-                                      : act.type === 'move_entity'
-                                      ? 'choose_move_entity'
-                                      : 'main',
-                                  delayDuration: act.delayDuration || 1,
-                                  particleOriginMode: act.particleOriginMode,
-                                  particleOriginEntityId: act.particleOriginEntityId,
-                                  particleOriginEntityType: act.particleOriginEntityType,
-                                  particleOriginTag: act.particleOriginTag,
-                                  particleCount: act.particleCount,
-                                  particleColor: act.particleColor,
-                                  particleColor2: act.particleColor2,
-                                  particleShape: act.particleShape,
-                                  customParticleId: act.customParticleId,
-                                  customParticleIds: act.customParticleIds,
-                                  customParticleMode: act.customParticleMode,
-                                  useParticleTint: act.useParticleTint,
-                                  particleSpeed: act.particleSpeed,
-                                  particleSize: act.particleSize,
-                                  particleLifetime: act.particleLifetime,
-                                  particleGravity: act.particleGravity,
-                                  particleSpread: act.particleSpread,
-                                  particleAngle: act.particleAngle,
-                                  parentChildMode: act.targetMode,
-                                  parentChildType: act.targetType,
-                                  parentChildTag: act.targetTag,
-                                  parentTargetMode: act.parentTargetMode,
-                                  parentEntityId: act.parentEntityId,
-                                  parentEntityType: act.parentEntityType,
-                                  parentEntityTag: act.parentEntityTag,
-                                  parentOffset: act.parentOffset,
-                                  moveDistance: act.moveDistance ?? 40,
-                                  moveDirectionMode: act.moveDirectionMode || 'cardinal',
-                                  moveCardinal: act.moveCardinal || 'right',
-                                  moveAngle: act.moveAngle ?? 0,
-                                  moveApplyMode: act.moveApplyMode || 'instant',
-                                  moveTargetMode: act.moveTargetMode || (isCollision ? 'target' : 'entity'),
-                                  moveTargetEntityId: act.moveTargetEntityId,
-                                  moveTargetEntityType: act.moveTargetEntityType,
-                                  moveTargetTag: act.moveTargetTag,
-                                })
-                              }
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => openRuleActionModal(rule, act, actIdx)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  openRuleActionModal(rule, act, actIdx);
+                                }
+                              }}
                               onDragOver={(e) => {
                                 e.preventDefault();
                                 setDragOverSlot(actionSlotKey);
@@ -2306,10 +2611,15 @@ export function RuleBook() {
                                 <div className="w-14 h-14 rounded-2xl bg-sky-50 border border-sky-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
                                   🏃
                                 </div>
+                              ) : act.type === 'add_score' ? (
+                                <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                  🏆
+                                </div>
                               ) : act.type === 'play_sound' ? (
                                 <div className="relative w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
                                   🔊
-                                  <div
+                                  <button
+                                    type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handlePlayPreview(act.soundType, act.customSoundId);
@@ -2318,7 +2628,7 @@ export function RuleBook() {
                                     title="Écouter"
                                   >
                                     <Play className="w-2.5 h-2.5 fill-current" />
-                                  </div>
+                                  </button>
                                 </div>
                               ) : act.type === 'spawn_entity' ? (
                                 <div className="relative w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
@@ -2355,6 +2665,8 @@ export function RuleBook() {
                                     ? 'Salve de particules'
                                     : act.type === 'play_sound'
                                     ? customSound?.name || `Son ${act.soundType || ''}`
+                                    : act.type === 'add_score'
+                                    ? 'Ajouter Score'
                                     : act.targetMode === 'subject'
                                     ? `Sujet (${subjectOpt?.label || 'Objet'})`
                                     : act.targetMode === 'target'
@@ -2365,11 +2677,19 @@ export function RuleBook() {
                                     ? `🏷️ Tag #${act.targetTag}`
                                     : actEntity?.name || act.targetType || 'Autre Objet'}
                                 </div>
-                                <div className="text-[9px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md font-medium truncate mt-0.5">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openRuleActionModal(rule, act, actIdx, detailSubStep);
+                                  }}
+                                  className="w-full text-[9px] text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 border border-indigo-200/60 px-1.5 py-0.5 rounded-md font-bold truncate mt-0.5 cursor-pointer transition-colors"
+                                  title="Accès direct au réglage de cette action"
+                                >
                                   {actionDetail}
-                                </div>
+                                </button>
                               </div>
-                            </button>
+                            </div>
                           </div>
                         );
                       })}
@@ -2445,50 +2765,81 @@ export function RuleBook() {
       {/* ========================================================================= */}
       {/* 🪄 1-CLICK SEQUENTIAL CREATION WIZARD (Grandes Cartes, 1 Clic par Étape) */}
       {/* ========================================================================= */}
-      {activeWizard && (
+      {activeWizard && (() => {
+        const isWizardGlobal = ['timer', 'keyboard', 'variable'].includes(activeWizard.triggerType);
+        const isWizardRelational = activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity';
+        const wizardObjectPhase = activeWizard.objectPhase || 'subject';
+        const hasWizardParams = ['timer', 'keyboard', 'proximity', 'boundary', 'variable', 'collision'].includes(activeWizard.triggerType);
+
+        return (
         <div
           data-modal-open="true"
           className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4"
         >
-          <div className={`bg-white rounded-3xl border border-slate-200 p-6 w-full shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] flex flex-col overflow-hidden ${
-            activeWizard.step === 4 && activeWizard.triggerType === 'collision' ? 'max-w-5xl' : 'max-w-4xl'
+          <div className={`bg-white rounded-3xl border border-slate-200 p-6 w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] flex flex-col overflow-hidden ${
+            activeWizard.step === 3 && isWizardRelational ? 'max-w-5xl' : 'max-w-4xl'
           }`}>
-            {/* Header with Stepper */}
+            {/* Header with Back Button */}
             <div className="border-b border-slate-100 pb-3 shrink-0 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                {activeWizard.step > 1 && (
+                {(activeWizard.step > 1 || (activeWizard.step === 1 && activeWizard.actionSubStep && activeWizard.actionSubStep !== 'main')) && (
                   <button
                     type="button"
                     onClick={() => {
-                      if (activeWizard.actionSubStep === 'toggle_states_picker') {
-                        setActiveWizard({ ...activeWizard, actionSubStep: 'toggle_entity_picker' });
-                      } else if (activeWizard.actionSubStep === 'spawn_location_picker') {
-                        const spEnt = getEntityObj(activeWizard.pendingSpawnType);
-                        const hasMultiStates = Object.keys(spEnt?.states || {}).length > 1;
-                        setActiveWizard({
-                          ...activeWizard,
-                          actionSubStep: hasMultiStates ? 'spawn_state_picker' : 'spawn_entity_picker',
-                        });
-                      } else if (activeWizard.actionSubStep === 'spawn_state_picker') {
-                        setActiveWizard({ ...activeWizard, actionSubStep: 'spawn_entity_picker' });
-                      } else if (activeWizard.actionSubStep === 'third_party_state_picker') {
-                        setActiveWizard({ ...activeWizard, actionSubStep: 'third_party_entity_picker' });
-                      } else if (activeWizard.actionSubStep && activeWizard.actionSubStep !== 'main') {
-                        setActiveWizard({ ...activeWizard, actionSubStep: 'main' });
-                      } else if (activeWizard.step === 3 && activeWizard.targetSubStep === 'choose_state') {
-                        setActiveWizard({ ...activeWizard, targetSubStep: 'choose_object' });
-                      } else if (activeWizard.step === 1 && activeWizard.subjectSubStep === 'choose_state') {
-                        setActiveWizard({ ...activeWizard, subjectSubStep: 'choose_object' });
+                      if (activeWizard.step === 3) {
+                        if (activeWizard.actionSubStep === 'toggle_states_picker') {
+                          setActiveWizard({ ...activeWizard, actionSubStep: 'toggle_entity_picker' });
+                        } else if (activeWizard.actionSubStep === 'spawn_location_picker') {
+                          const spEnt = getEntityObj(activeWizard.pendingSpawnType);
+                          const hasMultiStates = Object.keys(spEnt?.states || {}).length > 1;
+                          setActiveWizard({
+                            ...activeWizard,
+                            actionSubStep: hasMultiStates ? 'spawn_state_picker' : 'spawn_entity_picker',
+                          });
+                        } else if (activeWizard.actionSubStep === 'spawn_state_picker') {
+                          setActiveWizard({ ...activeWizard, actionSubStep: 'spawn_entity_picker' });
+                        } else if (activeWizard.actionSubStep === 'third_party_state_picker') {
+                          setActiveWizard({ ...activeWizard, actionSubStep: 'third_party_entity_picker' });
+                        } else if (activeWizard.actionSubStep && activeWizard.actionSubStep !== 'main') {
+                          setActiveWizard({ ...activeWizard, actionSubStep: 'main' });
+                        } else if (isWizardGlobal) {
+                          setActiveWizard({
+                            ...activeWizard,
+                            step: 1,
+                            actionSubStep: 'main',
+                          });
+                        } else {
+                          setActiveWizard({
+                            ...activeWizard,
+                            step: 2,
+                            objectPhase: isWizardRelational ? 'target' : 'subject',
+                            subjectSubStep: 'choose_object',
+                            targetSubStep: 'choose_object',
+                            actionSubStep: 'main',
+                          });
+                        }
+                      } else if (activeWizard.step === 2) {
+                        if (wizardObjectPhase === 'target') {
+                          if (activeWizard.targetSubStep === 'choose_state') {
+                            setActiveWizard({ ...activeWizard, targetSubStep: 'choose_object' });
+                          } else {
+                            setActiveWizard({
+                              ...activeWizard,
+                              objectPhase: 'subject',
+                              subjectSubStep: 'choose_object',
+                            });
+                          }
+                        } else if (activeWizard.subjectSubStep === 'choose_state') {
+                          setActiveWizard({ ...activeWizard, subjectSubStep: 'choose_object' });
+                        } else {
+                          setActiveWizard({
+                            ...activeWizard,
+                            step: 1,
+                            actionSubStep: 'main',
+                          });
+                        }
                       } else {
-                        const prevStep =
-                          activeWizard.step === 4 && activeWizard.triggerType !== 'collision' ? 2 : activeWizard.step - 1;
-                        setActiveWizard({
-                          ...activeWizard,
-                          step: prevStep as any,
-                          actionSubStep: 'main',
-                          subjectSubStep: 'choose_object',
-                          targetSubStep: 'choose_object',
-                        });
+                        setActiveWizard({ ...activeWizard, actionSubStep: 'main' });
                       }
                     }}
                     className="p-2 text-slate-500 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer transition-colors"
@@ -2502,19 +2853,26 @@ export function RuleBook() {
                     <Zap className="w-5 h-5 text-amber-500" />
                     <span>
                       {activeWizard.step === 1 &&
-                        (activeWizard.subjectSubStep === 'choose_state'
-                          ? `Étape 1 : Quel état pour ${getEntityObj(activeWizard.subjectType)?.name || activeWizard.subjectType} ?`
-                          : 'Étape 1 : Qui agit ? (Objet Sujet)')}
-                      {activeWizard.step === 2 && 'Étape 2 : Quel événement déclencheur ?'}
-                      {activeWizard.step === 3 &&
-                        (activeWizard.targetSubStep === 'choose_state'
-                          ? `Étape 3 : Quel état requis pour la cible ${getEntityObj(activeWizard.targetType)?.name || activeWizard.targetType} ?`
-                          : 'Étape 3 : Avec quel objet cible ?')}
-                      {activeWizard.step === 4 && 'Étape 4 : Que doit-il se passer ? (Action)'}
+                        (activeWizard.actionSubStep === 'key_picker'
+                          ? 'Étape 1 : Quelle touche du clavier ?'
+                          : activeWizard.actionSubStep === 'config_event_params'
+                          ? 'Étape 1 : Paramètres de la condition'
+                          : 'Étape 1 : Quand la règle se déclenche-t-elle ? (Condition)')}
+                      {activeWizard.step === 2 &&
+                        (isWizardGlobal
+                          ? 'Étape 2 : Portée globale'
+                          : wizardObjectPhase === 'target'
+                          ? activeWizard.targetSubStep === 'choose_state'
+                            ? `Étape 2 : État requis de la Cible (${getEntityObj(activeWizard.targetType)?.name || activeWizard.targetType})`
+                            : 'Étape 2 : Quel objet Cible est touché / approché ?'
+                          : activeWizard.subjectSubStep === 'choose_state'
+                          ? `Étape 2 : État requis du Sujet (${getEntityObj(activeWizard.subjectType)?.name || activeWizard.subjectType})`
+                          : 'Étape 2 : Quel objet Sujet est concerné ?')}
+                      {activeWizard.step === 3 && 'Étape 3 : Que doit-il se passer ? (Action)'}
                     </span>
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Cliquez sur une grande carte pour passer instantanément à l'étape suivante.
+                    Cliquez sur une carte pour avancer ou utilisez la barre d'étapes ci-dessous pour naviguer en 1 clic.
                   </p>
                 </div>
               </div>
@@ -2528,490 +2886,275 @@ export function RuleBook() {
               </button>
             </div>
 
-            {/* Stepper Progress Badges */}
-            <div className="grid grid-cols-4 gap-2 shrink-0">
-              {[
-                { num: 1, label: '1. Sujet' },
-                { num: 2, label: '2. Événement' },
-                { num: 3, label: '3. Cible' },
-                { num: 4, label: '4. Action' },
-              ].map((st) => {
-                const isActive = st.num === activeWizard.step;
-                const isDone = activeWizard.step > st.num;
-                return (
-                  <div
-                    key={st.num}
-                    className={`py-1.5 px-2 rounded-xl text-xs font-bold text-center border transition-all ${
-                      isActive
-                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm scale-102'
-                        : isDone
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        : 'bg-slate-50 text-slate-400 border-slate-200'
+            {/* Clickable 3-Step Progress Bar */}
+            <div className="space-y-2 shrink-0">
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { num: 1 as const, label: '1. Condition' },
+                  {
+                    num: 2 as const,
+                    label: isWizardGlobal
+                      ? '2. Objets (Global ⚡)'
+                      : isWizardRelational
+                      ? '2. Objets (Sujet ↔ Cible)'
+                      : '2. Objet (Sujet)',
+                    disabled: isWizardGlobal,
+                  },
+                  { num: 3 as const, label: '3. Action' },
+                ]).map((st) => {
+                  const isActive = st.num === activeWizard.step;
+                  const isDone = activeWizard.step > st.num && !st.disabled;
+                  return (
+                    <button
+                      key={st.num}
+                      type="button"
+                      disabled={st.disabled}
+                      onClick={() => {
+                        if (st.num === 1) {
+                          setActiveWizard({ ...activeWizard, step: 1, actionSubStep: 'main' });
+                        } else if (st.num === 2 && !isWizardGlobal) {
+                          setActiveWizard({
+                            ...activeWizard,
+                            step: 2,
+                            objectPhase: 'subject',
+                            subjectSubStep: 'choose_object',
+                            targetSubStep: 'choose_object',
+                            actionSubStep: 'main',
+                          });
+                        } else if (st.num === 3) {
+                          setActiveWizard({ ...activeWizard, step: 3, actionSubStep: 'main' });
+                        }
+                      }}
+                      className={`py-2 px-2.5 rounded-xl text-xs font-bold text-center border transition-all ${
+                        st.disabled
+                          ? 'bg-slate-100/80 text-slate-400 border-slate-200/70 line-through cursor-not-allowed opacity-70'
+                          : isActive
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm cursor-pointer'
+                          : isDone
+                          ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 cursor-pointer'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 cursor-pointer'
+                      }`}
+                    >
+                      {st.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Sub-step 1-click Breadcrumb */}
+              <div className="flex items-center gap-1.5 flex-wrap text-[11px] bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200/80">
+                <button
+                  type="button"
+                  onClick={() => setActiveWizard({ ...activeWizard, step: 1, actionSubStep: 'main' })}
+                  className={`px-2 py-0.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                    activeWizard.step === 1 && activeWizard.actionSubStep === 'main'
+                      ? 'bg-indigo-600 text-white'
+                      : 'text-slate-600 hover:bg-white hover:text-indigo-700'
+                  }`}
+                >
+                  ⚡ Type de condition
+                </button>
+                {hasWizardParams && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveWizard({
+                        ...activeWizard,
+                        step: 1,
+                        actionSubStep: activeWizard.triggerType === 'keyboard' ? 'key_picker' : 'config_event_params',
+                      })
+                    }
+                    className={`px-2 py-0.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                      activeWizard.step === 1 &&
+                      (activeWizard.actionSubStep === 'config_event_params' || activeWizard.actionSubStep === 'key_picker')
+                        ? 'bg-amber-500 text-white'
+                        : 'text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200/80'
                     }`}
                   >
-                    {st.label}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* --- BODY (Large Cards Grid) --- */}
-            <div className="overflow-y-auto flex-1 pr-1 py-1">
-              {/* ÉTAPE 1 : SUJET (Grandes Cartes) OU ÉVÉNEMENT GLOBAL */}
-              {activeWizard.step === 1 && (
-                <div className="space-y-4">
-                  {/* Switcher de mode de départ : Par Objet vs Par Événement Global */}
-                  <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                    {activeWizard.triggerType === 'keyboard' ? '⌨️ Touche & phase' : '⚙️ Paramètres'}
+                  </button>
+                )}
+                {!isWizardGlobal && (
+                  <>
+                    <span className="text-slate-300">›</span>
                     <button
                       type="button"
-                      onClick={() => setWizardEntryTab('subject')}
-                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                        wizardEntryTab === 'subject'
-                          ? 'bg-white text-indigo-700 shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
+                      onClick={() =>
+                        setActiveWizard({
+                          ...activeWizard,
+                          step: 2,
+                          objectPhase: 'subject',
+                          subjectSubStep: 'choose_object',
+                          actionSubStep: 'main',
+                        })
+                      }
+                      className={`px-2 py-0.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                        activeWizard.step === 2 && wizardObjectPhase === 'subject' && activeWizard.subjectSubStep !== 'choose_state'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-slate-600 hover:bg-white hover:text-indigo-700'
                       }`}
                     >
-                      <span>📦 Par Objet / Sujet (Plante, Pomme, etc.)</span>
+                      📦 Sujet
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setWizardEntryTab('global_event')}
-                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                        wizardEntryTab === 'global_event'
-                          ? 'bg-white text-indigo-700 shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      <span>⚡ Par Événement Global (Minuteur, Clavier, Score...)</span>
-                    </button>
-                  </div>
-
-                  {wizardEntryTab === 'global_event' ? (
-                    <div className="space-y-3">
-                      <div className="text-xs font-bold text-slate-600">
-                        Choisissez un événement thématique global (déclenchement sans sélectionner un objet d'abord) :
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {/* Minuteur / Chronomètre */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWizard({
-                              ...activeWizard,
-                              triggerType: 'timer',
-                              timerInterval: 2,
-                              timerType: 'repeat',
-                              step: 2,
-                              actionSubStep: 'config_event_params',
-                            });
-                          }}
-                          className="p-5 bg-slate-50 hover:bg-amber-50 border-2 border-slate-200 hover:border-amber-500 rounded-3xl flex items-center gap-4 cursor-pointer transition-all shadow-xs group active:scale-95 text-left"
-                        >
-                          <div className="w-16 h-16 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition-transform">
-                            ⏱️
-                          </div>
-                          <div>
-                            <div className="text-sm font-black text-slate-900 group-hover:text-amber-800">
-                              Minuteur / Chronomètre
-                            </div>
-                            <div className="text-xs text-slate-500 mt-1">
-                              Exécuter périodiquement (toutes les X secondes)
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* Touche de Clavier */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWizard({
-                              ...activeWizard,
-                              triggerType: 'keyboard',
-                              keyName: 'Space',
-                              triggerPhase: 'down',
-                              step: 2,
-                              actionSubStep: 'config_event_params',
-                            });
-                          }}
-                          className="p-5 bg-slate-50 hover:bg-purple-50 border-2 border-slate-200 hover:border-purple-500 rounded-3xl flex items-center gap-4 cursor-pointer transition-all shadow-xs group active:scale-95 text-left"
-                        >
-                          <div className="w-16 h-16 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition-transform">
-                            ⌨️
-                          </div>
-                          <div>
-                            <div className="text-sm font-black text-slate-900 group-hover:text-purple-800">
-                              Touche de Clavier
-                            </div>
-                            <div className="text-xs text-slate-500 mt-1">
-                              Espace, Flèches de direction, Touches A, S, D (Appui ou Relâché)
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* Condition de Score */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWizard({
-                              ...activeWizard,
-                              triggerType: 'variable',
-                              variableName: 'score',
-                              variableOperator: '>=',
-                              variableValue: 5,
-                              step: 2,
-                              actionSubStep: 'config_event_params',
-                            });
-                          }}
-                          className="p-5 bg-slate-50 hover:bg-emerald-50 border-2 border-slate-200 hover:border-emerald-500 rounded-3xl flex items-center gap-4 cursor-pointer transition-all shadow-xs group active:scale-95 text-left"
-                        >
-                          <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition-transform">
-                            📊
-                          </div>
-                          <div>
-                            <div className="text-sm font-black text-slate-900 group-hover:text-emerald-800">
-                              Score &amp; Compteur
-                            </div>
-                            <div className="text-xs text-slate-500 mt-1">
-                              Déclencher quand le score atteint le seuil choisi
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* Bord de Scène */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWizard({
-                              ...activeWizard,
-                              subjectMode: 'any',
-                              subjectType: undefined,
-                              subjectId: undefined,
-                              subjectTag: undefined,
-                              subjectStateId: undefined,
-                              triggerType: 'boundary',
-                              boundaryEdge: 'any',
-                              step: 2,
-                              actionSubStep: 'config_event_params',
-                            });
-                          }}
-                          className="p-5 bg-slate-50 hover:bg-rose-50 border-2 border-slate-200 hover:border-rose-500 rounded-3xl flex items-center gap-4 cursor-pointer transition-all shadow-xs group active:scale-95 text-left"
-                        >
-                          <div className="w-16 h-16 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition-transform">
-                            🖼️
-                          </div>
-                          <div>
-                            <div className="text-sm font-black text-slate-900 group-hover:text-rose-800">
-                              Bord de Scène
-                            </div>
-                            <div className="text-xs text-slate-500 mt-1">
-                              Toucher le cadre extérieur du Canvas
-                            </div>
-                          </div>
-                        </button>
-                      </div>
-                    </div>
-                  ) : activeWizard.subjectSubStep === 'choose_state' ? (
-                    <div className="space-y-4">
-                      <div className="text-xs font-bold text-slate-600">
-                        Choisissez si la règle requiert un état précis ou s'applique à tous les états :
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                        {/* Option : Tous les états */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWizard({
-                              ...activeWizard,
-                              subjectStateId: undefined,
-                              subjectSubStep: 'choose_object',
-                              step: 2,
-                            });
-                          }}
-                          className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all shadow-xs group active:scale-95"
-                        >
-                          <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-3xl shadow-2xs group-hover:scale-110 transition-transform">
-                            ✨
-                          </div>
-                          <div className="text-center w-full">
-                            <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700">
-                              Tous les états
-                            </div>
-                            <div className="text-[10px] text-slate-400 mt-0.5">N'importe quelle apparence</div>
-                          </div>
-                        </button>
-
-                        {/* Options : États spécifiques */}
-                        {Object.values(getEntityObj(activeWizard.subjectType)?.states || {}).map((st) => (
-                          <button
-                            key={st.id}
-                            type="button"
-                            onClick={() => {
-                              setActiveWizard({
-                                ...activeWizard,
-                                subjectStateId: st.id,
-                                subjectSubStep: 'choose_object',
-                                step: 2,
-                              });
-                            }}
-                            className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all shadow-xs group active:scale-95"
-                          >
-                            <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs group-hover:scale-110 transition-transform">
-                              <EntityMiniPreview
-                                entity={getEntityObj(activeWizard.subjectType)}
-                                type={activeWizard.subjectType}
-                                stateId={st.id}
-                                size={52}
-                              />
-                            </div>
-                            <div className="text-center w-full">
-                              <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700 truncate">
-                                État {st.name}
-                              </div>
-                              <div className="text-[10px] text-slate-400 mt-0.5">Seulement dans cet état</div>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {/* Sélecteur Type / #Tag / Instance précise / Tous objets (Sujet) */}
-                      <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200">
-                        <button
-                          type="button"
-                          onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'type' })}
-                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            (activeWizard.subjectMode || 'type') === 'type'
-                              ? 'bg-white text-indigo-700 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          🧩 Par Type
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'tag' })}
-                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            activeWizard.subjectMode === 'tag'
-                              ? 'bg-white text-purple-700 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          🏷️ Par #Tag
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'instance' })}
-                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            activeWizard.subjectMode === 'instance'
-                              ? 'bg-white text-cyan-700 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          📍 Instance
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'any' })}
-                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            activeWizard.subjectMode === 'any'
-                              ? 'bg-white text-emerald-700 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          🌐 Tous objets
-                        </button>
-                      </div>
-
-                      {activeWizard.subjectMode === 'any' ? (
+                    {(activeWizard.subjectMode === 'type' || activeWizard.subjectMode === 'instance') &&
+                      Object.keys(getEntityObj(activeWizard.subjectType)?.states || {}).length > 1 && (
                         <button
                           type="button"
                           onClick={() =>
                             setActiveWizard({
                               ...activeWizard,
-                              subjectMode: 'any',
-                              subjectType: undefined,
-                              subjectId: undefined,
-                              subjectTag: undefined,
-                              subjectStateId: undefined,
                               step: 2,
+                              objectPhase: 'subject',
+                              subjectSubStep: 'choose_state',
+                              actionSubStep: 'main',
                             })
                           }
-                          className="w-full p-6 bg-emerald-50/70 hover:bg-emerald-100/70 border-2 border-emerald-300 hover:border-emerald-500 rounded-3xl flex items-center justify-between gap-4 cursor-pointer transition-all shadow-xs group text-left"
+                          className={`px-2 py-0.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                            activeWizard.step === 2 && wizardObjectPhase === 'subject' && activeWizard.subjectSubStep === 'choose_state'
+                              ? 'bg-indigo-600 text-white'
+                              : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100'
+                          }`}
                         >
-                          <div className="flex items-center gap-4">
-                            <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition-transform">
-                              🌐
-                            </div>
-                            <div>
-                              <div className="text-sm font-black text-emerald-950">
-                                Tous les objets de la scène
-                              </div>
-                              <div className="text-xs text-emerald-700 mt-1">
-                                La règle s'appliquera à n'importe quelle entité (présente ou créée en cours de partie).
-                              </div>
-                            </div>
-                          </div>
-                          <ChevronRight className="w-5 h-5 text-emerald-700 shrink-0" />
+                          🎭 État Sujet
                         </button>
-                      ) : activeWizard.subjectMode === 'tag' ? (
-                        <div className="p-4 bg-purple-50/50 border-2 border-purple-200 rounded-3xl space-y-3">
-                          <div className="text-xs font-bold text-purple-950">
-                            Cibler toutes les entités (existantes ou créées en jeu) portant un #Tag :
-                          </div>
-                          {allProjectTags.length > 0 && (
-                            <div className="flex flex-wrap gap-2">
-                              {allProjectTags.map((tag) => (
-                                <button
-                                  key={tag}
-                                  type="button"
-                                  onClick={() =>
-                                    setActiveWizard({
-                                      ...activeWizard,
-                                      subjectMode: 'tag',
-                                      subjectTag: tag,
-                                      subjectStateId: undefined,
-                                      step: 2,
-                                    })
-                                  }
-                                  className="px-3 py-1.5 bg-white hover:bg-purple-600 hover:text-white text-purple-800 border border-purple-300 rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs"
-                                >
-                                  #{tag} →
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="text"
-                              value={activeWizard.subjectTag || ''}
-                              onChange={(e) =>
-                                setActiveWizard({ ...activeWizard, subjectTag: e.target.value.replace(/^#/, '') })
-                              }
-                              placeholder="Ou saisir un tag (ex: ennemi, piece...)"
-                              className="flex-1 px-3 py-2 text-xs font-bold bg-white border border-purple-300 rounded-xl outline-none focus:border-purple-600"
-                            />
-                            <button
-                              type="button"
-                              disabled={!activeWizard.subjectTag?.trim()}
-                              onClick={() => {
-                                if (!activeWizard.subjectTag?.trim()) return;
-                                setActiveWizard({
-                                  ...activeWizard,
-                                  subjectMode: 'tag',
-                                  subjectTag: activeWizard.subjectTag.trim().replace(/^#/, ''),
-                                  subjectStateId: undefined,
-                                  step: 2,
-                                });
-                              }}
-                              className="px-4 py-2 bg-purple-600 disabled:bg-slate-200 text-white disabled:text-slate-400 text-xs font-bold rounded-xl cursor-pointer"
-                            >
-                              Valider →
-                            </button>
-                          </div>
-                        </div>
-                      ) : activeWizard.subjectMode === 'instance' ? (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
-                          {entityList.length === 0 ? (
-                            <div className="col-span-full text-center text-xs text-slate-500 py-6">
-                              Aucune entité posée sur la scène.
-                            </div>
-                          ) : (
-                            entityList.map((inst) => {
-                              const statesCount = Object.keys(inst.states || {}).length;
-                              return (
-                                <button
-                                  key={inst.id}
-                                  type="button"
-                                  onClick={() => {
-                                    if (statesCount > 1) {
-                                      setActiveWizard({
-                                        ...activeWizard,
-                                        subjectMode: 'instance',
-                                        subjectId: inst.id,
-                                        subjectType: inst.type,
-                                        subjectSubStep: 'choose_state',
-                                      });
-                                    } else {
-                                      setActiveWizard({
-                                        ...activeWizard,
-                                        subjectMode: 'instance',
-                                        subjectId: inst.id,
-                                        subjectType: inst.type,
-                                        subjectStateId: undefined,
-                                        step: 2,
-                                      });
-                                    }
-                                  }}
-                                  className="p-4 bg-slate-50 hover:bg-cyan-50 border-2 border-slate-200 hover:border-cyan-500 rounded-3xl flex flex-col items-center justify-center gap-2.5 cursor-pointer transition-all shadow-xs group active:scale-95"
-                                >
-                                  <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs">
-                                    <EntityMiniPreview entity={inst} type={inst.type} size={52} />
-                                  </div>
-                                  <div className="text-center w-full">
-                                    <div className="text-xs font-black text-slate-800 truncate">{inst.name}</div>
-                                    <div className="text-[10px] text-slate-400">
-                                      ({Math.round(inst.position.x)}, {Math.round(inst.position.y)})
-                                    </div>
-                                  </div>
-                                </button>
-                              );
-                            })
-                          )}
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                          {availableEntityOptions.map((opt) => {
-                            const ent = getEntityObj(opt.type);
-                            const statesCount = Object.keys(ent?.states || {}).length;
-                            return (
-                              <button
-                                key={opt.type}
-                                type="button"
-                                onClick={() => {
-                                  if (statesCount > 1) {
-                                    setActiveWizard({
-                                      ...activeWizard,
-                                      subjectMode: 'type',
-                                      subjectType: opt.type,
-                                      subjectSubStep: 'choose_state',
-                                    });
-                                  } else {
-                                    setActiveWizard({
-                                      ...activeWizard,
-                                      subjectMode: 'type',
-                                      subjectType: opt.type,
-                                      subjectStateId: undefined,
-                                      step: 2,
-                                    });
-                                  }
-                                }}
-                                className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3.5 cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
-                              >
-                                <div className="w-20 h-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-2 shadow-2xs group-hover:scale-110 transition-transform">
-                                  <EntityMiniPreview entity={ent} type={opt.type} size={64} />
-                                </div>
-                                <div className="text-center w-full">
-                                  <div className="text-sm font-black text-slate-800 group-hover:text-indigo-700 truncate">
-                                    {opt.label}
-                                  </div>
-                                  <div className="text-[11px] text-slate-400 mt-0.5">
-                                    {statesCount > 1 ? `${statesCount} états disponibles →` : 'Choisir comme Sujet →'}
-                                  </div>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
                       )}
-                    </div>
-                  )}
-                </div>
-              )}
+                  </>
+                )}
+                {isWizardRelational && (
+                  <>
+                    <span className="text-slate-300">›</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveWizard({
+                          ...activeWizard,
+                          step: 2,
+                          objectPhase: 'target',
+                          targetSubStep: 'choose_object',
+                          actionSubStep: 'main',
+                        })
+                      }
+                      className={`px-2 py-0.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                        activeWizard.step === 2 && wizardObjectPhase === 'target' && activeWizard.targetSubStep !== 'choose_state'
+                          ? 'bg-emerald-600 text-white'
+                          : 'text-slate-600 hover:bg-white hover:text-emerald-700'
+                      }`}
+                    >
+                      🎯 Cible
+                    </button>
+                    {(activeWizard.targetMode === 'type' || activeWizard.targetMode === 'instance') &&
+                      Object.keys(getEntityObj(activeWizard.targetType)?.states || {}).length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveWizard({
+                              ...activeWizard,
+                              step: 2,
+                              objectPhase: 'target',
+                              targetSubStep: 'choose_state',
+                              actionSubStep: 'main',
+                            })
+                          }
+                          className={`px-2 py-0.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                            activeWizard.step === 2 && wizardObjectPhase === 'target' && activeWizard.targetSubStep === 'choose_state'
+                              ? 'bg-emerald-600 text-white'
+                              : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                          }`}
+                        >
+                          🎭 État Cible
+                        </button>
+                      )}
+                  </>
+                )}
+                <span className="text-slate-300">›</span>
+                <button
+                  type="button"
+                  onClick={() => setActiveWizard({ ...activeWizard, step: 3, actionSubStep: 'main' })}
+                  className={`px-2 py-0.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                    activeWizard.step === 3
+                      ? 'bg-indigo-600 text-white'
+                      : 'text-slate-600 hover:bg-white hover:text-indigo-700'
+                  }`}
+                >
+                  🎬 Actions
+                </button>
+              </div>
+            </div>
 
-              {/* ÉTAPE 2 : ÉVÉNEMENT (Organisé en Cases Logiques & Écran Intermédiaire de Paramètres) */}
-              {activeWizard.step === 2 && (
-                activeWizard.actionSubStep === 'config_event_params' ? (
+            {/* --- BODY (Large Cards Grid) --- */}
+            <div className="overflow-y-auto flex-1 pr-1 py-1">
+              {/* ÉTAPE 1 : CONDITION (Toutes les catégories de déclencheurs + Paramètres + Clavier) */}
+              {activeWizard.step === 1 && (
+                activeWizard.actionSubStep === 'key_picker' ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div className="text-xs font-bold text-slate-600">
+                        Choisissez la touche du clavier qui déclenche cette règle :
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                        <button
+                          type="button"
+                          onClick={() => setActiveWizard({ ...activeWizard, triggerPhase: 'down' })}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                            activeWizard.triggerPhase !== 'up' && activeWizard.triggerPhase !== 'key_up'
+                              ? 'bg-white text-purple-700 shadow-2xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          👇 Appui (Down)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveWizard({ ...activeWizard, triggerPhase: 'up' })}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                            activeWizard.triggerPhase === 'up' || activeWizard.triggerPhase === 'key_up'
+                              ? 'bg-white text-purple-700 shadow-2xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          🖐️ Relâchement (Up)
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+                      {[
+                        { key: 'Space', label: "Barre d'Espace", icon: '🚀' },
+                        { key: 'ArrowUp', label: 'Flèche Haut ⬆️', icon: '⬆️' },
+                        { key: 'ArrowDown', label: 'Flèche Bas ⬇️', icon: '⬇️' },
+                        { key: 'ArrowLeft', label: 'Flèche Gauche ⬅️', icon: '⬅️' },
+                        { key: 'ArrowRight', label: 'Flèche Droite ➡️', icon: '➡️' },
+                        { key: 'Enter', label: 'Touche Entrée ↩️', icon: '↩️' },
+                        { key: 'z', label: 'Touche Z (Avancer)', icon: '⌨️' },
+                        { key: 'q', label: 'Touche Q (Gauche)', icon: '⌨️' },
+                        { key: 's', label: 'Touche S (Reculer)', icon: '⌨️' },
+                        { key: 'd', label: 'Touche D (Droite)', icon: '⌨️' },
+                        { key: 'any', label: 'N’importe quelle touche', icon: '🌟' },
+                      ].map((k) => (
+                        <button
+                          key={k.key}
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'keyboard',
+                              keyName: k.key,
+                              step: 3,
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-4 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-xs group active:scale-95"
+                        >
+                          <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-3xl shadow-2xs group-hover:scale-110 transition-transform">
+                            {k.icon}
+                          </div>
+                          <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700 text-center">
+                            {k.label}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : activeWizard.actionSubStep === 'config_event_params' ? (
                   <div className="bg-slate-50/90 p-6 rounded-3xl border border-slate-200/90 space-y-6 max-w-xl mx-auto shadow-xs animate-in fade-in zoom-in-95">
                     <div className="flex items-center gap-3 border-b border-slate-200 pb-4">
                       <div className="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-2xl font-black shadow-inner">
@@ -3019,10 +3162,10 @@ export function RuleBook() {
                       </div>
                       <div>
                         <h4 className="text-base font-black text-slate-900">
-                          Réglage des paramètres de l'événement
+                          Réglage des paramètres de la condition
                         </h4>
                         <p className="text-xs text-slate-500">
-                          Définissez la valeur exacte pour cet événement avant de continuer.
+                          Définissez la valeur exacte pour cette condition avant de continuer.
                         </p>
                       </div>
                     </div>
@@ -3087,6 +3230,8 @@ export function RuleBook() {
                             <option value="ArrowLeft">← Flèche Gauche</option>
                             <option value="ArrowRight">→ Flèche Droite</option>
                             <option value="Enter">Touche Entrée</option>
+                            <option value="z">Touche Z</option>
+                            <option value="q">Touche Q</option>
                             <option value="a">Touche A</option>
                             <option value="w">Touche W</option>
                             <option value="s">Touche S</option>
@@ -3195,7 +3340,46 @@ export function RuleBook() {
                       </div>
                     )}
 
-                    {/* 6. Option d'Auto-remise dédiée */}
+                    {/* 6. Collision anti-boucle */}
+                    {activeWizard.triggerType === 'collision' && (
+                      <div className="space-y-3 bg-indigo-50/60 p-4 rounded-2xl border border-indigo-200/80">
+                        <label className="flex items-center justify-between gap-2 text-xs font-bold text-indigo-900">
+                          <span>Marge anti-rebond de sortie (px) :</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={60}
+                            step={2}
+                            value={activeWizard.collisionExitMargin ?? 10}
+                            onChange={(e) =>
+                              setActiveWizard({
+                                ...activeWizard,
+                                collisionExitMargin: Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)),
+                              })
+                            }
+                            className="w-20 px-2.5 py-1.5 text-center text-xs font-bold bg-white border border-indigo-200 rounded-xl outline-none"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveWizard({
+                              ...activeWizard,
+                              collisionTriggerOnce: !activeWizard.collisionTriggerOnce,
+                            })
+                          }
+                          className={`w-full px-3 py-2 rounded-xl text-xs font-black border transition-all cursor-pointer ${
+                            activeWizard.collisionTriggerOnce
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white text-slate-700 border-indigo-200 hover:bg-indigo-100/60'
+                          }`}
+                        >
+                          {activeWizard.collisionTriggerOnce ? '✓ 1 seule fois par paire' : '1× par paire (Optionnel)'}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* 7. Option d'Auto-remise dédiée */}
                     {['click', 'hover', 'keyboard', 'collision', 'proximity'].includes(activeWizard.triggerType) && (
                       <div className="pt-2 border-t border-slate-200/80 space-y-2">
                         <label className="text-xs font-bold text-slate-800 block flex items-center gap-1.5">
@@ -3215,7 +3399,7 @@ export function RuleBook() {
                               <span>↩️ Activer l'Auto-remise</span>
                             </div>
                             <span className="text-[10px] text-slate-500 font-medium mt-1 leading-tight">
-                              Restaure l'état initial au relâchement (clic/touche) ou à la fin du survol/contact (ex: Clic Down → État B, Clic Up → Normal).
+                              Restaure l'état initial au relâchement (clic/touche) ou à la fin du survol/contact.
                             </span>
                           </button>
 
@@ -3243,866 +3427,1317 @@ export function RuleBook() {
                       <button
                         type="button"
                         onClick={() => {
-                          const needsTarget = activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity';
-                          const nextStep = needsTarget ? 3 : 4;
                           setActiveWizard({
                             ...activeWizard,
-                            step: nextStep,
-                            actionSubStep: 'main',
+                            step: isWizardGlobal ? 3 : 2,
+                            objectPhase: 'subject',
+                            subjectSubStep: 'choose_object',
                             targetSubStep: 'choose_object',
+                            actionSubStep: 'main',
                           });
                         }}
                         className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
                       >
-                        <span>Continuer vers {activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity' ? 'la Cible' : "l'Action"}</span>
+                        <span>
+                          {isWizardGlobal
+                            ? "Continuer vers l'Action (Étape 3)"
+                            : isWizardRelational
+                            ? 'Continuer vers les Objets Sujet & Cible (Étape 2)'
+                            : "Continuer vers l'Objet Sujet (Étape 2)"}
+                        </span>
                         <ArrowRight className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
                 ) : (
-                <div className="space-y-5">
-                  {/* CASE 1 : COLLISIONS & CONTACTS */}
-                  <div className="bg-indigo-50/50 p-4 rounded-3xl border border-indigo-200/80 space-y-3">
-                    <div className="flex items-center gap-2 text-xs font-black uppercase text-indigo-800 tracking-wider">
-                      <span>💥 Collisions & Contacts entre Objets</span>
-                      <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full">
-                        Nécessite une Cible
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                      {/* Collision Entrée */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveWizard({
-                            ...activeWizard,
-                            triggerType: 'collision',
-                            triggerPhase: 'enter',
-                            step: 3,
-                            targetSubStep: 'choose_object',
-                          });
-                        }}
-                        className="p-4 bg-white hover:bg-indigo-100/60 border-2 border-indigo-100 hover:border-indigo-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                      >
-                        <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
-                          💥
-                        </div>
-                        <div>
-                          <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
-                            Collision Entrée
-                          </div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            Premier contact quand le sujet touche la cible
-                          </div>
-                        </div>
-                      </button>
-
-                      {/* Collision Sortie */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveWizard({
-                            ...activeWizard,
-                            triggerType: 'collision',
-                            triggerPhase: 'exit',
-                            step: 3,
-                            targetSubStep: 'choose_object',
-                          });
-                        }}
-                        className="p-4 bg-white hover:bg-indigo-100/60 border-2 border-indigo-100 hover:border-indigo-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                      >
-                        <div className="w-10 h-10 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
-                          💨
-                        </div>
-                        <div>
-                          <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
-                            Collision Sortie
-                          </div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            Séparation dès que le sujet quitte la cible
-                          </div>
-                        </div>
-                      </button>
-
-                      {/* Contact Continu */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveWizard({
-                            ...activeWizard,
-                            triggerType: 'collision',
-                            triggerPhase: 'stay',
-                            step: 3,
-                            targetSubStep: 'choose_object',
-                          });
-                        }}
-                        className="p-4 bg-white hover:bg-indigo-100/60 border-2 border-indigo-100 hover:border-indigo-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                      >
-                        <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
-                          ⏳
-                        </div>
-                        <div>
-                          <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
-                            Contact Continu
-                          </div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            Maintenu tant que les deux objets se touchent
-                          </div>
-                        </div>
-                      </button>
-
-                      {/* Collision Au Relâchement */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveWizard({
-                            ...activeWizard,
-                            triggerType: 'collision',
-                            triggerPhase: 'collision_release',
-                            step: 3,
-                            targetSubStep: 'choose_object',
-                          });
-                        }}
-                        className="p-4 bg-white hover:bg-indigo-100/60 border-2 border-indigo-100 hover:border-indigo-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                      >
-                        <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
-                          🎯
-                        </div>
-                        <div>
-                          <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
-                            Lâché sur Cible
-                          </div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            Relâchement du sujet pendant la collision
-                          </div>
-                        </div>
-                      </button>
-                    </div>
-
-                    {/* Options anti-boucle Collision (Hystérésis & 1x par paire) */}
-                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-indigo-200/70">
-                      <label className="flex items-center gap-2 text-[11px] font-bold text-indigo-900">
-                        <span>Marge anti-rebond sortie :</span>
-                        <input
-                          type="number"
-                          min={0}
-                          max={60}
-                          step={2}
-                          value={activeWizard.collisionExitMargin ?? 10}
-                          onChange={(e) =>
-                            setActiveWizard({
-                              ...activeWizard,
-                              collisionExitMargin: Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)),
-                            })
-                          }
-                          className="w-14 px-2 py-1 text-center text-xs font-bold bg-white border border-indigo-200 rounded-lg outline-none focus:border-indigo-500"
-                        />
-                        <span className="text-[10px] text-indigo-600 font-normal">px (évite les boucles si l'état change de taille)</span>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setActiveWizard({
-                            ...activeWizard,
-                            collisionTriggerOnce: !activeWizard.collisionTriggerOnce,
-                          })
-                        }
-                        className={`px-3 py-1.5 rounded-xl text-[11px] font-black border transition-all cursor-pointer ${
-                          activeWizard.collisionTriggerOnce
-                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
-                            : 'bg-white text-slate-700 border-indigo-200 hover:bg-indigo-100/60'
-                        }`}
-                      >
-                        {activeWizard.collisionTriggerOnce ? '✓ 1 seule fois par paire' : '1× par paire (Optionnel)'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* CASE 2 : CLICS & POINTEUR */}
-                  <div className="bg-purple-50/50 p-4 rounded-3xl border border-purple-200/80 space-y-3">
-                    <div className="text-xs font-black uppercase text-purple-800 tracking-wider">
-                      👆 Clics & Pointeur Souris / Tactile
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      {/* Clic Complet */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveWizard({
-                            ...activeWizard,
-                            triggerType: 'click',
-                            triggerPhase: 'click',
-                            step: 4,
-                            actionSubStep: 'main',
-                          });
-                        }}
-                        className="p-4 bg-white hover:bg-purple-100/60 border-2 border-purple-100 hover:border-purple-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                      >
-                        <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
-                          👆
-                        </div>
-                        <div>
-                          <div className="text-xs font-black text-slate-900 group-hover:text-purple-800">
-                            Clic Complet
-                          </div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            Action exécutée lors d'un clic complet sur l'objet
-                          </div>
-                        </div>
-                      </button>
-
-                      {/* Appui Clic (Mouse Down) */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveWizard({
-                            ...activeWizard,
-                            triggerType: 'click',
-                            triggerPhase: 'down',
-                            step: 4,
-                            actionSubStep: 'main',
-                          });
-                        }}
-                        className="p-4 bg-white hover:bg-purple-100/60 border-2 border-purple-100 hover:border-purple-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                      >
-                        <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
-                          👇
-                        </div>
-                        <div>
-                          <div className="text-xs font-black text-slate-900 group-hover:text-purple-800">
-                            Appui Clic (Mouse Down)
-                          </div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            Dès la pression du bouton du pointeur
-                          </div>
-                        </div>
-                      </button>
-
-                      {/* Relâchement Clic (Mouse Up) */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveWizard({
-                            ...activeWizard,
-                            triggerType: 'click',
-                            triggerPhase: 'up',
-                            step: 4,
-                            actionSubStep: 'main',
-                          });
-                        }}
-                        className="p-4 bg-white hover:bg-purple-100/60 border-2 border-purple-100 hover:border-purple-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                      >
-                        <div className="w-10 h-10 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
-                          🖐️
-                        </div>
-                        <div>
-                          <div className="text-xs font-black text-slate-900 group-hover:text-purple-800">
-                            Relâchement Clic (Mouse Up)
-                          </div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            Au relâchement du bouton du pointeur
-                          </div>
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* CASE 3 & 4 : SURVOL & GLISSER-DÉPOSER */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* CASE 3 : SURVOL SOURIS (HOVER) */}
-                    <div className="bg-amber-50/50 p-4 rounded-3xl border border-amber-200/80 space-y-3">
-                      <div className="text-xs font-black uppercase text-amber-800 tracking-wider">
-                        👀 Survol Souris (Hover)
+                  <div className="space-y-5">
+                    {/* CASE 1 : COLLISIONS & CONTACTS (Nécessite Sujet & Cible) */}
+                    <div className="bg-indigo-50/50 p-4 rounded-3xl border border-indigo-200/80 space-y-3">
+                      <div className="flex items-center gap-2 text-xs font-black uppercase text-indigo-800 tracking-wider flex-wrap">
+                        <span>💥 Collisions &amp; Contacts entre Objets</span>
+                        <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full">
+                          Sujet ↔ Cible
+                        </span>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                         <button
                           type="button"
                           onClick={() => {
                             setActiveWizard({
                               ...activeWizard,
-                              triggerType: 'hover',
-                              triggerPhase: 'hover_enter',
-                              step: 4,
-                              actionSubStep: 'main',
-                            });
-                          }}
-                          className="p-3.5 bg-white hover:bg-amber-100/60 border-2 border-amber-100 hover:border-amber-500 rounded-2xl flex flex-col justify-between gap-1.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                        >
-                          <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-xl shadow-2xs group-hover:scale-110 transition-transform">
-                            👀
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-amber-800">
-                              Survol Entrée
-                            </div>
-                            <div className="text-[10px] text-slate-500 mt-0.5">
-                              Mouse Hover Enter
-                            </div>
-                          </div>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWizard({
-                              ...activeWizard,
-                              triggerType: 'hover',
-                              triggerPhase: 'hover_exit',
-                              step: 4,
-                              actionSubStep: 'main',
-                            });
-                          }}
-                          className="p-3.5 bg-white hover:bg-amber-100/60 border-2 border-amber-100 hover:border-amber-500 rounded-2xl flex flex-col justify-between gap-1.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                        >
-                          <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-xl shadow-2xs group-hover:scale-110 transition-transform">
-                            🏃
-                          </div>
-                          <div>
-                            <div className="text-xs font-black text-slate-900 group-hover:text-amber-800">
-                              Survol Sortie
-                            </div>
-                            <div className="text-[10px] text-slate-500 mt-0.5">
-                              Mouse Hover Exit
-                            </div>
-                          </div>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* CASE 4 : GLISSER-DÉPOSER (DRAG & DROP) */}
-                    <div className="bg-emerald-50/50 p-4 rounded-3xl border border-emerald-200/80 space-y-3">
-                      <div className="text-xs font-black uppercase text-emerald-800 tracking-wider">
-                        🫳 Glisser-Déposer libre
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveWizard({
-                            ...activeWizard,
-                            triggerType: 'drag',
-                            triggerPhase: 'drag_release',
-                            step: 4,
-                            actionSubStep: 'main',
-                          });
-                        }}
-                        className="w-full p-3.5 bg-white hover:bg-emerald-100/60 border-2 border-emerald-100 hover:border-emerald-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                      >
-                        <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-110 transition-transform">
-                          🫳
-                        </div>
-                        <div>
-                          <div className="text-xs font-black text-slate-900 group-hover:text-emerald-800">
-                            Relâcher dans le vide (Drop)
-                          </div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            Quand l'objet est déposé n'importe où sur le canvas
-                          </div>
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* CASE 5 & 6 : MINUTEURS & CLAVIER */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* CASE 5 : MINUTEURS & CHRONOMÈTRES */}
-                    <div className="bg-cyan-50/50 p-4 rounded-3xl border border-cyan-200/80 space-y-3">
-                      <div className="text-xs font-black uppercase text-cyan-800 tracking-wider">
-                        ⏱️ Minuteurs & Chronomètres
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWizard({
-                              ...activeWizard,
-                              triggerType: 'timer',
-                              timerInterval: 3,
-                              timerType: 'once',
-                              step: 4,
-                              actionSubStep: 'main',
-                            });
-                          }}
-                          className="p-3 bg-white hover:bg-cyan-100/60 border-2 border-cyan-100 hover:border-cyan-500 rounded-2xl text-left cursor-pointer transition-all shadow-xs group"
-                        >
-                          <div className="text-xl mb-1">⏱️</div>
-                          <div className="text-xs font-black text-slate-900 group-hover:text-cyan-800">
-                            Après 3 secondes
-                          </div>
-                          <div className="text-[10px] text-slate-500">
-                            Timer unique
-                          </div>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWizard({
-                              ...activeWizard,
-                              triggerType: 'timer',
-                              timerInterval: 2,
-                              timerType: 'repeat',
-                              step: 4,
-                              actionSubStep: 'main',
-                            });
-                          }}
-                          className="p-3 bg-white hover:bg-cyan-100/60 border-2 border-cyan-100 hover:border-cyan-500 rounded-2xl text-left cursor-pointer transition-all shadow-xs group"
-                        >
-                          <div className="text-xl mb-1">🔄</div>
-                          <div className="text-xs font-black text-slate-900 group-hover:text-cyan-800">
-                            Toutes les 2 secondes
-                          </div>
-                          <div className="text-[10px] text-slate-500">
-                            Timer récurrent
-                          </div>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* CASE 6 : CLAVIER & COMMANDES (Unique carte -> Choix de la touche) */}
-                    <div className="bg-slate-100/80 p-4 rounded-3xl border border-slate-300 space-y-3">
-                      <div className="text-xs font-black uppercase text-slate-800 tracking-wider">
-                        ⌨️ Touches du Clavier
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveWizard({
-                            ...activeWizard,
-                            triggerType: 'keyboard',
-                            actionSubStep: 'key_picker',
-                          });
-                        }}
-                        className="w-full p-4 bg-white hover:bg-slate-200/80 border-2 border-slate-300 hover:border-indigo-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
-                      >
-                        <div className="w-12 h-12 rounded-xl bg-slate-200 text-slate-800 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-110 transition-transform">
-                          ⌨️
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
-                            Touche de Clavier
-                          </div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            Choisir la touche (Espace, Flèches, Z/Q/S/D, Entrée, etc.) →
-                          </div>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 shrink-0" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* CASE 7, 8, 9, 10 : ÉTATS, PROXIMITÉ, BORDS & SCORE */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    {/* CASE 7 : CHANGEMENT D'ÉTAT */}
-                    <div className="bg-violet-50/50 p-3.5 rounded-2xl border border-violet-200 space-y-2">
-                      <div className="text-xs font-black uppercase text-violet-800">🔄 Changement d'État</div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveWizard({
-                            ...activeWizard,
-                            triggerType: 'state_change',
-                            step: 4,
-                            actionSubStep: 'main',
-                          });
-                        }}
-                        className="w-full p-2.5 bg-white hover:bg-violet-100 border border-violet-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
-                      >
-                        <span className="text-xl">✨</span>
-                        <div>
-                          <div className="text-xs font-black text-slate-900">Nouveau statut</div>
-                          <div className="text-[9px] text-slate-500">L'objet passe à l'état X</div>
-                        </div>
-                      </button>
-                    </div>
-
-                    {/* CASE 8 : PROXIMITÉ */}
-                    <div className="bg-sky-50/50 p-3.5 rounded-2xl border border-sky-200 space-y-2">
-                      <div className="text-xs font-black uppercase text-sky-800">📏 Proximité</div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveWizard({
-                            ...activeWizard,
-                            triggerType: 'proximity',
-                            proximityDistance: 80,
-                            actionSubStep: 'config_event_params',
-                          });
-                        }}
-                        className="w-full p-2.5 bg-white hover:bg-sky-100 border border-sky-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
-                      >
-                        <span className="text-xl">📏</span>
-                        <div>
-                          <div className="text-xs font-black text-slate-900">Approche Cible</div>
-                          <div className="text-[9px] text-slate-500">Définir le rayon en px →</div>
-                        </div>
-                      </button>
-                    </div>
-
-                    {/* CASE 9 : BORDS DE SCÈNE */}
-                    <div className="bg-rose-50/50 p-3.5 rounded-2xl border border-rose-200 space-y-2">
-                      <div className="text-xs font-black uppercase text-rose-800">🖼️ Bords du Canvas</div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveWizard({
-                            ...activeWizard,
-                            triggerType: 'boundary',
-                            boundaryEdge: 'any',
-                            actionSubStep: 'config_event_params',
-                          });
-                        }}
-                        className="w-full p-2.5 bg-white hover:bg-rose-100 border border-rose-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
-                      >
-                        <span className="text-xl">🖼️</span>
-                        <div>
-                          <div className="text-xs font-black text-slate-900">Touche le Cadre</div>
-                          <div className="text-[9px] text-slate-500">Définir le bord à contacter →</div>
-                        </div>
-                      </button>
-                    </div>
-
-                    {/* CASE 10 : SCORE & VARIABLE */}
-                    <div className="bg-amber-50/50 p-3.5 rounded-2xl border border-amber-200 space-y-2">
-                      <div className="text-xs font-black uppercase text-amber-800">📊 Score &amp; Variables</div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveWizard({
-                            ...activeWizard,
-                            triggerType: 'variable',
-                            variableName: 'score',
-                            variableOperator: '>=',
-                            variableValue: 5,
-                            actionSubStep: 'config_event_params',
-                          });
-                        }}
-                        className="w-full p-2.5 bg-white hover:bg-amber-100 border border-amber-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
-                      >
-                        <span className="text-xl">🏆</span>
-                        <div>
-                          <div className="text-xs font-black text-slate-900">Score &amp; Compteur</div>
-                          <div className="text-[9px] text-slate-500">Régler le seuil du score →</div>
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )
-            )}
-
-              {/* ÉTAPE 3 : CIBLE (Collision - Grandes Cartes) */}
-              {activeWizard.step === 3 && (
-                <div>
-                  {activeWizard.targetSubStep === 'choose_state' ? (
-                    <div className="space-y-4">
-                      <div className="text-xs font-bold text-slate-600">
-                        Choisissez si la règle requiert un état précis pour la cible {getEntityObj(activeWizard.targetType)?.name || activeWizard.targetType} :
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                        {/* Option : Tous les états */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWizard({
-                              ...activeWizard,
-                              targetStateId: undefined,
+                              triggerType: 'collision',
+                              triggerPhase: 'enter',
+                              step: 2,
+                              objectPhase: 'subject',
+                              subjectSubStep: 'choose_object',
                               targetSubStep: 'choose_object',
-                              step: 4,
                               actionSubStep: 'main',
                             });
                           }}
-                          className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all shadow-xs group active:scale-95"
+                          className="p-4 bg-white hover:bg-indigo-100/60 border-2 border-indigo-100 hover:border-indigo-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
                         >
-                          <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-3xl shadow-2xs group-hover:scale-110 transition-transform">
-                            ✨
+                          <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
+                            💥
                           </div>
-                          <div className="text-center w-full">
-                            <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700">
-                              Tous les états
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
+                              Collision Entrée
                             </div>
-                            <div className="text-[10px] text-slate-400 mt-0.5">Toute apparence de la cible</div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              Premier contact quand le sujet touche la cible
+                            </div>
                           </div>
                         </button>
 
-                        {/* Options : États spécifiques de la cible */}
-                        {Object.values(getEntityObj(activeWizard.targetType)?.states || {}).map((st) => (
-                          <button
-                            key={st.id}
-                            type="button"
-                            onClick={() => {
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'collision',
+                              triggerPhase: 'exit',
+                              step: 2,
+                              objectPhase: 'subject',
+                              subjectSubStep: 'choose_object',
+                              targetSubStep: 'choose_object',
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-4 bg-white hover:bg-indigo-100/60 border-2 border-indigo-100 hover:border-indigo-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                        >
+                          <div className="w-10 h-10 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
+                            💨
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
+                              Collision Sortie
+                            </div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              Séparation dès que le sujet quitte la cible
+                            </div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'collision',
+                              triggerPhase: 'stay',
+                              step: 2,
+                              objectPhase: 'subject',
+                              subjectSubStep: 'choose_object',
+                              targetSubStep: 'choose_object',
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-4 bg-white hover:bg-indigo-100/60 border-2 border-indigo-100 hover:border-indigo-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                        >
+                          <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
+                            ⏳
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
+                              Contact Continu
+                            </div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              Maintenu tant que les deux objets se touchent
+                            </div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'collision',
+                              triggerPhase: 'collision_release',
+                              step: 2,
+                              objectPhase: 'subject',
+                              subjectSubStep: 'choose_object',
+                              targetSubStep: 'choose_object',
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-4 bg-white hover:bg-indigo-100/60 border-2 border-indigo-100 hover:border-indigo-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                        >
+                          <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
+                            🎯
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
+                              Lâché sur Cible
+                            </div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              Relâchement du sujet pendant la collision
+                            </div>
+                          </div>
+                        </button>
+                      </div>
+
+                      {/* Options anti-boucle Collision */}
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-indigo-200/70">
+                        <label className="flex items-center gap-2 text-[11px] font-bold text-indigo-900">
+                          <span>Marge anti-rebond sortie :</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={60}
+                            step={2}
+                            value={activeWizard.collisionExitMargin ?? 10}
+                            onChange={(e) =>
                               setActiveWizard({
                                 ...activeWizard,
-                                targetStateId: st.id,
-                                targetSubStep: 'choose_object',
-                                step: 4,
-                                actionSubStep: 'main',
-                              });
-                            }}
-                            className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all shadow-xs group active:scale-95"
-                          >
-                            <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs group-hover:scale-110 transition-transform">
-                              <EntityMiniPreview
-                                entity={getEntityObj(activeWizard.targetType)}
-                                type={activeWizard.targetType}
-                                stateId={st.id}
-                                size={52}
-                              />
-                            </div>
-                            <div className="text-center w-full">
-                              <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700 truncate">
-                                État {st.name}
-                              </div>
-                              <div className="text-[10px] text-slate-400 mt-0.5">Seulement si la cible est dans cet état</div>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {/* Sélecteur Type / #Tag / Instance précise / Tous objets (Cible) */}
-                      <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200">
-                        <button
-                          type="button"
-                          onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'type' })}
-                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            (activeWizard.targetMode || 'type') === 'type'
-                              ? 'bg-white text-indigo-700 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          🧩 Par Type
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'tag' })}
-                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            activeWizard.targetMode === 'tag'
-                              ? 'bg-white text-purple-700 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          🏷️ Par #Tag
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'instance' })}
-                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            activeWizard.targetMode === 'instance'
-                              ? 'bg-white text-cyan-700 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          📍 Instance
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'any' })}
-                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            activeWizard.targetMode === 'any'
-                              ? 'bg-white text-emerald-700 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          🌐 Tous objets
-                        </button>
-                      </div>
-
-                      {activeWizard.targetMode === 'any' ? (
+                                collisionExitMargin: Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)),
+                              })
+                            }
+                            className="w-14 px-2 py-1 text-center text-xs font-bold bg-white border border-indigo-200 rounded-lg outline-none focus:border-indigo-500"
+                          />
+                          <span className="text-[10px] text-indigo-600 font-normal">px (évite les boucles si l'état change de taille)</span>
+                        </label>
                         <button
                           type="button"
                           onClick={() =>
                             setActiveWizard({
                               ...activeWizard,
-                              targetMode: 'any',
-                              targetType: undefined,
-                              targetId: undefined,
-                              targetTag: undefined,
-                              targetStateId: undefined,
-                              step: 4,
-                              actionSubStep: 'main',
+                              collisionTriggerOnce: !activeWizard.collisionTriggerOnce,
                             })
                           }
-                          className="w-full p-6 bg-emerald-50/70 hover:bg-emerald-100/70 border-2 border-emerald-300 hover:border-emerald-500 rounded-3xl flex items-center justify-between gap-4 cursor-pointer transition-all shadow-xs group text-left"
+                          className={`px-3 py-1.5 rounded-xl text-[11px] font-black border transition-all cursor-pointer ${
+                            activeWizard.collisionTriggerOnce
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                              : 'bg-white text-slate-700 border-indigo-200 hover:bg-indigo-100/60'
+                          }`}
                         >
-                          <div className="flex items-center gap-4">
-                            <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition-transform">
-                              🌐
+                          {activeWizard.collisionTriggerOnce ? '✓ 1 seule fois par paire' : '1× par paire (Optionnel)'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* CASE 2 : CLICS & POINTEUR */}
+                    <div className="bg-purple-50/50 p-4 rounded-3xl border border-purple-200/80 space-y-3">
+                      <div className="flex items-center gap-2 text-xs font-black uppercase text-purple-800 tracking-wider">
+                        <span>👆 Clics &amp; Pointeur Souris / Tactile</span>
+                        <span className="text-[10px] font-bold text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full">
+                          1 Objet (Sujet)
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'click',
+                              triggerPhase: 'click',
+                              step: 2,
+                              objectPhase: 'subject',
+                              subjectSubStep: 'choose_object',
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-4 bg-white hover:bg-purple-100/60 border-2 border-purple-100 hover:border-purple-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                        >
+                          <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
+                            👆
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-purple-800">
+                              Clic Complet
+                            </div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              Action exécutée lors d'un clic complet sur l'objet
+                            </div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'click',
+                              triggerPhase: 'down',
+                              step: 2,
+                              objectPhase: 'subject',
+                              subjectSubStep: 'choose_object',
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-4 bg-white hover:bg-purple-100/60 border-2 border-purple-100 hover:border-purple-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                        >
+                          <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
+                            👇
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-purple-800">
+                              Appui Clic (Mouse Down)
+                            </div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              Dès la pression du bouton du pointeur
+                            </div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'click',
+                              triggerPhase: 'up',
+                              step: 2,
+                              objectPhase: 'subject',
+                              subjectSubStep: 'choose_object',
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="p-4 bg-white hover:bg-purple-100/60 border-2 border-purple-100 hover:border-purple-500 rounded-2xl flex flex-col justify-between gap-2 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                        >
+                          <div className="w-10 h-10 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-110 transition-transform">
+                            🖐️
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-purple-800">
+                              Relâchement Clic (Mouse Up)
+                            </div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              Au relâchement du bouton du pointeur
+                            </div>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* CASE 3 & 4 : SURVOL & GLISSER-DÉPOSER */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="bg-amber-50/50 p-4 rounded-3xl border border-amber-200/80 space-y-3">
+                        <div className="text-xs font-black uppercase text-amber-800 tracking-wider">
+                          👀 Survol Souris (Hover)
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveWizard({
+                                ...activeWizard,
+                                triggerType: 'hover',
+                                triggerPhase: 'hover_enter',
+                                step: 2,
+                                objectPhase: 'subject',
+                                subjectSubStep: 'choose_object',
+                                actionSubStep: 'main',
+                              });
+                            }}
+                            className="p-3.5 bg-white hover:bg-amber-100/60 border-2 border-amber-100 hover:border-amber-500 rounded-2xl flex flex-col justify-between gap-1.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                          >
+                            <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-xl shadow-2xs group-hover:scale-110 transition-transform">
+                              👀
                             </div>
                             <div>
-                              <div className="text-sm font-black text-emerald-950">
-                                N'importe quel autre objet (Tous les objets)
+                              <div className="text-xs font-black text-slate-900 group-hover:text-amber-800">
+                                Survol Entrée
                               </div>
-                              <div className="text-xs text-emerald-700 mt-1">
-                                Déclencher la collision ou proximité avec tout autre objet sur le canvas (y compris ceux créés en jeu).
+                              <div className="text-[10px] text-slate-500 mt-0.5">
+                                Mouse Hover Enter
                               </div>
                             </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveWizard({
+                                ...activeWizard,
+                                triggerType: 'hover',
+                                triggerPhase: 'hover_exit',
+                                step: 2,
+                                objectPhase: 'subject',
+                                subjectSubStep: 'choose_object',
+                                actionSubStep: 'main',
+                              });
+                            }}
+                            className="p-3.5 bg-white hover:bg-amber-100/60 border-2 border-amber-100 hover:border-amber-500 rounded-2xl flex flex-col justify-between gap-1.5 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                          >
+                            <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-xl shadow-2xs group-hover:scale-110 transition-transform">
+                              🏃
+                            </div>
+                            <div>
+                              <div className="text-xs font-black text-slate-900 group-hover:text-amber-800">
+                                Survol Sortie
+                              </div>
+                              <div className="text-[10px] text-slate-500 mt-0.5">
+                                Mouse Hover Exit
+                              </div>
+                            </div>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="bg-emerald-50/50 p-4 rounded-3xl border border-emerald-200/80 space-y-3">
+                        <div className="text-xs font-black uppercase text-emerald-800 tracking-wider">
+                          🫳 Glisser-Déposer libre
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'drag',
+                              triggerPhase: 'drag_release',
+                              step: 2,
+                              objectPhase: 'subject',
+                              subjectSubStep: 'choose_object',
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="w-full p-3.5 bg-white hover:bg-emerald-100/60 border-2 border-emerald-100 hover:border-emerald-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                        >
+                          <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-110 transition-transform">
+                            🫳
                           </div>
-                          <ChevronRight className="w-5 h-5 text-emerald-700 shrink-0" />
+                          <div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-emerald-800">
+                              Relâcher dans le vide (Drop)
+                            </div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              Quand l'objet est déposé n'importe où sur le canvas
+                            </div>
+                          </div>
                         </button>
-                      ) : activeWizard.targetMode === 'tag' ? (
-                        <div className="p-4 bg-purple-50/50 border-2 border-purple-200 rounded-3xl space-y-3">
-                          <div className="text-xs font-bold text-purple-950">
-                            Déclencher lorsque le Sujet touche n'importe quel objet portant ce #Tag (ex: projectiles, ennemis créés en jeu) :
+                      </div>
+                    </div>
+
+                    {/* CASE 5 & 6 : MINUTEURS & CLAVIER (Conditions Globales -> sautent directement à Étape 3 Action) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="bg-cyan-50/50 p-4 rounded-3xl border border-cyan-200/80 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-xs font-black uppercase text-cyan-800 tracking-wider">
+                            ⏱️ Minuteurs &amp; Chronomètres
                           </div>
-                          {allProjectTags.length > 0 && (
-                            <div className="flex flex-wrap gap-2">
-                              {allProjectTags.map((tag) => (
-                                <button
-                                  key={tag}
-                                  type="button"
-                                  onClick={() =>
-                                    setActiveWizard({
-                                      ...activeWizard,
-                                      targetMode: 'tag',
-                                      targetTag: tag,
-                                      targetStateId: undefined,
-                                      step: 4,
-                                      actionSubStep: 'main',
-                                    })
-                                  }
-                                  className="px-3 py-1.5 bg-white hover:bg-purple-600 hover:text-white text-purple-800 border border-purple-300 rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs"
-                                >
-                                  #{tag} →
-                                </button>
-                              ))}
+                          <span className="text-[10px] font-bold text-cyan-700 bg-cyan-100 px-2 py-0.5 rounded-full">
+                            Global ⚡
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveWizard({
+                                ...activeWizard,
+                                triggerType: 'timer',
+                                timerInterval: 3,
+                                timerType: 'once',
+                                step: 3,
+                                actionSubStep: 'main',
+                              });
+                            }}
+                            className="p-3 bg-white hover:bg-cyan-100/60 border-2 border-cyan-100 hover:border-cyan-500 rounded-2xl text-left cursor-pointer transition-all shadow-xs group"
+                          >
+                            <div className="text-lg mb-1">⏱️</div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-cyan-800">
+                              Après 3s
                             </div>
-                          )}
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="text"
-                              value={activeWizard.targetTag || ''}
-                              onChange={(e) =>
-                                setActiveWizard({ ...activeWizard, targetTag: e.target.value.replace(/^#/, '') })
-                              }
-                              placeholder="Ou saisir un tag cible (ex: projectile, mur...)"
-                              className="flex-1 px-3 py-2 text-xs font-bold bg-white border border-purple-300 rounded-xl outline-none focus:border-purple-600"
-                            />
+                            <div className="text-[10px] text-slate-500">
+                              Timer unique
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveWizard({
+                                ...activeWizard,
+                                triggerType: 'timer',
+                                timerInterval: 2,
+                                timerType: 'repeat',
+                                step: 3,
+                                actionSubStep: 'main',
+                              });
+                            }}
+                            className="p-3 bg-white hover:bg-cyan-100/60 border-2 border-cyan-100 hover:border-cyan-500 rounded-2xl text-left cursor-pointer transition-all shadow-xs group"
+                          >
+                            <div className="text-lg mb-1">🔄</div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-cyan-800">
+                              Toutes les 2s
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              Récurrent
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveWizard({
+                                ...activeWizard,
+                                triggerType: 'timer',
+                                timerInterval: activeWizard.timerInterval ?? 2,
+                                timerType: activeWizard.timerType ?? 'repeat',
+                                actionSubStep: 'config_event_params',
+                              });
+                            }}
+                            className="p-3 bg-white hover:bg-cyan-100/60 border-2 border-cyan-100 hover:border-cyan-500 rounded-2xl text-left cursor-pointer transition-all shadow-xs group"
+                          >
+                            <div className="text-lg mb-1">⚙️</div>
+                            <div className="text-xs font-black text-slate-900 group-hover:text-cyan-800">
+                              Personnaliser
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              Durée exacte →
+                            </div>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-100/80 p-4 rounded-3xl border border-slate-300 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                            ⌨️ Touches du Clavier
+                          </div>
+                          <span className="text-[10px] font-bold text-slate-700 bg-slate-200 px-2 py-0.5 rounded-full">
+                            Global ⚡
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'keyboard',
+                              actionSubStep: 'key_picker',
+                            });
+                          }}
+                          className="w-full p-4 bg-white hover:bg-slate-200/80 border-2 border-slate-300 hover:border-indigo-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs group active:scale-95"
+                        >
+                          <div className="w-12 h-12 rounded-xl bg-slate-200 text-slate-800 flex items-center justify-center text-2xl shrink-0 shadow-2xs group-hover:scale-110 transition-transform">
+                            ⌨️
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
+                              Touche de Clavier
+                            </div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              Choisir la touche (Espace, Flèches, Z/Q/S/D, Entrée, etc.) →
+                            </div>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 shrink-0" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* CASE 7, 8, 9, 10 : ÉTATS, PROXIMITÉ, BORDS & SCORE */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      <div className="bg-violet-50/50 p-3.5 rounded-2xl border border-violet-200 space-y-2">
+                        <div className="text-xs font-black uppercase text-violet-800">🔄 Changement d'État</div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'state_change',
+                              step: 2,
+                              objectPhase: 'subject',
+                              subjectSubStep: 'choose_object',
+                              actionSubStep: 'main',
+                            });
+                          }}
+                          className="w-full p-2.5 bg-white hover:bg-violet-100 border border-violet-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
+                        >
+                          <span className="text-xl">✨</span>
+                          <div>
+                            <div className="text-xs font-black text-slate-900">Nouveau statut</div>
+                            <div className="text-[9px] text-slate-500">L'objet passe à l'état X</div>
+                          </div>
+                        </button>
+                      </div>
+
+                      <div className="bg-sky-50/50 p-3.5 rounded-2xl border border-sky-200 space-y-2">
+                        <div className="text-xs font-black uppercase text-sky-800">📏 Proximité</div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'proximity',
+                              proximityDistance: 80,
+                              actionSubStep: 'config_event_params',
+                            });
+                          }}
+                          className="w-full p-2.5 bg-white hover:bg-sky-100 border border-sky-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
+                        >
+                          <span className="text-xl">📏</span>
+                          <div>
+                            <div className="text-xs font-black text-slate-900">Approche Cible</div>
+                            <div className="text-[9px] text-slate-500">Définir le rayon en px →</div>
+                          </div>
+                        </button>
+                      </div>
+
+                      <div className="bg-rose-50/50 p-3.5 rounded-2xl border border-rose-200 space-y-2">
+                        <div className="text-xs font-black uppercase text-rose-800">🖼️ Bords du Canvas</div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'boundary',
+                              boundaryEdge: 'any',
+                              actionSubStep: 'config_event_params',
+                            });
+                          }}
+                          className="w-full p-2.5 bg-white hover:bg-rose-100 border border-rose-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
+                        >
+                          <span className="text-xl">🖼️</span>
+                          <div>
+                            <div className="text-xs font-black text-slate-900">Touche le Cadre</div>
+                            <div className="text-[9px] text-slate-500">Définir le bord à contacter →</div>
+                          </div>
+                        </button>
+                      </div>
+
+                      <div className="bg-amber-50/50 p-3.5 rounded-2xl border border-amber-200 space-y-2">
+                        <div className="text-xs font-black uppercase text-amber-800">📊 Score &amp; Variables</div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveWizard({
+                              ...activeWizard,
+                              triggerType: 'variable',
+                              variableName: 'score',
+                              variableOperator: '>=',
+                              variableValue: 5,
+                              actionSubStep: 'config_event_params',
+                            });
+                          }}
+                          className="w-full p-2.5 bg-white hover:bg-amber-100 border border-amber-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
+                        >
+                          <span className="text-xl">🏆</span>
+                          <div>
+                            <div className="text-xs font-black text-slate-900">Score &amp; Compteur</div>
+                            <div className="text-[9px] text-slate-500">Régler le seuil (Global) →</div>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              )}
+
+              {/* ÉTAPE 2 : OBJETS (Adaptatif : Sujet seul, ou Sujet ↔ Cible pour Collision/Proximité) */}
+              {activeWizard.step === 2 && (
+                isWizardGlobal ? (
+                  <div className="p-8 bg-indigo-50/60 border-2 border-indigo-200 rounded-3xl text-center space-y-4 max-w-lg mx-auto">
+                    <div className="w-16 h-16 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-3xl mx-auto">
+                      ⚡
+                    </div>
+                    <div>
+                      <div className="text-sm font-black text-indigo-950">
+                        Condition Globale — Aucun objet déclencheur requis
+                      </div>
+                      <p className="text-xs text-indigo-700 mt-1">
+                        Les conditions Minuteur, Clavier et Score s'exécutent globalement sans cibler un objet de départ.
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setActiveWizard({ ...activeWizard, step: 1, actionSubStep: 'main' })}
+                        className="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 text-xs font-bold rounded-xl hover:bg-indigo-50 cursor-pointer"
+                      >
+                        ← Changer de condition
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveWizard({ ...activeWizard, step: 3, actionSubStep: 'main' })}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-xl cursor-pointer shadow-xs"
+                      >
+                        Passer à l'Action →
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Onglets Sujet / Cible lorsque la condition est relationnelle (Collision / Proximité) */}
+                    {isWizardRelational && (
+                      <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveWizard({
+                              ...activeWizard,
+                              objectPhase: 'subject',
+                              subjectSubStep: 'choose_object',
+                            })
+                          }
+                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                            wizardObjectPhase === 'subject'
+                              ? 'bg-white text-indigo-700 shadow-xs ring-1 ring-indigo-200'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          <span>1️⃣ Objet Sujet (qui touche / approche)</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">
+                            {activeWizard.subjectMode === 'any'
+                              ? 'Tous'
+                              : activeWizard.subjectMode === 'tag'
+                              ? `#${activeWizard.subjectTag || 'tag'}`
+                              : activeWizard.subjectMode === 'instance'
+                              ? entities[activeWizard.subjectId || '']?.name || 'Instance'
+                              : getEntityObj(activeWizard.subjectType)?.name || activeWizard.subjectType || 'À choisir'}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveWizard({
+                              ...activeWizard,
+                              objectPhase: 'target',
+                              targetSubStep: 'choose_object',
+                            })
+                          }
+                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                            wizardObjectPhase === 'target'
+                              ? 'bg-white text-emerald-700 shadow-xs ring-1 ring-emerald-200'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          <span>2️⃣ Objet Cible (touché / approché)</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
+                            {activeWizard.targetMode === 'any'
+                              ? 'Tous'
+                              : activeWizard.targetMode === 'tag'
+                              ? `#${activeWizard.targetTag || 'tag'}`
+                              : activeWizard.targetMode === 'instance'
+                              ? entities[activeWizard.targetId || '']?.name || 'Instance'
+                              : getEntityObj(activeWizard.targetType)?.name || activeWizard.targetType || 'À choisir'}
+                          </span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* PHASE A : CHOIX DU SUJET */}
+                    {(!isWizardRelational || wizardObjectPhase === 'subject') ? (
+                      activeWizard.subjectSubStep === 'choose_state' ? (
+                        <div className="space-y-4">
+                          <div className="text-xs font-bold text-slate-600">
+                            Choisissez si la règle requiert un état précis pour le Sujet {getEntityObj(activeWizard.subjectType)?.name || activeWizard.subjectType} :
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                             <button
                               type="button"
-                              disabled={!activeWizard.targetTag?.trim()}
                               onClick={() => {
-                                if (!activeWizard.targetTag?.trim()) return;
                                 setActiveWizard({
                                   ...activeWizard,
-                                  targetMode: 'tag',
-                                  targetTag: activeWizard.targetTag.trim().replace(/^#/, ''),
+                                  subjectStateId: undefined,
+                                  subjectSubStep: 'choose_object',
+                                  ...(isWizardRelational
+                                    ? { objectPhase: 'target', targetSubStep: 'choose_object' }
+                                    : { step: 3, actionSubStep: 'main' }),
+                                });
+                              }}
+                              className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all shadow-xs group active:scale-95"
+                            >
+                              <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-3xl shadow-2xs group-hover:scale-110 transition-transform">
+                                ✨
+                              </div>
+                              <div className="text-center w-full">
+                                <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700">
+                                  Tous les états
+                                </div>
+                                <div className="text-[10px] text-slate-400 mt-0.5">N'importe quelle apparence</div>
+                              </div>
+                            </button>
+
+                            {Object.values(getEntityObj(activeWizard.subjectType)?.states || {}).map((st) => (
+                              <button
+                                key={st.id}
+                                type="button"
+                                onClick={() => {
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    subjectStateId: st.id,
+                                    subjectSubStep: 'choose_object',
+                                    ...(isWizardRelational
+                                      ? { objectPhase: 'target', targetSubStep: 'choose_object' }
+                                      : { step: 3, actionSubStep: 'main' }),
+                                  });
+                                }}
+                                className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all shadow-xs group active:scale-95"
+                              >
+                                <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs group-hover:scale-110 transition-transform">
+                                  <EntityMiniPreview
+                                    entity={getEntityObj(activeWizard.subjectType)}
+                                    type={activeWizard.subjectType}
+                                    stateId={st.id}
+                                    size={52}
+                                  />
+                                </div>
+                                <div className="text-center w-full">
+                                  <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700 truncate">
+                                    État {st.name}
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 mt-0.5">Seulement dans cet état</div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                            <button
+                              type="button"
+                              onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'type' })}
+                              className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                (activeWizard.subjectMode || 'type') === 'type'
+                                  ? 'bg-white text-indigo-700 shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              🧩 Par Type
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'tag' })}
+                              className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                activeWizard.subjectMode === 'tag'
+                                  ? 'bg-white text-purple-700 shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              🏷️ Par #Tag
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'instance' })}
+                              className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                activeWizard.subjectMode === 'instance'
+                                  ? 'bg-white text-cyan-700 shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              📍 Instance
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveWizard({ ...activeWizard, subjectMode: 'any' })}
+                              className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                activeWizard.subjectMode === 'any'
+                                  ? 'bg-white text-emerald-700 shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              🌐 Tous objets
+                            </button>
+                          </div>
+
+                          {activeWizard.subjectMode === 'any' ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setActiveWizard({
+                                  ...activeWizard,
+                                  subjectMode: 'any',
+                                  subjectType: undefined,
+                                  subjectId: undefined,
+                                  subjectTag: undefined,
+                                  subjectStateId: undefined,
+                                  ...(isWizardRelational
+                                    ? { objectPhase: 'target', targetSubStep: 'choose_object' }
+                                    : { step: 3, actionSubStep: 'main' }),
+                                })
+                              }
+                              className="w-full p-6 bg-emerald-50/70 hover:bg-emerald-100/70 border-2 border-emerald-300 hover:border-emerald-500 rounded-3xl flex items-center justify-between gap-4 cursor-pointer transition-all shadow-xs group text-left"
+                            >
+                              <div className="flex items-center gap-4">
+                                <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition-transform">
+                                  🌐
+                                </div>
+                                <div>
+                                  <div className="text-sm font-black text-emerald-950">
+                                    Tous les objets de la scène
+                                  </div>
+                                  <div className="text-xs text-emerald-700 mt-1">
+                                    La règle s'appliquera à n'importe quelle entité (présente ou créée en cours de partie).
+                                  </div>
+                                </div>
+                              </div>
+                              <ChevronRight className="w-5 h-5 text-emerald-700 shrink-0" />
+                            </button>
+                          ) : activeWizard.subjectMode === 'tag' ? (
+                            <div className="p-4 bg-purple-50/50 border-2 border-purple-200 rounded-3xl space-y-3">
+                              <div className="text-xs font-bold text-purple-950">
+                                Cibler toutes les entités (existantes ou créées en jeu) portant un #Tag :
+                              </div>
+                              {allProjectTags.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  {allProjectTags.map((tag) => (
+                                    <button
+                                      key={tag}
+                                      type="button"
+                                      onClick={() =>
+                                        setActiveWizard({
+                                          ...activeWizard,
+                                          subjectMode: 'tag',
+                                          subjectTag: tag,
+                                          subjectStateId: undefined,
+                                          ...(isWizardRelational
+                                            ? { objectPhase: 'target', targetSubStep: 'choose_object' }
+                                            : { step: 3, actionSubStep: 'main' }),
+                                        })
+                                      }
+                                      className="px-3 py-1.5 bg-white hover:bg-purple-600 hover:text-white text-purple-800 border border-purple-300 rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs"
+                                    >
+                                      #{tag} →
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={activeWizard.subjectTag || ''}
+                                  onChange={(e) =>
+                                    setActiveWizard({ ...activeWizard, subjectTag: e.target.value.replace(/^#/, '') })
+                                  }
+                                  placeholder="Ou saisir un tag (ex: ennemi, piece...)"
+                                  className="flex-1 px-3 py-2 text-xs font-bold bg-white border border-purple-300 rounded-xl outline-none focus:border-purple-600"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={!activeWizard.subjectTag?.trim()}
+                                  onClick={() => {
+                                    if (!activeWizard.subjectTag?.trim()) return;
+                                    setActiveWizard({
+                                      ...activeWizard,
+                                      subjectMode: 'tag',
+                                      subjectTag: activeWizard.subjectTag.trim().replace(/^#/, ''),
+                                      subjectStateId: undefined,
+                                      ...(isWizardRelational
+                                        ? { objectPhase: 'target', targetSubStep: 'choose_object' }
+                                        : { step: 3, actionSubStep: 'main' }),
+                                    });
+                                  }}
+                                  className="px-4 py-2 bg-purple-600 disabled:bg-slate-200 text-white disabled:text-slate-400 text-xs font-bold rounded-xl cursor-pointer"
+                                >
+                                  Valider →
+                                </button>
+                              </div>
+                            </div>
+                          ) : activeWizard.subjectMode === 'instance' ? (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+                              {entityList.length === 0 ? (
+                                <div className="col-span-full text-center text-xs text-slate-500 py-6">
+                                  Aucune entité posée sur la scène.
+                                </div>
+                              ) : (
+                                entityList.map((inst) => {
+                                  const statesCount = Object.keys(inst.states || {}).length;
+                                  return (
+                                    <button
+                                      key={inst.id}
+                                      type="button"
+                                      onClick={() => {
+                                        if (statesCount > 1) {
+                                          setActiveWizard({
+                                            ...activeWizard,
+                                            subjectMode: 'instance',
+                                            subjectId: inst.id,
+                                            subjectType: inst.type,
+                                            subjectSubStep: 'choose_state',
+                                          });
+                                        } else {
+                                          setActiveWizard({
+                                            ...activeWizard,
+                                            subjectMode: 'instance',
+                                            subjectId: inst.id,
+                                            subjectType: inst.type,
+                                            subjectStateId: undefined,
+                                            ...(isWizardRelational
+                                              ? { objectPhase: 'target', targetSubStep: 'choose_object' }
+                                              : { step: 3, actionSubStep: 'main' }),
+                                          });
+                                        }
+                                      }}
+                                      className="p-4 bg-slate-50 hover:bg-cyan-50 border-2 border-slate-200 hover:border-cyan-500 rounded-3xl flex flex-col items-center justify-center gap-2.5 cursor-pointer transition-all shadow-xs group active:scale-95"
+                                    >
+                                      <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs">
+                                        <EntityMiniPreview entity={inst} type={inst.type} size={52} />
+                                      </div>
+                                      <div className="text-center w-full">
+                                        <div className="text-xs font-black text-slate-800 truncate">{inst.name}</div>
+                                        <div className="text-[10px] text-slate-400">
+                                          ({Math.round(inst.position.x)}, {Math.round(inst.position.y)})
+                                        </div>
+                                      </div>
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                              {availableEntityOptions.map((opt) => {
+                                const ent = getEntityObj(opt.type);
+                                const statesCount = Object.keys(ent?.states || {}).length;
+                                return (
+                                  <button
+                                    key={opt.type}
+                                    type="button"
+                                    onClick={() => {
+                                      if (statesCount > 1) {
+                                        setActiveWizard({
+                                          ...activeWizard,
+                                          subjectMode: 'type',
+                                          subjectType: opt.type,
+                                          subjectSubStep: 'choose_state',
+                                        });
+                                      } else {
+                                        setActiveWizard({
+                                          ...activeWizard,
+                                          subjectMode: 'type',
+                                          subjectType: opt.type,
+                                          subjectStateId: undefined,
+                                          ...(isWizardRelational
+                                            ? { objectPhase: 'target', targetSubStep: 'choose_object' }
+                                            : { step: 3, actionSubStep: 'main' }),
+                                        });
+                                      }
+                                    }}
+                                    className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3.5 cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
+                                  >
+                                    <div className="w-20 h-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-2 shadow-2xs group-hover:scale-110 transition-transform">
+                                      <EntityMiniPreview entity={ent} type={opt.type} size={64} />
+                                    </div>
+                                    <div className="text-center w-full">
+                                      <div className="text-sm font-black text-slate-800 group-hover:text-indigo-700 truncate">
+                                        {opt.label}
+                                      </div>
+                                      <div className="text-[11px] text-slate-400 mt-0.5">
+                                        {statesCount > 1 ? `${statesCount} états disponibles →` : 'Choisir comme Sujet →'}
+                                      </div>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    ) : (
+                      /* PHASE B : CHOIX DE LA CIBLE (Uniquement si Collision ou Proximité) */
+                      activeWizard.targetSubStep === 'choose_state' ? (
+                        <div className="space-y-4">
+                          <div className="text-xs font-bold text-slate-600">
+                            Choisissez si la règle requiert un état précis pour la Cible {getEntityObj(activeWizard.targetType)?.name || activeWizard.targetType} :
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveWizard({
+                                  ...activeWizard,
                                   targetStateId: undefined,
-                                  step: 4,
+                                  targetSubStep: 'choose_object',
+                                  step: 3,
                                   actionSubStep: 'main',
                                 });
                               }}
-                              className="px-4 py-2 bg-purple-600 disabled:bg-slate-200 text-white disabled:text-slate-400 text-xs font-bold rounded-xl cursor-pointer"
+                              className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all shadow-xs group active:scale-95"
                             >
-                              Valider →
+                              <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-3xl shadow-2xs group-hover:scale-110 transition-transform">
+                                ✨
+                              </div>
+                              <div className="text-center w-full">
+                                <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700">
+                                  Tous les états
+                                </div>
+                                <div className="text-[10px] text-slate-400 mt-0.5">Toute apparence de la cible</div>
+                              </div>
                             </button>
-                          </div>
-                        </div>
-                      ) : activeWizard.targetMode === 'instance' ? (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
-                          {entityList.length === 0 ? (
-                            <div className="col-span-full text-center text-xs text-slate-500 py-6">
-                              Aucune entité posée sur la scène.
-                            </div>
-                          ) : (
-                            entityList.map((inst) => {
-                              const statesCount = Object.keys(inst.states || {}).length;
-                              return (
-                                <button
-                                  key={inst.id}
-                                  type="button"
-                                  onClick={() => {
-                                    if (statesCount > 1) {
-                                      setActiveWizard({
-                                        ...activeWizard,
-                                        targetMode: 'instance',
-                                        targetId: inst.id,
-                                        targetType: inst.type,
-                                        targetSubStep: 'choose_state',
-                                      });
-                                    } else {
-                                      setActiveWizard({
-                                        ...activeWizard,
-                                        targetMode: 'instance',
-                                        targetId: inst.id,
-                                        targetType: inst.type,
-                                        targetStateId: undefined,
-                                        step: 4,
-                                        actionSubStep: 'main',
-                                      });
-                                    }
-                                  }}
-                                  className="p-4 bg-slate-50 hover:bg-cyan-50 border-2 border-slate-200 hover:border-cyan-500 rounded-3xl flex flex-col items-center justify-center gap-2.5 cursor-pointer transition-all shadow-xs group active:scale-95"
-                                >
-                                  <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs">
-                                    <EntityMiniPreview entity={inst} type={inst.type} size={52} />
-                                  </div>
-                                  <div className="text-center w-full">
-                                    <div className="text-xs font-black text-slate-800 truncate">{inst.name}</div>
-                                    <div className="text-[10px] text-slate-400">
-                                      ({Math.round(inst.position.x)}, {Math.round(inst.position.y)})
-                                    </div>
-                                  </div>
-                                </button>
-                              );
-                            })
-                          )}
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                          {availableEntityOptions.map((opt) => {
-                            const ent = getEntityObj(opt.type);
-                            const statesCount = Object.keys(ent?.states || {}).length;
-                            return (
+
+                            {Object.values(getEntityObj(activeWizard.targetType)?.states || {}).map((st) => (
                               <button
-                                key={opt.type}
+                                key={st.id}
                                 type="button"
                                 onClick={() => {
-                                  if (statesCount > 1) {
-                                    setActiveWizard({
-                                      ...activeWizard,
-                                      targetMode: 'type',
-                                      targetType: opt.type,
-                                      targetSubStep: 'choose_state',
-                                    });
-                                  } else {
-                                    setActiveWizard({
-                                      ...activeWizard,
-                                      targetMode: 'type',
-                                      targetType: opt.type,
-                                      targetStateId: undefined,
-                                      step: 4,
-                                      actionSubStep: 'main',
-                                    });
-                                  }
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    targetStateId: st.id,
+                                    targetSubStep: 'choose_object',
+                                    step: 3,
+                                    actionSubStep: 'main',
+                                  });
                                 }}
-                                className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3.5 cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
+                                className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all shadow-xs group active:scale-95"
                               >
-                                <div className="w-20 h-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-2 shadow-2xs group-hover:scale-110 transition-transform">
-                                  <EntityMiniPreview entity={ent} type={opt.type} size={64} />
+                                <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs group-hover:scale-110 transition-transform">
+                                  <EntityMiniPreview
+                                    entity={getEntityObj(activeWizard.targetType)}
+                                    type={activeWizard.targetType}
+                                    stateId={st.id}
+                                    size={52}
+                                  />
                                 </div>
                                 <div className="text-center w-full">
-                                  <div className="text-sm font-black text-slate-800 group-hover:text-indigo-700 truncate">
-                                    {opt.label}
+                                  <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700 truncate">
+                                    État {st.name}
                                   </div>
-                                  <div className="text-[11px] text-slate-400 mt-0.5">
-                                    {statesCount > 1 ? `${statesCount} états disponibles →` : 'Choisir comme Cible →'}
-                                  </div>
+                                  <div className="text-[10px] text-slate-400 mt-0.5">Seulement si la cible est dans cet état</div>
                                 </div>
                               </button>
-                            );
-                          })}
+                            ))}
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                            <button
+                              type="button"
+                              onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'type' })}
+                              className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                (activeWizard.targetMode || 'type') === 'type'
+                                  ? 'bg-white text-indigo-700 shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              🧩 Par Type
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'tag' })}
+                              className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                activeWizard.targetMode === 'tag'
+                                  ? 'bg-white text-purple-700 shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              🏷️ Par #Tag
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'instance' })}
+                              className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                activeWizard.targetMode === 'instance'
+                                  ? 'bg-white text-cyan-700 shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              📍 Instance
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveWizard({ ...activeWizard, targetMode: 'any' })}
+                              className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                activeWizard.targetMode === 'any'
+                                  ? 'bg-white text-emerald-700 shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              🌐 Tous objets
+                            </button>
+                          </div>
+
+                          {activeWizard.targetMode === 'any' ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setActiveWizard({
+                                  ...activeWizard,
+                                  targetMode: 'any',
+                                  targetType: undefined,
+                                  targetId: undefined,
+                                  targetTag: undefined,
+                                  targetStateId: undefined,
+                                  step: 3,
+                                  actionSubStep: 'main',
+                                })
+                              }
+                              className="w-full p-6 bg-emerald-50/70 hover:bg-emerald-100/70 border-2 border-emerald-300 hover:border-emerald-500 rounded-3xl flex items-center justify-between gap-4 cursor-pointer transition-all shadow-xs group text-left"
+                            >
+                              <div className="flex items-center gap-4">
+                                <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition-transform">
+                                  🌐
+                                </div>
+                                <div>
+                                  <div className="text-sm font-black text-emerald-950">
+                                    N'importe quel autre objet (Tous les objets)
+                                  </div>
+                                  <div className="text-xs text-emerald-700 mt-1">
+                                    Déclencher la collision ou proximité avec tout autre objet sur le canvas (y compris ceux créés en jeu).
+                                  </div>
+                                </div>
+                              </div>
+                              <ChevronRight className="w-5 h-5 text-emerald-700 shrink-0" />
+                            </button>
+                          ) : activeWizard.targetMode === 'tag' ? (
+                            <div className="p-4 bg-purple-50/50 border-2 border-purple-200 rounded-3xl space-y-3">
+                              <div className="text-xs font-bold text-purple-950">
+                                Déclencher lorsque le Sujet touche n'importe quel objet portant ce #Tag (ex: projectiles, ennemis créés en jeu) :
+                              </div>
+                              {allProjectTags.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  {allProjectTags.map((tag) => (
+                                    <button
+                                      key={tag}
+                                      type="button"
+                                      onClick={() =>
+                                        setActiveWizard({
+                                          ...activeWizard,
+                                          targetMode: 'tag',
+                                          targetTag: tag,
+                                          targetStateId: undefined,
+                                          step: 3,
+                                          actionSubStep: 'main',
+                                        })
+                                      }
+                                      className="px-3 py-1.5 bg-white hover:bg-purple-600 hover:text-white text-purple-800 border border-purple-300 rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs"
+                                    >
+                                      #{tag} →
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={activeWizard.targetTag || ''}
+                                  onChange={(e) =>
+                                    setActiveWizard({ ...activeWizard, targetTag: e.target.value.replace(/^#/, '') })
+                                  }
+                                  placeholder="Ou saisir un tag cible (ex: projectile, mur...)"
+                                  className="flex-1 px-3 py-2 text-xs font-bold bg-white border border-purple-300 rounded-xl outline-none focus:border-purple-600"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={!activeWizard.targetTag?.trim()}
+                                  onClick={() => {
+                                    if (!activeWizard.targetTag?.trim()) return;
+                                    setActiveWizard({
+                                      ...activeWizard,
+                                      targetMode: 'tag',
+                                      targetTag: activeWizard.targetTag.trim().replace(/^#/, ''),
+                                      targetStateId: undefined,
+                                      step: 3,
+                                      actionSubStep: 'main',
+                                    });
+                                  }}
+                                  className="px-4 py-2 bg-purple-600 disabled:bg-slate-200 text-white disabled:text-slate-400 text-xs font-bold rounded-xl cursor-pointer"
+                                >
+                                  Valider →
+                                </button>
+                              </div>
+                            </div>
+                          ) : activeWizard.targetMode === 'instance' ? (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+                              {entityList.length === 0 ? (
+                                <div className="col-span-full text-center text-xs text-slate-500 py-6">
+                                  Aucune entité posée sur la scène.
+                                </div>
+                              ) : (
+                                entityList.map((inst) => {
+                                  const statesCount = Object.keys(inst.states || {}).length;
+                                  return (
+                                    <button
+                                      key={inst.id}
+                                      type="button"
+                                      onClick={() => {
+                                        if (statesCount > 1) {
+                                          setActiveWizard({
+                                            ...activeWizard,
+                                            targetMode: 'instance',
+                                            targetId: inst.id,
+                                            targetType: inst.type,
+                                            targetSubStep: 'choose_state',
+                                          });
+                                        } else {
+                                          setActiveWizard({
+                                            ...activeWizard,
+                                            targetMode: 'instance',
+                                            targetId: inst.id,
+                                            targetType: inst.type,
+                                            targetStateId: undefined,
+                                            step: 3,
+                                            actionSubStep: 'main',
+                                          });
+                                        }
+                                      }}
+                                      className="p-4 bg-slate-50 hover:bg-cyan-50 border-2 border-slate-200 hover:border-cyan-500 rounded-3xl flex flex-col items-center justify-center gap-2.5 cursor-pointer transition-all shadow-xs group active:scale-95"
+                                    >
+                                      <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-1.5 shadow-2xs">
+                                        <EntityMiniPreview entity={inst} type={inst.type} size={52} />
+                                      </div>
+                                      <div className="text-center w-full">
+                                        <div className="text-xs font-black text-slate-800 truncate">{inst.name}</div>
+                                        <div className="text-[10px] text-slate-400">
+                                          ({Math.round(inst.position.x)}, {Math.round(inst.position.y)})
+                                        </div>
+                                      </div>
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                              {availableEntityOptions.map((opt) => {
+                                const ent = getEntityObj(opt.type);
+                                const statesCount = Object.keys(ent?.states || {}).length;
+                                return (
+                                  <button
+                                    key={opt.type}
+                                    type="button"
+                                    onClick={() => {
+                                      if (statesCount > 1) {
+                                        setActiveWizard({
+                                          ...activeWizard,
+                                          targetMode: 'type',
+                                          targetType: opt.type,
+                                          targetSubStep: 'choose_state',
+                                        });
+                                      } else {
+                                        setActiveWizard({
+                                          ...activeWizard,
+                                          targetMode: 'type',
+                                          targetType: opt.type,
+                                          targetStateId: undefined,
+                                          step: 3,
+                                          actionSubStep: 'main',
+                                        });
+                                      }
+                                    }}
+                                    className="p-5 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-3.5 cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-95"
+                                  >
+                                    <div className="w-20 h-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center p-2 shadow-2xs group-hover:scale-110 transition-transform">
+                                      <EntityMiniPreview entity={ent} type={opt.type} size={64} />
+                                    </div>
+                                    <div className="text-center w-full">
+                                      <div className="text-sm font-black text-slate-800 group-hover:text-indigo-700 truncate">
+                                        {opt.label}
+                                      </div>
+                                      <div className="text-[11px] text-slate-400 mt-0.5">
+                                        {statesCount > 1 ? `${statesCount} états disponibles →` : 'Choisir comme Cible →'}
+                                      </div>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    )}
+                  </div>
+                )
               )}
 
-              {/* ÉTAPE 4 : ACTION (Grandes Cartes, 1 Clic pour Finaliser) */}
-              {activeWizard.step === 4 && (
+              {/* ÉTAPE 3 : ACTION (Grandes Cartes, 1 Clic pour Finaliser) */}
+              {activeWizard.step === 3 && (
                 <div>
-                  {/* Mode Principal Étape 4 */}
+                  {/* Mode Principal Étape 3 */}
                   {activeWizard.actionSubStep === 'main' && (() => {
                     const wizardSubjectEntity = getEntityObj(activeWizard.subjectType);
                     const wizardSubjectOpt = availableEntityOptions.find((o) => o.type === activeWizard.subjectType);
@@ -4111,7 +4746,7 @@ export function RuleBook() {
                     const wizardTargetEntity = getEntityObj(activeWizard.targetType);
                     const wizardTargetOpt = availableEntityOptions.find((o) => o.type === activeWizard.targetType);
                     const wizardTargetName = wizardTargetEntity?.name || wizardTargetOpt?.label || activeWizard.targetType;
-                    const isCollision = activeWizard.triggerType === 'collision';
+                    const isCollision = isWizardRelational;
 
                     return (
                       <div className="space-y-4">
@@ -4142,6 +4777,8 @@ export function RuleBook() {
                         </div>
 
                         <div className={`grid grid-cols-1 ${isCollision ? 'lg:grid-cols-3 md:grid-cols-2' : 'md:grid-cols-2'} gap-4 items-start`}>
+                          {!isWizardGlobal ? (
+                          <>
                           {/* SECTION 1 : SUJET */}
                           <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-3xl border border-slate-200/90 flex flex-col h-full shadow-2xs">
                             {/* En-tête Sujet avec miniature et nom de l'entité */}
@@ -4283,6 +4920,111 @@ export function RuleBook() {
                               </button>
                             </div>
                           </div>
+                          </>
+                          ) : (
+                          /* SECTION 1 (Globale) : ACTIONS SUR UN OBJET AU CHOIX */
+                          <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-3xl border border-slate-200/90 flex flex-col h-full shadow-2xs">
+                            <div className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-indigo-50 border border-indigo-200/80 shadow-2xs">
+                              <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 border border-indigo-200 flex items-center justify-center text-xl shrink-0">
+                                ⚡
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-indigo-600 text-white shadow-2xs">
+                                  Condition Globale
+                                </span>
+                                <div className="text-xs font-bold text-slate-700 truncate mt-0.5">
+                                  Agir sur un objet de la scène
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2.5 flex-1">
+                              <button
+                                type="button"
+                                onClick={() => setActiveWizard({ ...activeWizard, actionSubStep: 'third_party_entity_picker' })}
+                                className="w-full p-3.5 bg-white hover:bg-indigo-50/70 border-2 border-slate-200 hover:border-indigo-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-lg shrink-0">
+                                  🔄
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-indigo-700 truncate">
+                                    Changer l'état d'un objet
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Choisir l'objet à transformer →
+                                  </div>
+                                </div>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setActiveWizard({ ...activeWizard, actionSubStep: 'toggle_entity_picker' })}
+                                className="w-full p-3.5 bg-white hover:bg-violet-50/70 border-2 border-slate-200 hover:border-violet-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-lg shrink-0">
+                                  🔀
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-violet-700 truncate">
+                                    Basculer l'état (Toggle ⇄)
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Alterner A ⇄ B sur un objet →
+                                  </div>
+                                </div>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    actionSubStep: 'move_entity_picker',
+                                    actionTargetMode: 'type',
+                                    actionTargetType: activeWizard.actionTargetType || availableEntityOptions[0]?.type,
+                                    moveDistance: activeWizard.moveDistance ?? 40,
+                                    moveDirectionMode: activeWizard.moveDirectionMode || 'cardinal',
+                                    moveCardinal: activeWizard.moveCardinal || 'right',
+                                    moveAngle: activeWizard.moveAngle ?? 0,
+                                    moveApplyMode: activeWizard.moveApplyMode || 'instant',
+                                  })
+                                }
+                                className="w-full p-3.5 bg-white hover:bg-sky-50/70 border-2 border-slate-200 hover:border-sky-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center text-lg shrink-0">
+                                  🏃
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-sky-700 truncate">
+                                    Déplacer un objet de X px
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Décaler ou propulser une entité →
+                                  </div>
+                                </div>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setActiveWizard({ ...activeWizard, actionSubStep: 'third_party_destroy_picker' })}
+                                className="w-full p-3.5 bg-white hover:bg-rose-50/70 border-2 border-slate-200 hover:border-rose-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center text-lg shrink-0">
+                                  💥
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-rose-700 truncate">
+                                    Détruire un objet
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Choisir l'objet à supprimer →
+                                  </div>
+                                </div>
+                              </button>
+                            </div>
+                          </div>
+                          )}
 
                           {/* SECTION 2 : CIBLE (Si Collision) */}
                           {isCollision && (
@@ -5172,52 +5914,6 @@ export function RuleBook() {
                     );
                   })()}
 
-                  {/* Sous-étape : Choix de la touche Clavier (Key Picker Window) */}
-                  {activeWizard.actionSubStep === 'key_picker' && (
-                    <div className="space-y-4">
-                      <div className="text-xs font-bold text-slate-600">
-                        Choisissez la touche du clavier qui déclenche cette règle :
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
-                        {[
-                          { key: 'Space', label: "Barre d'Espace", icon: '🚀' },
-                          { key: 'ArrowUp', label: 'Flèche Haut ⬆️', icon: '⬆️' },
-                          { key: 'ArrowDown', label: 'Flèche Bas ⬇️', icon: '⬇️' },
-                          { key: 'ArrowLeft', label: 'Flèche Gauche ⬅️', icon: '⬅️' },
-                          { key: 'ArrowRight', label: 'Flèche Droite ➡️', icon: '➡️' },
-                          { key: 'Enter', label: 'Touche Entrée ↩️', icon: '↩️' },
-                          { key: 'z', label: 'Touche Z (Avancer)', icon: '⌨️' },
-                          { key: 'q', label: 'Touche Q (Gauche)', icon: '⌨️' },
-                          { key: 's', label: 'Touche S (Reculer)', icon: '⌨️' },
-                          { key: 'd', label: 'Touche D (Droite)', icon: '⌨️' },
-                          { key: 'any', label: 'N’importe quelle touche', icon: '🌟' },
-                        ].map((k) => (
-                          <button
-                            key={k.key}
-                            type="button"
-                            onClick={() => {
-                              setActiveWizard({
-                                ...activeWizard,
-                                triggerType: 'keyboard',
-                                keyName: k.key,
-                                step: 4,
-                                actionSubStep: 'main',
-                              });
-                            }}
-                            className="p-4 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-xs group active:scale-95"
-                          >
-                            <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-3xl shadow-2xs group-hover:scale-110 transition-transform">
-                              {k.icon}
-                            </div>
-                            <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700 text-center">
-                              {k.label}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
                   {/* Sous-étape : Choix de l'emplacement de spawn avec SpawnLocationPicker */}
                   {activeWizard.actionSubStep === 'spawn_location_picker' && (
                     <div className="space-y-3">
@@ -5225,11 +5921,11 @@ export function RuleBook() {
                         Où faire apparaître {getEntityObj(activeWizard.pendingSpawnType)?.name || activeWizard.pendingSpawnType} ?
                       </div>
                       <SpawnLocationPicker
-                        isCollision={activeWizard.triggerType === 'collision'}
+                        isCollision={isWizardRelational}
                         subjectEntity={getEntityObj(activeWizard.subjectType)}
                         targetEntity={getEntityObj(activeWizard.targetType)}
                         spawnEntity={getEntityObj(activeWizard.pendingSpawnType)}
-                        initialMode={activeWizard.triggerType === 'collision' ? 'at_target' : 'at_subject'}
+                        initialMode={isWizardRelational ? 'at_target' : 'at_subject'}
                         initialStateId={activeWizard.actionSpawnInitialStateId}
                         onConfirm={(data) => {
                           completeWizardWithAction({
@@ -5868,7 +6564,7 @@ export function RuleBook() {
                             className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
                           >
                             <option value="subject">Sujet</option>
-                            {activeWizard.triggerType === 'collision' && <option value="target">Cible touchée</option>}
+                            {isWizardRelational && <option value="target">Cible touchée</option>}
                             <option value="last_spawned">Dernier objet créé</option>
                             <option value="tag">Par Tag (#tag)</option>
                           </select>
@@ -5890,12 +6586,12 @@ export function RuleBook() {
                         <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
                           <span className="font-bold text-slate-700 text-xs">Objet parent (Porteur)</span>
                           <select
-                            value={activeWizard.parentTargetMode || (activeWizard.triggerType === 'collision' ? 'target' : 'entity')}
+                            value={activeWizard.parentTargetMode || (isWizardRelational ? 'target' : 'entity')}
                             onChange={(e) => setActiveWizard({ ...activeWizard, parentTargetMode: e.target.value as any })}
                             className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
                           >
                             <option value="subject">Sujet</option>
-                            {activeWizard.triggerType === 'collision' && <option value="target">Cible touchée</option>}
+                            {isWizardRelational && <option value="target">Cible touchée</option>}
                             <option value="entity">Entité de la scène</option>
                             <option value="type">Par Type</option>
                             <option value="tag">Par Tag (#tag)</option>
@@ -6039,7 +6735,7 @@ export function RuleBook() {
                             className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
                           >
                             <option value="subject">Sujet</option>
-                            {activeWizard.triggerType === 'collision' && <option value="target">Cible touchée</option>}
+                            {isWizardRelational && <option value="target">Cible touchée</option>}
                             <option value="last_spawned">Dernier objet créé</option>
                             <option value="tag">Par Tag (#tag)</option>
                             <option value="type">Par Type</option>
@@ -6100,12 +6796,12 @@ export function RuleBook() {
                         <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
                           <span className="font-bold text-slate-700 text-xs">Entité à déplacer</span>
                           <select
-                            value={activeWizard.actionTargetMode || 'subject'}
+                            value={activeWizard.actionTargetMode || (isWizardGlobal ? 'type' : 'subject')}
                             onChange={(e) => setActiveWizard({ ...activeWizard, actionTargetMode: e.target.value as any })}
                             className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
                           >
-                            <option value="subject">Sujet</option>
-                            {activeWizard.triggerType === 'collision' && <option value="target">Cible touchée</option>}
+                            {!isWizardGlobal && <option value="subject">Sujet</option>}
+                            {isWizardRelational && <option value="target">Cible touchée</option>}
                             <option value="last_spawned">Dernier objet créé</option>
                             <option value="tag">Par Tag (#tag)</option>
                             <option value="type">Par Type</option>
@@ -6228,12 +6924,12 @@ export function RuleBook() {
                             <div className="flex items-center justify-between gap-2">
                               <span className="font-bold text-slate-700 text-xs">Entité de référence</span>
                               <select
-                                value={activeWizard.moveTargetMode || (activeWizard.triggerType === 'collision' ? 'target' : 'entity')}
+                                value={activeWizard.moveTargetMode || (isWizardRelational ? 'target' : 'entity')}
                                 onChange={(e) => setActiveWizard({ ...activeWizard, moveTargetMode: e.target.value as any })}
                                 className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
                               >
-                                <option value="subject">Sujet</option>
-                                {activeWizard.triggerType === 'collision' && <option value="target">Cible touchée</option>}
+                                {!isWizardGlobal && <option value="subject">Sujet</option>}
+                                {isWizardRelational && <option value="target">Cible touchée</option>}
                                 <option value="last_spawned">Dernier objet créé</option>
                                 <option value="mouse">Souris (curseur)</option>
                                 <option value="entity">Instance précise</option>
@@ -6325,12 +7021,29 @@ export function RuleBook() {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ========================================================================= */}
       {/* 🎯 MODALS FOR DIRECT SLOT EDITING (Grande taille, 1 clic) */}
       {/* ========================================================================= */}
-      {activeModal && (
+      {activeModal && (() => {
+        const modalRule = rules.find((r) => r.id === activeModal.ruleId);
+        const isModalGlobal = modalRule ? ['timer', 'keyboard', 'variable'].includes(modalRule.trigger.type) : false;
+        const isModalRelational = modalRule ? (modalRule.trigger.type === 'collision' || modalRule.trigger.type === 'proximity') : false;
+        const hasModalParams = modalRule ? ['timer', 'keyboard', 'proximity', 'boundary', 'variable', 'collision'].includes(modalRule.trigger.type) : false;
+        const modalSubjectType = modalRule?.trigger.subjectType || availableEntityOptions[0]?.type;
+        const modalTargetType = modalRule?.trigger.targetType || availableEntityOptions[1]?.type || availableEntityOptions[0]?.type;
+        const modalSubjectHasStates = modalRule
+          ? (!modalRule.trigger.subjectMode || modalRule.trigger.subjectMode === 'type' || modalRule.trigger.subjectMode === 'instance') &&
+            Object.keys(getEntityObj(modalSubjectType)?.states || {}).length > 1
+          : false;
+        const modalTargetHasStates = modalRule
+          ? (!modalRule.trigger.targetMode || modalRule.trigger.targetMode === 'type' || modalRule.trigger.targetMode === 'instance') &&
+            Object.keys(getEntityObj(modalTargetType)?.states || {}).length > 1
+          : false;
+
+        return (
         <div
           data-modal-open="true"
           className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4"
@@ -6338,6 +7051,142 @@ export function RuleBook() {
           <div className={`bg-white rounded-3xl border border-slate-200 p-6 w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col overflow-hidden ${
             activeModal.type === 'action' ? 'max-w-5xl' : 'max-w-2xl'
           }`}>
+            {/* Barre de navigation rapide 1-clic entre toutes les étapes & sous-étapes de la règle */}
+            {modalRule && (
+              <div className="flex items-center gap-1.5 flex-wrap bg-slate-50 px-3 py-2 rounded-2xl border border-slate-200/90 text-[11px] shrink-0">
+                <button
+                  type="button"
+                  onClick={() => openRuleEventModal(modalRule, 'main')}
+                  className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    activeModal.type === 'event' && (!activeModal.subStep || activeModal.subStep === 'main')
+                      ? 'bg-slate-900 text-white shadow-2xs'
+                      : 'text-slate-700 hover:bg-white hover:text-indigo-700'
+                  }`}
+                >
+                  1. Condition
+                </button>
+
+                {hasModalParams && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openRuleEventModal(
+                        modalRule,
+                        modalRule.trigger.type === 'keyboard' ? 'key_picker' : 'config_event_params'
+                      )
+                    }
+                    className={`px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                      activeModal.type === 'event' &&
+                      (activeModal.subStep === 'config_event_params' || activeModal.subStep === 'key_picker')
+                        ? 'bg-amber-500 text-white shadow-2xs'
+                        : 'text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200/80'
+                    }`}
+                  >
+                    {modalRule.trigger.type === 'keyboard' ? '⌨️ Touche' : '⚙️ Paramètres'}
+                  </button>
+                )}
+
+                {!isModalGlobal && (
+                  <>
+                    <span className="text-slate-300">›</span>
+                    <button
+                      type="button"
+                      onClick={() => openRuleSubjectModal(modalRule, 'choose_object')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                        activeModal.type === 'subject' && activeModal.subStep !== 'choose_state'
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'text-slate-700 hover:bg-white hover:text-indigo-700'
+                      }`}
+                    >
+                      2. Sujet
+                    </button>
+                    {modalSubjectHasStates && (
+                      <button
+                        type="button"
+                        onClick={() => openRuleSubjectModal(modalRule, 'choose_state')}
+                        className={`px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                          activeModal.type === 'subject' && activeModal.subStep === 'choose_state'
+                            ? 'bg-indigo-600 text-white shadow-2xs'
+                            : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100'
+                        }`}
+                      >
+                        🎭 État Sujet
+                      </button>
+                    )}
+                  </>
+                )}
+
+                {isModalRelational && (
+                  <>
+                    <span className="text-slate-300">›</span>
+                    <button
+                      type="button"
+                      onClick={() => openRuleTargetModal(modalRule, 'choose_object')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                        activeModal.type === 'target' && activeModal.subStep !== 'choose_state'
+                          ? 'bg-emerald-600 text-white shadow-2xs'
+                          : 'text-slate-700 hover:bg-white hover:text-emerald-700'
+                      }`}
+                    >
+                      🎯 Cible
+                    </button>
+                    {modalTargetHasStates && (
+                      <button
+                        type="button"
+                        onClick={() => openRuleTargetModal(modalRule, 'choose_state')}
+                        className={`px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                          activeModal.type === 'target' && activeModal.subStep === 'choose_state'
+                            ? 'bg-emerald-600 text-white shadow-2xs'
+                            : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                        }`}
+                      >
+                        🎭 État Cible
+                      </button>
+                    )}
+                  </>
+                )}
+
+                <span className="text-slate-300">›</span>
+                {modalRule.actions.map((act, idx) => {
+                  const isEditingThisAct = activeModal.type === 'action' && activeModal.actionIndex === idx;
+                  return (
+                    <button
+                      key={act.id}
+                      type="button"
+                      onClick={() => openRuleActionModal(modalRule, act, idx)}
+                      className={`px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                        isEditingThisAct
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'text-slate-700 bg-white border border-slate-200 hover:border-indigo-400 hover:text-indigo-700'
+                      }`}
+                    >
+                      🎬 Action {modalRule.actions.length > 1 ? idx + 1 : ''}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setActiveModal({
+                      type: 'action',
+                      ruleId: modalRule.id,
+                      actionIndex: undefined,
+                      actionType: 'change_state',
+                      targetMode: isModalRelational ? 'target' : 'subject',
+                      subStep: 'main',
+                    })
+                  }
+                  className={`px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    activeModal.type === 'action' && activeModal.actionIndex === undefined
+                      ? 'bg-indigo-600 text-white shadow-2xs'
+                      : 'text-indigo-600 bg-indigo-50/70 hover:bg-indigo-100 border border-indigo-200/70'
+                  }`}
+                >
+                  + Action
+                </button>
+              </div>
+            )}
+
             {/* 1. SUJET / CIBLE MODAL */}
             {(activeModal.type === 'subject' || activeModal.type === 'target') && (() => {
               const rule = rules.find((r) => r.id === activeModal.ruleId);
@@ -7583,7 +8432,7 @@ export function RuleBook() {
               const rule = rules.find((r) => r.id === activeModal.ruleId);
               if (!rule) return null;
 
-              const isCollision = rule.trigger.type === 'collision';
+              const isCollision = rule.trigger.type === 'collision' || rule.trigger.type === 'proximity';
               const subjectType = rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
               const targetType = rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
 
@@ -9852,7 +10701,8 @@ export function RuleBook() {
             })()}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Boîte modale de gestion et enregistrement des sons audio */}
       <SoundRecorderModal
