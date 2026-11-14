@@ -12,7 +12,7 @@ import {
   MousePointerClick,
   Flame,
 } from 'lucide-react';
-import { CustomParticlePreset, ParticleShape } from '../types';
+import { CustomParticlePreset, CustomParticleUsageMode, ParticleShape } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
 import {
   createParticlePool,
@@ -24,6 +24,8 @@ import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 export interface ParticleEditorConfig {
   shape: ParticleShape;
   customParticleId?: string;
+  customParticleIds?: string[];
+  customParticleMode?: CustomParticleUsageMode;
   useParticleTint?: boolean;
   color: string;
   color2: string;
@@ -170,23 +172,33 @@ export function ParticleEditorModal({
   const updateCustomParticle = useSceneStore((state) => state.updateCustomParticle);
   const deleteCustomParticle = useSceneStore((state) => state.deleteCustomParticle);
 
-  const [config, setConfig] = useState<ParticleEditorConfig>(() => ({
-    shape: initialConfig.shape || 'circle',
-    customParticleId: initialConfig.customParticleId,
-    useParticleTint: Boolean(initialConfig.useParticleTint),
-    color: initialConfig.color || '#f59e0b',
-    color2: initialConfig.color2 || initialConfig.color || '#ef4444',
-    rate: initialConfig.rate ?? 16,
-    count: initialConfig.count ?? 22,
-    speed: initialConfig.speed ?? 160,
-    size: initialConfig.size ?? 7,
-    lifetime: initialConfig.lifetime ?? 0.8,
-    gravity: initialConfig.gravity ?? 180,
-    spread: initialConfig.spread ?? (mode === 'burst' ? 360 : 60),
-    angle: initialConfig.angle ?? -90,
-    offsetX: initialConfig.offsetX ?? 0,
-    offsetY: initialConfig.offsetY ?? 0,
-  }));
+  const [config, setConfig] = useState<ParticleEditorConfig>(() => {
+    const initialIds =
+      initialConfig.customParticleIds && initialConfig.customParticleIds.length > 0
+        ? initialConfig.customParticleIds
+        : initialConfig.customParticleId
+        ? [initialConfig.customParticleId]
+        : [];
+    return {
+      shape: initialConfig.shape || 'circle',
+      customParticleId: initialConfig.customParticleId || initialIds[0],
+      customParticleIds: initialIds,
+      customParticleMode: initialConfig.customParticleMode || 'random',
+      useParticleTint: Boolean(initialConfig.useParticleTint),
+      color: initialConfig.color || '#f59e0b',
+      color2: initialConfig.color2 || initialConfig.color || '#ef4444',
+      rate: initialConfig.rate ?? 16,
+      count: initialConfig.count ?? 22,
+      speed: initialConfig.speed ?? 160,
+      size: initialConfig.size ?? 7,
+      lifetime: initialConfig.lifetime ?? 0.8,
+      gravity: initialConfig.gravity ?? 180,
+      spread: initialConfig.spread ?? (mode === 'burst' ? 360 : 60),
+      angle: initialConfig.angle ?? -90,
+      offsetX: initialConfig.offsetX ?? 0,
+      offsetY: initialConfig.offsetY ?? 0,
+    };
+  });
 
   const [isAutoEmitting, setIsAutoEmitting] = useState(true);
   const [backdropTheme, setBackdropTheme] = useState<'dark' | 'light' | 'grid'>('dark');
@@ -245,6 +257,8 @@ export function ParticleEditorModal({
               color2: cfg.color2,
               shape: cfg.shape,
               customParticleId: cfg.customParticleId,
+              customParticleIds: cfg.customParticleIds,
+              customParticleMode: cfg.customParticleMode,
               useTint: cfg.useParticleTint,
               speed: cfg.speed,
               size: cfg.size,
@@ -267,6 +281,8 @@ export function ParticleEditorModal({
               color2: cfg.color2,
               shape: cfg.shape,
               customParticleId: cfg.customParticleId,
+              customParticleIds: cfg.customParticleIds,
+              customParticleMode: cfg.customParticleMode,
               useTint: cfg.useParticleTint,
               speed: cfg.speed,
               size: cfg.size,
@@ -309,6 +325,8 @@ export function ParticleEditorModal({
       color2: cfg.color2,
       shape: cfg.shape,
       customParticleId: cfg.customParticleId,
+      customParticleIds: cfg.customParticleIds,
+      customParticleMode: cfg.customParticleMode,
       useTint: cfg.useParticleTint,
       speed: cfg.speed,
       size: cfg.size,
@@ -346,6 +364,7 @@ export function ParticleEditorModal({
 
   return createPortal(
     <div
+      data-modal-open="true"
       className="fixed inset-0 z-[10000] bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 select-none"
       style={{ isolation: 'isolate' }}
       onClick={onClose}
@@ -537,6 +556,8 @@ export function ParticleEditorModal({
                     color2: config.color2,
                     shape: config.shape,
                     customParticleId: config.customParticleId,
+                    customParticleIds: config.customParticleIds,
+                    customParticleMode: config.customParticleMode,
                     useTint: config.useParticleTint,
                     speed: config.speed,
                     size: config.size,
@@ -602,8 +623,12 @@ export function ParticleEditorModal({
                 value={config.shape}
                 onChange={(e) => {
                   const nextShape = e.target.value as ParticleShape;
-                  if (nextShape === 'custom' && !config.customParticleId && customParticles.length > 0) {
-                    update({ shape: nextShape, customParticleId: customParticles[0].id });
+                  if (nextShape === 'custom' && (!config.customParticleIds || config.customParticleIds.length === 0) && customParticles.length > 0) {
+                    update({
+                      shape: nextShape,
+                      customParticleId: customParticles[0].id,
+                      customParticleIds: [customParticles[0].id],
+                    });
                   } else {
                     update({ shape: nextShape });
                   }
@@ -618,15 +643,18 @@ export function ParticleEditorModal({
               </select>
             </div>
 
-            {/* Particule vectorielle personnalisée */}
+            {/* Particules vectorielles personnalisées (multi-sélection & mode d'usage) */}
             {config.shape === 'custom' && (
               <div className="p-2.5 bg-amber-50/70 rounded-2xl border border-amber-200 space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-bold text-amber-950">Particule vectorielle :</span>
+                  <div>
+                    <span className="text-[11px] font-bold text-amber-950 block">Particules dessinées :</span>
+                    <span className="text-[10px] text-amber-700/80">Cliquez pour sélectionner une ou plusieurs formes</span>
+                  </div>
                   <button
                     type="button"
                     onClick={() => setDrawerTarget({})}
-                    className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
+                    className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs shrink-0"
                   >
                     <Paintbrush className="w-3 h-3" />
                     <span>+ Dessiner</span>
@@ -640,17 +668,40 @@ export function ParticleEditorModal({
                 ) : (
                   <div className="grid grid-cols-4 gap-1.5">
                     {customParticles.map((preset) => {
-                      const isSel = config.customParticleId === preset.id;
+                      const selectedIds =
+                        config.customParticleIds && config.customParticleIds.length > 0
+                          ? config.customParticleIds
+                          : config.customParticleId
+                          ? [config.customParticleId]
+                          : [];
+                      const selIdx = selectedIds.indexOf(preset.id);
+                      const isSel = selIdx >= 0;
                       return (
                         <div
                           key={preset.id}
-                          onClick={() => update({ customParticleId: preset.id })}
+                          onClick={() => {
+                            let nextIds: string[];
+                            if (isSel) {
+                              nextIds = selectedIds.filter((id) => id !== preset.id);
+                            } else {
+                              nextIds = [...selectedIds, preset.id];
+                            }
+                            update({
+                              customParticleIds: nextIds,
+                              customParticleId: nextIds[0],
+                            });
+                          }}
                           className={`relative group p-1.5 rounded-xl border flex flex-col items-center gap-1 cursor-pointer transition-all ${
                             isSel
                               ? 'bg-white border-amber-500 ring-2 ring-amber-300/60 shadow-xs'
                               : 'bg-white/80 border-slate-200 hover:border-amber-300'
                           }`}
                         >
+                          {isSel && (
+                            <span className="absolute -top-1.5 -left-1.5 min-w-4 h-4 px-1 rounded-full bg-amber-500 text-white text-[9px] font-black flex items-center justify-center shadow-xs">
+                              {selectedIds.length > 1 ? selIdx + 1 : '✓'}
+                            </span>
+                          )}
                           <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden">
                             <svg viewBox="0 0 100 100" className="w-7 h-7">
                               {preset.vectorPaths.map((p) => (
@@ -687,7 +738,11 @@ export function ParticleEditorModal({
                                 e.stopPropagation();
                                 deleteCustomParticle(preset.id);
                                 invalidateCustomParticleSprite(preset.id);
-                                if (isSel) update({ customParticleId: undefined });
+                                const remaining = selectedIds.filter((id) => id !== preset.id);
+                                update({
+                                  customParticleIds: remaining,
+                                  customParticleId: remaining[0],
+                                });
                               }}
                               className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
                               title="Supprimer"
@@ -698,6 +753,21 @@ export function ParticleEditorModal({
                         </div>
                       );
                     })}
+                  </div>
+                )}
+
+                {((config.customParticleIds?.length || 0) > 1) && (
+                  <div className="p-2 bg-white rounded-xl border border-amber-200 flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-slate-700">Utilisation multiple</span>
+                    <select
+                      value={config.customParticleMode || 'random'}
+                      onChange={(e) => update({ customParticleMode: e.target.value as CustomParticleUsageMode })}
+                      className="bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 text-[11px] font-bold text-amber-900 cursor-pointer"
+                    >
+                      <option value="random">Aléatoire (variantes)</option>
+                      <option value="sequence">Séquence (1 → 2 → 3)</option>
+                      <option value="lifetime_anim">Animation sur durée de vie</option>
+                    </select>
                   </div>
                 )}
 
@@ -942,7 +1012,20 @@ export function ParticleEditorModal({
                 useTint: false,
               });
             }
-            update({ shape: 'custom', customParticleId: targetPresetId });
+            const existingIds =
+              config.customParticleIds && config.customParticleIds.length > 0
+                ? config.customParticleIds
+                : config.customParticleId
+                ? [config.customParticleId]
+                : [];
+            const nextIds = existingIds.includes(targetPresetId)
+              ? existingIds
+              : [...existingIds, targetPresetId];
+            update({
+              shape: 'custom',
+              customParticleId: nextIds[0] || targetPresetId,
+              customParticleIds: nextIds,
+            });
             setDrawerTarget(null);
           }}
           onClose={() => setDrawerTarget(null)}

@@ -53,6 +53,7 @@ export function CreateEntityModal({ isOpen, onClose }: CreateEntityModalProps) {
 
   return createPortal(
     <div
+      data-modal-open="true"
       className="fixed inset-0 z-[9999] bg-[#f8fafc] flex flex-col overflow-hidden select-none"
       style={{ isolation: 'isolate' }}
     >

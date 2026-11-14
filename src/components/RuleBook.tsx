@@ -18,6 +18,7 @@ import {
   ParticleShape,
   ParentOffset,
   CustomParticlePreset,
+  CustomParticleUsageMode,
 } from '../types';
 import { EntityMiniPreview } from './EntityMiniPreview';
 import { SpawnLocationPicker } from './SpawnLocationPicker';
@@ -96,7 +97,8 @@ type ActiveModal =
         | 'choose_delay_duration'
         | 'choose_particles'
         | 'choose_attach_parent'
-        | 'choose_detach_parent';
+        | 'choose_detach_parent'
+        | 'choose_move_entity';
       actionType?: ActionType;
       targetMode?: ActionTargetMode;
       selectedTargetType?: EntityType;
@@ -120,6 +122,8 @@ type ActiveModal =
       particleColor2?: string;
       particleShape?: ParticleShape;
       customParticleId?: string;
+      customParticleIds?: string[];
+      customParticleMode?: CustomParticleUsageMode;
       useParticleTint?: boolean;
       particleSpeed?: number;
       particleSize?: number;
@@ -136,6 +140,16 @@ type ActiveModal =
       parentEntityType?: EntityType;
       parentEntityTag?: string;
       parentOffset?: ParentOffset;
+      // Move Entity config
+      moveDistance?: number;
+      moveDirectionMode?: 'cardinal' | 'angle' | 'facing' | 'toward_target' | 'away_target';
+      moveCardinal?: 'right' | 'left' | 'up' | 'down';
+      moveAngle?: number;
+      moveApplyMode?: 'instant' | 'impulse';
+      moveTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'mouse';
+      moveTargetEntityId?: string;
+      moveTargetEntityType?: EntityType;
+      moveTargetTag?: string;
     }
   | null;
 
@@ -160,7 +174,8 @@ interface WizardData {
     | 'delay_duration_picker'
     | 'particle_picker'
     | 'attach_parent_picker'
-    | 'detach_parent_picker';
+    | 'detach_parent_picker'
+    | 'move_entity_picker';
   delayDuration?: number;
   name: string;
   subjectMode?: SelectionMode;
@@ -210,6 +225,8 @@ interface WizardData {
   particleColor2?: string;
   particleShape?: ParticleShape;
   customParticleId?: string;
+  customParticleIds?: string[];
+  customParticleMode?: CustomParticleUsageMode;
   useParticleTint?: boolean;
   particleSpeed?: number;
   particleSize?: number;
@@ -227,6 +244,17 @@ interface WizardData {
   parentEntityType?: EntityType;
   parentEntityTag?: string;
   parentOffset?: ParentOffset;
+
+  // Move Entity config
+  moveDistance?: number;
+  moveDirectionMode?: 'cardinal' | 'angle' | 'facing' | 'toward_target' | 'away_target';
+  moveCardinal?: 'right' | 'left' | 'up' | 'down';
+  moveAngle?: number;
+  moveApplyMode?: 'instant' | 'impulse';
+  moveTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'mouse';
+  moveTargetEntityId?: string;
+  moveTargetEntityType?: EntityType;
+  moveTargetTag?: string;
 
   // Configuration Minuteurs, Clavier, Proximité, Bords, Score
   timerInterval?: number;
@@ -501,9 +529,17 @@ export function RuleBook() {
           : act.particleOriginMode === 'tag' && act.particleOriginTag
           ? ` @#${act.particleOriginTag}`
           : '';
+      const selectedCustomIds =
+        act.customParticleIds && act.customParticleIds.length > 0
+          ? act.customParticleIds
+          : act.customParticleId
+          ? [act.customParticleId]
+          : [];
       const shapeBadge =
-        act.particleShape === 'custom' && act.customParticleId
-          ? customParticles.find((p) => p.id === act.customParticleId)?.name || 'Dessin'
+        act.particleShape === 'custom' && selectedCustomIds.length > 0
+          ? selectedCustomIds.length > 1
+            ? `${selectedCustomIds.length} dessins`
+            : customParticles.find((p) => p.id === selectedCustomIds[0])?.name || 'Dessin'
           : `${act.particleCount ?? 18}x`;
       return (
         <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
@@ -571,6 +607,46 @@ export function RuleBook() {
           <span className="text-xs truncate">{targetLabel}</span>
           <span className="text-[10px] text-rose-700 bg-rose-50 px-1.5 py-0.2 rounded font-medium truncate">
             (Détacher)
+          </span>
+        </div>
+      );
+    }
+    if (act.type === 'move_entity') {
+      const targetLabel =
+        act.targetMode === 'subject'
+          ? 'Sujet'
+          : act.targetMode === 'target'
+          ? 'Cible'
+          : act.targetMode === 'last_spawned'
+          ? 'Dernier créé'
+          : act.targetMode === 'tag' && act.targetTag
+          ? `#${act.targetTag}`
+          : getEntityObj(act.targetType)?.name || 'Objet';
+      const dist = act.moveDistance ?? 40;
+      const dirLabel =
+        act.moveDirectionMode === 'angle'
+          ? `${act.moveAngle ?? 0}°`
+          : act.moveDirectionMode === 'facing'
+          ? 'Regard'
+          : act.moveDirectionMode === 'toward_target'
+          ? 'Vers cible'
+          : act.moveDirectionMode === 'away_target'
+          ? 'Fuir cible'
+          : act.moveCardinal === 'left'
+          ? '←'
+          : act.moveCardinal === 'up'
+          ? '↑'
+          : act.moveCardinal === 'down'
+          ? '↓'
+          : '→';
+      return (
+        <div className="flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0">
+          <div className="w-5 h-5 rounded-md bg-sky-100 text-sky-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+            🏃
+          </div>
+          <span className="text-xs truncate">{targetLabel}</span>
+          <span className="text-[10px] text-sky-700 bg-sky-50 px-1.5 py-0.2 rounded font-medium truncate">
+            (+{dist}px {dirLabel})
           </span>
         </div>
       );
@@ -2021,9 +2097,18 @@ export function RuleBook() {
                           actionDetail = `+ ${act.spawnEntityType || 'Objet'}${initStName ? ` (${initStName})` : ''} • ${locLabel}`;
                         } else if (act.type === 'emit_particles') {
                           actionBadge = 'Particules';
-                          const customP = act.customParticleId
-                            ? customParticles.find((p) => p.id === act.customParticleId)?.name
-                            : undefined;
+                          const selectedIds =
+                            act.customParticleIds && act.customParticleIds.length > 0
+                              ? act.customParticleIds
+                              : act.customParticleId
+                              ? [act.customParticleId]
+                              : [];
+                          const customP =
+                            selectedIds.length === 1
+                              ? customParticles.find((p) => p.id === selectedIds[0])?.name
+                              : selectedIds.length > 1
+                              ? `${selectedIds.length} dessins`
+                              : undefined;
                           actionDetail = `${act.particleCount ?? 18}x ${
                             act.particleShape === 'custom' && customP ? `✨ ${customP}` : act.particleShape || 'circle'
                           }${act.particleOriginMode === 'event_point' ? ' • Point exact' : ''}`;
@@ -2045,6 +2130,26 @@ export function RuleBook() {
                         } else if (act.type === 'detach_parent') {
                           actionBadge = 'Détacher Parent';
                           actionDetail = 'Libérer du parent';
+                        } else if (act.type === 'move_entity') {
+                          actionBadge = 'Déplacer';
+                          const dist = act.moveDistance ?? 40;
+                          const dirTxt =
+                            act.moveDirectionMode === 'angle'
+                              ? `${act.moveAngle ?? 0}°`
+                              : act.moveDirectionMode === 'facing'
+                              ? 'Direction regard'
+                              : act.moveDirectionMode === 'toward_target'
+                              ? 'Vers référence'
+                              : act.moveDirectionMode === 'away_target'
+                              ? 'À l’opposé'
+                              : act.moveCardinal === 'left'
+                              ? 'Gauche ←'
+                              : act.moveCardinal === 'up'
+                              ? 'Haut ↑'
+                              : act.moveCardinal === 'down'
+                              ? 'Bas ↓'
+                              : 'Droite →';
+                          actionDetail = `${dist} px • ${dirTxt}`;
                         } else if (act.type === 'play_sound') {
                           actionBadge = 'Jouer Son';
                           actionDetail = customSound ? `Son vocal : ${customSound.name}` : act.soundType ? `Son ${act.soundType}` : 'Effet sonore';
@@ -2081,6 +2186,8 @@ export function RuleBook() {
                                   actionId: act.id,
                                   actionType: act.type,
                                   targetMode: act.targetMode || 'target',
+                                  selectedTargetType: act.targetType,
+                                  targetTag: act.targetTag,
                                   subStep:
                                     act.type === 'delay'
                                       ? 'choose_delay_duration'
@@ -2090,6 +2197,8 @@ export function RuleBook() {
                                       ? 'choose_attach_parent'
                                       : act.type === 'detach_parent'
                                       ? 'choose_detach_parent'
+                                      : act.type === 'move_entity'
+                                      ? 'choose_move_entity'
                                       : 'main',
                                   delayDuration: act.delayDuration || 1,
                                   particleOriginMode: act.particleOriginMode,
@@ -2101,6 +2210,8 @@ export function RuleBook() {
                                   particleColor2: act.particleColor2,
                                   particleShape: act.particleShape,
                                   customParticleId: act.customParticleId,
+                                  customParticleIds: act.customParticleIds,
+                                  customParticleMode: act.customParticleMode,
                                   useParticleTint: act.useParticleTint,
                                   particleSpeed: act.particleSpeed,
                                   particleSize: act.particleSize,
@@ -2116,6 +2227,15 @@ export function RuleBook() {
                                   parentEntityType: act.parentEntityType,
                                   parentEntityTag: act.parentEntityTag,
                                   parentOffset: act.parentOffset,
+                                  moveDistance: act.moveDistance ?? 40,
+                                  moveDirectionMode: act.moveDirectionMode || 'cardinal',
+                                  moveCardinal: act.moveCardinal || 'right',
+                                  moveAngle: act.moveAngle ?? 0,
+                                  moveApplyMode: act.moveApplyMode || 'instant',
+                                  moveTargetMode: act.moveTargetMode || (isCollision ? 'target' : 'entity'),
+                                  moveTargetEntityId: act.moveTargetEntityId,
+                                  moveTargetEntityType: act.moveTargetEntityType,
+                                  moveTargetTag: act.moveTargetTag,
                                 })
                               }
                               onDragOver={(e) => {
@@ -2150,6 +2270,10 @@ export function RuleBook() {
                               ) : act.type === 'detach_parent' ? (
                                 <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
                                   ✂️
+                                </div>
+                              ) : act.type === 'move_entity' ? (
+                                <div className="w-14 h-14 rounded-2xl bg-sky-50 border border-sky-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                  🏃
                                 </div>
                               ) : act.type === 'play_sound' ? (
                                 <div className="relative w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
@@ -2291,7 +2415,10 @@ export function RuleBook() {
       {/* 🪄 1-CLICK SEQUENTIAL CREATION WIZARD (Grandes Cartes, 1 Clic par Étape) */}
       {/* ========================================================================= */}
       {activeWizard && (
-        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+          data-modal-open="true"
+          className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        >
           <div className={`bg-white rounded-3xl border border-slate-200 p-6 w-full shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] flex flex-col overflow-hidden ${
             activeWizard.step === 4 && activeWizard.triggerType === 'collision' ? 'max-w-5xl' : 'max-w-4xl'
           }`}>
@@ -4069,7 +4196,37 @@ export function RuleBook() {
                                 </div>
                               </button>
 
-                              {/* 3. Détruire le Sujet */}
+                              {/* 3. Déplacer le Sujet de X px */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveWizard({
+                                    ...activeWizard,
+                                    actionSubStep: 'move_entity_picker',
+                                    actionTargetMode: 'subject',
+                                    moveDistance: activeWizard.moveDistance ?? 40,
+                                    moveDirectionMode: activeWizard.moveDirectionMode || 'cardinal',
+                                    moveCardinal: activeWizard.moveCardinal || 'right',
+                                    moveAngle: activeWizard.moveAngle ?? 0,
+                                    moveApplyMode: activeWizard.moveApplyMode || 'instant',
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-sky-50/70 border-2 border-slate-200 hover:border-sky-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🏃
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-sky-700 truncate">
+                                    Déplacer de X px
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Décaler ou propulser dans une direction
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 4. Détruire le Sujet */}
                               <button
                                 type="button"
                                 onClick={() => {
@@ -4158,7 +4315,37 @@ export function RuleBook() {
                                   </div>
                                 </button>
 
-                                {/* 2. Détruire la Cible */}
+                                {/* 2. Déplacer la Cible de X px */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveWizard({
+                                      ...activeWizard,
+                                      actionSubStep: 'move_entity_picker',
+                                      actionTargetMode: 'target',
+                                      moveDistance: activeWizard.moveDistance ?? 40,
+                                      moveDirectionMode: activeWizard.moveDirectionMode || 'cardinal',
+                                      moveCardinal: activeWizard.moveCardinal || 'right',
+                                      moveAngle: activeWizard.moveAngle ?? 0,
+                                      moveApplyMode: activeWizard.moveApplyMode || 'instant',
+                                    });
+                                  }}
+                                  className="w-full p-3.5 bg-white hover:bg-sky-50/70 border-2 border-slate-200 hover:border-sky-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                                >
+                                  <div className="w-11 h-11 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                    🏃
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-xs font-black text-slate-900 group-hover:text-sky-700 truncate">
+                                      Déplacer la Cible de X px
+                                    </div>
+                                    <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                      Pousser ou décaler « {wizardTargetName} »
+                                    </div>
+                                  </div>
+                                </button>
+
+                                {/* 3. Détruire la Cible */}
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -5343,13 +5530,21 @@ export function RuleBook() {
                             value={activeWizard.particleShape || 'circle'}
                             onChange={(e) => {
                               const nextShape = e.target.value as ParticleShape;
+                              const existing =
+                                activeWizard.customParticleIds && activeWizard.customParticleIds.length > 0
+                                  ? activeWizard.customParticleIds
+                                  : activeWizard.customParticleId
+                                  ? [activeWizard.customParticleId]
+                                  : [];
+                              const nextIds =
+                                nextShape === 'custom' && existing.length === 0 && customParticles.length > 0
+                                  ? [customParticles[0].id]
+                                  : existing;
                               setActiveWizard({
                                 ...activeWizard,
                                 particleShape: nextShape,
-                                customParticleId:
-                                  nextShape === 'custom' && !activeWizard.customParticleId && customParticles.length > 0
-                                    ? customParticles[0].id
-                                    : activeWizard.customParticleId,
+                                customParticleId: nextIds[0],
+                                customParticleIds: nextIds,
                               });
                             }}
                             className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
@@ -5362,97 +5557,149 @@ export function RuleBook() {
                           </select>
                         </div>
 
-                        {activeWizard.particleShape === 'custom' && (
-                          <div className="p-2.5 bg-amber-50/70 rounded-xl border border-amber-200 space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[11px] font-bold text-amber-950">Particule vectorielle :</span>
-                              <button
-                                type="button"
-                                onClick={() => setParticleDrawingTarget({ context: 'wizard' })}
-                                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
-                              >
-                                <Paintbrush className="w-3 h-3" />
-                                <span>+ Dessiner une particule</span>
-                              </button>
-                            </div>
-                            {customParticles.length === 0 ? (
-                              <div className="text-[11px] text-amber-800 bg-white/80 rounded-lg p-2 border border-amber-200 text-center">
-                                Aucune particule dessinée. Cliquez sur <strong>+ Dessiner une particule</strong>.
+                        {activeWizard.particleShape === 'custom' && (() => {
+                          const wizSelectedIds: string[] =
+                            activeWizard.customParticleIds && activeWizard.customParticleIds.length > 0
+                              ? activeWizard.customParticleIds
+                              : activeWizard.customParticleId
+                              ? [activeWizard.customParticleId]
+                              : [];
+                          const toggleWizPreset = (pid: string) => {
+                            const nextIds = wizSelectedIds.includes(pid)
+                              ? wizSelectedIds.filter((id) => id !== pid)
+                              : [...wizSelectedIds, pid];
+                            setActiveWizard({
+                              ...activeWizard,
+                              customParticleIds: nextIds,
+                              customParticleId: nextIds[0],
+                            });
+                          };
+                          return (
+                            <div className="p-2.5 bg-amber-50/70 rounded-xl border border-amber-200 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-bold text-amber-950">
+                                  Particules ({wizSelectedIds.length} sél.) :
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setParticleDrawingTarget({ context: 'wizard' })}
+                                  className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
+                                >
+                                  <Paintbrush className="w-3 h-3" />
+                                  <span>+ Dessiner une particule</span>
+                                </button>
                               </div>
-                            ) : (
-                              <div className="grid grid-cols-4 gap-1.5">
-                                {customParticles.map((preset) => {
-                                  const isSel = activeWizard.customParticleId === preset.id;
-                                  return (
-                                    <div
-                                      key={preset.id}
-                                      onClick={() => setActiveWizard({ ...activeWizard, customParticleId: preset.id })}
-                                      className={`relative group p-1.5 rounded-xl border flex flex-col items-center gap-1 cursor-pointer transition-all ${
-                                        isSel
-                                          ? 'bg-white border-amber-500 ring-2 ring-amber-300/60 shadow-xs'
-                                          : 'bg-white/80 border-slate-200 hover:border-amber-300'
-                                      }`}
-                                    >
-                                      <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden">
-                                        <svg viewBox="0 0 100 100" className="w-7 h-7">
-                                          {preset.vectorPaths.map((p) => (
-                                            <path
-                                              key={p.id}
-                                              d={p.d}
-                                              stroke={p.stroke}
-                                              strokeWidth={p.strokeWidth}
-                                              fill={p.fill || 'none'}
-                                              strokeLinecap="round"
-                                              strokeLinejoin="round"
-                                            />
-                                          ))}
-                                        </svg>
+                              {customParticles.length === 0 ? (
+                                <div className="text-[11px] text-amber-800 bg-white/80 rounded-lg p-2 border border-amber-200 text-center">
+                                  Aucune particule dessinée. Cliquez sur <strong>+ Dessiner une particule</strong>.
+                                </div>
+                              ) : (
+                                <div className="grid grid-cols-4 gap-1.5">
+                                  {customParticles.map((preset) => {
+                                    const selIdx = wizSelectedIds.indexOf(preset.id);
+                                    const isSel = selIdx !== -1;
+                                    return (
+                                      <div
+                                        key={preset.id}
+                                        onClick={() => toggleWizPreset(preset.id)}
+                                        className={`relative group p-1.5 rounded-xl border flex flex-col items-center gap-1 cursor-pointer transition-all ${
+                                          isSel
+                                            ? 'bg-white border-amber-500 ring-2 ring-amber-300/60 shadow-xs'
+                                            : 'bg-white/80 border-slate-200 hover:border-amber-300'
+                                        }`}
+                                      >
+                                        {isSel && (
+                                          <span className="absolute -top-1.5 -left-1.5 px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[9px] font-black shadow-2xs">
+                                            #{selIdx + 1}
+                                          </span>
+                                        )}
+                                        <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden">
+                                          <svg viewBox="0 0 100 100" className="w-7 h-7">
+                                            {preset.vectorPaths.map((p) => (
+                                              <path
+                                                key={p.id}
+                                                d={p.d}
+                                                stroke={p.stroke}
+                                                strokeWidth={p.strokeWidth}
+                                                fill={p.fill || 'none'}
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                              />
+                                            ))}
+                                          </svg>
+                                        </div>
+                                        <span className="text-[9px] font-bold text-slate-700 truncate w-full text-center">
+                                          {preset.name}
+                                        </span>
+                                        <div className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center gap-0.5">
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setParticleDrawingTarget({ context: 'wizard', editingPreset: preset });
+                                            }}
+                                            className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
+                                            title="Modifier"
+                                          >
+                                            <Pencil className="w-2.5 h-2.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              deleteCustomParticle(preset.id);
+                                              invalidateCustomParticleSprite(preset.id);
+                                              if (isSel) {
+                                                const nextIds = wizSelectedIds.filter((id) => id !== preset.id);
+                                                setActiveWizard({
+                                                  ...activeWizard,
+                                                  customParticleIds: nextIds,
+                                                  customParticleId: nextIds[0],
+                                                });
+                                              }
+                                            }}
+                                            className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
+                                            title="Supprimer"
+                                          >
+                                            <X className="w-2.5 h-2.5" />
+                                          </button>
+                                        </div>
                                       </div>
-                                      <span className="text-[9px] font-bold text-slate-700 truncate w-full text-center">
-                                        {preset.name}
-                                      </span>
-                                      <div className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center gap-0.5">
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setParticleDrawingTarget({ context: 'wizard', editingPreset: preset });
-                                          }}
-                                          className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
-                                          title="Modifier"
-                                        >
-                                          <Pencil className="w-2.5 h-2.5" />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            deleteCustomParticle(preset.id);
-                                            invalidateCustomParticleSprite(preset.id);
-                                            if (isSel) setActiveWizard({ ...activeWizard, customParticleId: undefined });
-                                          }}
-                                          className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
-                                          title="Supprimer"
-                                        >
-                                          <X className="w-2.5 h-2.5" />
-                                        </button>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              {wizSelectedIds.length > 1 && (
+                                <div className="p-2 bg-white rounded-xl border border-amber-200 flex items-center justify-between gap-2">
+                                  <span className="text-[11px] font-bold text-slate-700">Utilisation :</span>
+                                  <select
+                                    value={activeWizard.customParticleMode || 'random'}
+                                    onChange={(e) =>
+                                      setActiveWizard({
+                                        ...activeWizard,
+                                        customParticleMode: e.target.value as CustomParticleUsageMode,
+                                      })
+                                    }
+                                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800"
+                                  >
+                                    <option value="random">Aléatoire</option>
+                                    <option value="sequence">Séquence (#1 → #2 → ...)</option>
+                                    <option value="lifetime_anim">Animation sur durée de vie</option>
+                                  </select>
+                                </div>
+                              )}
+                              <div className="flex items-center justify-between pt-1 border-t border-amber-200/70">
+                                <span className="text-[11px] font-bold text-slate-700">Teinter avec les couleurs d'émission</span>
+                                <input
+                                  type="checkbox"
+                                  checked={activeWizard.useParticleTint === true}
+                                  onChange={(e) => setActiveWizard({ ...activeWizard, useParticleTint: e.target.checked })}
+                                  className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                                />
                               </div>
-                            )}
-                            <div className="flex items-center justify-between pt-1 border-t border-amber-200/70">
-                              <span className="text-[11px] font-bold text-slate-700">Teinter avec les couleurs d'émission</span>
-                              <input
-                                type="checkbox"
-                                checked={activeWizard.useParticleTint === true}
-                                onChange={(e) => setActiveWizard({ ...activeWizard, useParticleTint: e.target.checked })}
-                                className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
-                              />
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
 
                         <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
                           <span className="font-bold text-slate-700 text-xs">Nombre ({activeWizard.particleCount ?? 20})</span>
@@ -5529,6 +5776,12 @@ export function RuleBook() {
                         type="button"
                         onClick={() => {
                           const pOriginMode = activeWizard.particleOriginMode || 'subject';
+                          const selectedIds =
+                            activeWizard.customParticleIds && activeWizard.customParticleIds.length > 0
+                              ? activeWizard.customParticleIds
+                              : activeWizard.customParticleId
+                              ? [activeWizard.customParticleId]
+                              : undefined;
                           completeWizardWithAction({
                             type: 'emit_particles',
                             particleOriginMode: pOriginMode,
@@ -5549,7 +5802,11 @@ export function RuleBook() {
                             particleColor2: activeWizard.particleColor2 ?? '#ef4444',
                             particleShape: activeWizard.particleShape ?? 'circle',
                             customParticleId:
-                              activeWizard.particleShape === 'custom' ? activeWizard.customParticleId : undefined,
+                              activeWizard.particleShape === 'custom' ? selectedIds?.[0] : undefined,
+                            customParticleIds:
+                              activeWizard.particleShape === 'custom' ? selectedIds : undefined,
+                            customParticleMode:
+                              activeWizard.particleShape === 'custom' ? (activeWizard.customParticleMode || 'random') : undefined,
                             useParticleTint:
                               activeWizard.particleShape === 'custom' ? Boolean(activeWizard.useParticleTint) : undefined,
                             particleSpeed: activeWizard.particleSpeed ?? 180,
@@ -5804,6 +6061,234 @@ export function RuleBook() {
                       </button>
                     </div>
                   )}
+
+                  {/* Sous-étape Wizard : Déplacer de X px dans une direction */}
+                  {activeWizard.actionSubStep === 'move_entity_picker' && (
+                    <div className="space-y-4 max-w-xl mx-auto py-2">
+                      <div className="space-y-2 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Entité à déplacer</span>
+                          <select
+                            value={activeWizard.actionTargetMode || 'subject'}
+                            onChange={(e) => setActiveWizard({ ...activeWizard, actionTargetMode: e.target.value as any })}
+                            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                          >
+                            <option value="subject">Sujet</option>
+                            {activeWizard.triggerType === 'collision' && <option value="target">Cible touchée</option>}
+                            <option value="last_spawned">Dernier objet créé</option>
+                            <option value="tag">Par Tag (#tag)</option>
+                            <option value="type">Par Type</option>
+                          </select>
+                        </div>
+
+                        {activeWizard.actionTargetMode === 'tag' && (
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Tag à déplacer</span>
+                            <input
+                              type="text"
+                              value={activeWizard.actionTargetTag || ''}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, actionTargetTag: e.target.value.replace(/^#/, '') })}
+                              placeholder="ex: joueur"
+                              className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            />
+                          </div>
+                        )}
+
+                        {activeWizard.actionTargetMode === 'type' && (
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Type à déplacer</span>
+                            <select
+                              value={activeWizard.actionTargetType || availableEntityOptions[0]?.type || ''}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, actionTargetType: e.target.value })}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            >
+                              {availableEntityOptions.map((opt) => (
+                                <option key={opt.type} value={opt.type}>{opt.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Distance (px)</span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="range"
+                              min="1"
+                              max="500"
+                              step="5"
+                              value={activeWizard.moveDistance ?? 40}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, moveDistance: parseFloat(e.target.value) || 0 })}
+                              className="w-32 accent-sky-600"
+                            />
+                            <input
+                              type="number"
+                              value={activeWizard.moveDistance ?? 40}
+                              onChange={(e) => setActiveWizard({ ...activeWizard, moveDistance: parseFloat(e.target.value) || 0 })}
+                              className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Direction</span>
+                          <select
+                            value={activeWizard.moveDirectionMode || 'cardinal'}
+                            onChange={(e) => setActiveWizard({ ...activeWizard, moveDirectionMode: e.target.value as any })}
+                            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                          >
+                            <option value="cardinal">Direction cardinale (H / B / G / D)</option>
+                            <option value="angle">Angle libre (degrés °)</option>
+                            <option value="facing">Direction du regard / rotation</option>
+                            <option value="toward_target">Vers une entité / cible</option>
+                            <option value="away_target">S'éloigner d'une entité / cible</option>
+                          </select>
+                        </div>
+
+                        {(activeWizard.moveDirectionMode || 'cardinal') === 'cardinal' && (
+                          <div className="grid grid-cols-4 gap-1.5 bg-white p-2 rounded-xl border border-slate-200">
+                            {([
+                              { id: 'left', label: '← Gauche' },
+                              { id: 'right', label: '→ Droite' },
+                              { id: 'up', label: '↑ Haut' },
+                              { id: 'down', label: '↓ Bas' },
+                            ] as const).map((dir) => (
+                              <button
+                                key={dir.id}
+                                type="button"
+                                onClick={() => setActiveWizard({ ...activeWizard, moveCardinal: dir.id })}
+                                className={`py-1.5 rounded-lg text-[11px] font-bold border cursor-pointer transition-all ${
+                                  (activeWizard.moveCardinal || 'right') === dir.id
+                                    ? 'bg-sky-600 text-white border-sky-700 shadow-2xs'
+                                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                                }`}
+                              >
+                                {dir.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {activeWizard.moveDirectionMode === 'angle' && (
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Angle ({activeWizard.moveAngle ?? 0}°)</span>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="range"
+                                min="-180"
+                                max="180"
+                                step="5"
+                                value={activeWizard.moveAngle ?? 0}
+                                onChange={(e) => setActiveWizard({ ...activeWizard, moveAngle: parseFloat(e.target.value) || 0 })}
+                                className="w-32 accent-sky-600"
+                              />
+                              <input
+                                type="number"
+                                value={activeWizard.moveAngle ?? 0}
+                                onChange={(e) => setActiveWizard({ ...activeWizard, moveAngle: parseFloat(e.target.value) || 0 })}
+                                className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {(activeWizard.moveDirectionMode === 'toward_target' || activeWizard.moveDirectionMode === 'away_target') && (
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-700 text-xs">Entité de référence</span>
+                              <select
+                                value={activeWizard.moveTargetMode || (activeWizard.triggerType === 'collision' ? 'target' : 'entity')}
+                                onChange={(e) => setActiveWizard({ ...activeWizard, moveTargetMode: e.target.value as any })}
+                                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              >
+                                <option value="subject">Sujet</option>
+                                {activeWizard.triggerType === 'collision' && <option value="target">Cible touchée</option>}
+                                <option value="last_spawned">Dernier objet créé</option>
+                                <option value="mouse">Souris (curseur)</option>
+                                <option value="entity">Instance précise</option>
+                                <option value="type">Par Type</option>
+                                <option value="tag">Par Tag (#tag)</option>
+                              </select>
+                            </div>
+                            {activeWizard.moveTargetMode === 'entity' && (
+                              <select
+                                value={activeWizard.moveTargetEntityId || Object.keys(entities)[0] || ''}
+                                onChange={(e) => setActiveWizard({ ...activeWizard, moveTargetEntityId: e.target.value })}
+                                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              >
+                                {Object.values(entities).map((ent) => (
+                                  <option key={ent.id} value={ent.id}>{ent.name}</option>
+                                ))}
+                              </select>
+                            )}
+                            {activeWizard.moveTargetMode === 'type' && (
+                              <select
+                                value={activeWizard.moveTargetEntityType || availableEntityOptions[0]?.type || ''}
+                                onChange={(e) => setActiveWizard({ ...activeWizard, moveTargetEntityType: e.target.value })}
+                                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              >
+                                {availableEntityOptions.map((opt) => (
+                                  <option key={opt.type} value={opt.type}>{opt.label}</option>
+                                ))}
+                              </select>
+                            )}
+                            {activeWizard.moveTargetMode === 'tag' && (
+                              <input
+                                type="text"
+                                value={activeWizard.moveTargetTag || ''}
+                                onChange={(e) => setActiveWizard({ ...activeWizard, moveTargetTag: e.target.value.replace(/^#/, '') })}
+                                placeholder="ex: joueur"
+                                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              />
+                            )}
+                          </div>
+                        )}
+
+                        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 text-xs">Mode de déplacement</span>
+                          <select
+                            value={activeWizard.moveApplyMode || 'instant'}
+                            onChange={(e) => setActiveWizard({ ...activeWizard, moveApplyMode: e.target.value as any })}
+                            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                          >
+                            <option value="instant">Décalage direct (Teleport +X px)</option>
+                            <option value="impulse">Impulsion physique (Force / Knockback)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetMode = activeWizard.actionTargetMode || 'subject';
+                          completeWizardWithAction({
+                            type: 'move_entity',
+                            targetMode,
+                            targetType:
+                              targetMode === 'type'
+                                ? activeWizard.actionTargetType || availableEntityOptions[0]?.type
+                                : targetMode === 'target'
+                                ? activeWizard.targetType
+                                : activeWizard.subjectType,
+                            targetTag: targetMode === 'tag' ? activeWizard.actionTargetTag : undefined,
+                            moveDistance: activeWizard.moveDistance ?? 40,
+                            moveDirectionMode: activeWizard.moveDirectionMode || 'cardinal',
+                            moveCardinal: activeWizard.moveCardinal || 'right',
+                            moveAngle: activeWizard.moveAngle ?? 0,
+                            moveApplyMode: activeWizard.moveApplyMode || 'instant',
+                            moveTargetMode: activeWizard.moveTargetMode,
+                            moveTargetEntityId: activeWizard.moveTargetEntityId,
+                            moveTargetEntityType: activeWizard.moveTargetEntityType,
+                            moveTargetTag: activeWizard.moveTargetTag,
+                          });
+                        }}
+                        className="w-full py-3 bg-sky-600 hover:bg-sky-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>Valider le déplacement</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -5815,7 +6300,10 @@ export function RuleBook() {
       {/* 🎯 MODALS FOR DIRECT SLOT EDITING (Grande taille, 1 clic) */}
       {/* ========================================================================= */}
       {activeModal && (
-        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+          data-modal-open="true"
+          className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        >
           <div className={`bg-white rounded-3xl border border-slate-200 p-6 w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col overflow-hidden ${
             activeModal.type === 'action' ? 'max-w-5xl' : 'max-w-2xl'
           }`}>
@@ -6815,7 +7303,37 @@ export function RuleBook() {
                                 </div>
                               </button>
 
-                              {/* 3. Détruire le Sujet */}
+                              {/* 3. Déplacer le Sujet de X px */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveModal({
+                                    ...activeModal,
+                                    subStep: 'choose_move_entity',
+                                    targetMode: 'subject',
+                                    moveDistance: activeModal.moveDistance ?? 40,
+                                    moveDirectionMode: activeModal.moveDirectionMode || 'cardinal',
+                                    moveCardinal: activeModal.moveCardinal || 'right',
+                                    moveAngle: activeModal.moveAngle ?? 0,
+                                    moveApplyMode: activeModal.moveApplyMode || 'instant',
+                                  });
+                                }}
+                                className="w-full p-3.5 bg-white hover:bg-sky-50/70 border-2 border-slate-200 hover:border-sky-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                              >
+                                <div className="w-11 h-11 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                  🏃
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-black text-slate-900 group-hover:text-sky-700 truncate">
+                                    Déplacer de X px
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    Décaler ou propulser dans une direction
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* 4. Détruire le Sujet */}
                               <button
                                 type="button"
                                 onClick={() => {
@@ -6910,7 +7428,37 @@ export function RuleBook() {
                                   </div>
                                 </button>
 
-                                {/* 2. Détruire Cible */}
+                                {/* 2. Déplacer la Cible de X px */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveModal({
+                                      ...activeModal,
+                                      subStep: 'choose_move_entity',
+                                      targetMode: 'target',
+                                      moveDistance: activeModal.moveDistance ?? 40,
+                                      moveDirectionMode: activeModal.moveDirectionMode || 'cardinal',
+                                      moveCardinal: activeModal.moveCardinal || 'right',
+                                      moveAngle: activeModal.moveAngle ?? 0,
+                                      moveApplyMode: activeModal.moveApplyMode || 'instant',
+                                    });
+                                  }}
+                                  className="w-full p-3.5 bg-white hover:bg-sky-50/70 border-2 border-slate-200 hover:border-sky-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                                >
+                                  <div className="w-11 h-11 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                    🏃
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-xs font-black text-slate-900 group-hover:text-sky-700 truncate">
+                                      Déplacer la Cible de X px
+                                    </div>
+                                    <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                      Pousser ou décaler « {modalTargetName} »
+                                    </div>
+                                  </div>
+                                </button>
+
+                                {/* 3. Détruire Cible */}
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -8079,13 +8627,21 @@ export function RuleBook() {
                               value={activeModal.particleShape || 'circle'}
                               onChange={(e) => {
                                 const nextShape = e.target.value as ParticleShape;
+                                const existing =
+                                  activeModal.customParticleIds && activeModal.customParticleIds.length > 0
+                                    ? activeModal.customParticleIds
+                                    : activeModal.customParticleId
+                                    ? [activeModal.customParticleId]
+                                    : [];
+                                const nextIds =
+                                  nextShape === 'custom' && existing.length === 0 && customParticles.length > 0
+                                    ? [customParticles[0].id]
+                                    : existing;
                                 setActiveModal({
                                   ...activeModal,
                                   particleShape: nextShape,
-                                  customParticleId:
-                                    nextShape === 'custom' && !activeModal.customParticleId && customParticles.length > 0
-                                      ? customParticles[0].id
-                                      : activeModal.customParticleId,
+                                  customParticleId: nextIds[0],
+                                  customParticleIds: nextIds,
                                 });
                               }}
                               className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
@@ -8098,97 +8654,149 @@ export function RuleBook() {
                             </select>
                           </div>
 
-                          {activeModal.particleShape === 'custom' && (
-                            <div className="p-2.5 bg-amber-50/70 rounded-xl border border-amber-200 space-y-2">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-[11px] font-bold text-amber-950">Particule vectorielle :</span>
-                                <button
-                                  type="button"
-                                  onClick={() => setParticleDrawingTarget({ context: 'modal' })}
-                                  className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
-                                >
-                                  <Paintbrush className="w-3 h-3" />
-                                  <span>+ Dessiner une particule</span>
-                                </button>
-                              </div>
-                              {customParticles.length === 0 ? (
-                                <div className="text-[11px] text-amber-800 bg-white/80 rounded-lg p-2 border border-amber-200 text-center">
-                                  Aucune particule dessinée. Cliquez sur <strong>+ Dessiner une particule</strong>.
+                          {activeModal.particleShape === 'custom' && (() => {
+                            const modSelectedIds: string[] =
+                              activeModal.customParticleIds && activeModal.customParticleIds.length > 0
+                                ? activeModal.customParticleIds
+                                : activeModal.customParticleId
+                                ? [activeModal.customParticleId]
+                                : [];
+                            const toggleModPreset = (pid: string) => {
+                              const nextIds = modSelectedIds.includes(pid)
+                                ? modSelectedIds.filter((id) => id !== pid)
+                                : [...modSelectedIds, pid];
+                              setActiveModal({
+                                ...activeModal,
+                                customParticleIds: nextIds,
+                                customParticleId: nextIds[0],
+                              });
+                            };
+                            return (
+                              <div className="p-2.5 bg-amber-50/70 rounded-xl border border-amber-200 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[11px] font-bold text-amber-950">
+                                    Particules ({modSelectedIds.length} sél.) :
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setParticleDrawingTarget({ context: 'modal' })}
+                                    className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
+                                  >
+                                    <Paintbrush className="w-3 h-3" />
+                                    <span>+ Dessiner une particule</span>
+                                  </button>
                                 </div>
-                              ) : (
-                                <div className="grid grid-cols-4 gap-1.5">
-                                  {customParticles.map((preset) => {
-                                    const isSel = activeModal.customParticleId === preset.id;
-                                    return (
-                                      <div
-                                        key={preset.id}
-                                        onClick={() => setActiveModal({ ...activeModal, customParticleId: preset.id })}
-                                        className={`relative group p-1.5 rounded-xl border flex flex-col items-center gap-1 cursor-pointer transition-all ${
-                                          isSel
-                                            ? 'bg-white border-amber-500 ring-2 ring-amber-300/60 shadow-xs'
-                                            : 'bg-white/80 border-slate-200 hover:border-amber-300'
-                                        }`}
-                                      >
-                                        <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden">
-                                          <svg viewBox="0 0 100 100" className="w-7 h-7">
-                                            {preset.vectorPaths.map((p) => (
-                                              <path
-                                                key={p.id}
-                                                d={p.d}
-                                                stroke={p.stroke}
-                                                strokeWidth={p.strokeWidth}
-                                                fill={p.fill || 'none'}
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                              />
-                                            ))}
-                                          </svg>
+                                {customParticles.length === 0 ? (
+                                  <div className="text-[11px] text-amber-800 bg-white/80 rounded-lg p-2 border border-amber-200 text-center">
+                                    Aucune particule dessinée. Cliquez sur <strong>+ Dessiner une particule</strong>.
+                                  </div>
+                                ) : (
+                                  <div className="grid grid-cols-4 gap-1.5">
+                                    {customParticles.map((preset) => {
+                                      const selIdx = modSelectedIds.indexOf(preset.id);
+                                      const isSel = selIdx !== -1;
+                                      return (
+                                        <div
+                                          key={preset.id}
+                                          onClick={() => toggleModPreset(preset.id)}
+                                          className={`relative group p-1.5 rounded-xl border flex flex-col items-center gap-1 cursor-pointer transition-all ${
+                                            isSel
+                                              ? 'bg-white border-amber-500 ring-2 ring-amber-300/60 shadow-xs'
+                                              : 'bg-white/80 border-slate-200 hover:border-amber-300'
+                                          }`}
+                                        >
+                                          {isSel && (
+                                            <span className="absolute -top-1.5 -left-1.5 px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[9px] font-black shadow-2xs">
+                                              #{selIdx + 1}
+                                            </span>
+                                          )}
+                                          <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden">
+                                            <svg viewBox="0 0 100 100" className="w-7 h-7">
+                                              {preset.vectorPaths.map((p) => (
+                                                <path
+                                                  key={p.id}
+                                                  d={p.d}
+                                                  stroke={p.stroke}
+                                                  strokeWidth={p.strokeWidth}
+                                                  fill={p.fill || 'none'}
+                                                  strokeLinecap="round"
+                                                  strokeLinejoin="round"
+                                                />
+                                              ))}
+                                            </svg>
+                                          </div>
+                                          <span className="text-[9px] font-bold text-slate-700 truncate w-full text-center">
+                                            {preset.name}
+                                          </span>
+                                          <div className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center gap-0.5">
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setParticleDrawingTarget({ context: 'modal', editingPreset: preset });
+                                              }}
+                                              className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
+                                              title="Modifier"
+                                            >
+                                              <Pencil className="w-2.5 h-2.5" />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                deleteCustomParticle(preset.id);
+                                                invalidateCustomParticleSprite(preset.id);
+                                                if (isSel) {
+                                                  const nextIds = modSelectedIds.filter((id) => id !== preset.id);
+                                                  setActiveModal({
+                                                    ...activeModal,
+                                                    customParticleIds: nextIds,
+                                                    customParticleId: nextIds[0],
+                                                  });
+                                                }
+                                              }}
+                                              className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
+                                              title="Supprimer"
+                                            >
+                                              <X className="w-2.5 h-2.5" />
+                                            </button>
+                                          </div>
                                         </div>
-                                        <span className="text-[9px] font-bold text-slate-700 truncate w-full text-center">
-                                          {preset.name}
-                                        </span>
-                                        <div className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center gap-0.5">
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setParticleDrawingTarget({ context: 'modal', editingPreset: preset });
-                                            }}
-                                            className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
-                                            title="Modifier"
-                                          >
-                                            <Pencil className="w-2.5 h-2.5" />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              deleteCustomParticle(preset.id);
-                                              invalidateCustomParticleSprite(preset.id);
-                                              if (isSel) setActiveModal({ ...activeModal, customParticleId: undefined });
-                                            }}
-                                            className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
-                                            title="Supprimer"
-                                          >
-                                            <X className="w-2.5 h-2.5" />
-                                          </button>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                {modSelectedIds.length > 1 && (
+                                  <div className="p-2 bg-white rounded-xl border border-amber-200 flex items-center justify-between gap-2">
+                                    <span className="text-[11px] font-bold text-slate-700">Utilisation :</span>
+                                    <select
+                                      value={activeModal.customParticleMode || 'random'}
+                                      onChange={(e) =>
+                                        setActiveModal({
+                                          ...activeModal,
+                                          customParticleMode: e.target.value as CustomParticleUsageMode,
+                                        })
+                                      }
+                                      className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800"
+                                    >
+                                      <option value="random">Aléatoire</option>
+                                      <option value="sequence">Séquence (#1 → #2 → ...)</option>
+                                      <option value="lifetime_anim">Animation sur durée de vie</option>
+                                    </select>
+                                  </div>
+                                )}
+                                <div className="flex items-center justify-between pt-1 border-t border-amber-200/70">
+                                  <span className="text-[11px] font-bold text-slate-700">Teinter avec les couleurs d'émission</span>
+                                  <input
+                                    type="checkbox"
+                                    checked={activeModal.useParticleTint === true}
+                                    onChange={(e) => setActiveModal({ ...activeModal, useParticleTint: e.target.checked })}
+                                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                                  />
                                 </div>
-                              )}
-                              <div className="flex items-center justify-between pt-1 border-t border-amber-200/70">
-                                <span className="text-[11px] font-bold text-slate-700">Teinter avec les couleurs d'émission</span>
-                                <input
-                                  type="checkbox"
-                                  checked={activeModal.useParticleTint === true}
-                                  onChange={(e) => setActiveModal({ ...activeModal, useParticleTint: e.target.checked })}
-                                  className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
-                                />
                               </div>
-                            </div>
-                          )}
+                            );
+                          })()}
 
                           <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
                             <span className="font-bold text-slate-700 text-xs">Nombre ({activeModal.particleCount ?? 20})</span>
@@ -8265,6 +8873,12 @@ export function RuleBook() {
                           type="button"
                           onClick={() => {
                             const pOriginMode = activeModal.particleOriginMode || 'subject';
+                            const selectedIds =
+                              activeModal.customParticleIds && activeModal.customParticleIds.length > 0
+                                ? activeModal.customParticleIds
+                                : activeModal.customParticleId
+                                ? [activeModal.customParticleId]
+                                : undefined;
                             applyAction({
                               type: 'emit_particles',
                               particleOriginMode: pOriginMode,
@@ -8285,7 +8899,11 @@ export function RuleBook() {
                               particleColor2: activeModal.particleColor2 ?? '#ef4444',
                               particleShape: activeModal.particleShape ?? 'circle',
                               customParticleId:
-                                activeModal.particleShape === 'custom' ? activeModal.customParticleId : undefined,
+                                activeModal.particleShape === 'custom' ? selectedIds?.[0] : undefined,
+                              customParticleIds:
+                                activeModal.particleShape === 'custom' ? selectedIds : undefined,
+                              customParticleMode:
+                                activeModal.particleShape === 'custom' ? (activeModal.customParticleMode || 'random') : undefined,
                               useParticleTint:
                                 activeModal.particleShape === 'custom' ? Boolean(activeModal.useParticleTint) : undefined,
                               particleSpeed: activeModal.particleSpeed ?? 180,
@@ -8540,6 +9158,240 @@ export function RuleBook() {
                         </button>
                       </div>
                     )}
+
+                    {/* Modal Action : Déplacer de X px dans une direction */}
+                    {activeModal.subStep === 'choose_move_entity' && (
+                      <div className="space-y-4 max-w-xl mx-auto py-2">
+                        <div className="space-y-2 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Entité à déplacer</span>
+                            <select
+                              value={activeModal.targetMode || 'subject'}
+                              onChange={(e) => setActiveModal({ ...activeModal, targetMode: e.target.value as any })}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            >
+                              <option value="subject">Sujet</option>
+                              {isCollision && <option value="target">Cible touchée</option>}
+                              <option value="last_spawned">Dernier objet créé</option>
+                              <option value="tag">Par Tag (#tag)</option>
+                              <option value="type">Par Type</option>
+                            </select>
+                          </div>
+
+                          {activeModal.targetMode === 'tag' && (
+                            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-700 text-xs">Tag à déplacer</span>
+                              <input
+                                type="text"
+                                list="modal-move-tags"
+                                value={activeModal.targetTag || ''}
+                                onChange={(e) => setActiveModal({ ...activeModal, targetTag: e.target.value.replace(/^#/, '') })}
+                                placeholder="ex: joueur"
+                                className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              />
+                              <datalist id="modal-move-tags">
+                                {allProjectTags.map((t) => (
+                                  <option key={t} value={t} />
+                                ))}
+                              </datalist>
+                            </div>
+                          )}
+
+                          {activeModal.targetMode === 'type' && (
+                            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-700 text-xs">Type à déplacer</span>
+                              <select
+                                value={activeModal.selectedTargetType || availableEntityOptions[0]?.type || ''}
+                                onChange={(e) => setActiveModal({ ...activeModal, selectedTargetType: e.target.value })}
+                                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                              >
+                                {availableEntityOptions.map((opt) => (
+                                  <option key={opt.type} value={opt.type}>{opt.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Distance (px)</span>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="range"
+                                min="1"
+                                max="500"
+                                step="5"
+                                value={activeModal.moveDistance ?? 40}
+                                onChange={(e) => setActiveModal({ ...activeModal, moveDistance: parseFloat(e.target.value) || 0 })}
+                                className="w-32 accent-sky-600"
+                              />
+                              <input
+                                type="number"
+                                value={activeModal.moveDistance ?? 40}
+                                onChange={(e) => setActiveModal({ ...activeModal, moveDistance: parseFloat(e.target.value) || 0 })}
+                                className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Direction</span>
+                            <select
+                              value={activeModal.moveDirectionMode || 'cardinal'}
+                              onChange={(e) => setActiveModal({ ...activeModal, moveDirectionMode: e.target.value as any })}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            >
+                              <option value="cardinal">Direction cardinale (H / B / G / D)</option>
+                              <option value="angle">Angle libre (degrés °)</option>
+                              <option value="facing">Direction du regard / rotation</option>
+                              <option value="toward_target">Vers une entité / cible</option>
+                              <option value="away_target">S'éloigner d'une entité / cible</option>
+                            </select>
+                          </div>
+
+                          {(activeModal.moveDirectionMode || 'cardinal') === 'cardinal' && (
+                            <div className="grid grid-cols-4 gap-1.5 bg-white p-2 rounded-xl border border-slate-200">
+                              {([
+                                { id: 'left', label: '← Gauche' },
+                                { id: 'right', label: '→ Droite' },
+                                { id: 'up', label: '↑ Haut' },
+                                { id: 'down', label: '↓ Bas' },
+                              ] as const).map((dir) => (
+                                <button
+                                  key={dir.id}
+                                  type="button"
+                                  onClick={() => setActiveModal({ ...activeModal, moveCardinal: dir.id })}
+                                  className={`py-1.5 rounded-lg text-[11px] font-bold border cursor-pointer transition-all ${
+                                    (activeModal.moveCardinal || 'right') === dir.id
+                                      ? 'bg-sky-600 text-white border-sky-700 shadow-2xs'
+                                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  {dir.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {activeModal.moveDirectionMode === 'angle' && (
+                            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-700 text-xs">Angle ({activeModal.moveAngle ?? 0}°)</span>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="range"
+                                  min="-180"
+                                  max="180"
+                                  step="5"
+                                  value={activeModal.moveAngle ?? 0}
+                                  onChange={(e) => setActiveModal({ ...activeModal, moveAngle: parseFloat(e.target.value) || 0 })}
+                                  className="w-32 accent-sky-600"
+                                />
+                                <input
+                                  type="number"
+                                  value={activeModal.moveAngle ?? 0}
+                                  onChange={(e) => setActiveModal({ ...activeModal, moveAngle: parseFloat(e.target.value) || 0 })}
+                                  className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {(activeModal.moveDirectionMode === 'toward_target' || activeModal.moveDirectionMode === 'away_target') && (
+                            <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-bold text-slate-700 text-xs">Entité de référence</span>
+                                <select
+                                  value={activeModal.moveTargetMode || (isCollision ? 'target' : 'entity')}
+                                  onChange={(e) => setActiveModal({ ...activeModal, moveTargetMode: e.target.value as any })}
+                                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                                >
+                                  <option value="subject">Sujet</option>
+                                  {isCollision && <option value="target">Cible touchée</option>}
+                                  <option value="last_spawned">Dernier objet créé</option>
+                                  <option value="mouse">Souris (curseur)</option>
+                                  <option value="entity">Instance précise</option>
+                                  <option value="type">Par Type</option>
+                                  <option value="tag">Par Tag (#tag)</option>
+                                </select>
+                              </div>
+                              {activeModal.moveTargetMode === 'entity' && (
+                                <select
+                                  value={activeModal.moveTargetEntityId || Object.keys(entities)[0] || ''}
+                                  onChange={(e) => setActiveModal({ ...activeModal, moveTargetEntityId: e.target.value })}
+                                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                                >
+                                  {Object.values(entities).map((ent) => (
+                                    <option key={ent.id} value={ent.id}>{ent.name}</option>
+                                  ))}
+                                </select>
+                              )}
+                              {activeModal.moveTargetMode === 'type' && (
+                                <select
+                                  value={activeModal.moveTargetEntityType || availableEntityOptions[0]?.type || ''}
+                                  onChange={(e) => setActiveModal({ ...activeModal, moveTargetEntityType: e.target.value })}
+                                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                                >
+                                  {availableEntityOptions.map((opt) => (
+                                    <option key={opt.type} value={opt.type}>{opt.label}</option>
+                                  ))}
+                                </select>
+                              )}
+                              {activeModal.moveTargetMode === 'tag' && (
+                                <input
+                                  type="text"
+                                  value={activeModal.moveTargetTag || ''}
+                                  onChange={(e) => setActiveModal({ ...activeModal, moveTargetTag: e.target.value.replace(/^#/, '') })}
+                                  placeholder="ex: joueur"
+                                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                                />
+                              )}
+                            </div>
+                          )}
+
+                          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-700 text-xs">Mode de déplacement</span>
+                            <select
+                              value={activeModal.moveApplyMode || 'instant'}
+                              onChange={(e) => setActiveModal({ ...activeModal, moveApplyMode: e.target.value as any })}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                            >
+                              <option value="instant">Décalage direct (Teleport +X px)</option>
+                              <option value="impulse">Impulsion physique (Force / Knockback)</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const targetMode = activeModal.targetMode || 'subject';
+                            applyAction({
+                              type: 'move_entity',
+                              targetMode,
+                              targetType:
+                                targetMode === 'type'
+                                  ? activeModal.selectedTargetType || availableEntityOptions[0]?.type
+                                  : targetMode === 'target'
+                                  ? targetType
+                                  : subjectType,
+                              targetTag: targetMode === 'tag' ? activeModal.targetTag : undefined,
+                              moveDistance: activeModal.moveDistance ?? 40,
+                              moveDirectionMode: activeModal.moveDirectionMode || 'cardinal',
+                              moveCardinal: activeModal.moveCardinal || 'right',
+                              moveAngle: activeModal.moveAngle ?? 0,
+                              moveApplyMode: activeModal.moveApplyMode || 'instant',
+                              moveTargetMode: activeModal.moveTargetMode,
+                              moveTargetEntityId: activeModal.moveTargetEntityId,
+                              moveTargetEntityType: activeModal.moveTargetEntityType,
+                              moveTargetTag: activeModal.moveTargetTag,
+                            });
+                          }}
+                          className="w-full py-3 bg-sky-600 hover:bg-sky-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>Valider le déplacement</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -8607,20 +9459,40 @@ export function RuleBook() {
               });
             }
             if (particleDrawingTarget.context === 'wizard' && activeWizard) {
+              const existingIds =
+                activeWizard.customParticleIds && activeWizard.customParticleIds.length > 0
+                  ? activeWizard.customParticleIds
+                  : activeWizard.customParticleId
+                  ? [activeWizard.customParticleId]
+                  : [];
+              const nextIds = existingIds.includes(targetPresetId)
+                ? existingIds
+                : [...existingIds, targetPresetId];
               setActiveWizard({
                 ...activeWizard,
                 particleShape: 'custom',
-                customParticleId: targetPresetId,
+                customParticleId: nextIds[0],
+                customParticleIds: nextIds,
               });
             } else if (
               particleDrawingTarget.context === 'modal' &&
               activeModal &&
               activeModal.type === 'action'
             ) {
+              const existingIds =
+                activeModal.customParticleIds && activeModal.customParticleIds.length > 0
+                  ? activeModal.customParticleIds
+                  : activeModal.customParticleId
+                  ? [activeModal.customParticleId]
+                  : [];
+              const nextIds = existingIds.includes(targetPresetId)
+                ? existingIds
+                : [...existingIds, targetPresetId];
               setActiveModal({
                 ...activeModal,
                 particleShape: 'custom',
-                customParticleId: targetPresetId,
+                customParticleId: nextIds[0],
+                customParticleIds: nextIds,
               });
             }
             setParticleDrawingTarget(null);
@@ -8645,6 +9517,8 @@ export function RuleBook() {
             initialConfig={{
               shape: src.particleShape || 'circle',
               customParticleId: src.customParticleId,
+              customParticleIds: src.customParticleIds,
+              customParticleMode: src.customParticleMode,
               useParticleTint: src.useParticleTint,
               color: src.particleColor || '#f59e0b',
               color2: src.particleColor2 || '#ef4444',
@@ -8657,9 +9531,19 @@ export function RuleBook() {
               angle: src.particleAngle ?? -90,
             }}
             onApply={(cfg) => {
+              const nextCustomIds =
+                cfg.shape === 'custom'
+                  ? cfg.customParticleIds && cfg.customParticleIds.length > 0
+                    ? cfg.customParticleIds
+                    : cfg.customParticleId
+                    ? [cfg.customParticleId]
+                    : []
+                  : undefined;
               const patch = {
                 particleShape: cfg.shape,
-                customParticleId: cfg.shape === 'custom' ? cfg.customParticleId : undefined,
+                customParticleId: cfg.shape === 'custom' ? (nextCustomIds?.[0] || cfg.customParticleId) : undefined,
+                customParticleIds: nextCustomIds,
+                customParticleMode: cfg.shape === 'custom' ? cfg.customParticleMode : undefined,
                 useParticleTint: cfg.shape === 'custom' ? Boolean(cfg.useParticleTint) : undefined,
                 particleColor: cfg.color,
                 particleColor2: cfg.color2,

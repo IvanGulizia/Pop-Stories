@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSceneStore } from '../store/useSceneStore';
 import { ProjectSlot, SceneAspectRatio } from '../types';
+import { QUOTA_TIER_OPTIONS_MB, estimateJsonBytes } from '../utils/localStorageDB';
 import {
   FolderArchive,
   Save,
@@ -11,14 +12,13 @@ import {
   X,
   Play,
   RotateCcw,
-  Sparkles,
   Calendar,
   Layers,
   Zap,
   Plus,
-  Tv,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  HardDrive,
 } from 'lucide-react';
 
 interface ProjectSlotsModalProps {
@@ -26,35 +26,71 @@ interface ProjectSlotsModalProps {
   onClose: () => void;
 }
 
+type PendingQuotaAction =
+  | { kind: 'create'; name: string }
+  | { kind: 'overwrite'; slot: ProjectSlot }
+  | { kind: 'duplicate'; slotId: string };
+
+function formatBytesLabel(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 Ko';
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} Ko`;
+  }
+  if (bytes < 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+  }
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} Go`;
+}
+
 export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
-  const getProjectSlots = useSceneStore((state) => state.getProjectSlots);
+  const projectSlots = useSceneStore((state) => state.projectSlots);
   const saveProjectToSlot = useSceneStore((state) => state.saveProjectToSlot);
   const loadProjectFromSlot = useSceneStore((state) => state.loadProjectFromSlot);
   const deleteProjectSlot = useSceneStore((state) => state.deleteProjectSlot);
   const duplicateProjectSlot = useSceneStore((state) => state.duplicateProjectSlot);
   const renameProjectSlot = useSceneStore((state) => state.renameProjectSlot);
   const currentSlotId = useSceneStore((state) => state.currentSlotId);
+  const quotaLimitMb = useSceneStore((state) => state.quotaLimitMb);
+  const setQuotaLimitMb = useSceneStore((state) => state.setQuotaLimitMb);
+  const getStorageStats = useSceneStore((state) => state.getStorageStats);
   const restoreDefaultScene = useSceneStore((state) => state.restoreDefaultScene);
   const clearProject = useSceneStore((state) => state.clearProject);
 
-  const [slots, setSlots] = useState<ProjectSlot[]>([]);
+  const slots = useMemo(
+    () => [...projectSlots].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
+    [projectSlots]
+  );
+
   const [newSlotName, setNewSlotName] = useState('');
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [confirmingOverwriteId, setConfirmingOverwriteId] = useState<string | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [quotaAlert, setQuotaAlert] = useState<{ message: string; pending: PendingQuotaAction } | null>(null);
+  const [storageStats, setStorageStats] = useState<{
+    slotsBytes: number;
+    collectionBytes: number;
+    totalAppBytes: number;
+    quotaMb: number;
+    browserUsageBytes?: number;
+    browserQuotaBytes?: number;
+  } | null>(null);
 
-  const refreshSlots = () => {
-    setSlots(getProjectSlots());
+  const refreshStats = () => {
+    getStorageStats()
+      .then((res) => setStorageStats(res))
+      .catch(() => {});
   };
 
   useEffect(() => {
     if (isOpen) {
-      refreshSlots();
-      setNewSlotName(`Mon Projet #${slots.length + 1}`);
+      refreshStats();
+      setNewSlotName((prev) => (prev.trim() ? prev : `Mon Projet #${slots.length + 1}`));
+    } else {
+      setQuotaAlert(null);
     }
-  }, [isOpen]);
+  }, [isOpen, projectSlots.length, quotaLimitMb]);
 
   if (!isOpen) return null;
 
@@ -68,9 +104,15 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
     const name = newSlotName.trim() || `Projet #${slots.length + 1}`;
     const res = saveProjectToSlot(name);
     if (res.success) {
+      setQuotaAlert(null);
       showNotice('success', res.message);
       setNewSlotName(`Mon Projet #${slots.length + 2}`);
-      refreshSlots();
+      refreshStats();
+    } else if (res.quotaExceeded) {
+      setQuotaAlert({
+        message: res.message,
+        pending: { kind: 'create', name },
+      });
     } else {
       showNotice('error', res.message);
     }
@@ -79,9 +121,16 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
   const handleOverwrite = (slot: ProjectSlot) => {
     const res = saveProjectToSlot(slot.name, slot.id);
     if (res.success) {
+      setQuotaAlert(null);
       showNotice('success', res.message);
       setConfirmingOverwriteId(null);
-      refreshSlots();
+      refreshStats();
+    } else if (res.quotaExceeded) {
+      setConfirmingOverwriteId(null);
+      setQuotaAlert({
+        message: res.message,
+        pending: { kind: 'overwrite', slot },
+      });
     } else {
       showNotice('error', res.message);
     }
@@ -93,7 +142,7 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
       showNotice('success', res.message);
       setTimeout(() => {
         onClose();
-      }, 500);
+      }, 450);
     } else {
       showNotice('error', res.message);
     }
@@ -102,9 +151,10 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
   const handleDelete = (slot: ProjectSlot) => {
     const res = deleteProjectSlot(slot.id);
     if (res.success) {
+      setQuotaAlert(null);
       showNotice('success', res.message);
       setConfirmingDeleteId(null);
-      refreshSlots();
+      refreshStats();
     } else {
       showNotice('error', res.message);
     }
@@ -113,9 +163,42 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
   const handleDuplicate = (slot: ProjectSlot) => {
     const res = duplicateProjectSlot(slot.id);
     if (res.success) {
+      setQuotaAlert(null);
       showNotice('success', res.message);
-      refreshSlots();
+      refreshStats();
+    } else if (res.quotaExceeded) {
+      setQuotaAlert({
+        message: res.message,
+        pending: { kind: 'duplicate', slotId: slot.id },
+      });
     } else {
+      showNotice('error', res.message);
+    }
+  };
+
+  const handleUpgradeQuotaAndRetry = (newQuotaMb: number) => {
+    setQuotaLimitMb(newQuotaMb);
+    if (!quotaAlert) {
+      refreshStats();
+      return;
+    }
+    const { pending } = quotaAlert;
+    let res: { success: boolean; message: string; quotaExceeded?: boolean } | null = null;
+    if (pending.kind === 'create') {
+      res = saveProjectToSlot(pending.name);
+      if (res.success) setNewSlotName(`Mon Projet #${slots.length + 2}`);
+    } else if (pending.kind === 'overwrite') {
+      res = saveProjectToSlot(pending.slot.name, pending.slot.id);
+    } else if (pending.kind === 'duplicate') {
+      res = duplicateProjectSlot(pending.slotId);
+    }
+    if (res?.success) {
+      setQuotaAlert(null);
+      showNotice('success', `Limite relevée (${newQuotaMb === 0 ? 'Illimité' : `${newQuotaMb} Mo`}) — ${res.message}`);
+      refreshStats();
+    } else if (res?.quotaExceeded) {
+      setQuotaAlert({ message: res.message, pending });
+    } else if (res) {
       showNotice('error', res.message);
     }
   };
@@ -130,7 +213,6 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
     if (res.success) {
       showNotice('success', res.message);
       setEditingSlotId(null);
-      refreshSlots();
     } else {
       showNotice('error', res.message);
     }
@@ -146,8 +228,15 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
     }
   };
 
+  const usedBytes = storageStats?.totalAppBytes ?? estimateJsonBytes(slots);
+  const limitBytes = quotaLimitMb > 0 ? quotaLimitMb * 1024 * 1024 : null;
+  const usagePct = limitBytes ? Math.min(100, Math.round((usedBytes / limitBytes) * 100)) : 0;
+
   return (
-    <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
+    <div
+      data-modal-open="true"
+      className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200"
+    >
       <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden">
         {/* HEADER */}
         <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
@@ -163,7 +252,7 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
                 </span>
               </h3>
               <p className="text-xs text-slate-500">
-                Enregistrez et basculez instantanément entre vos différents projets dans le navigateur
+                Stockage 100 % local sur votre machine (IndexedDB navigateur — aucun serveur/cloud)
               </p>
             </div>
           </div>
@@ -174,6 +263,94 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* JAUGE DE STOCKAGE LOCAL & QUOTA */}
+        <div className="px-4 sm:px-5 py-3 border-b border-slate-100 bg-slate-50/40 flex flex-col gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-slate-700 font-semibold">
+              <HardDrive className="w-3.5 h-3.5 text-indigo-500" />
+              <span>
+                Utilisé : <strong className="font-mono text-slate-900">{formatBytesLabel(usedBytes)}</strong>
+                {quotaLimitMb > 0 ? (
+                  <> / <strong className="font-mono text-indigo-700">{quotaLimitMb} Mo</strong></>
+                ) : (
+                  <> <span className="text-emerald-700 font-bold">(Quota interne illimité)</span></>
+                )}
+              </span>
+              {storageStats?.browserQuotaBytes ? (
+                <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
+                  • Plafond disque navigateur : ~{formatBytesLabel(storageStats.browserQuotaBytes)}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-bold text-slate-500">Limite locale :</span>
+              <select
+                value={quotaLimitMb}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  setQuotaLimitMb(val);
+                  refreshStats();
+                }}
+                className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-800 cursor-pointer"
+              >
+                {QUOTA_TIER_OPTIONS_MB.map((tier) => (
+                  <option key={tier} value={tier}>
+                    {tier === 0 ? 'Illimité (limite disque)' : tier >= 1000 ? `${tier / 1000} Go` : `${tier} Mo`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {quotaLimitMb > 0 && (
+            <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+              <div
+                className={`h-full transition-all duration-300 ${
+                  usagePct >= 90 ? 'bg-rose-500' : usagePct >= 70 ? 'bg-amber-500' : 'bg-indigo-500'
+                }`}
+                style={{ width: `${usagePct}%` }}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* ALERTE QUOTA DEPASSE AVEC OPTIONS D'EXTENSION */}
+        {quotaAlert && (
+          <div className="mx-5 mt-4 p-3.5 rounded-2xl bg-amber-50 border border-amber-300 space-y-2.5 animate-in fade-in duration-150">
+            <div className="flex items-start gap-2 text-xs font-bold text-amber-950">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <div>{quotaAlert.message}</div>
+                <div className="text-[11px] font-medium text-amber-800 mt-0.5">
+                  Vous pouvez augmenter le quota ci-dessous (reprise automatique de la sauvegarde) ou supprimer d'anciens slots.
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[100, 250, 500, 0]
+                .filter((tier) => tier === 0 || tier > quotaLimitMb)
+                .map((tier) => (
+                  <button
+                    key={tier}
+                    type="button"
+                    onClick={() => handleUpgradeQuotaAndRetry(tier)}
+                    className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-[11px] font-bold cursor-pointer shadow-2xs transition-all"
+                  >
+                    {tier === 0 ? 'Passer en Illimité' : `Passer à ${tier} Mo`}
+                  </button>
+                ))}
+              <button
+                type="button"
+                onClick={() => setQuotaAlert(null)}
+                className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-[11px] font-semibold cursor-pointer"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* FEEDBACK NOTICE */}
         {feedback && (
@@ -218,7 +395,7 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
               <FolderArchive className="w-10 h-10 text-slate-300 mb-2" />
               <p className="text-xs font-bold text-slate-700">Aucun slot enregistré</p>
               <p className="text-[11px] text-slate-400 max-w-sm mt-0.5 mb-3">
-                Vous n'avez pas encore sauvegardé de projet dans votre navigateur. Donnez un nom ci-dessus et cliquez sur "Sauvegarder l'état actuel".
+                Vous n'avez pas encore sauvegardé de projet sur votre machine. Donnez un nom ci-dessus et cliquez sur "Sauvegarder l'état actuel".
               </p>
             </div>
           ) : (

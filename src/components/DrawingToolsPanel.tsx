@@ -9,6 +9,7 @@ import {
   PaintBucket,
   Eraser,
   Undo2,
+  Redo2,
   Trash2,
   Palette,
   RotateCcw,
@@ -21,10 +22,19 @@ import {
 interface DrawingToolsPanelProps {
   onClose?: () => void;
   onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
   onClearLayer?: () => void;
 }
 
-export function DrawingToolsPanel({ onUndo, onClearLayer }: DrawingToolsPanelProps) {
+export function DrawingToolsPanel({
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  onClearLayer,
+}: DrawingToolsPanelProps) {
   const selectedLayerId = useSceneStore((state) => state.selectedLayerId);
   const layerGroups = useSceneStore((state) => state.layerGroups || []);
   const drawingTool = useSceneStore((state) => state.drawingTool);
@@ -98,7 +108,48 @@ export function DrawingToolsPanel({ onUndo, onClearLayer }: DrawingToolsPanelPro
   ];
 
   return (
-    <div className="space-y-4 flex flex-col h-full text-slate-800 select-none">
+    <div id="drawing-tools-panel" className="space-y-4 flex flex-col h-full text-slate-800 select-none">
+      {/* Barre rapide en haut : Annuler / Rétablir / Vider */}
+      {(onUndo || onRedo || onClearLayer) && (
+        <div className="grid grid-cols-3 gap-1.5">
+          {onUndo && (
+            <button
+              type="button"
+              onClick={onUndo}
+              disabled={canUndo === false}
+              className="py-2 px-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer border border-slate-200 active:scale-95"
+              title="Annuler le dernier tracé (Cmd/Ctrl+Z)"
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+              <span>Annuler</span>
+            </button>
+          )}
+          {onRedo && (
+            <button
+              type="button"
+              onClick={onRedo}
+              disabled={canRedo === false}
+              className="py-2 px-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer border border-slate-200 active:scale-95"
+              title="Rétablir le tracé annulé (Cmd/Ctrl+Shift+Z)"
+            >
+              <Redo2 className="w-3.5 h-3.5" />
+              <span>Rétablir</span>
+            </button>
+          )}
+          {onClearLayer && (
+            <button
+              type="button"
+              onClick={onClearLayer}
+              className="py-2 px-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer border border-rose-200 active:scale-95"
+              title="Effacer tous les tracés de ce calque"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Vider</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Opacité du calque actif (arrière-plan, premier-plan, collider) */}
       {activeLayer && (
         <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5">
@@ -486,32 +537,6 @@ export function DrawingToolsPanel({ onUndo, onClearLayer }: DrawingToolsPanelPro
         </div>
       </div>
 
-      {/* Actions complémentaires : Undo / Clear Layer / Quitter */}
-      <div className="pt-2 border-t border-slate-200 space-y-2">
-        <div className="grid grid-cols-2 gap-2">
-          {onUndo && (
-            <button
-              type="button"
-              onClick={onUndo}
-              className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-slate-200"
-            >
-              <Undo2 className="w-4 h-4" />
-              <span>Annuler (Undo)</span>
-            </button>
-          )}
-
-          {onClearLayer && (
-            <button
-              type="button"
-              onClick={onClearLayer}
-              className="p-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-rose-200"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>Vider le calque</span>
-            </button>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

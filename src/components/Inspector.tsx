@@ -579,9 +579,6 @@ export function Inspector() {
                     >
                       État {st.name}
                     </span>
-                    {isActive && (
-                      <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse shrink-0 ml-0.5" title="État actif sur la scène" />
-                    )}
                   </div>
                 )}
 

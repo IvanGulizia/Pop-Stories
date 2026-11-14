@@ -139,6 +139,10 @@ export function stopKeyboardListening() {
 
 const activePhysicsCollisionPairs = new Set<string>();
 const activePhysicsCollisionContacts = new Map<string, Position>();
+const groundedEntityIds = new Set<string>();
+const jumpTrackers = new Map<string, { jumpsUsed: number; wasJumpPressed: boolean }>();
+const rebuildingBodyIds = new Set<string>();
+const activeDragPositions: Record<string, Position> = {};
 const autoDestroyTimers = new Map<string, number>();
 const particleEmitterAccumulators = new Map<string, number>();
 const hierarchyGroupIds = new Map<string, number>();
@@ -383,10 +387,42 @@ export function resetMatterPhysicsRuntime() {
   activeKeys.clear();
   activePhysicsCollisionPairs.clear();
   activePhysicsCollisionContacts.clear();
+  groundedEntityIds.clear();
+  jumpTrackers.clear();
+  rebuildingBodyIds.clear();
+  Object.keys(activeDragPositions).forEach((k) => delete activeDragPositions[k]);
   autoDestroyTimers.clear();
   particleEmitterAccumulators.clear();
   hierarchyGroupIds.clear();
   nextNegativeGroupId = -100;
+}
+
+/**
+ * Déplace une entité pendant le mode Play (translation directe exacte ou impulsion physique)
+ * tout en maintenant le corps Matter.js parfaitement synchronisé.
+ */
+export function applyEntityMoveAction(
+  entityId: string,
+  dx: number,
+  dy: number,
+  mode: 'instant' | 'impulse' = 'instant'
+): boolean {
+  const body = bodyMap.get(entityId);
+  if (!body) return false;
+
+  Matter.Sleeping.set(body, false);
+  if (mode === 'impulse' && !body.isStatic) {
+    // Impulsion proportionnelle à la distance (dx/dy px convertis en vitesse initiale px/frame)
+    const scale = 3.5 / 60;
+    const maxStepSpeed = 25;
+    const vx = Math.max(-maxStepSpeed, Math.min(maxStepSpeed, body.velocity.x + dx * scale));
+    const vy = Math.max(-maxStepSpeed, Math.min(maxStepSpeed, body.velocity.y + dy * scale));
+    Body.setVelocity(body, { x: vx, y: vy });
+    return true;
+  }
+
+  Body.translate(body, { x: dx, y: dy });
+  return false;
 }
 
 /**
@@ -419,6 +455,18 @@ export function setEntityRuntimeVelocity(entityId: string, vx: number, vy: numbe
   }
 }
 
+export function setActiveDragPosition(entityId: string, position: Position | null) {
+  if (position && !Number.isNaN(position.x) && !Number.isNaN(position.y)) {
+    activeDragPositions[entityId] = { x: position.x, y: position.y };
+  } else {
+    delete activeDragPositions[entityId];
+  }
+}
+
+export function getActiveDragPositions(): Record<string, Position> {
+  return activeDragPositions;
+}
+
 /**
  * Synchronise la position d'un corps pendant un drag manuel à la souris
  * en tenant compte du décalage exact du collider calculé depuis le mode dessin.
@@ -430,6 +478,7 @@ export function syncEntityDragPosition(
   width?: number,
   height?: number
 ) {
+  setActiveDragPosition(entityId, { x: left, y: top });
   const body = bodyMap.get(entityId);
   if (body) {
     const offset = colliderOffsets.get(entityId) || {
@@ -661,6 +710,27 @@ function ensurePhysicsWorld(
       const pt = { x: Math.round(contactX * 10) / 10, y: Math.round(contactY * 10) / 10 };
       activePhysicsCollisionContacts.set(`${idA}:::${idB}`, pt);
       activePhysicsCollisionContacts.set(`${idB}:::${idA}`, pt);
+
+      // Détection précise du contact au sol (surfaces solides sous l'entité, jamais les capteurs ni les murs verticaux)
+      const bodyA = pair.bodyA;
+      const bodyB = pair.bodyB;
+      if (!bodyA.isSensor && !bodyB.isSensor) {
+        if (idB === 'boundary_ground') {
+          groundedEntityIds.add(idA);
+        } else if (idA === 'boundary_ground') {
+          groundedEntityIds.add(idB);
+        } else {
+          const normalY = Math.abs((pair as any).collision?.normal?.y ?? 0);
+          if (normalY > 0.45) {
+            if (!idA.startsWith('boundary_') && !idA.startsWith('layercol::') && contactY >= bodyA.position.y - 2) {
+              groundedEntityIds.add(idA);
+            }
+            if (!idB.startsWith('boundary_') && !idB.startsWith('layercol::') && contactY >= bodyB.position.y - 2) {
+              groundedEntityIds.add(idB);
+            }
+          }
+        }
+      }
     };
 
     // Écouteur de collisions pour capture temps-réel et rebond calibré
@@ -693,6 +763,17 @@ function ensurePhysicsWorld(
         const idA = getBodyLabel(pair.bodyA);
         const idB = getBodyLabel(pair.bodyB);
         if (idA && idB) {
+          if (rebuildingBodyIds.has(idA) || rebuildingBodyIds.has(idB)) {
+            return;
+          }
+          // Ignorer le collisionEnd d'un ancien corps détruit/reconstruit lors d'un changement d'état
+          const currentBodyA = bodyMap.get(idA);
+          const currentBodyB = bodyMap.get(idB);
+          const isStaleBodyA = !idA.startsWith('boundary_') && !idA.startsWith('layercol::') && currentBodyA && currentBodyA !== pair.bodyA;
+          const isStaleBodyB = !idB.startsWith('boundary_') && !idB.startsWith('layercol::') && currentBodyB && currentBodyB !== pair.bodyB;
+          if (isStaleBodyA || isStaleBodyB) {
+            return;
+          }
           activePhysicsCollisionPairs.delete(`${idA}:::${idB}`);
           activePhysicsCollisionPairs.delete(`${idB}:::${idA}`);
           activePhysicsCollisionContacts.delete(`${idA}:::${idB}`);
@@ -818,7 +899,9 @@ function ensurePhysicsWorld(
     if (!body || bodySignatures.get(entity.id) !== signature) {
       const prevVel = body ? { x: body.velocity.x, y: body.velocity.y } : null;
       if (body) {
+        rebuildingBodyIds.add(entity.id);
         World.remove(engine.world, body);
+        rebuildingBodyIds.delete(entity.id);
         bodyMap.delete(entity.id);
       }
 
@@ -991,6 +1074,21 @@ export function stepMatterPhysics(params: {
       continue;
     }
 
+    // Si l'entité est actuellement déplacée manuellement à la souris, figer son corps sur le curseur
+    const activeDragPos = activeDragPositions[entity.id];
+    if (activeDragPos && body) {
+      const dragOffset = colliderOffsets.get(entity.id) || {
+        relCenterX: entity.size.width / 2,
+        relCenterY: entity.size.height / 2,
+      };
+      Body.setPosition(body, {
+        x: activeDragPos.x + dragOffset.relCenterX,
+        y: activeDragPos.y + dragOffset.relCenterY,
+      });
+      Body.setVelocity(body, { x: 0, y: 0 });
+      continue;
+    }
+
     if (!body || effectiveBehaviors.length === 0) continue;
 
     // Récupérer les comportements configurés
@@ -1115,12 +1213,24 @@ export function stepMatterPhysics(params: {
           vx = approachAxisVelocity(body.velocity.x, targetVx, accel, damp, !physics ? 0.8 : undefined);
         }
 
-        // Détection de contact au sol pour le saut
-        const isGrounded = Math.abs(body.velocity.y) < 1.2;
-        let vy = body.velocity.y;
-        if (allowJump && upJump && isGrounded) {
-          vy = -((keyboard.jumpForce ?? 450) / 60);
+        // Détection précise du sol + limitation du nombre de sauts (maxJumps, défaut 1)
+        const tracker = jumpTrackers.get(entity.id) || { jumpsUsed: 0, wasJumpPressed: false };
+        const isBottomFloor = !body.isSensor && body.bounds.max.y >= canvasBounds.height - 3;
+        const isGrounded = (groundedEntityIds.has(entity.id) || isBottomFloor) && body.velocity.y >= -0.6;
+        if (isGrounded) {
+          tracker.jumpsUsed = 0;
         }
+
+        const maxJumps = Math.max(1, keyboard.maxJumps ?? 1);
+        const jumpJustPressed = upJump && !tracker.wasJumpPressed;
+        let vy = body.velocity.y;
+        if (allowJump && jumpJustPressed && tracker.jumpsUsed < maxJumps) {
+          vy = -((keyboard.jumpForce ?? 450) / 60);
+          tracker.jumpsUsed += 1;
+          groundedEntityIds.delete(entity.id);
+        }
+        tracker.wasJumpPressed = upJump;
+        jumpTrackers.set(entity.id, tracker);
 
         Body.setVelocity(body, { x: vx, y: vy });
       }
@@ -1661,8 +1771,15 @@ export function stepMatterPhysics(params: {
     }
   }
 
-  // Tique d'itération physique du moteur Matter.js
-  Engine.update(engine, dt * 1000);
+  // Tique d'itération physique du moteur Matter.js avec sous-pas <= 16.666 ms (évite le warning delta > 16.667 ms)
+  const totalMs = dt * 1000;
+  const maxStepMs = 16.666;
+  const subSteps = Math.max(1, Math.ceil(totalMs / maxStepMs));
+  const stepMs = totalMs / subSteps;
+  groundedEntityIds.clear();
+  for (let s = 0; s < subSteps; s++) {
+    Engine.update(engine, stepMs);
+  }
 
   // Résolution des transformations dans l'ordre topologique (parents avant enfants)
   const orderedEntities = sortEntitiesTopologically(entities);
@@ -1749,7 +1866,12 @@ export function stepMatterPhysics(params: {
           (b.type === 'wandering' && !!(b as WanderingBehaviorConfig).orientToMovement)
       );
 
-      if (!body.isStatic || hasRotationBehavior) {
+      const isActivelyDragged = Boolean(activeDragPositions[entity.id]);
+      if (isActivelyDragged) {
+        const dp = activeDragPositions[entity.id];
+        newX = dp.x;
+        newY = dp.y;
+      } else if (!body.isStatic || hasRotationBehavior) {
         const offset = colliderOffsets.get(entity.id) || {
           relCenterX: entity.size.width / 2,
           relCenterY: entity.size.height / 2,
@@ -1803,6 +1925,8 @@ export function stepMatterPhysics(params: {
           color2: emitter.color2,
           shape: emitter.shape || 'circle',
           customParticleId: emitter.customParticleId,
+          customParticleIds: emitter.customParticleIds,
+          customParticleMode: emitter.customParticleMode,
           useTint: emitter.useParticleTint,
           speed: emitter.speed ?? 120,
           size: emitter.size ?? 6,

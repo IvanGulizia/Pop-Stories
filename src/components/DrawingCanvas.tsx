@@ -1518,6 +1518,30 @@ export function DrawingCanvas({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Annuler / Rétablir toujours accessibles en haut */}
+            <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200 shadow-2xs">
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={historyIndexRef.current <= 0}
+                className="px-2 py-1 rounded-lg text-[11px] font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-35 disabled:cursor-not-allowed flex items-center gap-1 transition-all cursor-pointer active:scale-95"
+                title="Annuler (Cmd/Ctrl+Z)"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Annuler</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleRedo}
+                disabled={historyIndexRef.current >= historyRef.current.length - 1}
+                className="px-2 py-1 rounded-lg text-[11px] font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-35 disabled:cursor-not-allowed flex items-center gap-1 transition-all cursor-pointer active:scale-95"
+                title="Rétablir (Cmd/Ctrl+Shift+Z)"
+              >
+                <Redo2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Rétablir</span>
+              </button>
+            </div>
+
             {/* Guide & Hotspot Quick Toggles */}
             {(activeReferenceGuide || isCursorMode) && (
               <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200 shadow-2xs">

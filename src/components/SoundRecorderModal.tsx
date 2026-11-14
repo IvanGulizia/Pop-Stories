@@ -546,6 +546,7 @@ export function SoundRecorderModal({ isOpen, onClose, onSelectSound }: SoundReco
 
   return createPortal(
     <div
+      data-modal-open="true"
       className="fixed inset-0 z-[10000] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200 select-none"
       style={{ isolation: 'isolate' }}
       onClick={onClose}

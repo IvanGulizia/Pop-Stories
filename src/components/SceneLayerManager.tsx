@@ -42,7 +42,7 @@ export function SceneLayerManager(_props: SceneLayerManagerProps) {
   };
 
   return (
-    <div className="space-y-3">
+    <div id="scene-layer-manager" className="space-y-3">
       {/* En-tête des calques de décor */}
       <div className="flex items-center justify-between px-1">
         <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">

@@ -206,6 +206,7 @@ export interface KeyboardControlBehaviorConfig extends BaseBehaviorConfig {
   allowHorizontal?: boolean; // default true
   allowVertical?: boolean;   // default true (used in top_down)
   allowJump?: boolean;       // default true (used in platformer)
+  maxJumps?: number;         // default 1 (1 = saut simple, 2 = double saut, etc.)
   acceleration?: number;     // 0.05..1 (réactivité au démarrage)
   damping?: number;          // 0..0.99 (inertie / glisse au relâchement)
   flipOnMove?: boolean;
@@ -219,6 +220,7 @@ export interface BoundaryBehaviorConfig extends BaseBehaviorConfig {
 }
 
 export type ParticleShape = 'circle' | 'square' | 'spark' | 'star' | 'custom';
+export type CustomParticleUsageMode = 'random' | 'sequence' | 'lifetime_anim';
 
 export interface CustomParticlePreset {
   id: string;
@@ -235,6 +237,8 @@ export interface ParticleEmitterBehaviorConfig extends BaseBehaviorConfig {
   color2?: string;
   shape: ParticleShape;
   customParticleId?: string;
+  customParticleIds?: string[];
+  customParticleMode?: CustomParticleUsageMode;
   useParticleTint?: boolean;
   speed: number;         // px/s
   size: number;          // px
@@ -428,7 +432,8 @@ export type ActionType =
   | 'delay'
   | 'attach_to_parent'
   | 'detach_parent'
-  | 'emit_particles';
+  | 'emit_particles'
+  | 'move_entity';
 
 export type SpawnLocationMode =
   | 'at_subject'
@@ -539,6 +544,8 @@ export interface RuleAction {
   particleColor2?: string;
   particleShape?: ParticleShape;
   customParticleId?: string;
+  customParticleIds?: string[];
+  customParticleMode?: CustomParticleUsageMode;
   useParticleTint?: boolean;
   particleSpeed?: number;
   particleSize?: number;
@@ -546,6 +553,17 @@ export interface RuleAction {
   particleGravity?: number;
   particleSpread?: number;
   particleAngle?: number;
+
+  // Champs pour 'move_entity' (Déplacer de X px dans une direction)
+  moveDistance?: number;
+  moveDirectionMode?: 'cardinal' | 'angle' | 'facing' | 'toward_target' | 'away_target';
+  moveCardinal?: 'up' | 'down' | 'left' | 'right';
+  moveAngle?: number;
+  moveApplyMode?: 'instant' | 'impulse';
+  moveTargetMode?: 'target' | 'subject' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'mouse';
+  moveTargetEntityId?: EntityId;
+  moveTargetEntityType?: EntityType;
+  moveTargetTag?: string;
 
   // Champs pour 'play_sound'
   soundType?: 'pop' | 'bell' | 'laser' | 'bounce' | 'magic' | 'win';

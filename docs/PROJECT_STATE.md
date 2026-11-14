@@ -1,6 +1,15 @@
 # État du Projet
 
 ## Complété
+- **Correctifs Workflow, IndexedDB Local, Raccourcis Studio, Multi-Particules & Action Déplacement (Phase 10.16)** :
+  - **Sous-pas Matter.js (`<= 16.666 ms`)** : Élimination des avertissements `delta > 16.667 ms` lors de frames longues.
+  - **Persistance 100 % locale IndexedDB (`localStorageDB.ts`) & Quota configurable** : Migration automatique depuis `localStorage` (~5 Mo) vers IndexedDB local sur machine (`50 Mo` par défaut, extensible à `100/250/500/1000 Mo` ou `Illimité` dans la limite disque navigateur) avec jauge et alerte interactive d'extension dans `ProjectSlotsModal`.
+  - **Ergonomie Dessin & Canvas** : Boutons *Annuler / Rétablir* remontés en haut de `DrawingCanvas` et `DrawingToolsPanel`, validation automatique du dessin de calque au clic extérieur / changement de vue / `Échap`, suppression du point bleu sur la carte d'état active dans `Inspector`, réactivation des poignées de redimensionnement (`pointer-events-auto`) avec historique Undo.
+  - **Raccourcis clavier globaux (`App.tsx`)** : `Cmd/Ctrl+S`, `Cmd/Ctrl+Z`, `Cmd/Ctrl+Shift+Z` / `Cmd+Y`, `Cmd/Ctrl+D`, `Cmd/Ctrl+P` / `Cmd/Ctrl+Entrée` (sans `Espace`), `Suppr`, `Échap`.
+  - **Sauts limités (`maxJumps`, défaut `1`), Multi-Particules dessinées (`customParticleIds` + mode `random`/`sequence`/`lifetime_anim`, z-index éditeur corrigé) & Action `move_entity` (`X px` dans une direction)** dans `BehaviorManager`, `ParticleEditorModal` et `RuleBook`.
+- **Correction Définitive Boucles Collision Enter / Exit & Auto-Remise en Drag (Phase 10.15)** :
+  - **Synchronisation temps réel Drag ↔ 60 FPS (`activeDragPositions`)** : Les entités déplacées en Mode Play (`CustomShape`, `Apple`, `Plant`) publient leur position instantanée dans un registre partagé lu par `evaluateRulesWithTemp` (collisions, calques colliders, proximité, bords) et respecté dans `stepMatterPhysics`, éliminant toute oscillation entre l'ancienne position et le curseur.
+  - **Protection reconstruction Matter.js (`rebuildingBodyIds`) & Cooldown Auto-Remise** : Filtrage des faux `collisionEnd` émis lors du remplacement de corps après changement d'état/collider et cooldown anti-rebond (`120 ms`) sur l'auto-remise.
 - **Fiabilisation Clics/Collisions (Option B), Sound Studio Réverbe/FX & Colliders Manuels/Partagés (Phase 10.14)** :
   - **Déduplication Clic & Spawn** : Séparation stricte `click` / `down` / `up`, suppression des doubles appels `pointerup`/`mouse_up` et garde anti-réentrance `isEvaluatingRules` garantissant 1 seule exécution/création par clic.
   - **Anti-boucle Collision Entrée/Sortie (Option B)** : Marge d'hystérésis de séparation configurable (`collisionExitMargin`, 10px par défaut), pontage des règles `Enter`→`Exit`, option `1× par paire` (`collisionTriggerOnce`) et cooldown anti-rebond dans `RuleBook`, `useSceneStore` et `matterPhysicsEngine`.

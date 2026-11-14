@@ -19,6 +19,7 @@ import {
   FleeBehaviorConfig,
   ParticleShape,
   CustomParticlePreset,
+  CustomParticleUsageMode,
 } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
@@ -919,9 +920,25 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
                 useTint: false,
               });
             }
+            const curBeh = baseBehaviors.find((bh) => bh.id === particleDrawerState.behaviorId);
+            const curOv = particleDrawerState.isOverridden
+              ? targetState?.behaviorOverrides?.[particleDrawerState.behaviorId]
+              : undefined;
+            const curEffective = { ...(curBeh || {}), ...(curOv || {}) } as ParticleEmitterBehaviorConfig;
+            const existingIds =
+              curEffective.customParticleIds && curEffective.customParticleIds.length > 0
+                ? curEffective.customParticleIds
+                : curEffective.customParticleId
+                ? [curEffective.customParticleId]
+                : [];
+            const nextIds = existingIds.includes(targetPresetId)
+              ? existingIds
+              : [...existingIds, targetPresetId];
             const patch: Partial<ParticleEmitterBehaviorConfig> = {
               shape: 'custom',
-              customParticleId: targetPresetId,
+              customParticleId: nextIds[0],
+              customParticleIds: nextIds,
+              customParticleMode: curEffective.customParticleMode || 'random',
             };
             if (particleDrawerState.isOverridden) {
               handleUpdateOverride(particleDrawerState.behaviorId, patch);
@@ -948,6 +965,8 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
             initialConfig={{
               shape: effective.shape || 'circle',
               customParticleId: effective.customParticleId,
+              customParticleIds: effective.customParticleIds,
+              customParticleMode: effective.customParticleMode,
               useParticleTint: effective.useParticleTint,
               color: effective.color || '#f59e0b',
               color2: effective.color2 || effective.color || '#ef4444',
@@ -964,7 +983,9 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
             onApply={(cfg) => {
               const patch: Partial<ParticleEmitterBehaviorConfig> = {
                 shape: cfg.shape,
-                customParticleId: cfg.shape === 'custom' ? cfg.customParticleId : undefined,
+                customParticleId: cfg.shape === 'custom' ? (cfg.customParticleIds?.[0] || cfg.customParticleId) : undefined,
+                customParticleIds: cfg.shape === 'custom' ? cfg.customParticleIds : undefined,
+                customParticleMode: cfg.shape === 'custom' ? cfg.customParticleMode : undefined,
                 useParticleTint: cfg.shape === 'custom' ? Boolean(cfg.useParticleTint) : undefined,
                 color: cfg.color,
                 color2: cfg.color2,
@@ -1494,18 +1515,43 @@ function renderBehaviorControls({
 
           {/* Ligne 5: Autoriser le saut (si mode Plateforme) */}
           {b.mode === 'platformer' && (
-            <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
-              <div>
-                <div className="font-bold text-slate-700 text-xs">Autoriser le saut</div>
-                <div className="text-[10px] text-slate-400">Active l'impulsion verticale (Haut / Espace)</div>
+            <>
+              <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+                <div>
+                  <div className="font-bold text-slate-700 text-xs">Autoriser le saut</div>
+                  <div className="text-[10px] text-slate-400">Active l'impulsion verticale (Haut / Espace)</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={b.allowJump !== false}
+                  onChange={(e) => update({ allowJump: e.target.checked })}
+                  className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+                />
               </div>
-              <input
-                type="checkbox"
-                checked={b.allowJump !== false}
-                onChange={(e) => update({ allowJump: e.target.checked })}
-                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
-              />
-            </div>
+
+              {b.allowJump !== false && (
+                <div className="p-2 bg-white rounded-xl border border-slate-200">
+                  <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                    <span className="font-bold">Nombre de sauts max</span>
+                    <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                      {b.maxJumps ?? 1} {(b.maxJumps ?? 1) > 1 ? 'sauts' : 'saut'}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    step="1"
+                    value={b.maxJumps ?? 1}
+                    onChange={(e) => update({ maxJumps: parseInt(e.target.value, 10) || 1 })}
+                    className="w-full accent-indigo-600 h-1.5"
+                  />
+                  <div className="text-[10px] text-slate-400 mt-0.5">
+                    1 = saut simple (au sol), 2 = double saut, etc.
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {/* Ligne 6: Vitesse de déplacement */}
@@ -2331,6 +2377,25 @@ function renderBehaviorControls({
 
     case 'particle_emitter': {
       const b = { ...behavior, ...(override || {}) } as ParticleEmitterBehaviorConfig;
+      const selectedCustomIds: string[] =
+        b.customParticleIds && b.customParticleIds.length > 0
+          ? b.customParticleIds
+          : b.customParticleId
+          ? [b.customParticleId]
+          : [];
+      const toggleCustomParticleSelection = (presetId: string) => {
+        const exists = selectedCustomIds.includes(presetId);
+        let nextIds: string[];
+        if (exists) {
+          nextIds = selectedCustomIds.filter((id) => id !== presetId);
+        } else {
+          nextIds = [...selectedCustomIds, presetId];
+        }
+        update({
+          customParticleIds: nextIds,
+          customParticleId: nextIds[0],
+        });
+      };
       return (
         <div className="space-y-1.5">
           {/* Bouton Éditeur & Testeur interactif */}
@@ -2350,8 +2415,12 @@ function renderBehaviorControls({
               value={b.shape || 'circle'}
               onChange={(e) => {
                 const nextShape = e.target.value as ParticleShape;
-                if (nextShape === 'custom' && !b.customParticleId && customParticles.length > 0) {
-                  update({ shape: nextShape, customParticleId: customParticles[0].id });
+                if (nextShape === 'custom' && selectedCustomIds.length === 0 && customParticles.length > 0) {
+                  update({
+                    shape: nextShape,
+                    customParticleId: customParticles[0].id,
+                    customParticleIds: [customParticles[0].id],
+                  });
                 } else {
                   update({ shape: nextShape });
                 }
@@ -2370,7 +2439,9 @@ function renderBehaviorControls({
           {b.shape === 'custom' && (
             <div className="p-2.5 bg-amber-50/60 rounded-xl border border-amber-200 space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-bold text-amber-950">Particule vectorielle :</span>
+                <span className="text-[11px] font-bold text-amber-950">
+                  Particules ({selectedCustomIds.length} sél.) :
+                </span>
                 <button
                   type="button"
                   onClick={() => onOpenParticleDrawer(undefined)}
@@ -2388,7 +2459,8 @@ function renderBehaviorControls({
               ) : (
                 <div className="grid grid-cols-3 gap-1.5">
                   {customParticles.map((preset) => {
-                    const isSel = b.customParticleId === preset.id;
+                    const selIdx = selectedCustomIds.indexOf(preset.id);
+                    const isSel = selIdx !== -1;
                     return (
                       <div
                         key={preset.id}
@@ -2397,8 +2469,13 @@ function renderBehaviorControls({
                             ? 'bg-white border-amber-500 ring-2 ring-amber-300/60 shadow-xs'
                             : 'bg-white/80 border-slate-200 hover:border-amber-300'
                         }`}
-                        onClick={() => update({ customParticleId: preset.id })}
+                        onClick={() => toggleCustomParticleSelection(preset.id)}
                       >
+                        {isSel && (
+                          <span className="absolute -top-1.5 -left-1.5 px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[9px] font-black shadow-2xs">
+                            #{selIdx + 1}
+                          </span>
+                        )}
                         <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden">
                           <svg viewBox="0 0 100 100" className="w-7 h-7">
                             {preset.vectorPaths.map((p) => (
@@ -2434,7 +2511,10 @@ function renderBehaviorControls({
                             onClick={(e) => {
                               e.stopPropagation();
                               onDeleteCustomParticle(preset.id);
-                              if (isSel) update({ customParticleId: undefined });
+                              if (isSel) {
+                                const nextIds = selectedCustomIds.filter((id) => id !== preset.id);
+                                update({ customParticleIds: nextIds, customParticleId: nextIds[0] });
+                              }
                             }}
                             className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
                             title="Supprimer ce preset"
@@ -2445,6 +2525,21 @@ function renderBehaviorControls({
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {selectedCustomIds.length > 1 && (
+                <div className="p-2 bg-white rounded-xl border border-amber-200 flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-slate-700">Utilisation :</span>
+                  <select
+                    value={b.customParticleMode || 'random'}
+                    onChange={(e) => update({ customParticleMode: e.target.value as CustomParticleUsageMode })}
+                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800"
+                  >
+                    <option value="random">Aléatoire parmi les sélectionnées</option>
+                    <option value="sequence">Séquence (#1 → #2 → ...)</option>
+                    <option value="lifetime_anim">Animation sur durée de vie</option>
+                  </select>
                 </div>
               )}
 

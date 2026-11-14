@@ -41,6 +41,10 @@ export default function App() {
   const entities = useSceneStore((state) => state.entities);
   const settings = useSceneStore((state) => state.settings);
   const setLayerVectorPaths = useSceneStore((state) => state.setLayerVectorPaths);
+  const sceneUndoCount = useSceneStore((state) => state.sceneUndoStack.length);
+  const sceneRedoCount = useSceneStore((state) => state.sceneRedoStack.length);
+  const undoScene = useSceneStore((state) => state.undoScene);
+  const redoScene = useSceneStore((state) => state.redoScene);
 
   // Main UI View States
   const [activeView, setActiveView] = useState<'canvas' | 'rules'>('canvas');
@@ -50,9 +54,150 @@ export default function App() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [isSlotsModalOpen, setIsSlotsModalOpen] = useState(false);
+  const [saveToast, setSaveToast] = useState<string | null>(null);
 
   // Drawing Layer State
   const [editingLayer, setEditingLayer] = useState<{ layer: SceneLayer; group: SceneLayerGroup } | null>(null);
+
+  // Ouvrir automatiquement le panneau outils si un calque est sélectionné en édition
+  useEffect(() => {
+    if (selectedLayerId && appMode === 'edit' && rightPanel !== 'inspector') {
+      setRightPanel('inspector');
+    }
+  }, [selectedLayerId, appMode]);
+
+  // Point 4: Quitter / valider automatiquement le mode dessin de calque au clic en dehors (ou perte de fenêtre)
+  useEffect(() => {
+    if (!selectedLayerId || appMode !== 'edit') return;
+    const handlePointerDownOutside = (e: PointerEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (!el) return;
+      // Ne pas interrompre si une modale est ouverte ou si le clic est sur le canvas, les outils de dessin ou la liste des calques
+      if (el.closest('[data-modal-open="true"]')) return;
+      if (el.closest('#scene-canvas-container, #drawing-tools-panel, #scene-layer-manager, [data-layer-drawing-keep]')) {
+        return;
+      }
+      useSceneStore.getState().selectLayer(null);
+    };
+    const handleWindowBlur = () => {
+      useSceneStore.getState().selectLayer(null);
+    };
+    window.addEventListener('pointerdown', handlePointerDownOutside, true);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDownOutside, true);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, [selectedLayerId, appMode]);
+
+  // Point 5: Raccourcis clavier globaux du studio (Cmd/Ctrl+Z, Shift+Z / Y, S, D, P, Enter, Suppr, Escape — sans Espace!)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.toLowerCase();
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable;
+      const hasBlockingModal = Boolean(
+        isCreateModalOpen ||
+        isSlotsModalOpen ||
+        isClearModalOpen ||
+        editingLayer ||
+        document.querySelector('[data-modal-open="true"]')
+      );
+
+      // Cmd/Ctrl + S : Sauvegarde locale rapide sur le slot actif (ou ouverture des slots)
+      if (mod && key === 's') {
+        e.preventDefault();
+        if (hasBlockingModal) return;
+        const st = useSceneStore.getState();
+        const activeSlot = st.currentSlotId
+          ? st.projectSlots.find((s) => s.id === st.currentSlotId)
+          : undefined;
+        if (activeSlot) {
+          const res = st.saveProjectToSlot(activeSlot.name, activeSlot.id);
+          if (res.success) {
+            setSaveToast(`Enregistré : ${activeSlot.name}`);
+            setTimeout(() => setSaveToast(null), 2200);
+          } else if (res.quotaExceeded) {
+            setIsSlotsModalOpen(true);
+          }
+        } else {
+          setIsSlotsModalOpen(true);
+        }
+        return;
+      }
+
+      if (hasBlockingModal || isTyping) return;
+
+      // Cmd/Ctrl + P ou Cmd/Ctrl + Enter : Basculer Play <-> Édition (Espace reste libre pour le saut)
+      if (mod && (key === 'p' || e.key === 'Enter')) {
+        e.preventDefault();
+        const st = useSceneStore.getState();
+        if (st.appMode === 'play') {
+          st.setAppMode('edit');
+        } else {
+          if (st.selectedLayerId) st.selectLayer(null);
+          st.setAppMode('play');
+          setActiveView('canvas');
+        }
+        return;
+      }
+
+      // Échap : Quitter Play -> Quitter dessin calque -> Désélectionner entité
+      if (e.key === 'Escape') {
+        const st = useSceneStore.getState();
+        if (st.appMode === 'play') {
+          st.setAppMode('edit');
+        } else if (st.selectedLayerId) {
+          st.selectLayer(null);
+        } else if (st.selectedEntityId) {
+          st.selectEntity(null);
+        }
+        return;
+      }
+
+      // Les raccourcis d'édition ci-dessous ne s'appliquent qu'en mode Édition
+      const st = useSceneStore.getState();
+      if (st.appMode !== 'edit') return;
+
+      // Cmd/Ctrl + Z : Annuler (Undo) / Cmd/Ctrl + Shift + Z ou Cmd/Ctrl + Y : Rétablir (Redo)
+      if (mod && key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          st.redoScene();
+        } else {
+          st.undoScene();
+        }
+        return;
+      }
+      if (mod && key === 'y') {
+        e.preventDefault();
+        st.redoScene();
+        return;
+      }
+
+      // Cmd/Ctrl + D : Dupliquer l'entité sélectionnée
+      if (mod && key === 'd') {
+        if (st.selectedEntityId) {
+          e.preventDefault();
+          st.duplicateEntity(st.selectedEntityId);
+        }
+        return;
+      }
+
+      // Suppr / Retour arrière : Supprimer l'entité sélectionnée
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (st.selectedEntityId && !st.selectedLayerId) {
+          e.preventDefault();
+          st.deleteEntity(st.selectedEntityId);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [isCreateModalOpen, isSlotsModalOpen, isClearModalOpen, editingLayer]);
 
   // Keyboard Event Listener in Play Mode (Down & Up phases)
   useEffect(() => {
@@ -92,6 +237,9 @@ export default function App() {
   const activeEntitiesCount = Object.keys(entities).length;
 
   const handleToggleRightPanel = (panel: 'inspector' | 'settings') => {
+    if (panel === 'settings' && selectedLayerId) {
+      selectLayer(null);
+    }
     if (rightPanel === panel) {
       setRightPanel('none');
     } else {
@@ -160,7 +308,10 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => setActiveView('rules')}
+              onClick={() => {
+                if (selectedLayerId) selectLayer(null);
+                setActiveView('rules');
+              }}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
                 activeView === 'rules'
                   ? 'bg-white text-slate-900 shadow-sm'
@@ -193,6 +344,7 @@ export default function App() {
                 if (appMode === 'play') {
                   setAppMode('edit');
                 } else {
+                  if (selectedLayerId) selectLayer(null);
                   setAppMode('play');
                   setActiveView('canvas');
                 }
@@ -202,7 +354,7 @@ export default function App() {
                   ? 'bg-emerald-500 text-white shadow-sm ring-2 ring-emerald-400/40'
                   : 'text-slate-400 hover:text-white hover:bg-white/10'
               }`}
-              title={appMode === 'play' ? "Cliquer pour repasser en mode Édition" : "Mode Play (Interactif - bascule sur le canvas)"}
+              title={appMode === 'play' ? "Repasser en mode Édition (Cmd/Ctrl+P ou Cmd/Ctrl+Entrée)" : "Mode Play (Cmd/Ctrl+P ou Cmd/Ctrl+Entrée)"}
             >
               <Play className="w-3.5 h-3.5 fill-current" strokeWidth={2} />
             </button>
@@ -219,11 +371,12 @@ export default function App() {
             {/* Button 4: Deselect / Close */}
             <button
               onClick={() => {
-                if (selectedEntityId) selectEntity(null);
+                if (selectedLayerId) selectLayer(null);
+                else if (selectedEntityId) selectEntity(null);
                 else setIsClearModalOpen(true);
               }}
               className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-white/10 transition-all cursor-pointer"
-              title={selectedEntityId ? 'Désélectionner' : 'Nettoyer la scène'}
+              title={selectedLayerId ? 'Terminer le dessin du calque' : selectedEntityId ? 'Désélectionner' : 'Nettoyer la scène'}
             >
               <X className="w-3.5 h-3.5" strokeWidth={2} />
             </button>
@@ -232,11 +385,16 @@ export default function App() {
 
         {/* RIGHT SECTION: SLOTS, INSPECTOR & SETTINGS TABS */}
         <div className="flex items-center gap-2">
+          {saveToast && (
+            <span className="px-2.5 py-1 bg-emerald-500 text-white rounded-xl text-[11px] font-bold shadow-xs animate-in fade-in duration-150">
+              {saveToast}
+            </span>
+          )}
           {/* Slots / Mes Projets Button (Floppy Disk Icon Only) */}
           <button
             onClick={() => setIsSlotsModalOpen(true)}
             className="w-9 h-9 rounded-2xl flex items-center justify-center transition-all cursor-pointer shadow-xs bg-[#22273e] text-indigo-300 hover:text-white hover:bg-[#1c2136] border border-indigo-500/40 active:scale-95"
-            title="Sauvegardes locales & Slots"
+            title="Sauvegardes locales & Slots (Cmd/Ctrl+S)"
           >
             <Save className="w-4 h-4 text-indigo-400" strokeWidth={2} />
           </button>
@@ -279,7 +437,10 @@ export default function App() {
               <div className="flex items-center bg-slate-200/80 p-0.5 rounded-2xl flex-1">
                 <button
                   type="button"
-                  onClick={() => setLeftTab('entities')}
+                  onClick={() => {
+                    if (selectedLayerId) selectLayer(null);
+                    setLeftTab('entities');
+                  }}
                   className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                     leftTab === 'entities'
                       ? 'bg-white text-slate-900 shadow-xs'
@@ -382,16 +543,10 @@ export default function App() {
             <div className="p-4 flex-1 overflow-y-auto">
               {selectedLayerId ? (
                 <DrawingToolsPanel
-                  onUndo={() => {
-                    const layerGroups = useSceneStore.getState().layerGroups || [];
-                    for (const g of layerGroups) {
-                      const l = g.layers.find((ly) => ly.id === selectedLayerId);
-                      if (l && l.vectorPaths && l.vectorPaths.length > 0) {
-                        useSceneStore.getState().setLayerVectorPaths(selectedLayerId, l.vectorPaths.slice(0, -1));
-                        break;
-                      }
-                    }
-                  }}
+                  onUndo={() => undoScene()}
+                  onRedo={() => redoScene()}
+                  canUndo={sceneUndoCount > 0}
+                  canRedo={sceneRedoCount > 0}
                   onClearLayer={() => {
                     useSceneStore.getState().setLayerVectorPaths(selectedLayerId, []);
                   }}
@@ -433,7 +588,10 @@ export default function App() {
 
       {/* Nettoyage Modal */}
       {isClearModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+        <div
+          data-modal-open="true"
+          className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+        >
           <div className="bg-white rounded-3xl border border-slate-200 p-6 max-w-md w-full shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2.5">

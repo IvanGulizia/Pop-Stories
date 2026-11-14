@@ -1,4 +1,4 @@
-import { CustomParticlePreset, ParticleShape } from '../types';
+import { CustomParticlePreset, CustomParticleUsageMode, ParticleShape } from '../types';
 
 export interface ParticleBurstOptions {
   x: number;
@@ -8,6 +8,8 @@ export interface ParticleBurstOptions {
   color2?: string;
   shape?: ParticleShape;
   customParticleId?: string;
+  customParticleIds?: string[];
+  customParticleMode?: CustomParticleUsageMode;
   useTint?: boolean;
   speed?: number;
   size?: number;
@@ -30,6 +32,8 @@ interface PooledParticle {
   gravity: number;
   shape: ParticleShape;
   customParticleId?: string;
+  customParticleIds?: string[];
+  customParticleMode?: CustomParticleUsageMode;
   useTint?: boolean;
   rotation: number;
   vr: number;
@@ -120,6 +124,7 @@ export interface ParticlePoolInstance {
 
 export function createParticlePool(maxParticles: number = DEFAULT_MAX_PARTICLES): ParticlePoolInstance {
   let sequenceCounter = 0;
+  let customSeqCounter = 0;
 
   const pool: PooledParticle[] = Array.from({ length: maxParticles }, () => ({
     active: false,
@@ -134,6 +139,8 @@ export function createParticlePool(maxParticles: number = DEFAULT_MAX_PARTICLES)
     gravity: 220,
     shape: 'circle',
     customParticleId: undefined,
+    customParticleIds: undefined,
+    customParticleMode: undefined,
     useTint: false,
     rotation: 0,
     vr: 0,
@@ -167,12 +174,31 @@ export function createParticlePool(maxParticles: number = DEFAULT_MAX_PARTICLES)
     const gravity = opts.gravity ?? 220;
     const spreadRad = ((opts.spread ?? 360) * Math.PI) / 180;
     const centerAngleRad = ((opts.angle ?? -90) * Math.PI) / 180;
+    const customList =
+      opts.customParticleIds && opts.customParticleIds.length > 0
+        ? opts.customParticleIds
+        : opts.customParticleId
+        ? [opts.customParticleId]
+        : [];
+    const customMode: CustomParticleUsageMode = opts.customParticleMode || 'random';
 
     for (let i = 0; i < count; i++) {
       const p = acquireSlot();
       const theta = centerAngleRad + (Math.random() - 0.5) * spreadRad;
       const spd = baseSpeed * (0.45 + Math.random() * 0.75);
       const life = baseLife * (0.7 + Math.random() * 0.5);
+
+      let chosenCustomId = customList[0];
+      if (customList.length > 1) {
+        if (customMode === 'sequence') {
+          chosenCustomId = customList[customSeqCounter % customList.length];
+          customSeqCounter = (customSeqCounter + 1) % 100000;
+        } else if (customMode === 'lifetime_anim') {
+          chosenCustomId = customList[0];
+        } else {
+          chosenCustomId = customList[Math.floor(Math.random() * customList.length)];
+        }
+      }
 
       p.active = true;
       p.x = opts.x + (Math.random() - 0.5) * 6;
@@ -185,7 +211,9 @@ export function createParticlePool(maxParticles: number = DEFAULT_MAX_PARTICLES)
       p.maxLife = life;
       p.gravity = gravity;
       p.shape = shape;
-      p.customParticleId = opts.customParticleId;
+      p.customParticleId = chosenCustomId;
+      p.customParticleIds = customList.length > 1 && customMode === 'lifetime_anim' ? customList : undefined;
+      p.customParticleMode = customMode;
       p.useTint = opts.useTint;
       p.rotation = Math.random() * Math.PI * 2;
       p.vr = (Math.random() - 0.5) * 8;
@@ -242,7 +270,16 @@ export function createParticlePool(maxParticles: number = DEFAULT_MAX_PARTICLES)
       ctx.translate(p.x, p.y);
 
       if (p.shape === 'custom') {
-        const sprite = getOrBuildCustomParticleSprite(p.customParticleId);
+        let spriteId = p.customParticleId;
+        if (p.customParticleMode === 'lifetime_anim' && p.customParticleIds && p.customParticleIds.length > 1) {
+          const elapsedNorm = 1 - progress;
+          const frameIdx = Math.min(
+            p.customParticleIds.length - 1,
+            Math.max(0, Math.floor(elapsedNorm * p.customParticleIds.length))
+          );
+          spriteId = p.customParticleIds[frameIdx];
+        }
+        const sprite = getOrBuildCustomParticleSprite(spriteId);
         if (sprite) {
           const drawDim = Math.max(4, currentSize * 1.9);
           ctx.rotate(p.rotation);

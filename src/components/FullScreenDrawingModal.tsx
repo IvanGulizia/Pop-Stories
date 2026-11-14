@@ -77,7 +77,8 @@ export function FullScreenDrawingModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[9999] bg-[#f8fafc] flex flex-col overflow-hidden select-none"
+      data-modal-open="true"
+      className="fixed inset-0 z-[10050] bg-[#f8fafc] flex flex-col overflow-hidden select-none"
       style={{ isolation: 'isolate' }}
     >
       <div className="bg-[#f8fafc] w-full h-full flex flex-col overflow-hidden">

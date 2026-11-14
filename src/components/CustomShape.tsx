@@ -4,7 +4,7 @@ import { useSceneStore } from '../store/useSceneStore';
 import { useEffect, useRef, useState } from 'react';
 import { isPointInsideEntityCollider, getEntityColliderBounds, getEntityColliderClipPath } from '../utils/collider';
 import { useAppCursor } from '../context/CursorContext';
-import { isEntityDraggable, setEntityRuntimeVelocity, syncEntityDragPosition } from '../utils/matterPhysicsEngine';
+import { isEntityDraggable, setEntityRuntimeVelocity, syncEntityDragPosition, setActiveDragPosition } from '../utils/matterPhysicsEngine';
 
 interface CustomShapeProps {
   entity: Entity;
@@ -80,12 +80,20 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
   const y = useMotionValue(entity.position.y);
 
   useEffect(() => {
+    if (isDraggingRef.current) return;
     x.set(entity.position.x);
     y.set(entity.position.y);
   }, [entity.position.x, entity.position.y, x, y]);
 
+  useEffect(() => {
+    return () => {
+      setActiveDragPosition(entity.id, null);
+    };
+  }, [entity.id]);
+
   const handleDragStart = () => {
     isDraggingRef.current = true;
+    setActiveDragPosition(entity.id, { x: entity.position.x, y: entity.position.y });
     dragSamplesRef.current = [{ x: entity.position.x, y: entity.position.y, time: performance.now() }];
     setIsDragging(true);
     setCursorState('drag');
@@ -118,6 +126,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
     setCursorState('drag');
 
     if (!isNaN(numX) && !isNaN(numY)) {
+      setActiveDragPosition(entity.id, { x: numX, y: numY });
       if (appMode === 'play') {
         syncEntityDragPosition(entity.id, numX, numY, entity.size.width, entity.size.height);
       }
@@ -138,6 +147,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
   };
 
   const handleDragEnd = () => {
+    setActiveDragPosition(entity.id, null);
     const currentX = x.get();
     const currentY = y.get();
     const numX = typeof currentX === 'string' ? parseFloat(currentX) : currentX;
@@ -200,6 +210,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
   const handleResizePointerDown = (e: React.PointerEvent) => {
     e.stopPropagation();
     e.preventDefault();
+    useSceneStore.getState().pushSceneHistory();
     setIsResizing(true);
 
     const startX = e.clientX;
@@ -498,7 +509,8 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
           <div
             onPointerDown={handleResizePointerDown}
             onClick={(e) => e.stopPropagation()}
-            className="absolute -bottom-3 -right-3 w-6 h-6 bg-white border-2 border-indigo-600 rounded-full shadow-md cursor-nwse-resize z-40 flex items-center justify-center hover:scale-125 transition-transform group"
+            style={{ touchAction: 'none' }}
+            className="pointer-events-auto absolute -bottom-3 -right-3 w-6 h-6 bg-white border-2 border-indigo-600 rounded-full shadow-md cursor-nwse-resize z-40 flex items-center justify-center hover:scale-125 transition-transform group"
             title="Glisser pour redimensionner"
           >
             <div className="w-2 h-2 bg-indigo-600 rounded-full group-hover:scale-110" />

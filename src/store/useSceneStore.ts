@@ -40,12 +40,27 @@ import {
   getActivePhysicsCollisionPairs,
   getPhysicsCollisionContact,
   checkEntityAgainstColliderLayer,
+  getActiveDragPositions,
+  setActiveDragPosition,
+  applyEntityMoveAction,
 } from '../utils/matterPhysicsEngine';
 import {
   clearParticles,
   emitParticlesBurst,
   invalidateCustomParticleSprite,
 } from '../utils/particleSystem';
+import {
+  DEFAULT_SOFT_QUOTA_MB,
+  getSoftQuotaMb,
+  setSoftQuotaMb,
+  estimateJsonBytes,
+  getBrowserStorageEstimate,
+  loadAllSlotsFromDB,
+  putSlotInDB,
+  deleteSlotFromDB,
+  loadCollectionFromDB,
+  saveCollectionInDB,
+} from '../utils/localStorageDB';
 import defaultCursorPack from '../data/defaultCursorPack.json';
 
 export const DEFAULT_PROJECT_PALETTE: ProjectPaletteColor[] = [
@@ -103,9 +118,35 @@ export const initialSceneLayerGroups: SceneLayerGroup[] = [
   },
 ];
 
-// Clé de stockage des slots de projets locaux et collection permanente d'entités
-const SLOTS_STORAGE_KEY = 'atelier-vivant-project-slots-v1';
+// Clé de stockage fallback (collection migrée vers IndexedDB)
 const COLLECTION_STORAGE_KEY = 'atelier-vivant-custom-entity-collection-v1';
+
+export interface SceneHistorySnapshot {
+  entities: Record<EntityId, Entity>;
+  entityOrder: EntityId[];
+  layerGroups: SceneLayerGroup[];
+  rules: DynamicRule[];
+  selectedEntityId: EntityId | null;
+  selectedLayerId: string | null;
+}
+
+function captureSceneSnapshot(state: {
+  entities: Record<EntityId, Entity>;
+  entityOrder: EntityId[];
+  layerGroups: SceneLayerGroup[];
+  rules: DynamicRule[];
+  selectedEntityId: EntityId | null;
+  selectedLayerId: string | null;
+}): SceneHistorySnapshot {
+  return {
+    entities: JSON.parse(JSON.stringify(state.entities)),
+    entityOrder: [...(state.entityOrder || Object.keys(state.entities))],
+    layerGroups: JSON.parse(JSON.stringify(state.layerGroups || [])),
+    rules: JSON.parse(JSON.stringify(state.rules || [])),
+    selectedEntityId: state.selectedEntityId,
+    selectedLayerId: state.selectedLayerId,
+  };
+}
 
 function loadLocalCollectionFromStorage(): Record<string, Entity> {
   if (typeof window === 'undefined' || !window.localStorage) return {};
@@ -120,12 +161,10 @@ function loadLocalCollectionFromStorage(): Record<string, Entity> {
 }
 
 function saveLocalCollectionToStorage(coll: Record<string, Entity>) {
-  if (typeof window === 'undefined' || !window.localStorage) return;
-  try {
-    window.localStorage.setItem(COLLECTION_STORAGE_KEY, JSON.stringify(coll));
-  } catch (e) {
-    console.error('Failed to save local entity collection:', e);
-  }
+  if (typeof window === 'undefined') return;
+  saveCollectionInDB(coll).catch((e) => {
+    console.error('Failed to save local entity collection to IndexedDB:', e);
+  });
 }
 
 interface SceneState {
@@ -251,13 +290,45 @@ interface SceneState {
   exportProject: () => ProjectExportData;
   importProject: (data: any) => { success: boolean; message?: string };
 
-  // Project Slots (Sauvegardes locales dans le navigateur)
+  // Project Slots (Stockage local IndexedDB sur la machine de l'utilisateur + quota ajustable)
+  projectSlots: ProjectSlot[];
+  storageHydrated: boolean;
+  quotaLimitMb: number;
+  setQuotaLimitMb: (mb: number) => void;
+  hydrateLocalStorage: () => Promise<void>;
+  getStorageStats: () => Promise<{
+    slotsBytes: number;
+    collectionBytes: number;
+    totalAppBytes: number;
+    quotaMb: number;
+    browserUsageBytes?: number;
+    browserQuotaBytes?: number;
+  }>;
   getProjectSlots: () => ProjectSlot[];
-  saveProjectToSlot: (name: string, slotId?: string) => { success: boolean; slotId: string; message: string };
+  saveProjectToSlot: (name: string, slotId?: string) => {
+    success: boolean;
+    slotId: string;
+    message: string;
+    quotaExceeded?: boolean;
+    usedBytes?: number;
+    limitBytes?: number;
+  };
   loadProjectFromSlot: (slotId: string) => { success: boolean; message: string };
   deleteProjectSlot: (slotId: string) => { success: boolean; message: string };
-  duplicateProjectSlot: (slotId: string) => { success: boolean; newSlotId: string; message: string };
+  duplicateProjectSlot: (slotId: string) => {
+    success: boolean;
+    newSlotId: string;
+    message: string;
+    quotaExceeded?: boolean;
+  };
   renameProjectSlot: (slotId: string, newName: string) => { success: boolean; message: string };
+
+  // Historique Undo / Redo de scène & calques
+  sceneUndoStack: SceneHistorySnapshot[];
+  sceneRedoStack: SceneHistorySnapshot[];
+  pushSceneHistory: () => void;
+  undoScene: () => boolean;
+  redoScene: () => boolean;
 
   // Rules & Folders management
   addRule: (rule: Omit<DynamicRule, 'id'>) => string;
@@ -523,6 +594,7 @@ function clearPlayRuntimeState() {
   Object.keys(preEventAutoRevertStates).forEach((k) => delete preEventAutoRevertStates[k]);
   Object.keys(lastCollisionContacts).forEach((k) => delete lastCollisionContacts[k]);
   Object.keys(firedCollisionOnceKeys).forEach((k) => delete firedCollisionOnceKeys[k]);
+  Object.keys(getActiveDragPositions()).forEach((id) => setActiveDragPosition(id, null));
   lastSpawnedEntityId = null;
 }
 
@@ -639,6 +711,106 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   entities: {},
   customArchetypes: {},
   localEntityCollection: loadLocalCollectionFromStorage(),
+  projectSlots: [],
+  storageHydrated: false,
+  quotaLimitMb: getSoftQuotaMb(),
+  sceneUndoStack: [],
+  sceneRedoStack: [],
+
+  pushSceneHistory: () => {
+    const state = get();
+    if (state.appMode !== 'edit') return;
+    const snap = captureSceneSnapshot(state);
+    set((prev) => {
+      const next = [...prev.sceneUndoStack, snap];
+      if (next.length > 35) next.shift();
+      return {
+        sceneUndoStack: next,
+        sceneRedoStack: [],
+      };
+    });
+  },
+
+  undoScene: () => {
+    const state = get();
+    if (state.appMode !== 'edit' || state.sceneUndoStack.length === 0) return false;
+    const currentSnap = captureSceneSnapshot(state);
+    const targetSnap = state.sceneUndoStack[state.sceneUndoStack.length - 1];
+    set({
+      entities: JSON.parse(JSON.stringify(targetSnap.entities)),
+      entityOrder: [...targetSnap.entityOrder],
+      layerGroups: JSON.parse(JSON.stringify(targetSnap.layerGroups)),
+      rules: JSON.parse(JSON.stringify(targetSnap.rules)),
+      selectedEntityId:
+        targetSnap.selectedEntityId && targetSnap.entities[targetSnap.selectedEntityId]
+          ? targetSnap.selectedEntityId
+          : null,
+      selectedLayerId: state.selectedLayerId ?? targetSnap.selectedLayerId,
+      sceneUndoStack: state.sceneUndoStack.slice(0, -1),
+      sceneRedoStack: [...state.sceneRedoStack, currentSnap].slice(-35),
+    });
+    return true;
+  },
+
+  redoScene: () => {
+    const state = get();
+    if (state.appMode !== 'edit' || state.sceneRedoStack.length === 0) return false;
+    const currentSnap = captureSceneSnapshot(state);
+    const targetSnap = state.sceneRedoStack[state.sceneRedoStack.length - 1];
+    set({
+      entities: JSON.parse(JSON.stringify(targetSnap.entities)),
+      entityOrder: [...targetSnap.entityOrder],
+      layerGroups: JSON.parse(JSON.stringify(targetSnap.layerGroups)),
+      rules: JSON.parse(JSON.stringify(targetSnap.rules)),
+      selectedEntityId:
+        targetSnap.selectedEntityId && targetSnap.entities[targetSnap.selectedEntityId]
+          ? targetSnap.selectedEntityId
+          : null,
+      selectedLayerId: state.selectedLayerId ?? targetSnap.selectedLayerId,
+      sceneUndoStack: [...state.sceneUndoStack, currentSnap].slice(-35),
+      sceneRedoStack: state.sceneRedoStack.slice(0, -1),
+    });
+    return true;
+  },
+
+  setQuotaLimitMb: (mb: number) => {
+    const cleanMb = Math.max(0, Math.round(mb));
+    setSoftQuotaMb(cleanMb);
+    set({ quotaLimitMb: cleanMb });
+  },
+
+  hydrateLocalStorage: async () => {
+    try {
+      const [slots, coll] = await Promise.all([
+        loadAllSlotsFromDB(),
+        loadCollectionFromDB(),
+      ]);
+      set((state) => ({
+        projectSlots: slots,
+        localEntityCollection:
+          Object.keys(coll).length > 0 ? coll : state.localEntityCollection,
+        storageHydrated: true,
+      }));
+    } catch (err) {
+      console.error('Failed to hydrate IndexedDB storage:', err);
+      set({ storageHydrated: true });
+    }
+  },
+
+  getStorageStats: async () => {
+    const state = get();
+    const slotsBytes = estimateJsonBytes(state.projectSlots);
+    const collectionBytes = estimateJsonBytes(state.localEntityCollection);
+    const browserEst = await getBrowserStorageEstimate();
+    return {
+      slotsBytes,
+      collectionBytes,
+      totalAppBytes: slotsBytes + collectionBytes,
+      quotaMb: state.quotaLimitMb ?? DEFAULT_SOFT_QUOTA_MB,
+      browserUsageBytes: browserEst.usageBytes,
+      browserQuotaBytes: browserEst.quotaBytes,
+    };
+  },
 
   saveToLocalCollection: (entityOrType: string) => {
     const { entities, customArchetypes, localEntityCollection } = get();
@@ -1044,6 +1216,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   setLayerVectorPaths: (layerId, vectorPaths) => {
+    get().pushSceneHistory();
     set((state) => ({
       layerGroups: state.layerGroups.map((g) => ({
         ...g,
@@ -1121,6 +1294,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   duplicateEntity: (id) => {
     const current = get().entities[id];
     if (!current) return '';
+    get().pushSceneHistory();
     const newId = `${current.type}-${Date.now().toString(36)}`;
     const cloned: Entity = {
       ...JSON.parse(JSON.stringify(current)),
@@ -1142,6 +1316,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         },
         entityOrder: [...order.filter((i) => i !== newId), newId],
         selectedEntityId: newId,
+        selectedLayerId: null,
       };
     });
     if (get().appMode === 'play' && !isEvaluatingRules) {
@@ -1232,7 +1407,11 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     get().evaluateRules();
   },
 
-  selectEntity: (id) => set({ selectedEntityId: id }),
+  selectEntity: (id) =>
+    set((state) => ({
+      selectedEntityId: id,
+      selectedLayerId: id ? null : state.selectedLayerId,
+    })),
 
   updateEntityPosition: (id, position) => {
     set((state) => {
@@ -2183,6 +2362,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   spawnEntity: ({ type, position, initialStateId, size, tags }) => {
+    if (get().appMode === 'edit') {
+      get().pushSceneHistory();
+    }
     const currentEntities = Object.values(get().entities);
     const archetype = get().customArchetypes[type] || currentEntities.find((e) => e.type === type);
 
@@ -2276,6 +2458,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   deleteEntity: (id) => {
+    if (get().appMode === 'edit') {
+      get().pushSceneHistory();
+    }
+    setActiveDragPosition(id, null);
     set((state) => {
       const { [id]: _, ...remainingEntities } = state.entities;
       // Détacher proprement tout enfant dont le parent est supprimé
@@ -2304,6 +2490,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   clearAllEntities: () => {
+    get().pushSceneHistory();
     set({
       entities: {},
       entityOrder: [],
@@ -2462,30 +2649,19 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     }
   },
 
-  // --- Gestion des Slots de Sauvegarde Locale ---
+  // --- Gestion des Slots de Sauvegarde Locale (IndexedDB sur la machine utilisateur) ---
   getProjectSlots: () => {
-    if (typeof window === 'undefined' || !window.localStorage) return [];
-    try {
-      const raw = window.localStorage.getItem(SLOTS_STORAGE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return parsed.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-      }
-      return [];
-    } catch (e) {
-      console.error('Failed to read project slots from localStorage:', e);
-      return [];
-    }
+    return [...get().projectSlots].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   },
 
   saveProjectToSlot: (name: string, targetSlotId?: string) => {
-    if (typeof window === 'undefined' || !window.localStorage) {
+    if (typeof window === 'undefined') {
       return { success: false, slotId: '', message: 'Stockage local non disponible dans cet environnement.' };
     }
     try {
-      const slots = get().getProjectSlots();
-      const currentData = get().exportProject();
+      const state = get();
+      const slots = state.getProjectSlots();
+      const currentData = state.exportProject();
       const slotId = targetSlotId || `slot-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
       const cleanName = name.trim() || `Projet ${new Date().toLocaleDateString('fr-FR')}`;
 
@@ -2508,9 +2684,33 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         updatedSlots = [newSlot, ...slots];
       }
 
-      window.localStorage.setItem(SLOTS_STORAGE_KEY, JSON.stringify(updatedSlots));
-      set({ currentSlotId: slotId });
-      return { success: true, slotId, message: `Projet "${cleanName}" sauvegardé avec succès !` };
+      const quotaMb = state.quotaLimitMb ?? DEFAULT_SOFT_QUOTA_MB;
+      if (quotaMb > 0) {
+        const limitBytes = quotaMb * 1024 * 1024;
+        const usedBytes = estimateJsonBytes(updatedSlots) + estimateJsonBytes(state.localEntityCollection);
+        if (usedBytes > limitBytes) {
+          const usedMo = (usedBytes / (1024 * 1024)).toFixed(1);
+          return {
+            success: false,
+            slotId: '',
+            quotaExceeded: true,
+            usedBytes,
+            limitBytes,
+            message: `Quota local atteint (${usedMo} Mo / ${quotaMb} Mo). Augmentez le quota ou supprimez d'anciens slots.`,
+          };
+        }
+      }
+
+      set({
+        projectSlots: updatedSlots.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
+        currentSlotId: slotId,
+      });
+
+      putSlotInDB(newSlot).catch((err) => {
+        console.error('Failed to persist slot in IndexedDB:', err);
+      });
+
+      return { success: true, slotId, message: `Projet "${cleanName}" sauvegardé localement sur votre machine !` };
     } catch (err: any) {
       console.error('Save to slot error:', err);
       return { success: false, slotId: '', message: err?.message || 'Erreur lors de la sauvegarde du slot.' };
@@ -2536,16 +2736,19 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   deleteProjectSlot: (slotId: string) => {
-    if (typeof window === 'undefined' || !window.localStorage) {
+    if (typeof window === 'undefined') {
       return { success: false, message: 'Stockage local non disponible.' };
     }
     try {
       const slots = get().getProjectSlots();
       const filtered = slots.filter((s) => s.id !== slotId);
-      window.localStorage.setItem(SLOTS_STORAGE_KEY, JSON.stringify(filtered));
-      if (get().currentSlotId === slotId) {
-        set({ currentSlotId: null });
-      }
+      set({
+        projectSlots: filtered,
+        currentSlotId: get().currentSlotId === slotId ? null : get().currentSlotId,
+      });
+      deleteSlotFromDB(slotId).catch((err) => {
+        console.error('Failed to delete slot from IndexedDB:', err);
+      });
       return { success: true, message: 'Slot supprimé avec succès.' };
     } catch (err: any) {
       return { success: false, message: err?.message || 'Erreur lors de la suppression.' };
@@ -2554,7 +2757,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   duplicateProjectSlot: (slotId: string) => {
     try {
-      const slots = get().getProjectSlots();
+      const state = get();
+      const slots = state.getProjectSlots();
       const source = slots.find((s) => s.id === slotId);
       if (!source) return { success: false, newSlotId: '', message: 'Slot source introuvable.' };
 
@@ -2566,8 +2770,25 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         updatedAt: Date.now(),
       };
 
-      const updated = [newSlot, ...slots];
-      window.localStorage.setItem(SLOTS_STORAGE_KEY, JSON.stringify(updated));
+      const updated = [newSlot, ...slots].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      const quotaMb = state.quotaLimitMb ?? DEFAULT_SOFT_QUOTA_MB;
+      if (quotaMb > 0) {
+        const limitBytes = quotaMb * 1024 * 1024;
+        const usedBytes = estimateJsonBytes(updated) + estimateJsonBytes(state.localEntityCollection);
+        if (usedBytes > limitBytes) {
+          return {
+            success: false,
+            newSlotId: '',
+            quotaExceeded: true,
+            message: `Quota local atteint (${quotaMb} Mo). Augmentez le quota ou supprimez un slot.`,
+          };
+        }
+      }
+
+      set({ projectSlots: updated });
+      putSlotInDB(newSlot).catch((err) => {
+        console.error('Failed to duplicate slot in IndexedDB:', err);
+      });
       return { success: true, newSlotId: newId, message: `Copie de "${source.name}" créée !` };
     } catch (err: any) {
       return { success: false, newSlotId: '', message: err?.message || 'Erreur lors de la duplication.' };
@@ -2583,9 +2804,18 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const clean = newName.trim();
       if (!clean) return { success: false, message: 'Le nom ne peut pas être vide.' };
 
-      target.name = clean;
-      target.updatedAt = Date.now();
-      window.localStorage.setItem(SLOTS_STORAGE_KEY, JSON.stringify(slots));
+      const updatedSlot: ProjectSlot = {
+        ...target,
+        name: clean,
+        updatedAt: Date.now(),
+      };
+      const updatedSlots = slots
+        .map((s) => (s.id === slotId ? updatedSlot : s))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      set({ projectSlots: updatedSlots });
+      putSlotInDB(updatedSlot).catch((err) => {
+        console.error('Failed to rename slot in IndexedDB:', err);
+      });
       return { success: true, message: 'Nom du slot modifié avec succès.' };
     } catch (err: any) {
       return { success: false, message: err?.message || 'Erreur lors du renommage.' };
@@ -2594,6 +2824,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   // Gestion des Règles
   addRule: (ruleData) => {
+    get().pushSceneHistory();
     const id = `rule-${Date.now().toString(36)}`;
     const newRule: DynamicRule = { ...ruleData, id };
     set((state) => ({
@@ -2604,6 +2835,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   updateRule: (id, partial) => {
+    get().pushSceneHistory();
     set((state) => ({
       rules: state.rules.map((r) => (r.id === id ? { ...r, ...partial } : r)),
     }));
@@ -2613,6 +2845,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   duplicateRule: (id) => {
     const existingRule = get().rules.find((r) => r.id === id);
     if (!existingRule) return '';
+    get().pushSceneHistory();
     const newId = `rule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const clonedRule: DynamicRule = {
       ...JSON.parse(JSON.stringify(existingRule)),
@@ -2640,6 +2873,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   deleteRule: (id) => {
+    get().pushSceneHistory();
     set((state) => ({
       rules: state.rules.filter((r) => r.id !== id),
     }));
@@ -3119,6 +3353,15 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const { entities, rules, activeCollisions, sceneBounds, layerGroups, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
       const collisionRules = rules.filter((r) => r.enabled && r.trigger.type === 'collision');
 
+      // Fusionner les positions des entités actuellement déplacées à la souris (activeDragPositions)
+      // avec d'éventuelles positions temporaires pour éviter toute alternance position-départ / curseur entre onDrag et RAF
+      const activeDragMap = getActiveDragPositions();
+      const hasActiveDrag = Object.keys(activeDragMap).length > 0;
+      const effectivePositions: Record<EntityId, Position> | undefined =
+        hasActiveDrag || tempPositions
+          ? { ...activeDragMap, ...(tempPositions || {}) }
+          : undefined;
+
       const nextCollisions: Record<string, boolean> = { ...activeCollisions };
       const allEntitiesList = Object.values(entities);
       const now = Date.now();
@@ -3163,13 +3406,13 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
               const entB = allEntitiesList[j];
 
               let posA = entA.position;
-              if (tempPositions && tempPositions[entA.id]) {
-                posA = tempPositions[entA.id];
+              if (effectivePositions && effectivePositions[entA.id]) {
+                posA = effectivePositions[entA.id];
               }
 
               let posB = entB.position;
-              if (tempPositions && tempPositions[entB.id]) {
-                posB = tempPositions[entB.id];
+              if (effectivePositions && effectivePositions[entB.id]) {
+                posB = effectivePositions[entB.id];
               }
 
               const tempA = { ...entA, position: posA };
@@ -3268,8 +3511,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
               );
               if (!matchAsSubject) continue;
 
-              const tempEnt = tempPositions && tempPositions[ent.id]
-                ? { ...ent, position: tempPositions[ent.id] }
+              const tempEnt = effectivePositions && effectivePositions[ent.id]
+                ? { ...ent, position: effectivePositions[ent.id] }
                 : ent;
               const entBounds = getEntityWorldColliderBounds(tempEnt);
 
@@ -3381,17 +3624,21 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           if (!matchesEntityFilter(entA, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)) return;
           if (!matchesEntityFilter(entB, rule.trigger.targetMode, rule.trigger.targetId, rule.trigger.targetType, rule.trigger.targetTag)) return;
 
-          const centerA = { x: entA.position.x + entA.size.width / 2, y: entA.position.y + entA.size.height / 2 };
-          const centerB = { x: entB.position.x + entB.size.width / 2, y: entB.position.y + entB.size.height / 2 };
+          const posA = effectivePositions?.[entA.id] ?? entA.position;
+          const posB = effectivePositions?.[entB.id] ?? entB.position;
+          const centerA = { x: posA.x + entA.size.width / 2, y: posA.y + entA.size.height / 2 };
+          const centerB = { x: posB.x + entB.size.width / 2, y: posB.y + entB.size.height / 2 };
           const dist = Math.hypot(centerA.x - centerB.x, centerA.y - centerB.y);
 
           if (dist <= reqDist) {
             const cooldownKey = `prox_${rule.id}_${entA.id}_${entB.id}`;
             if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
               ruleCooldowns[cooldownKey] = now;
+              const effA = posA === entA.position ? entA : { ...entA, position: posA };
+              const effB = posB === entB.position ? entB : { ...entB, position: posB };
               executeRuleActions(rule.actions, {
-                subject: entA,
-                target: entB,
+                subject: effA,
+                target: effB,
                 eventPosition: {
                   x: Math.round((centerA.x + centerB.x) / 2),
                   y: Math.round((centerA.y + centerB.y) / 2),
@@ -3420,7 +3667,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         // État spécifique requis si défini
         if (rule.trigger.subjectStateId && subject.currentStateId !== rule.trigger.subjectStateId) return;
 
-        const wb = getEntityWorldColliderBounds(subject);
+        const subjPos = effectivePositions?.[subject.id] ?? subject.position;
+        const effectiveSubject = subjPos === subject.position ? subject : { ...subject, position: subjPos };
+        const wb = getEntityWorldColliderBounds(effectiveSubject);
         const hitLeft = wb.x <= edgeTol;
         const hitRight = wb.x + wb.width >= sceneW - edgeTol;
         const hitTop = wb.y <= edgeTol;
@@ -3442,7 +3691,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
               y: hitTop && (edge === 'top' || edge === 'any') ? 0 : hitBottom && (edge === 'bottom' || edge === 'any') ? sceneH : Math.round(wb.centerY),
             };
             executeRuleActions(rule.actions, {
-              subject,
+              subject: effectiveSubject,
               eventPosition: boundaryPt,
               allEntities: entities,
               updateEntityState,
@@ -3504,6 +3753,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     }
   },
 }));
+
+if (typeof window !== 'undefined') {
+  useSceneStore.getState().hydrateLocalStorage();
+}
 
 // Dernière instance créée dynamiquement en mode Play (Piste C : Référence "Dernier objet apparu")
 let lastSpawnedEntityId: EntityId | null = null;
@@ -3757,15 +4010,19 @@ function handleCollisionPair(
       shouldExecute = true;
     }
 
-    // Toggle / Revert pour autoRevert ou contact continu (stay)
+    // Toggle / Revert pour autoRevert ou contact continu (stay) avec anti-rebond
     if (rule.trigger.autoRevert || (rulePhase === 'stay' && rule.trigger.revertOnExit !== false)) {
-      const pre = preCollisionStates[collisionKey];
-      if (pre) {
-        if (pre.subjectState && subject.states[pre.subjectState] && subject.currentStateId !== pre.subjectState) {
-          helpers.updateEntityState(subject.id, pre.subjectState);
-        }
-        if (pre.targetState && target.states[pre.targetState] && target.currentStateId !== pre.targetState) {
-          helpers.updateEntityState(target.id, pre.targetState);
+      const revertCooldownKey = `revert_${rule.id}_${subject.id}_${target.id}`;
+      if (now - (ruleCooldowns[revertCooldownKey] || 0) >= 120) {
+        ruleCooldowns[revertCooldownKey] = now;
+        const pre = preCollisionStates[collisionKey];
+        if (pre) {
+          if (pre.subjectState && subject.states[pre.subjectState] && subject.currentStateId !== pre.subjectState) {
+            helpers.updateEntityState(subject.id, pre.subjectState);
+          }
+          if (pre.targetState && target.states[pre.targetState] && target.currentStateId !== pre.targetState) {
+            helpers.updateEntityState(target.id, pre.targetState);
+          }
         }
       }
     }
@@ -3925,6 +4182,8 @@ function executeAction(
       color2: act.particleColor2,
       shape: act.particleShape ?? 'circle',
       customParticleId: act.customParticleId,
+      customParticleIds: act.customParticleIds,
+      customParticleMode: act.customParticleMode,
       useTint: act.useParticleTint,
       speed: act.particleSpeed ?? 180,
       size: act.particleSize ?? 6,
@@ -4216,6 +4475,74 @@ function executeAction(
             },
           ],
         });
+      }
+    } else if (act.type === 'move_entity') {
+      const dist = act.moveDistance ?? 40;
+      const dirMode = act.moveDirectionMode || 'cardinal';
+      let dx = 0;
+      let dy = 0;
+
+      if (dirMode === 'cardinal') {
+        const card = act.moveCardinal || 'right';
+        if (card === 'right') dx = dist;
+        else if (card === 'left') dx = -dist;
+        else if (card === 'up') dy = -dist;
+        else if (card === 'down') dy = dist;
+      } else if (dirMode === 'angle') {
+        const rad = ((act.moveAngle ?? 0) * Math.PI) / 180;
+        dx = Math.cos(rad) * dist;
+        dy = Math.sin(rad) * dist;
+      } else if (dirMode === 'facing') {
+        const rot = entity.states[entity.currentStateId]?.rotation || 0;
+        const rad = (rot * Math.PI) / 180;
+        const sign = entity.flipX ? -1 : 1;
+        dx = Math.cos(rad) * dist * sign;
+        dy = Math.sin(rad) * dist * sign;
+      } else if (dirMode === 'toward_target' || dirMode === 'away_target') {
+        const ex = entity.position.x + entity.size.width / 2;
+        const ey = entity.position.y + entity.size.height / 2;
+        let rx: number | null = null;
+        let ry: number | null = null;
+        if (act.moveTargetMode === 'mouse') {
+          if (helpers.eventPosition) {
+            rx = helpers.eventPosition.x;
+            ry = helpers.eventPosition.y;
+          }
+        } else {
+          const refMode = act.moveTargetMode || (helpers.target ? 'target' : 'subject');
+          const ref = resolveEntityReference(
+            refMode,
+            act.moveTargetEntityId,
+            act.moveTargetEntityType,
+            act.moveTargetTag,
+            helpers.subject,
+            helpers.target,
+            liveEntities
+          );
+          if (ref && ref.id !== entity.id) {
+            rx = ref.position.x + ref.size.width / 2;
+            ry = ref.position.y + ref.size.height / 2;
+          }
+        }
+        if (rx !== null && ry !== null) {
+          const len = Math.hypot(rx - ex, ry - ey);
+          if (len > 0.001) {
+            const mult = dirMode === 'away_target' ? -1 : 1;
+            dx = ((rx - ex) / len) * dist * mult;
+            dy = ((ry - ey) / len) * dist * mult;
+          }
+        }
+      }
+
+      if (dx !== 0 || dy !== 0) {
+        const applyMode = act.moveApplyMode || 'instant';
+        const appliedImpulse = applyEntityMoveAction(entity.id, dx, dy, applyMode);
+        if (!appliedImpulse || applyMode === 'instant') {
+          useSceneStore.getState().updateEntityPosition(entity.id, {
+            x: Math.round((entity.position.x + dx) * 10) / 10,
+            y: Math.round((entity.position.y + dy) * 10) / 10,
+          });
+        }
       }
     } else if (act.type === 'delete_entity') {
       helpers.deleteEntity(entity.id);

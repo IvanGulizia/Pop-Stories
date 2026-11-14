@@ -1,3 +1,21 @@
+## [Phase 10.16] - 2026-11-14
+### Ajouté & Corrigé
+- **Sous-stepping Matter.js (`matterPhysicsEngine.ts`)** : Découpage automatique des pas physiques dépassant `16.666 ms` pour éliminer l'avertissement `Matter.Engine.update: delta argument is recommended to be less than or equal to 16.667 ms.`
+- **Stockage local IndexedDB & Quota extensible (`localStorageDB.ts`, `useSceneStore.ts`, `ProjectSlotsModal.tsx`)** : Remplacement du plafond ~5 Mo de `localStorage` par IndexedDB 100 % local sur la machine de l'utilisateur avec migration automatique, quota configurable (`50 Mo` par défaut, extensible `100 / 250 / 500 Mo / 1 Go / Illimité`), jauge d'utilisation et proposition interactive d'augmentation ou de suppression lors du dépassement.
+- **Undo / Redo accessibles en haut de l'Atelier & Raccourcis Studio (`DrawingCanvas.tsx`, `DrawingToolsPanel.tsx`, `useSceneStore.ts`, `App.tsx`)** : Ajout des boutons Annuler / Rétablir en barre supérieure sans scroll, pile Undo/Redo de scène (`35` états), et raccourcis globaux `Cmd/Ctrl+S`, `Cmd/Ctrl+Z`, `Cmd/Ctrl+Shift+Z` / `Cmd+Y`, `Cmd/Ctrl+D`, `Cmd/Ctrl+P` / `Cmd/Ctrl+Entrée` (sans `Espace`), `Suppr` et `Échap`.
+- **Sortie auto du mode dessin de calque (`App.tsx`, `useSceneStore.ts`)** : Validation et désélection automatique du calque au clic extérieur, changement d'onglet, passage en Play, sélection d'entité ou perte de focus fenêtre.
+- **Sauts limités dans Contrôles Joueur (`types/index.ts`, `matterPhysicsEngine.ts`, `BehaviorManager.tsx`)** : Nouveau paramètre `maxJumps` (défaut `1`) avec détection de contact au sol fiable et déclenchement sur front montant pour double saut / multi-sauts paramétrables.
+- **Inspecteur & Poignées de Resize (`Inspector.tsx`, `CustomShape.tsx`, `Apple.tsx`, `Plant.tsx`)** : Suppression du point bleu pulsant sur les cartes d'état sélectionnées et restauration des poignées de redimensionnement sur canvas (`pointer-events-auto` + `touchAction: 'none'`).
+- **Particules dessinées multiples & Z-index éditeur (`FullScreenDrawingModal.tsx`, `ParticleEditorModal.tsx`, `particleSystem.ts`, `BehaviorManager.tsx`, `RuleBook.tsx`)** : Élévation du z-index de `FullScreenDrawingModal` (`z-[10050]`) pour qu'il s'ouvre au-dessus de l'éditeur de particules, sélection multiple numérotée (`#1`, `#2`, …) et modes `Aléatoire`, `Séquence` ou `Animation sur durée de vie`.
+- **Nouvelle Action Storyboard `Déplacer de X px` (`move_entity`) (`types/index.ts`, `matterPhysicsEngine.ts`, `useSceneStore.ts`, `RuleBook.tsx`)** : Déplacement instantané ou par impulsion physique d'une entité (Sujet, Cible, Dernier créé, `#Tag`, Type) de `X` px selon une direction cardinale, un angle, le sens du regard, ou vers/à l'opposé d'une entité de référence.
+
+## [Phase 10.15] - 2026-11-13
+### Corrigé
+- **Correction définitive des boucles Collision Enter / Exit & Auto-Remise pendant le Drag (`matterPhysicsEngine.ts` / `useSceneStore.ts` / `CustomShape.tsx` / `Apple.tsx` / `Plant.tsx`)** :
+  - **Registre synchrone `activeDragPositions` partagé (Drag vs boucle 60 FPS)** : Enregistrement temps réel de la position courante de tout objet déplacé à la souris (`handleDragStart` / `handleDrag` / `handleDragEnd`), fusionné systématiquement dans `evaluateRulesWithTemp` (collisions Entité↔Entité, Calques Colliders, Proximité, Bords) et respecté dans `stepMatterPhysics` (corps maintenu à la position exacte du curseur sans écrasement par l'ancien transform) avec garde contre les `useEffect` de réalignement Framer Motion pendant le drag.
+  - **Protection contre les `collisionEnd` fantômes lors d'un changement de corps Matter.js (`rebuildingBodyIds`)** : Lorsqu'un changement d'état modifie la forme ou la taille du collider, l'ancien corps Matter.js est détruit puis remplacé ; `collisionEnd` ignore désormais les événements provenant d'un corps en reconstruction ou obsolète afin de ne jamais effacer un contact physique actif.
+  - **Cooldown anti-rebond sur l'auto-remise (`120 ms`)** : L'action `autoRevert` dans `handleCollisionPair` bénéficie d'un cooldown anti-rebond évitant toute oscillation rapide autour du seuil d'hystérésis.
+
 ## [Phase 10.14] - 2026-11-13
 ### Ajouté & Corrigé
 - **Correction des déclenchements multiples au clic & réentrance (`useSceneStore.ts` / `CustomShape.tsx` / `Apple.tsx` / `Plant.tsx`)** :
