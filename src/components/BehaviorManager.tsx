@@ -1671,7 +1671,7 @@ function renderBehaviorControls({
                   <option value="">-- Non défini --</option>
                   {stateList.map((st) => (
                     <option key={st.id} value={st.id}>
-                      État {st.name}
+                      {st.name}
                     </option>
                   ))}
                 </select>
@@ -1694,7 +1694,7 @@ function renderBehaviorControls({
                   <option value="">-- Non défini --</option>
                   {stateList.map((st) => (
                     <option key={st.id} value={st.id}>
-                      État {st.name}
+                      {st.name}
                     </option>
                   ))}
                 </select>
@@ -1719,7 +1719,7 @@ function renderBehaviorControls({
                       <option value="">-- Non défini --</option>
                       {stateList.map((st) => (
                         <option key={st.id} value={st.id}>
-                          État {st.name}
+                          {st.name}
                         </option>
                       ))}
                     </select>
@@ -1742,10 +1742,59 @@ function renderBehaviorControls({
                       <option value="">-- Non défini --</option>
                       {stateList.map((st) => (
                         <option key={st.id} value={st.id}>
-                          État {st.name}
+                          {st.name}
                         </option>
                       ))}
                     </select>
+                  </div>
+
+                  <div className="bg-white p-1.5 rounded-lg border border-indigo-100 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold text-slate-700">Atterrissage (Land)</span>
+                      <select
+                        value={b.stateBindings?.landStateId || ''}
+                        onChange={(e) =>
+                          update({
+                            stateBindings: {
+                              ...(b.stateBindings || {}),
+                              landStateId: e.target.value || undefined,
+                            },
+                          })
+                        }
+                        className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[155px]"
+                      >
+                        <option value="">-- Non défini --</option>
+                        {stateList.map((st) => (
+                          <option key={st.id} value={st.id}>
+                            {st.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {b.stateBindings?.landStateId && (
+                      <div className="flex items-center gap-2 pt-1 border-t border-indigo-50">
+                        <span className="text-[10px] font-semibold text-slate-500 shrink-0">Durée :</span>
+                        <input
+                          type="range"
+                          min="0.05"
+                          max="0.6"
+                          step="0.05"
+                          value={b.stateBindings?.landDuration ?? 0.15}
+                          onChange={(e) =>
+                            update({
+                              stateBindings: {
+                                ...(b.stateBindings || {}),
+                                landDuration: parseFloat(e.target.value),
+                              },
+                            })
+                          }
+                          className="flex-1 accent-indigo-600"
+                        />
+                        <span className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded shrink-0">
+                          {(b.stateBindings?.landDuration ?? 0.15).toFixed(2)}s
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -2998,7 +3047,7 @@ function renderBehaviorControls({
               <option value="">-- Aucun --</option>
               {stateList.map((st) => (
                 <option key={st.id} value={st.id}>
-                  État {st.name}
+                  {st.name}
                 </option>
               ))}
             </select>
@@ -3019,7 +3068,7 @@ function renderBehaviorControls({
                 <option value="">État précédent (auto)</option>
                 {stateList.map((st) => (
                   <option key={st.id} value={st.id}>
-                    État {st.name}
+                    {st.name}
                   </option>
                 ))}
               </select>
@@ -3051,7 +3100,7 @@ function renderBehaviorControls({
                 <option value="">-- Choisir --</option>
                 {stateList.map((st) => (
                   <option key={st.id} value={st.id}>
-                    État {st.name}
+                    {st.name}
                   </option>
                 ))}
               </select>

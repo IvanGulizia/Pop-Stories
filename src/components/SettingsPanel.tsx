@@ -340,6 +340,24 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
               </button>
             )}
 
+            <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-indigo-100">
+              <div>
+                <div className="text-xs font-bold text-slate-800">Auto-Save brouillon local</div>
+                <div className="text-[10px] text-slate-500 leading-snug">
+                  Sauvegarde après 2,5 s d'inactivité en édition sans écraser vos slots
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateSettings({ autoSaveEnabled: settings.autoSaveEnabled === false ? true : false })}
+                className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center shrink-0 ${
+                  settings.autoSaveEnabled !== false ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'
+                }`}
+              >
+                <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+              </button>
+            </div>
+
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"

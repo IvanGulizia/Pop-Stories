@@ -34,6 +34,8 @@ export function Plant({ entity, style }: PlantProps) {
 
   const [isResizing, setIsResizing] = useState(false);
   const isDraggingRef = useRef(false);
+  const lastDragEndTimeRef = useRef<number>(0);
+  const lastDragEvalTimeRef = useRef<number>(0);
   const hasMovedBeyondDragThresholdRef = useRef(false);
   const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
   const pointerDownTimeRef = useRef<number>(0);
@@ -93,6 +95,7 @@ export function Plant({ entity, style }: PlantProps) {
 
   const handleDragStart = () => {
     isDraggingRef.current = true;
+    lastDragEvalTimeRef.current = 0;
     setActiveDragPosition(entity.id, { x: entity.position.x, y: entity.position.y });
     dragSamplesRef.current = [{ x: entity.position.x, y: entity.position.y, time: performance.now() }];
     setIsDragging(true);
@@ -118,9 +121,12 @@ export function Plant({ entity, style }: PlantProps) {
     }
 
     const now = performance.now();
-    dragSamplesRef.current.push({ x: numX, y: numY, time: now });
-    if (dragSamplesRef.current.length > 5) {
-      dragSamplesRef.current.shift();
+    const prevSample = dragSamplesRef.current[dragSamplesRef.current.length - 1];
+    if (!prevSample || now - prevSample.time >= 4) {
+      dragSamplesRef.current.push({ x: numX, y: numY, time: now });
+      if (dragSamplesRef.current.length > 12) {
+        dragSamplesRef.current.shift();
+      }
     }
 
     if (!isNaN(numX) && !isNaN(numY)) {
@@ -128,13 +134,19 @@ export function Plant({ entity, style }: PlantProps) {
       if (appMode === 'play') {
         syncEntityDragPosition(entity.id, numX, numY, entity.size.width, entity.size.height);
       }
-      evaluateRulesWithTemp({
-        [entity.id]: { x: numX, y: numY },
-      });
+      if (now - lastDragEvalTimeRef.current >= 16) {
+        lastDragEvalTimeRef.current = now;
+        evaluateRulesWithTemp({
+          [entity.id]: { x: numX, y: numY },
+        });
+      }
     }
   };
 
   const handleDragEnd = () => {
+    const now = performance.now();
+    isDraggingRef.current = false;
+    lastDragEndTimeRef.current = now;
     setActiveDragPosition(entity.id, null);
     const currentX = x.get();
     const currentY = y.get();
@@ -142,6 +154,8 @@ export function Plant({ entity, style }: PlantProps) {
     const numY = typeof currentY === 'string' ? parseFloat(currentY) : currentY;
 
     if (!isNaN(numX) && !isNaN(numY)) {
+      x.set(numX);
+      y.set(numY);
       updateEntityPosition(entity.id, {
         x: numX,
         y: numY,
@@ -157,19 +171,22 @@ export function Plant({ entity, style }: PlantProps) {
       // Injection de l'élan physique au lâcher en mode Play
       if (appMode === 'play' && throwable && dragSamplesRef.current.length >= 2) {
         const samples = dragSamplesRef.current;
-        const now = performance.now();
-        const last = samples[samples.length - 1];
+        const lastRaw = samples[samples.length - 1];
 
-        if (now - last.time <= 90) {
+        if (now - lastRaw.time <= 90) {
+          const last =
+            now - lastRaw.time >= 4 && Math.hypot(numX - lastRaw.x, numY - lastRaw.y) > 0.5
+              ? { x: numX, y: numY, time: now }
+              : lastRaw;
           let first = samples[0];
           for (let i = samples.length - 2; i >= 0; i--) {
-            if (last.time - samples[i].time >= 35) {
+            if (last.time - samples[i].time >= 40) {
               first = samples[i];
               break;
             }
           }
           const dt = (last.time - first.time) / 1000;
-          if (dt > 0.01 && dt < 0.3) {
+          if (dt > 0.012 && dt < 0.3) {
             let vx = (last.x - first.x) / dt;
             let vy = (last.y - first.y) / dt;
             const speed = Math.hypot(vx, vy);
@@ -188,9 +205,10 @@ export function Plant({ entity, style }: PlantProps) {
     setIsDragging(false);
     setCursorState('release');
     setTimeout(() => {
-      isDraggingRef.current = false;
       hasMovedBeyondDragThresholdRef.current = false;
-      setCursorState(canDrag ? 'hover_drag' : 'hover_click');
+      if (!isDraggingRef.current) {
+        setCursorState(canDrag ? 'hover_drag' : 'hover_click');
+      }
     }, 120);
   };
 
@@ -281,7 +299,7 @@ export function Plant({ entity, style }: PlantProps) {
           clipPath: colliderClipPath,
         }}
         onPointerEnter={(e) => {
-          if (isDraggingRef.current || appMode !== 'play') return;
+          if (isDraggingRef.current || performance.now() - lastDragEndTimeRef.current < 130 || appMode !== 'play') return;
           const pt = getSceneEventPosition(e.clientX, e.clientY);
           const isInside = isPointInsideEntityCollider(
             e.clientX,
@@ -305,7 +323,7 @@ export function Plant({ entity, style }: PlantProps) {
           }
         }}
         onPointerMove={(e) => {
-          if (isDraggingRef.current || appMode !== 'play') return;
+          if (isDraggingRef.current || performance.now() - lastDragEndTimeRef.current < 130 || appMode !== 'play') return;
           const pt = getSceneEventPosition(e.clientX, e.clientY);
           const isInside = isPointInsideEntityCollider(
             e.clientX,
@@ -447,7 +465,7 @@ export function Plant({ entity, style }: PlantProps) {
           }
 
           selectEntity(entity.id);
-          if (!hasMovedBeyondDragThresholdRef.current) {
+          if (!hasMovedBeyondDragThresholdRef.current && performance.now() - lastDragEndTimeRef.current >= 130) {
             lastHandledClickTimeRef.current = Date.now();
             setCursorState(canDrag ? 'hover_drag' : 'hover_click');
             triggerPointerEvent(entity.id, 'click', getSceneEventPosition(e.clientX, e.clientY));

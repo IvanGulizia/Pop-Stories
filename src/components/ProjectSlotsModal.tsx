@@ -55,11 +55,27 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
   const getStorageStats = useSceneStore((state) => state.getStorageStats);
   const restoreDefaultScene = useSceneStore((state) => state.restoreDefaultScene);
   const clearProject = useSceneStore((state) => state.clearProject);
+  const autoSaveDraft = useSceneStore((state) => state.autoSaveDraft);
+  const restoreAutoSaveDraft = useSceneStore((state) => state.restoreAutoSaveDraft);
+  const discardAutoSaveDraft = useSceneStore((state) => state.discardAutoSaveDraft);
 
   const slots = useMemo(
     () => [...projectSlots].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
     [projectSlots]
   );
+
+  const slotSizes = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const s of slots) {
+      map[s.id] = s.sizeBytes ?? estimateJsonBytes(s.data || s);
+    }
+    return map;
+  }, [slots]);
+
+  const currentProjectBytes = useMemo(() => {
+    if (!isOpen) return 0;
+    return estimateJsonBytes(useSceneStore.getState().exportProject());
+  }, [isOpen, projectSlots.length]);
 
   const [newSlotName, setNewSlotName] = useState('');
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
@@ -369,7 +385,7 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
         )}
 
         {/* NOUVELLE SAUVEGARDE FORM */}
-        <div className="p-4 sm:p-5 border-b border-slate-100 bg-white">
+        <div className="p-4 sm:p-5 border-b border-slate-100 bg-white space-y-2">
           <form onSubmit={handleCreateNewSave} className="flex gap-2">
             <input
               type="text"
@@ -386,10 +402,88 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
               <span>Sauvegarder l'état actuel</span>
             </button>
           </form>
+          <div className="flex items-center justify-between text-[11px] text-slate-500 px-1">
+            <span>
+              Poids du projet actuel :{' '}
+              <strong className="font-mono text-slate-700">{formatBytesLabel(currentProjectBytes)}</strong>
+            </span>
+            <span className="text-[10px] text-slate-400">
+              Auto-Save local sur brouillon séparé (n'écrase aucun slot)
+            </span>
+          </div>
         </div>
 
         {/* LISTE DES SLOTS */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3 min-h-[220px]">
+          {/* CARTE BROUILLON AUTO-SAVE (OPTION A) */}
+          {autoSaveDraft && (
+            <div className="p-3.5 rounded-2xl border border-emerald-200 bg-emerald-50/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 bg-emerald-600 text-white rounded-full">
+                    Brouillon Auto-Save
+                  </span>
+                  {autoSaveDraft.sourceSlotName && (
+                    <span className="text-xs font-bold text-emerald-950 truncate">
+                      ({autoSaveDraft.sourceSlotName})
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-emerald-900/80">
+                  <span className="flex items-center gap-1">
+                    <Calendar className="w-3 h-3 text-emerald-600" />
+                    {new Date(autoSaveDraft.updatedAt).toLocaleDateString('fr-FR', {
+                      day: 'numeric',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                  <span>•</span>
+                  <span>
+                    {autoSaveDraft.entitiesCount} {autoSaveDraft.entitiesCount > 1 ? 'entités' : 'entité'}
+                  </span>
+                  <span>•</span>
+                  <span>
+                    {autoSaveDraft.rulesCount} {autoSaveDraft.rulesCount > 1 ? 'règles' : 'règle'}
+                  </span>
+                  <span>•</span>
+                  <span className="font-mono font-bold text-emerald-800">
+                    {formatBytesLabel(autoSaveDraft.sizeBytes)}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const res = restoreAutoSaveDraft();
+                    if (res.success) {
+                      showNotice('success', res.message);
+                      setTimeout(() => onClose(), 400);
+                    } else {
+                      showNotice('error', res.message);
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-xs"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Restaurer</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    discardAutoSaveDraft();
+                    showNotice('success', 'Brouillon Auto-Save supprimé.');
+                  }}
+                  className="p-1.5 bg-white hover:bg-rose-50 text-rose-600 border border-emerald-200 hover:border-rose-200 rounded-xl text-xs cursor-pointer"
+                  title="Supprimer le brouillon Auto-Save"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
           {slots.length === 0 ? (
             <div className="flex flex-col items-center justify-center p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
               <FolderArchive className="w-10 h-10 text-slate-300 mb-2" />
@@ -481,6 +575,11 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
                       <span className="flex items-center gap-1 font-medium text-slate-600">
                         <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
                         {slot.rulesCount} {slot.rulesCount > 1 ? 'règles' : 'règle'}
+                      </span>
+                      <span>•</span>
+                      <span className="flex items-center gap-1 font-mono font-bold text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
+                        <HardDrive className="w-3 h-3 text-indigo-500" />
+                        {formatBytesLabel(slotSizes[slot.id] ?? 0)}
                       </span>
                       <span>•</span>
                       <span className="px-1.5 py-0.2 bg-slate-100 text-slate-600 rounded text-[10px] font-semibold border border-slate-200">

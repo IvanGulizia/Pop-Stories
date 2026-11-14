@@ -1,4 +1,4 @@
-import { Entity, ProjectSlot } from '../types';
+import { AutoSaveDraft, Entity, ProjectSlot } from '../types';
 
 const DB_NAME = 'atelier-vivant-local-db';
 const DB_VERSION = 1;
@@ -8,6 +8,7 @@ const STORE_KV = 'kv_store';
 const LEGACY_SLOTS_KEY = 'atelier-vivant-project-slots-v1';
 const LEGACY_COLLECTION_KEY = 'atelier-vivant-custom-entity-collection-v1';
 const QUOTA_MB_KEY = 'atelier-vivant-soft-quota-mb-v1';
+const AUTOSAVE_DRAFT_KEY = 'autosave_draft';
 
 export const DEFAULT_SOFT_QUOTA_MB = 50;
 export const QUOTA_TIER_OPTIONS_MB = [50, 100, 250, 500, 1000, 0]; // 0 = illimité (selon navigateur)
@@ -228,5 +229,48 @@ export async function saveCollectionInDB(coll: Record<string, Entity>): Promise<
         // ignore quota fallback
       }
     }
+  }
+}
+
+export async function loadAutoSaveDraftFromDB(): Promise<AutoSaveDraft | null> {
+  try {
+    const db = await openDB();
+    const res = await new Promise<AutoSaveDraft | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_KV, 'readonly');
+      const req = tx.objectStore(STORE_KV).get(AUTOSAVE_DRAFT_KEY);
+      req.onsuccess = () => resolve((req.result as AutoSaveDraft) || null);
+      req.onerror = () => reject(req.error);
+    });
+    return res && res.data ? res : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveAutoSaveDraftInDB(draft: AutoSaveDraft): Promise<void> {
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_KV, 'readwrite');
+      tx.objectStore(STORE_KV).put(draft, AUTOSAVE_DRAFT_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn('Auto-save IndexedDB write skipped:', err);
+  }
+}
+
+export async function clearAutoSaveDraftFromDB(): Promise<void> {
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_KV, 'readwrite');
+      tx.objectStore(STORE_KV).delete(AUTOSAVE_DRAFT_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn('Auto-save clear failed:', err);
   }
 }

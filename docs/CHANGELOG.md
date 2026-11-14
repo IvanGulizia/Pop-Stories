@@ -1,3 +1,12 @@
+## [Phase 10.19] - 2026-11-14
+### Ajouté & Corrigé
+- **Conservation des règles modifiées/créées en Play (`useSceneStore.ts`)** : Retrait de la capture/restauration `snapshotRules` dans `setAppMode` et `resetScene` pour préserver les créations et modifications de règles effectuées pendant les tests Play.
+- **Inspecteur sans préfixe « État » (`Inspector.tsx`, `BehaviorManager.tsx`)** : Affichage direct du nom des états sur les cartes et les listes déroulantes associées.
+- **Auto-Save brouillon local Option A (`types/index.ts`, `localStorageDB.ts`, `useSceneStore.ts`, `SettingsPanel.tsx`, `ProjectSlotsModal.tsx`, `App.tsx`)** : Persistance asynchrone dans `kv_store` IndexedDB (`autosave_draft`) après `2,5 s` d'inactivité en mode Édition uniquement, désactivable dans les Paramètres, bandeau de récupération au chargement et restauration/suppression en un clic dans `ProjectSlotsModal`.
+- **Poids de chaque projet dans les sauvegardes (`types/index.ts`, `useSceneStore.ts`, `ProjectSlotsModal.tsx`)** : Stockage et affichage mémoïsé (`sizeBytes` en `Ko`/`Mo`) par slot et pour le projet courant.
+- **Lancer physique fluide sans freeze de 120 ms (`CustomShape.tsx`, `Apple.tsx`, `Plant.tsx`)** : Découplage strict entre synchronisation visuelle immédiate (`isDraggingRef = false` dans `handleDragEnd`) et protection anti-clic/anti-survol post-drag (`lastDragEndTimeRef`), historique d'échantillonnage porté à 12 points pour écrans haute fréquence et throttling `16 ms` de `evaluateRulesWithTemp` durant le drag.
+- **État « Atterrissage (Land) » du Character Controller (`types/index.ts`, `matterPhysicsEngine.ts`, `BehaviorManager.tsx`)** : Nouveaux champs `landStateId` et `landDuration` (`0,05–0,60 s`), suivi `controllerAirStates` avec seuil minimal en vol (`0,04 s`), priorité entre chute et repos/marche et annulation instantanée au resaut.
+
 ## [Phase 10.18] - 2026-11-14
 ### Ajouté & Unifié
 - **Moteur Vectoriel & Mode Dessin Unifié (`utils/vectorDrawing.ts`, `utils/floodFill.ts`, `DrawingCanvas.tsx`, `DrawingToolsPanel.tsx`, `Scene.tsx`, `useSceneStore.ts`)** :

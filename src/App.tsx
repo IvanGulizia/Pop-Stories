@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Scene } from './components/Scene';
 import { Inspector } from './components/Inspector';
 import { RuleBook } from './components/RuleBook';
@@ -25,6 +25,7 @@ import {
   Trash2,
   FolderArchive,
   Save,
+  Clock,
 } from 'lucide-react';
 
 export default function App() {
@@ -45,6 +46,12 @@ export default function App() {
   const sceneRedoCount = useSceneStore((state) => state.sceneRedoStack.length);
   const undoScene = useSceneStore((state) => state.undoScene);
   const redoScene = useSceneStore((state) => state.redoScene);
+  const storageHydrated = useSceneStore((state) => state.storageHydrated);
+  const autoSaveDraft = useSceneStore((state) => state.autoSaveDraft);
+  const hasRecoveryDraftOnBoot = useSceneStore((state) => state.hasRecoveryDraftOnBoot);
+  const lastAutoSaveAt = useSceneStore((state) => state.lastAutoSaveAt);
+  const restoreAutoSaveDraft = useSceneStore((state) => state.restoreAutoSaveDraft);
+  const dismissRecoveryBanner = useSceneStore((state) => state.dismissRecoveryBanner);
 
   // Main UI View States
   const [activeView, setActiveView] = useState<'canvas' | 'rules'>('canvas');
@@ -55,9 +62,77 @@ export default function App() {
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [isSlotsModalOpen, setIsSlotsModalOpen] = useState(false);
   const [saveToast, setSaveToast] = useState<string | null>(null);
+  const autoSaveTimerRef = useRef<number | null>(null);
 
   // Drawing Layer State
   const [editingLayer, setEditingLayer] = useState<{ layer: SceneLayer; group: SceneLayerGroup } | null>(null);
+
+  // Auto-Save Option A : écoute uniquement en mode Édition avec debounce 2,5 s (zéro impact en Play / drag)
+  useEffect(() => {
+    if (!storageHydrated || appMode !== 'edit' || settings.autoSaveEnabled === false) {
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      return;
+    }
+
+    const initialState = useSceneStore.getState();
+    let prevSig = {
+      entities: initialState.entities,
+      customArchetypes: initialState.customArchetypes,
+      rules: initialState.rules,
+      folders: initialState.folders,
+      customSounds: initialState.customSounds,
+      customParticles: initialState.customParticles,
+      layerGroups: initialState.layerGroups,
+      projectPalette: initialState.projectPalette,
+      settings: initialState.settings,
+    };
+
+    const unsubscribe = useSceneStore.subscribe((state) => {
+      if (state.appMode !== 'edit' || state.settings.autoSaveEnabled === false) return;
+      const changed =
+        state.entities !== prevSig.entities ||
+        state.customArchetypes !== prevSig.customArchetypes ||
+        state.rules !== prevSig.rules ||
+        state.folders !== prevSig.folders ||
+        state.customSounds !== prevSig.customSounds ||
+        state.customParticles !== prevSig.customParticles ||
+        state.layerGroups !== prevSig.layerGroups ||
+        state.projectPalette !== prevSig.projectPalette ||
+        state.settings !== prevSig.settings;
+
+      if (!changed) return;
+      prevSig = {
+        entities: state.entities,
+        customArchetypes: state.customArchetypes,
+        rules: state.rules,
+        folders: state.folders,
+        customSounds: state.customSounds,
+        customParticles: state.customParticles,
+        layerGroups: state.layerGroups,
+        projectPalette: state.projectPalette,
+        settings: state.settings,
+      };
+
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+      }
+      autoSaveTimerRef.current = window.setTimeout(() => {
+        autoSaveTimerRef.current = null;
+        useSceneStore.getState().triggerAutoSave();
+      }, 2500);
+    });
+
+    return () => {
+      unsubscribe();
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+    };
+  }, [storageHydrated, appMode, settings.autoSaveEnabled]);
 
   // Ouvrir automatiquement le panneau outils si un calque est sélectionné en édition
   useEffect(() => {
@@ -390,6 +465,15 @@ export default function App() {
               {saveToast}
             </span>
           )}
+          {!saveToast && lastAutoSaveAt && appMode === 'edit' && settings.autoSaveEnabled !== false && (
+            <span
+              className="hidden lg:inline-flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-semibold bg-[#22273e]/80 text-emerald-300 border border-emerald-500/30"
+              title={`Brouillon Auto-Save local actualisé à ${new Date(lastAutoSaveAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`}
+            >
+              <Clock className="w-3 h-3" />
+              <span>Auto {new Date(lastAutoSaveAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+            </span>
+          )}
           {/* Slots / Mes Projets Button (Floppy Disk Icon Only) */}
           <button
             onClick={() => setIsSlotsModalOpen(true)}
@@ -426,6 +510,40 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {/* --- BANDEAU RÉCUPÉRATION AUTO-SAVE AU DÉMARRAGE --- */}
+      {hasRecoveryDraftOnBoot && autoSaveDraft && appMode === 'edit' && (
+        <div className="mx-3 sm:mx-6 mb-2 px-3.5 py-2 bg-emerald-50 border border-emerald-200 rounded-2xl flex flex-wrap items-center justify-between gap-2 shadow-2xs shrink-0 animate-in fade-in duration-150">
+          <div className="flex items-center gap-2 text-xs text-emerald-950">
+            <Clock className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>
+              <strong>Brouillon Auto-Save trouvé</strong> ({new Date(autoSaveDraft.updatedAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} • {autoSaveDraft.entitiesCount} entité(s), {autoSaveDraft.rulesCount} règle(s))
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                const res = restoreAutoSaveDraft();
+                if (res.success) {
+                  setSaveToast('Brouillon restauré');
+                  setTimeout(() => setSaveToast(null), 2200);
+                }
+              }}
+              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-bold cursor-pointer shadow-2xs"
+            >
+              Restaurer
+            </button>
+            <button
+              type="button"
+              onClick={dismissRecoveryBanner}
+              className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-200 rounded-xl text-[11px] font-semibold cursor-pointer"
+            >
+              Ignorer
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* --- MAIN WORKSPACE WITH 3 ROUNDED FRAMES --- */}
       <div className="flex-1 flex gap-3 px-3 sm:px-6 pb-4 overflow-hidden min-h-0">

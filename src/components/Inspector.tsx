@@ -587,7 +587,7 @@ export function Inspector() {
                         isActive ? 'text-indigo-900' : 'text-slate-700'
                       } group-hover/name:text-indigo-600 underline decoration-dotted decoration-slate-300 underline-offset-2`}
                     >
-                      État {st.name}
+                      {st.name}
                     </span>
                   </div>
                 )}
@@ -726,7 +726,7 @@ export function Inspector() {
                     >
                       {Object.values(selectedEntity.states).map((st) => (
                         <option key={st.id} value={st.id}>
-                          État {st.name}
+                          {st.name}
                         </option>
                       ))}
                     </select>

@@ -35,6 +35,7 @@ import {
   UnifiedDrawTool,
   AnimationFrame,
   AnimationLoopMode,
+  AutoSaveDraft,
 } from '../types';
 import { soundSynth } from '../utils/sound';
 import { getEntityWorldColliderBounds } from '../utils/collider';
@@ -63,6 +64,9 @@ import {
   deleteSlotFromDB,
   loadCollectionFromDB,
   saveCollectionInDB,
+  loadAutoSaveDraftFromDB,
+  saveAutoSaveDraftInDB,
+  clearAutoSaveDraftFromDB,
 } from '../utils/localStorageDB';
 import defaultCursorPack from '../data/defaultCursorPack.json';
 
@@ -304,6 +308,13 @@ interface SceneState {
   projectSlots: ProjectSlot[];
   storageHydrated: boolean;
   quotaLimitMb: number;
+  autoSaveDraft: AutoSaveDraft | null;
+  hasRecoveryDraftOnBoot: boolean;
+  lastAutoSaveAt: number | null;
+  triggerAutoSave: () => Promise<void>;
+  restoreAutoSaveDraft: () => { success: boolean; message: string };
+  discardAutoSaveDraft: () => void;
+  dismissRecoveryBanner: () => void;
   setQuotaLimitMb: (mb: number) => void;
   hydrateLocalStorage: () => Promise<void>;
   getStorageStats: () => Promise<{
@@ -724,6 +735,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   projectSlots: [],
   storageHydrated: false,
   quotaLimitMb: getSoftQuotaMb(),
+  autoSaveDraft: null,
+  hasRecoveryDraftOnBoot: false,
+  lastAutoSaveAt: null,
   sceneUndoStack: [],
   sceneRedoStack: [],
 
@@ -791,14 +805,24 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   hydrateLocalStorage: async () => {
     try {
-      const [slots, coll] = await Promise.all([
+      const [slots, coll, draft] = await Promise.all([
         loadAllSlotsFromDB(),
         loadCollectionFromDB(),
+        loadAutoSaveDraftFromDB(),
       ]);
+      const hasContentInDraft = Boolean(
+        draft &&
+          (draft.entitiesCount > 0 ||
+            draft.rulesCount > 0 ||
+            draft.data?.layerGroups?.some((g) => g.layers?.some((l) => (l.vectorPaths?.length || 0) > 0)))
+      );
       set((state) => ({
         projectSlots: slots,
         localEntityCollection:
           Object.keys(coll).length > 0 ? coll : state.localEntityCollection,
+        autoSaveDraft: draft,
+        lastAutoSaveAt: draft?.updatedAt || null,
+        hasRecoveryDraftOnBoot: hasContentInDraft,
         storageHydrated: true,
       }));
     } catch (err) {
@@ -806,6 +830,63 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       set({ storageHydrated: true });
     }
   },
+
+  triggerAutoSave: async () => {
+    const state = get();
+    if (state.appMode !== 'edit' || state.settings.autoSaveEnabled === false || !state.storageHydrated) {
+      return;
+    }
+    const currentData = state.exportProject();
+    const entitiesCount = Object.keys(currentData.entities || {}).length;
+    const rulesCount = (currentData.rules || []).length;
+    const hasStrokes = Boolean(
+      currentData.layerGroups?.some((g) => g.layers?.some((l) => (l.vectorPaths?.length || 0) > 0))
+    );
+    if (entitiesCount === 0 && rulesCount === 0 && !hasStrokes && !state.autoSaveDraft) {
+      return;
+    }
+    const sizeBytes = estimateJsonBytes(currentData);
+    const activeSlot = state.currentSlotId
+      ? state.projectSlots.find((s) => s.id === state.currentSlotId)
+      : undefined;
+    const draft: AutoSaveDraft = {
+      updatedAt: Date.now(),
+      sourceSlotId: state.currentSlotId,
+      sourceSlotName: activeSlot?.name || null,
+      entitiesCount,
+      rulesCount,
+      sizeBytes,
+      data: currentData,
+    };
+    await saveAutoSaveDraftInDB(draft);
+    set({
+      autoSaveDraft: draft,
+      lastAutoSaveAt: draft.updatedAt,
+    });
+  },
+
+  restoreAutoSaveDraft: () => {
+    const draft = get().autoSaveDraft;
+    if (!draft || !draft.data) {
+      return { success: false, message: 'Aucun brouillon Auto-Save disponible.' };
+    }
+    const res = get().importProject(draft.data);
+    if (res.success) {
+      set({
+        currentSlotId: draft.sourceSlotId || null,
+        hasRecoveryDraftOnBoot: false,
+      });
+      return { success: true, message: 'Brouillon Auto-Save restauré avec succès !' };
+    }
+    return { success: false, message: res.message || 'Impossible de restaurer le brouillon.' };
+  },
+
+  discardAutoSaveDraft: () => {
+    set({ autoSaveDraft: null, hasRecoveryDraftOnBoot: false, lastAutoSaveAt: null });
+    clearAutoSaveDraftFromDB();
+  },
+
+  dismissRecoveryBanner: () => set({ hasRecoveryDraftOnBoot: false }),
 
   getStorageStats: async () => {
     const state = get();
@@ -1123,6 +1204,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     showRuleFolders: false,
     entityFilterDisplayMode: 'icon_and_text',
     projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
+    autoSaveEnabled: true,
   },
 
   updateSettings: (partial) => {
@@ -1368,33 +1450,30 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   setAppMode: (mode) => {
     if (mode === 'play') {
       clearPlayRuntimeState();
-      // Sauvegarder un instantané propre (entités + ordre + règles) pour la restauration fidèle
+      // Sauvegarder un instantané propre des entités/ordre (les règles restent persistantes même modifiées en Play)
       const snapshot = JSON.parse(JSON.stringify(get().entities));
       const orderSnapshot = [...(get().entityOrder || Object.keys(get().entities))];
-      const rulesSnapshot = JSON.parse(JSON.stringify(get().rules));
       set({
         appMode: 'play',
         snapshotEntities: snapshot,
         snapshotEntityOrder: orderSnapshot,
-        snapshotRules: rulesSnapshot,
+        snapshotRules: null,
       });
     } else {
-      // Quand on repasse en mode édition, restaurer fidèlement la scène et les règles d'avant-jeu
+      // Quand on repasse en mode édition, restaurer la scène mais conserver les règles créées/modifiées en Play
       resetMatterPhysicsRuntime();
       clearParticles();
       clearPlayRuntimeState();
-      const { snapshotEntities, snapshotEntityOrder, snapshotRules } = get();
+      const { snapshotEntities, snapshotEntityOrder } = get();
       if (snapshotEntities) {
         set({
           entities: JSON.parse(JSON.stringify(snapshotEntities)),
           entityOrder: snapshotEntityOrder ? [...snapshotEntityOrder] : Object.keys(snapshotEntities),
-          ...(snapshotRules ? { rules: JSON.parse(JSON.stringify(snapshotRules)) } : {}),
           activeCollisions: {},
           appMode: 'edit',
         });
       } else {
         set({
-          ...(snapshotRules ? { rules: JSON.parse(JSON.stringify(snapshotRules)) } : {}),
           appMode: 'edit',
           activeCollisions: {},
         });
@@ -1406,12 +1485,11 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     resetMatterPhysicsRuntime();
     clearParticles();
     clearPlayRuntimeState();
-    const { snapshotEntities, snapshotEntityOrder, snapshotRules } = get();
+    const { snapshotEntities, snapshotEntityOrder } = get();
     if (snapshotEntities) {
       set({
         entities: JSON.parse(JSON.stringify(snapshotEntities)),
         entityOrder: snapshotEntityOrder ? [...snapshotEntityOrder] : Object.keys(snapshotEntities),
-        ...(snapshotRules ? { rules: JSON.parse(JSON.stringify(snapshotRules)) } : {}),
         activeCollisions: {},
       });
     } else {
@@ -2552,6 +2630,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       snapshotEntities: null,
       snapshotEntityOrder: null,
       snapshotRules: null,
+      hasRecoveryDraftOnBoot: false,
     });
   },
 
@@ -2574,6 +2653,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       selectedLayerId: null,
       activeCollisions: {},
       appMode: 'edit',
+      hasRecoveryDraftOnBoot: false,
     });
     get().evaluateRules();
   },
@@ -2676,6 +2756,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         snapshotEntities: null,
         snapshotEntityOrder: null,
         snapshotRules: null,
+        hasRecoveryDraftOnBoot: false,
       }));
 
       get().evaluateRules();
@@ -2698,6 +2779,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const state = get();
       const slots = state.getProjectSlots();
       const currentData = state.exportProject();
+      const slotSizeBytes = estimateJsonBytes(currentData);
       const slotId = targetSlotId || `slot-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
       const cleanName = name.trim() || `Projet ${new Date().toLocaleDateString('fr-FR')}`;
 
@@ -2708,6 +2790,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         updatedAt: Date.now(),
         entitiesCount: Object.keys(currentData.entities || {}).length,
         rulesCount: (currentData.rules || []).length,
+        sizeBytes: slotSizeBytes,
         aspectRatio: currentData.settings?.aspectRatio || 'free',
         data: currentData,
       };
@@ -2740,11 +2823,15 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       set({
         projectSlots: updatedSlots.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
         currentSlotId: slotId,
+        autoSaveDraft: null,
+        hasRecoveryDraftOnBoot: false,
+        lastAutoSaveAt: null,
       });
 
       putSlotInDB(newSlot).catch((err) => {
         console.error('Failed to persist slot in IndexedDB:', err);
       });
+      clearAutoSaveDraftFromDB();
 
       return { success: true, slotId, message: `Projet "${cleanName}" sauvegardé localement sur votre machine !` };
     } catch (err: any) {
@@ -2804,6 +2891,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         id: newId,
         name: `${source.name} (Copie)`,
         updatedAt: Date.now(),
+        sizeBytes: source.sizeBytes ?? estimateJsonBytes(source.data || source),
       };
 
       const updated = [newSlot, ...slots].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));

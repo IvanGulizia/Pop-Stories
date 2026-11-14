@@ -230,6 +230,8 @@ export interface KeyboardControlBehaviorConfig extends BaseBehaviorConfig {
     moveStateId?: StateId;
     jumpStateId?: StateId;
     fallStateId?: StateId;
+    landStateId?: StateId;
+    landDuration?: number; // secondes, défaut 0.15
   };
 }
 
@@ -638,7 +640,18 @@ export interface ProjectSlot {
   updatedAt: number;
   entitiesCount: number;
   rulesCount: number;
+  sizeBytes?: number;
   aspectRatio?: SceneAspectRatio;
+  data: ProjectExportData;
+}
+
+export interface AutoSaveDraft {
+  updatedAt: number;
+  sourceSlotId?: string | null;
+  sourceSlotName?: string | null;
+  entitiesCount: number;
+  rulesCount: number;
+  sizeBytes: number;
   data: ProjectExportData;
 }
 
@@ -662,6 +675,7 @@ export interface AppSettings {
   showRuleFolders?: boolean;
   entityFilterDisplayMode?: 'icon_only' | 'icon_and_text' | 'text_only';
   projectPalette?: ProjectPaletteColor[];
+  autoSaveEnabled?: boolean;
 }
 
 export interface CursorPackExportData {
