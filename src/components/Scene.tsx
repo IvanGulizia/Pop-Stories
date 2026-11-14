@@ -698,6 +698,8 @@ function DirectCanvasDrawingOverlay({
     if (layer.locked) return;
 
     const allowSnap =
+      drawingTool === 'pencil' ||
+      drawingTool === 'lasso_fill' ||
       drawingTool === 'line' ||
       drawingTool === 'polyline' ||
       drawingTool === 'rectangle' ||
@@ -743,9 +745,11 @@ function DirectCanvasDrawingOverlay({
           nextSelected = [hitPath.id];
           setSelectedIds(nextSelected);
         }
+        const nextBox = getSelectionBoundingBox(existingPaths, nextSelected);
         setDragMode('move');
         dragStartPtRef.current = rawPt;
         dragStartPathsRef.current = existingPaths;
+        dragStartBoxRef.current = nextBox ? { ...nextBox } : null;
         hasPushedDragHistoryRef.current = false;
         return;
       }
@@ -838,6 +842,8 @@ function DirectCanvasDrawingOverlay({
 
   const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const allowSnap =
+      drawingTool === 'pencil' ||
+      drawingTool === 'lasso_fill' ||
       drawingTool === 'line' ||
       drawingTool === 'polyline' ||
       drawingTool === 'rectangle' ||
@@ -858,8 +864,15 @@ function DirectCanvasDrawingOverlay({
         let dx = rawPt.x - dragStartPtRef.current.x;
         let dy = rawPt.y - dragStartPtRef.current.y;
         if (drawingSnapToGrid) {
-          dx = Math.round(dx / gridStep) * gridStep;
-          dy = Math.round(dy / gridStep) * gridStep;
+          if (dragStartBoxRef.current) {
+            const targetX = Math.round((dragStartBoxRef.current.x + dx) / gridStep) * gridStep;
+            const targetY = Math.round((dragStartBoxRef.current.y + dy) / gridStep) * gridStep;
+            dx = targetX - dragStartBoxRef.current.x;
+            dy = targetY - dragStartBoxRef.current.y;
+          } else {
+            dx = Math.round(dx / gridStep) * gridStep;
+            dy = Math.round(dy / gridStep) * gridStep;
+          }
         }
         if (Math.abs(dx) < 0.2 && Math.abs(dy) < 0.2) return;
         if (!hasPushedDragHistoryRef.current) {
@@ -916,16 +929,16 @@ function DirectCanvasDrawingOverlay({
     setCurrentPt(pt);
 
     if (drawingTool === 'pencil' || drawingTool === 'lasso_fill') {
-      const rawPt = getSvgCoordinates(e, false);
+      const rawPt = getSvgCoordinates(e, drawingSnapToGrid);
       const nativeEvt = e.nativeEvent as PointerEvent;
       const coalesced =
-        typeof nativeEvt.getCoalescedEvents === 'function'
+        !drawingSnapToGrid && typeof nativeEvt.getCoalescedEvents === 'function'
           ? nativeEvt.getCoalescedEvents()
           : null;
 
       setPoints((prev) => {
         let next = prev;
-        const minStep = isLegacy200 ? 0.7 : 2;
+        const minStep = drawingSnapToGrid ? 0.5 : isLegacy200 ? 0.7 : 2;
         if (coalesced && coalesced.length > 0 && svgRef.current) {
           const rect = svgRef.current.getBoundingClientRect();
           for (const ce of coalesced) {
@@ -1022,6 +1035,8 @@ function DirectCanvasDrawingOverlay({
     }
 
     const allowSnap =
+      drawingTool === 'pencil' ||
+      drawingTool === 'lasso_fill' ||
       drawingTool === 'line' ||
       drawingTool === 'rectangle' ||
       drawingTool === 'circle';
@@ -1338,9 +1353,17 @@ function DirectCanvasDrawingOverlay({
                 <path
                   d={`M ${gridStep} 0 L 0 0 0 ${gridStep}`}
                   fill="none"
-                  stroke="#6366f1"
-                  strokeOpacity="0.18"
-                  strokeWidth={isLegacy200 ? 0.35 : 0.75}
+                  stroke="#4f46e5"
+                  strokeOpacity="0.28"
+                  strokeWidth={isLegacy200 ? 0.45 : 0.9}
+                />
+                <rect
+                  x="0"
+                  y="0"
+                  width={isLegacy200 ? 0.9 : 1.8}
+                  height={isLegacy200 ? 0.9 : 1.8}
+                  fill="#4f46e5"
+                  fillOpacity="0.45"
                 />
               </pattern>
             </defs>
@@ -1500,6 +1523,28 @@ function DirectCanvasDrawingOverlay({
               ))}
           </g>
         )}
+
+        {/* Repère visuel d'aimantation Snap to Grid */}
+        {drawingSnapToGrid &&
+          hoverPt &&
+          !['select', 'eraser_partial', 'eraser_stroke', 'bucket'].includes(drawingTool) && (
+            <g className="pointer-events-none">
+              <circle
+                cx={hoverPt.x}
+                cy={hoverPt.y}
+                r={isLegacy200 ? 2.4 : 4.5}
+                fill="rgba(79,70,229,0.16)"
+                stroke="#4f46e5"
+                strokeWidth={isLegacy200 ? 0.6 : 1.2}
+              />
+              <circle
+                cx={hoverPt.x}
+                cy={hoverPt.y}
+                r={isLegacy200 ? 0.9 : 1.8}
+                fill="#4f46e5"
+              />
+            </g>
+          )}
 
         {/* Curseur visuel de gomme */}
         {(drawingTool === 'eraser_partial' || drawingTool === 'eraser_stroke') && hoverPt && (

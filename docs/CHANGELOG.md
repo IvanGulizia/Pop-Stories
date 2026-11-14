@@ -1,3 +1,11 @@
+## [Phase 10.20] - 2026-11-14
+### Ajouté & Corrigé
+- **Character Controller sur calques colliders & hauteur min. Fall/Land (`types/index.ts`, `matterPhysicsEngine.ts`, `BehaviorManager.tsx`)** : Ajout du suivi `keyboardMoveInput`, grâce de contact sol (`75 ms`) et de maintien marche (`80 ms`), assouplissement des contacts sur segments (`normalY > 0.38`), et curseur `minFallHeight` (`0–160 px`, défaut `20 px`) mesurant le dénivelé depuis `peakAirY` avant de passer en état `fall` ou `land`.
+- **Grille & Snap en mode dessin de calque (`Scene.tsx`)** : Extension du snap aux outils `pencil`, `lasso_fill` et au déplacement `select`, visibilité renforcée de la grille avec points d'intersection et réticule magnétique sous le curseur.
+- **Protection touche Espace en Mode Play (`App.tsx`)** : Blocage de prise de focus sur les boutons flottants d'en-tête et défocus automatique si `Espace` est pressé en Mode Play.
+- **Presets Sound Studio (`types/index.ts`, `audioEditor.ts`, `SoundRecorderModal.tsx`)** : Nouveau filtre `bandpass`, plage delay dès `0,012 s` et 10 presets FX instantanés conservant trim/fade/ADSR.
+- **Éditeur d'Événement complet dans le RuleBook (`RuleBook.tsx`)** : Accès aux 10 catégories de déclencheurs, sélecteur de touche clavier et panneau `config_event_params` directement lors du clic sur l'événement d'une règle existante.
+
 ## [Phase 10.19] - 2026-11-14
 ### Ajouté & Corrigé
 - **Conservation des règles modifiées/créées en Play (`useSceneStore.ts`)** : Retrait de la capture/restauration `snapshotRules` dans `setAppMode` et `resetScene` pour préserver les créations et modifications de règles effectuées pendant les tests Play.

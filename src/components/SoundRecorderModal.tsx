@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import {
   DEFAULT_SOUND_EDIT_PARAMS,
+  SOUND_STUDIO_PRESETS,
   LivePreviewHandle,
   computeEffectTailDuration,
   computeEnvelopeMultiplierAt,
@@ -838,6 +839,55 @@ export function SoundRecorderModal({ isOpen, onClose, onSelectSound }: SoundReco
                   </button>
                 </div>
 
+                {/* Filtres & Presets rapides (Style TikTok / Effets Vocaux) */}
+                <div className="p-2.5 bg-gradient-to-r from-indigo-50/80 via-fuchsia-50/50 to-amber-50/60 rounded-2xl border border-indigo-200/80 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-950">
+                      ✨ Filtres &amp; Voix Rapides
+                    </span>
+                    <span className="text-[10px] font-semibold text-indigo-700/80">
+                      1 clic pour transformer, puis ajustez les curseurs
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                    {SOUND_STUDIO_PRESETS.map((preset) => {
+                      const isActive = (p.presetId || 'original') === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          title={preset.description}
+                          onClick={() => {
+                            stopStudioPlayback();
+                            updateStudioParams({
+                              ...DEFAULT_SOUND_EDIT_PARAMS,
+                              trimStart: p.trimStart,
+                              trimEnd: p.trimEnd,
+                              fadeIn: p.fadeIn,
+                              fadeOut: p.fadeOut,
+                              attack: p.attack,
+                              decay: p.decay,
+                              sustain: p.sustain,
+                              release: p.release,
+                              gain: preset.params.gain ?? p.gain,
+                              ...preset.params,
+                              presetId: preset.id,
+                            });
+                          }}
+                          className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5 shrink-0 border transition-all cursor-pointer active:scale-95 ${
+                            isActive
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                              : 'bg-white hover:bg-indigo-50 text-slate-700 border-slate-200 hover:border-indigo-300'
+                          }`}
+                        >
+                          <span className="text-sm leading-none">{preset.icon}</span>
+                          <span>{preset.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* Forme d'onde interactive */}
                 <div className="rounded-2xl overflow-hidden border border-slate-800 bg-slate-900 shadow-inner">
                   <canvas
@@ -1163,9 +1213,9 @@ export function SoundRecorderModal({ isOpen, onClose, onSelectSound }: SoundReco
                         </div>
                         <input
                           type="range"
-                          min={0.04}
+                          min={0.015}
                           max={0.8}
-                          step={0.01}
+                          step={0.005}
                           value={p.delayTime ?? 0.22}
                           onChange={(e) => updateStudioParams({ delayTime: parseFloat(e.target.value) })}
                           className="w-full accent-sky-600 cursor-pointer"
@@ -1197,13 +1247,16 @@ export function SoundRecorderModal({ isOpen, onClose, onSelectSound }: SoundReco
                         <select
                           value={p.filterType || 'none'}
                           onChange={(e) =>
-                            updateStudioParams({ filterType: e.target.value as 'none' | 'lowpass' | 'highpass' })
+                            updateStudioParams({
+                              filterType: e.target.value as 'none' | 'lowpass' | 'highpass' | 'bandpass',
+                            })
                           }
                           className="text-[10px] font-bold bg-slate-50 border border-slate-200 rounded-lg px-2 py-0.5 outline-none cursor-pointer"
                         >
                           <option value="none">Aucun</option>
                           <option value="lowpass">Passe-Bas (Doux)</option>
                           <option value="highpass">Passe-Haut (Clair)</option>
+                          <option value="bandpass">Passe-Bande (Radio / Voix)</option>
                         </select>
                       </div>
                       <div>

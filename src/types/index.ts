@@ -232,6 +232,7 @@ export interface KeyboardControlBehaviorConfig extends BaseBehaviorConfig {
     fallStateId?: StateId;
     landStateId?: StateId;
     landDuration?: number; // secondes, défaut 0.15
+    minFallHeight?: number; // px minimum de chute avant fall/land, défaut 20
   };
 }
 
@@ -515,12 +516,13 @@ export interface CustomSoundEditParams {
   reverbDecay?: number;   // 0.2..3.5s
   reverbDamping?: number; // 0..1
   delayMix?: number;      // 0..1
-  delayTime?: number;     // 0.04..0.8s
+  delayTime?: number;     // 0.012..0.8s
   delayFeedback?: number; // 0..0.85
-  filterType?: 'none' | 'lowpass' | 'highpass';
+  filterType?: 'none' | 'lowpass' | 'highpass' | 'bandpass';
   filterFreq?: number;    // 150..12000 Hz
   drive?: number;         // 0..1 saturation douce
   reverse?: boolean;      // lecture inversée
+  presetId?: string;      // identifiant du filtre / preset rapide appliqué
 }
 
 export interface CustomSound {

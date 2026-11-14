@@ -205,6 +205,17 @@ export default function App() {
 
       if (hasBlockingModal || isTyping) return;
 
+      // Point 3: Empêcher la touche Espace d'activer un bouton de barre d'outils focalisé pendant le mode Play
+      if (
+        useSceneStore.getState().appMode === 'play' &&
+        (e.code === 'Space' || e.key === ' ') &&
+        tag === 'BUTTON'
+      ) {
+        e.preventDefault();
+        target?.blur();
+        return;
+      }
+
       // Cmd/Ctrl + P ou Cmd/Ctrl + Enter : Basculer Play <-> Édition (Espace reste libre pour le saut)
       if (mod && (key === 'p' || e.key === 'Enter')) {
         e.preventDefault();
@@ -402,7 +413,11 @@ export default function App() {
           <div className="flex items-center gap-2 bg-[#1e233a] p-1 rounded-full border border-[#2e3556] shadow-xs">
             {/* Button 1: Edit Mode */}
             <button
-              onClick={() => setAppMode('edit')}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.currentTarget.blur();
+                setAppMode('edit');
+              }}
               className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer ${
                 appMode === 'edit'
                   ? 'bg-white text-slate-900 shadow-sm'
@@ -415,7 +430,9 @@ export default function App() {
 
             {/* Button 2: Play Mode */}
             <button
-              onClick={() => {
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.currentTarget.blur();
                 if (appMode === 'play') {
                   setAppMode('edit');
                 } else {
@@ -436,7 +453,11 @@ export default function App() {
 
             {/* Button 3: Reset Scene */}
             <button
-              onClick={resetScene}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.currentTarget.blur();
+                resetScene();
+              }}
               className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
               title="Recharger la scène"
             >
@@ -445,7 +466,9 @@ export default function App() {
 
             {/* Button 4: Deselect / Close */}
             <button
-              onClick={() => {
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.currentTarget.blur();
                 if (selectedLayerId) selectLayer(null);
                 else if (selectedEntityId) selectEntity(null);
                 else setIsClearModalOpen(true);

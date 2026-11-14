@@ -21,7 +21,188 @@ export const DEFAULT_SOUND_EDIT_PARAMS: CustomSoundEditParams = {
   filterFreq: 3200,
   drive: 0,
   reverse: false,
+  presetId: 'original',
 };
+
+export interface SoundStudioPreset {
+  id: string;
+  label: string;
+  icon: string;
+  description: string;
+  params: Partial<CustomSoundEditParams>;
+}
+
+export const SOUND_STUDIO_PRESETS: SoundStudioPreset[] = [
+  {
+    id: 'original',
+    label: 'Original',
+    icon: '🎙️',
+    description: 'Son naturel sans effets',
+    params: {
+      playbackRate: 1,
+      reverbMix: 0,
+      reverbDecay: 1.2,
+      reverbDamping: 0.4,
+      delayMix: 0,
+      delayTime: 0.22,
+      delayFeedback: 0.35,
+      filterType: 'none',
+      filterFreq: 3200,
+      drive: 0,
+      reverse: false,
+    },
+  },
+  {
+    id: 'chipmunk',
+    label: 'Écureuil',
+    icon: '🐿️',
+    description: 'Voix aiguë & rapide façon TikTok',
+    params: {
+      playbackRate: 1.48,
+      reverbMix: 0,
+      delayMix: 0,
+      filterType: 'highpass',
+      filterFreq: 280,
+      drive: 0,
+      reverse: false,
+    },
+  },
+  {
+    id: 'titan',
+    label: 'Titan Grave',
+    icon: '👹',
+    description: 'Voix grave, lente & profonde',
+    params: {
+      playbackRate: 0.7,
+      reverbMix: 0.22,
+      reverbDecay: 1.4,
+      reverbDamping: 0.65,
+      delayMix: 0,
+      filterType: 'lowpass',
+      filterFreq: 1900,
+      drive: 0.16,
+      reverse: false,
+    },
+  },
+  {
+    id: 'robot',
+    label: 'Robot',
+    icon: '🤖',
+    description: 'Résonance métallique synthétique',
+    params: {
+      playbackRate: 1,
+      reverbMix: 0.08,
+      delayMix: 0.68,
+      delayTime: 0.022,
+      delayFeedback: 0.78,
+      filterType: 'bandpass',
+      filterFreq: 1650,
+      drive: 0.35,
+      reverse: false,
+    },
+  },
+  {
+    id: 'megaphone',
+    label: 'Mégaphone',
+    icon: '📢',
+    description: 'Annonce puissante & saturée',
+    params: {
+      playbackRate: 1,
+      reverbMix: 0.12,
+      reverbDecay: 0.7,
+      delayMix: 0,
+      filterType: 'bandpass',
+      filterFreq: 1450,
+      drive: 0.54,
+      reverse: false,
+    },
+  },
+  {
+    id: 'walkie',
+    label: 'Talkie-Walkie',
+    icon: '📻',
+    description: 'Radio tactique compacte',
+    params: {
+      playbackRate: 1,
+      reverbMix: 0,
+      delayMix: 0.14,
+      delayTime: 0.035,
+      delayFeedback: 0.22,
+      filterType: 'bandpass',
+      filterFreq: 2050,
+      drive: 0.45,
+      reverse: false,
+    },
+  },
+  {
+    id: 'cathedral',
+    label: 'Cathédrale',
+    icon: '🏛️',
+    description: 'Grande réverbe épique & ample',
+    params: {
+      playbackRate: 1,
+      reverbMix: 0.78,
+      reverbDecay: 2.85,
+      reverbDamping: 0.3,
+      delayMix: 0.12,
+      delayTime: 0.18,
+      delayFeedback: 0.25,
+      filterType: 'none',
+      drive: 0,
+      reverse: false,
+    },
+  },
+  {
+    id: 'echo_space',
+    label: 'Écho Spatial',
+    icon: '🛸',
+    description: 'Écho cosmique planant',
+    params: {
+      playbackRate: 0.96,
+      reverbMix: 0.48,
+      reverbDecay: 1.9,
+      reverbDamping: 0.35,
+      delayMix: 0.56,
+      delayTime: 0.28,
+      delayFeedback: 0.52,
+      filterType: 'lowpass',
+      filterFreq: 4800,
+      drive: 0,
+      reverse: false,
+    },
+  },
+  {
+    id: 'vintage_phone',
+    label: 'Téléphone',
+    icon: '☎️',
+    description: 'Ligne vintage rétro lo-fi',
+    params: {
+      playbackRate: 1,
+      reverbMix: 0,
+      delayMix: 0,
+      filterType: 'bandpass',
+      filterFreq: 1050,
+      drive: 0.28,
+      reverse: false,
+    },
+  },
+  {
+    id: 'reverse_mystery',
+    label: 'Inversé',
+    icon: '🔮',
+    description: 'Lecture à l’envers + halo',
+    params: {
+      playbackRate: 1,
+      reverbMix: 0.45,
+      reverbDecay: 1.7,
+      reverbDamping: 0.4,
+      delayMix: 0,
+      filterType: 'none',
+      drive: 0,
+      reverse: true,
+    },
+  },
+];
 
 export async function decodeDataUrlToAudioBuffer(dataUrl: string): Promise<AudioBuffer> {
   const res = await fetch(dataUrl);
@@ -127,7 +308,7 @@ export function computeEffectTailDuration(params: CustomSoundEditParams): number
   const revTail = reverbMix > 0.01 ? Math.min(4.5, reverbDecay * 1.15) : 0;
 
   const delayMix = Math.max(0, Math.min(1, params.delayMix ?? 0));
-  const delayTime = Math.max(0.04, Math.min(0.8, params.delayTime ?? 0.22));
+  const delayTime = Math.max(0.012, Math.min(0.8, params.delayTime ?? 0.22));
   const delayFeedback = Math.max(0, Math.min(0.85, params.delayFeedback ?? 0.35));
   const echoCount = Math.max(2, Math.ceil(Math.log(0.005) / Math.log(Math.max(0.05, delayFeedback))));
   const delTail = delayMix > 0.01 ? Math.min(4.0, delayTime * echoCount) : 0;
@@ -263,13 +444,13 @@ function scheduleAudioGraph(
     currentNode = shaper;
   }
 
-  // 3. Filtre Tonalité (Lowpass / Highpass)
+  // 3. Filtre Tonalité (Lowpass / Highpass / Bandpass)
   const filterType = params.filterType || 'none';
-  if (filterType === 'lowpass' || filterType === 'highpass') {
+  if (filterType === 'lowpass' || filterType === 'highpass' || filterType === 'bandpass') {
     const filter = ctx.createBiquadFilter();
     filter.type = filterType;
     filter.frequency.value = Math.max(120, Math.min(16000, params.filterFreq ?? 3200));
-    filter.Q.value = 0.85;
+    filter.Q.value = filterType === 'bandpass' ? 2.4 : 0.85;
     currentNode.connect(filter);
     currentNode = filter;
   }
@@ -309,7 +490,7 @@ function scheduleAudioGraph(
   // 6. Écho / Delay avec Feedback
   const delayMix = Math.max(0, Math.min(1, params.delayMix ?? 0));
   if (delayMix > 0.01) {
-    const delayTime = Math.max(0.04, Math.min(0.8, params.delayTime ?? 0.22));
+    const delayTime = Math.max(0.012, Math.min(0.8, params.delayTime ?? 0.22));
     const delayFeedback = Math.max(0, Math.min(0.85, params.delayFeedback ?? 0.35));
 
     const delayNode = ctx.createDelay(1.0);

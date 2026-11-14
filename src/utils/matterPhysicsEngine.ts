@@ -142,7 +142,19 @@ const activePhysicsCollisionPairs = new Set<string>();
 const activePhysicsCollisionContacts = new Map<string, Position>();
 const groundedEntityIds = new Set<string>();
 const jumpTrackers = new Map<string, { jumpsUsed: number; wasJumpPressed: boolean }>();
-const controllerAirStates = new Map<string, { wasGrounded: boolean; airborneTime: number; landTimer: number }>();
+const keyboardMoveInput = new Map<string, boolean>();
+const controllerAirStates = new Map<
+  string,
+  {
+    wasGrounded: boolean;
+    groundedGraceTimer: number;
+    airborneTime: number;
+    peakAirY: number;
+    maxFallDropPx: number;
+    landTimer: number;
+    moveGraceTimer: number;
+  }
+>();
 const rebuildingBodyIds = new Set<string>();
 const activeDragPositions: Record<string, Position> = {};
 const autoDestroyTimers = new Map<string, number>();
@@ -417,6 +429,7 @@ export function resetMatterPhysicsRuntime() {
   activePhysicsCollisionContacts.clear();
   groundedEntityIds.clear();
   jumpTrackers.clear();
+  keyboardMoveInput.clear();
   controllerAirStates.clear();
   rebuildingBodyIds.clear();
   Object.keys(activeDragPositions).forEach((k) => delete activeDragPositions[k]);
@@ -752,11 +765,11 @@ function ensurePhysicsWorld(
           groundedEntityIds.add(idB);
         } else {
           const normalY = Math.abs((pair as any).collision?.normal?.y ?? 0);
-          if (normalY > 0.45) {
-            if (!idA.startsWith('boundary_') && !idA.startsWith('layercol::') && contactY >= bodyA.position.y - 2) {
+          if (normalY > 0.38) {
+            if (!idA.startsWith('boundary_') && !idA.startsWith('layercol::') && contactY >= bodyA.position.y - 4) {
               groundedEntityIds.add(idA);
             }
-            if (!idB.startsWith('boundary_') && !idB.startsWith('layercol::') && contactY >= bodyB.position.y - 2) {
+            if (!idB.startsWith('boundary_') && !idB.startsWith('layercol::') && contactY >= bodyB.position.y - 4) {
               groundedEntityIds.add(idB);
             }
           }
@@ -1084,6 +1097,7 @@ export function stepMatterPhysics(params: {
   const entitiesToDestroy: string[] = [];
   const stateChanges: Record<string, string> = {};
   const entityList = Object.values(entities);
+  keyboardMoveInput.clear();
 
   for (const entity of entityList) {
     const currentState = entity.states[entity.currentStateId];
@@ -1225,6 +1239,8 @@ export function stepMatterPhysics(params: {
         if (upVertical) my -= 1;
         if (down) my += 1;
 
+        keyboardMoveInput.set(entity.id, mx !== 0 || my !== 0);
+
         if (mx !== 0 && my !== 0) {
           mx *= 0.7071;
           my *= 0.7071;
@@ -1239,6 +1255,7 @@ export function stepMatterPhysics(params: {
         Body.setVelocity(body, { x: nextVx, y: nextVy });
       } else {
         // Mode Plateforme
+        keyboardMoveInput.set(entity.id, Boolean(left || right));
         let vx = body.velocity.x;
         if (allowHorizontal) {
           const targetVx = left ? -speed : right ? speed : null;
@@ -1260,6 +1277,13 @@ export function stepMatterPhysics(params: {
           vy = -((keyboard.jumpForce ?? 450) / 60);
           tracker.jumpsUsed += 1;
           groundedEntityIds.delete(entity.id);
+          const airSt = controllerAirStates.get(entity.id);
+          if (airSt) {
+            airSt.groundedGraceTimer = 0;
+            airSt.wasGrounded = false;
+            airSt.peakAirY = body.position.y;
+            airSt.maxFallDropPx = 0;
+          }
         }
         tracker.wasJumpPressed = upJump;
         jumpTrackers.set(entity.id, tracker);
@@ -2118,45 +2142,93 @@ export function stepMatterPhysics(params: {
       // Garde-fou strict : ne jamais écraser un état hors locomotion (ex: Blessé, Attaque, Mort)
       if (boundIds.size > 0 && boundIds.has(entity.currentStateId)) {
         const isBottomFloor = !body.isSensor && body.bounds.max.y >= canvasBounds.height - 3;
-        const isGrounded = (groundedEntityIds.has(entity.id) || isBottomFloor) && body.velocity.y >= -0.6;
+        const rawGrounded = (groundedEntityIds.has(entity.id) || isBottomFloor) && body.velocity.y >= -0.75;
+        const wantsToMove = keyboardMoveInput.get(entity.id) === true;
+        const minFallHeight = Math.max(0, sb.minFallHeight ?? 20);
         let desiredStateId: string | undefined;
 
+        const airState = controllerAirStates.get(entity.id) || {
+          wasGrounded: rawGrounded,
+          groundedGraceTimer: rawGrounded ? 0.075 : 0,
+          airborneTime: 0,
+          peakAirY: body.position.y,
+          maxFallDropPx: 0,
+          landTimer: 0,
+          moveGraceTimer: 0,
+        };
+
+        if (wantsToMove || Math.abs(body.velocity.x) > 0.35) {
+          airState.moveGraceTimer = 0.08;
+        } else if (airState.moveGraceTimer > 0) {
+          airState.moveGraceTimer = Math.max(0, airState.moveGraceTimer - dt);
+        }
+
         if (keyboardCtrl.mode === 'platformer') {
-          const airState = controllerAirStates.get(entity.id) || {
-            wasGrounded: isGrounded,
-            airborneTime: 0,
-            landTimer: 0,
-          };
+          if (rawGrounded) {
+            airState.groundedGraceTimer = 0.075;
+          } else if (airState.groundedGraceTimer > 0 && body.velocity.y >= -0.85) {
+            airState.groundedGraceTimer = Math.max(0, airState.groundedGraceTimer - dt);
+          } else {
+            airState.groundedGraceTimer = 0;
+          }
+
+          const isGrounded = rawGrounded || airState.groundedGraceTimer > 0;
 
           if (!isGrounded) {
+            if (airState.wasGrounded) {
+              airState.peakAirY = body.position.y;
+              airState.maxFallDropPx = 0;
+            } else {
+              airState.peakAirY = Math.min(airState.peakAirY, body.position.y);
+            }
+            const currentDrop = Math.max(0, body.position.y - airState.peakAirY);
+            airState.maxFallDropPx = Math.max(airState.maxFallDropPx, currentDrop);
             airState.airborneTime += dt;
             airState.landTimer = 0;
             airState.wasGrounded = false;
           } else {
-            if (!airState.wasGrounded && airState.airborneTime >= 0.04) {
+            const hasFallenEnough =
+              minFallHeight === 0
+                ? airState.airborneTime >= 0.04
+                : airState.maxFallDropPx >= minFallHeight;
+            if (!airState.wasGrounded && hasFallenEnough) {
               airState.landTimer = Math.max(0.05, Math.min(1.0, sb.landDuration ?? 0.15));
             } else if (airState.landTimer > 0) {
               airState.landTimer = Math.max(0, airState.landTimer - dt);
             }
             airState.airborneTime = 0;
+            airState.peakAirY = body.position.y;
+            airState.maxFallDropPx = 0;
             airState.wasGrounded = true;
           }
           controllerAirStates.set(entity.id, airState);
 
+          const fallDropNow = Math.max(0, body.position.y - airState.peakAirY);
+          const canShowFall = minFallHeight === 0 ? airState.airborneTime >= 0.03 : fallDropNow >= minFallHeight;
+          const isMovingHorizontally =
+            wantsToMove ||
+            Math.abs(body.velocity.x) > 0.35 ||
+            (entity.currentStateId === sb.moveStateId && airState.moveGraceTimer > 0 && Math.abs(body.velocity.x) > 0.12);
+
           if (!isGrounded && body.velocity.y < -0.55 && sb.jumpStateId && entity.states[sb.jumpStateId]) {
             desiredStateId = sb.jumpStateId;
-          } else if (!isGrounded && body.velocity.y > 0.75 && sb.fallStateId && entity.states[sb.fallStateId]) {
+          } else if (!isGrounded && body.velocity.y > 0.75 && canShowFall && sb.fallStateId && entity.states[sb.fallStateId]) {
             desiredStateId = sb.fallStateId;
           } else if (isGrounded && airState.landTimer > 0 && sb.landStateId && entity.states[sb.landStateId]) {
             desiredStateId = sb.landStateId;
-          } else if (Math.abs(body.velocity.x) > 0.35 && sb.moveStateId && entity.states[sb.moveStateId]) {
+          } else if (isMovingHorizontally && sb.moveStateId && entity.states[sb.moveStateId]) {
             desiredStateId = sb.moveStateId;
           } else if (sb.idleStateId && entity.states[sb.idleStateId]) {
             desiredStateId = sb.idleStateId;
           }
         } else {
+          controllerAirStates.set(entity.id, airState);
           const speedMag = Math.hypot(body.velocity.x, body.velocity.y);
-          if (speedMag > 0.35 && sb.moveStateId && entity.states[sb.moveStateId]) {
+          const isMoving2D =
+            wantsToMove ||
+            speedMag > 0.35 ||
+            (entity.currentStateId === sb.moveStateId && airState.moveGraceTimer > 0 && speedMag > 0.12);
+          if (isMoving2D && sb.moveStateId && entity.states[sb.moveStateId]) {
             desiredStateId = sb.moveStateId;
           } else if (sb.idleStateId && entity.states[sb.idleStateId]) {
             desiredStateId = sb.idleStateId;

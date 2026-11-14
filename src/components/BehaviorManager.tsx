@@ -1796,6 +1796,35 @@ function renderBehaviorControls({
                       </div>
                     )}
                   </div>
+
+                  {/* Hauteur minimale de chute avant Chute / Atterrissage */}
+                  <div className="bg-white p-1.5 rounded-lg border border-indigo-100 space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold text-slate-700">Hauteur min. chute (Fall / Land)</span>
+                      <span className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">
+                        {b.stateBindings?.minFallHeight ?? 20} px
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="160"
+                      step="2"
+                      value={b.stateBindings?.minFallHeight ?? 20}
+                      onChange={(e) =>
+                        update({
+                          stateBindings: {
+                            ...(b.stateBindings || {}),
+                            minFallHeight: parseInt(e.target.value, 10) || 0,
+                          },
+                        })
+                      }
+                      className="w-full accent-indigo-600 h-1.5"
+                    />
+                    <div className="text-[9px] text-slate-400 leading-tight">
+                      Évite l'état Chute/Atterrissage sur de petits dénivelés ou calques irréguliers.
+                    </div>
+                  </div>
                 </>
               )}
             </div>
