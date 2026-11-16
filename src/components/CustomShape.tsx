@@ -11,6 +11,8 @@ import {
   setActiveDragPosition,
   getEntityRuntimeHealth,
   getEffectiveBehaviors,
+  notifyEntityHoverState,
+  notifyEntityDragLifecycle,
 } from '../utils/matterPhysicsEngine';
 import { HealthBehaviorConfig } from '../types';
 
@@ -157,6 +159,8 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
   useEffect(() => {
     return () => {
       setActiveDragPosition(entity.id, null);
+      notifyEntityHoverState(entity.id, false);
+      notifyEntityDragLifecycle(entity.id, 'end', undefined, false);
     };
   }, [entity.id]);
 
@@ -164,6 +168,9 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
     isDraggingRef.current = true;
     lastDragEvalTimeRef.current = 0;
     setActiveDragPosition(entity.id, { x: entity.position.x, y: entity.position.y });
+    if (appMode === 'play') {
+      notifyEntityDragLifecycle(entity.id, 'start', { x: entity.position.x, y: entity.position.y });
+    }
     dragSamplesRef.current = [{ x: entity.position.x, y: entity.position.y, time: performance.now() }];
     setIsDragging(true);
     setCursorState('drag');
@@ -202,6 +209,12 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
       setActiveDragPosition(entity.id, { x: numX, y: numY });
       if (appMode === 'play') {
         syncEntityDragPosition(entity.id, numX, numY, entity.size.width, entity.size.height);
+        notifyEntityDragLifecycle(
+          entity.id,
+          'move',
+          { x: numX, y: numY },
+          hasMovedBeyondDragThresholdRef.current
+        );
       }
       if (now - lastDragEvalTimeRef.current >= 16) {
         lastDragEvalTimeRef.current = now;
@@ -228,6 +241,9 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
     isDraggingRef.current = false;
     lastDragEndTimeRef.current = now;
     setActiveDragPosition(entity.id, null);
+    if (appMode === 'play') {
+      notifyEntityDragLifecycle(entity.id, 'end', undefined, hasMovedBeyondDragThresholdRef.current);
+    }
 
     const currentX = x.get();
     const currentY = y.get();
@@ -361,7 +377,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
       onDragEnd={handleDragEnd}
       animate={{
         scale: currentState.scale,
-        rotate: currentState.rotation,
+        rotate: currentState.rotation + (appMode === 'play' ? (entity.runtimeTilt || 0) : 0),
       }}
       transition={appMode === 'play' ? { duration: 0 } : undefined}
       whileHover={enableHoverScaleAnimation ? { scale: currentState.scale * (isSelected ? 1.0 : 1.03) } : undefined}
@@ -388,12 +404,14 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
             setCursorState(getHoverState());
             if (!isHoveringRef.current) {
               isHoveringRef.current = true;
+              notifyEntityHoverState(entity.id, true);
               triggerPointerEvent(entity.id, 'enter', pt);
             }
           } else {
             setCursorState('idle');
             if (isHoveringRef.current) {
               isHoveringRef.current = false;
+              notifyEntityHoverState(entity.id, false);
               triggerPointerEvent(entity.id, 'exit', pt);
             }
           }
@@ -412,12 +430,14 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
             setCursorState(getHoverState());
             if (!isHoveringRef.current) {
               isHoveringRef.current = true;
+              notifyEntityHoverState(entity.id, true);
               triggerPointerEvent(entity.id, 'enter', pt);
             }
           } else {
             setCursorState('idle');
             if (isHoveringRef.current) {
               isHoveringRef.current = false;
+              notifyEntityHoverState(entity.id, false);
               triggerPointerEvent(entity.id, 'exit', pt);
             }
           }
@@ -425,6 +445,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
         onPointerLeave={(e) => {
           if (appMode === 'play' && isHoveringRef.current) {
             isHoveringRef.current = false;
+            notifyEntityHoverState(entity.id, false);
             setCursorState('idle');
             triggerPointerEvent(entity.id, 'exit', getSceneEventPosition(e.clientX, e.clientY));
           }

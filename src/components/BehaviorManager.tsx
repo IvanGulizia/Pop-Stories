@@ -5,6 +5,7 @@ import {
   BehaviorType,
   PhysicsBehaviorConfig,
   DraggableBehaviorConfig,
+  InteractivePuppetBehaviorConfig,
   ConstantVelocityBehaviorConfig,
   LookAtBehaviorConfig,
   FollowBehaviorConfig,
@@ -26,6 +27,7 @@ import {
 import { useSceneStore } from '../store/useSceneStore';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { ParticleEditorModal } from './ParticleEditorModal';
+import { InteractivePuppetControls } from './InteractivePuppetControls';
 import { invalidateCustomParticleSprite } from '../utils/particleSystem';
 import {
   Activity,
@@ -154,6 +156,35 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
           maxThrowSpeed: 1500,
         } as DraggableBehaviorConfig;
         break;
+      case 'interactive_puppet':
+        newBehavior = {
+          id: generateBehaviorId('interactive_puppet'),
+          type: 'interactive_puppet',
+          enabled: true,
+          throwable: true,
+          maxThrowSpeed: 1500,
+          swingMode: 'both',
+          pendulumIntensity: 1.0,
+          pendulumMaxAngle: 32,
+          pendulumSmoothing: 0.18,
+          swingSpeedThreshold: 320,
+          shakeThreshold: 3,
+          approachFarDistance: 280,
+          approachNearDistance: 120,
+          hoverEnterDuration: 0.18,
+          hoverDwellDelay: 1.5,
+          hoverExitDuration: 0.2,
+          dragStartDuration: 0.18,
+          dragDwellDelay: 2.0,
+          dragReleaseDuration: 0.2,
+          minFallHeight: 20,
+          landDuration: 0.18,
+          dragOverTargets: [],
+          stateBindings: {
+            idleStateId: entity.currentStateId,
+          },
+        } as InteractivePuppetBehaviorConfig;
+        break;
       case 'physics':
         newBehavior = {
           id: generateBehaviorId('physics'),
@@ -194,7 +225,11 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
           type: 'look_at',
           enabled: true,
           targetType: 'mouse',
+          lookMode: 'rotate',
           rotationOffset: 0,
+          maxAngle: 0,
+          orbitRadius: 8,
+          orbitRadiusY: 8,
           smoothSpeed: 0,
         } as LookAtBehaviorConfig;
         break;
@@ -255,6 +290,7 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
           acceleration: 0.35,
           damping: 0.85,
           flipOnMove: false,
+          pauseWhileDragged: true,
         } as FleeBehaviorConfig;
         break;
       case 'keyboard_control':
@@ -359,6 +395,8 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
     switch (type) {
       case 'draggable':
         return <Hand className="w-4 h-4 text-indigo-600" />;
+      case 'interactive_puppet':
+        return <Sparkles className="w-4 h-4 text-violet-600" />;
       case 'physics':
         return <Activity className="w-4 h-4 text-emerald-600" />;
       case 'constant_velocity':
@@ -392,6 +430,8 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
     switch (type) {
       case 'draggable':
         return 'Déplaçable à la souris';
+      case 'interactive_puppet':
+        return 'Marionnette Interactive (Drag avancé)';
       case 'physics':
         return 'Physique & Gravité';
       case 'auto_destroy':
@@ -696,6 +736,27 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
                   <div>
                     <div className="font-bold text-slate-800 text-xs">Déplaçable à la souris (Drag & Throw)</div>
                     <div className="text-[11px] text-slate-500">Permet d'attraper l'objet et de le projeter avec élan et inertie.</div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleAddBehavior('interactive_puppet')}
+                  className="w-full p-2.5 rounded-2xl border border-violet-200 bg-violet-50/20 hover:border-violet-400 hover:bg-violet-50/60 flex items-center gap-3 transition-all text-left cursor-pointer group"
+                >
+                  <div className="w-8 h-8 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                      <span>Marionnette Interactive (Drag avancé)</span>
+                      <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">
+                        Preset
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      Paliers d'approche, survol, saisie, balancement pendulaire, survol de cibles & chute/atterrissage.
+                    </div>
                   </div>
                 </button>
               </div>
@@ -1221,6 +1282,20 @@ function renderBehaviorControls({
             </div>
           )}
         </div>
+      );
+    }
+
+    case 'interactive_puppet': {
+      const b = { ...behavior, ...(override || {}) } as InteractivePuppetBehaviorConfig;
+      return (
+        <InteractivePuppetControls
+          behavior={b}
+          update={update}
+          stateList={stateList}
+          targetEntityOptions={targetEntityOptions}
+          entityTypeOptions={entityTypeOptions}
+          availableTags={availableTags}
+        />
       );
     }
 
@@ -2189,8 +2264,46 @@ function renderBehaviorControls({
 
     case 'look_at': {
       const b = { ...behavior, ...(override || {}) } as LookAtBehaviorConfig;
+      const lookMode = b.lookMode || 'rotate';
+      const maxAngleVal = b.maxAngle ?? 0;
+      const isFreeCone = maxAngleVal <= 0 || maxAngleVal >= 180;
+      const rx = b.orbitRadius ?? 8;
+      const ry = b.orbitRadiusY ?? rx;
+
       return (
         <div className="space-y-1.5">
+          {/* Sélecteur de mode LookAt */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-700 text-xs">Mode de suivi</span>
+              <span className="text-[10px] text-slate-400">Fonctionne aussi sur enfants</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => update({ lookMode: 'rotate' })}
+                className={`px-2 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
+                  lookMode === 'rotate'
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                Rotation (Tête)
+              </button>
+              <button
+                type="button"
+                onClick={() => update({ lookMode: 'pupil_orbit' })}
+                className={`px-2 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
+                  lookMode === 'pupil_orbit'
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                Orbite / Pupille (Œil)
+              </button>
+            </div>
+          </div>
+
           {/* Ligne 1: Type de cible à regarder */}
           <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
             <span className="font-bold text-slate-700 text-xs">Cible à regarder</span>
@@ -2262,31 +2375,115 @@ function renderBehaviorControls({
             </div>
           )}
 
-          {/* Ligne 3: Décalage angulaire */}
-          <div className="p-2 bg-white rounded-xl border border-slate-200">
-            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-              <span className="font-bold">Décalage d'angle</span>
-              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-                {b.rotationOffset || 0}°
-              </span>
-            </div>
-            <input
-              type="range"
-              min="-180"
-              max="180"
-              step="5"
-              value={b.rotationOffset || 0}
-              onChange={(e) => update({ rotationOffset: parseFloat(e.target.value) })}
-              className="w-full accent-indigo-600"
-            />
-          </div>
+          {lookMode === 'rotate' ? (
+            <>
+              {/* Ligne 3: Décalage angulaire */}
+              <div className="p-2 bg-white rounded-xl border border-slate-200">
+                <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                  <span className="font-bold">Décalage d'angle</span>
+                  <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                    {b.rotationOffset || 0}°
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="-180"
+                  max="180"
+                  step="5"
+                  value={b.rotationOffset || 0}
+                  onChange={(e) => update({ rotationOffset: parseFloat(e.target.value) })}
+                  className="w-full accent-indigo-600"
+                />
+              </div>
 
-          {/* Ligne 4: Lissage angulaire */}
+              {/* Cône de rotation max (clamp autour de l'orientation de repos) */}
+              <div className="p-2 bg-white rounded-xl border border-slate-200">
+                <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                  <div>
+                    <span className="font-bold">Cône de rotation max</span>
+                    <span className="text-[10px] text-slate-400 block">
+                      Empêche une tête de faire un tour complet à l'envers
+                    </span>
+                  </div>
+                  <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px] shrink-0">
+                    {isFreeCone ? 'Libre 360°' : `±${maxAngleVal}°`}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="180"
+                  step="5"
+                  value={maxAngleVal}
+                  onChange={(e) => update({ maxAngle: parseFloat(e.target.value) })}
+                  className="w-full accent-indigo-600"
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Orbite horizontale (X) */}
+              <div className="p-2 bg-white rounded-xl border border-slate-200">
+                <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                  <div>
+                    <span className="font-bold">Rayon horizontal (Orbite X)</span>
+                    <span className="text-[10px] text-slate-400 block">
+                      Amplitude de glissement gauche/droite de la pupille
+                    </span>
+                  </div>
+                  <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                    {rx} px
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="50"
+                  step="1"
+                  value={rx}
+                  onChange={(e) => update({ orbitRadius: parseFloat(e.target.value) })}
+                  className="w-full accent-indigo-600"
+                />
+              </div>
+
+              {/* Orbite verticale (Y) */}
+              <div className="p-2 bg-white rounded-xl border border-slate-200">
+                <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                  <div>
+                    <span className="font-bold">Rayon vertical (Orbite Y)</span>
+                    <span className="text-[10px] text-slate-400 block">
+                      Amplitude haut/bas (utile pour des yeux ovales)
+                    </span>
+                  </div>
+                  <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                    {ry} px
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="50"
+                  step="1"
+                  value={ry}
+                  onChange={(e) => update({ orbitRadiusY: parseFloat(e.target.value) })}
+                  className="w-full accent-indigo-600"
+                />
+              </div>
+            </>
+          )}
+
+          {/* Ligne 4: Lissage / Réactivité */}
           <div className="p-2 bg-white rounded-xl border border-slate-200">
             <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
               <div>
-                <span className="font-bold">Lissage angulaire</span>
-                <span className="text-[10px] text-slate-400 block">0 = instantané, sinon vitesse de pivot</span>
+                <span className="font-bold">
+                  {lookMode === 'pupil_orbit' ? 'Réactivité du regard' : 'Lissage angulaire'}
+                </span>
+                <span className="text-[10px] text-slate-400 block">
+                  {lookMode === 'pupil_orbit'
+                    ? '0 = suivi instantané, sinon glissement fluide'
+                    : '0 = instantané, sinon vitesse de pivot'}
+                </span>
               </div>
               <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
                 {b.smoothSpeed || 0} °/s
@@ -2528,14 +2725,21 @@ function renderBehaviorControls({
           {/* Vitesse de fuite */}
           <div className="p-2 bg-white rounded-xl border border-slate-200">
             <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-              <span className="font-bold">Vitesse de fuite</span>
+              <div>
+                <span className="font-bold">Vitesse de fuite</span>
+                <span className="text-[10px] text-slate-400 block">
+                  {(b.speed ?? 160) === 0
+                    ? '0 = Peur sur place (réaction visuelle sans bouger)'
+                    : 'Vitesse de recul lorsque la menace approche'}
+                </span>
+              </div>
               <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
                 {b.speed ?? 160} px/s
               </span>
             </div>
             <input
               type="range"
-              min="30"
+              min="0"
               max="500"
               step="10"
               value={b.speed ?? 160}
@@ -2555,6 +2759,78 @@ function renderBehaviorControls({
               <option value="free_2d">Zone 2D (Toutes directions)</option>
               <option value="horizontal">Horizontal (Sol / Plateforme)</option>
             </select>
+          </div>
+
+          {/* Suspendre la peur pendant le drag */}
+          <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+            <div>
+              <div className="font-bold text-slate-700 text-xs">Suspendre la peur pendant le Drag</div>
+              <div className="text-[10px] text-slate-400">Évite de fuir ou d'écraser les états quand on l'attrape</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={b.pauseWhileDragged !== false}
+              onChange={(e) => update({ pauseWhileDragged: e.target.checked })}
+              className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
+            />
+          </div>
+
+          {/* États visuels (Conscience / Peur — Garde-fou actif) */}
+          <div className="p-2.5 bg-rose-50/70 rounded-xl border border-rose-200 space-y-2">
+            <div>
+              <div className="text-[11px] font-extrabold text-rose-800 uppercase tracking-wider">
+                États visuels (Conscience / Peur)
+              </div>
+              <div className="text-[10px] text-rose-600/90 leading-snug">
+                Garde-fou actif : bascule uniquement si l'entité est dans l'un de ces deux états (n'écrase jamais Drag, Survol, Blessé…).
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-rose-100">
+                <span className="text-[11px] font-bold text-slate-700">État Calme (Hors rayon)</span>
+                <select
+                  value={b.stateBindings?.calmStateId || ''}
+                  onChange={(e) =>
+                    update({
+                      stateBindings: {
+                        ...(b.stateBindings || {}),
+                        calmStateId: e.target.value || undefined,
+                      },
+                    })
+                  }
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[155px]"
+                >
+                  <option value="">-- Non défini --</option>
+                  {stateList.map((st) => (
+                    <option key={st.id} value={st.id}>
+                      {st.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-rose-100">
+                <span className="text-[11px] font-bold text-slate-700">État Apeuré (Menace proche)</span>
+                <select
+                  value={b.stateBindings?.scaredStateId || ''}
+                  onChange={(e) =>
+                    update({
+                      stateBindings: {
+                        ...(b.stateBindings || {}),
+                        scaredStateId: e.target.value || undefined,
+                      },
+                    })
+                  }
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[155px]"
+                >
+                  <option value="">-- Non défini --</option>
+                  {stateList.map((st) => (
+                    <option key={st.id} value={st.id}>
+                      {st.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </div>
 
           {renderInertiaControls(b, 0.85)}

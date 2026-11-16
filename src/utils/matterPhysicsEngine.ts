@@ -6,6 +6,7 @@ import {
   Position,
   PhysicsBehaviorConfig,
   DraggableBehaviorConfig,
+  InteractivePuppetBehaviorConfig,
   ConstantVelocityBehaviorConfig,
   LookAtBehaviorConfig,
   FollowBehaviorConfig,
@@ -65,22 +66,34 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
   hasDynamicPhysics: boolean;
 } {
   const effective = getEffectiveBehaviors(entity, currentState);
+  const puppetBehavior = effective.find((b) => b.type === 'interactive_puppet') as
+    | InteractivePuppetBehaviorConfig
+    | undefined;
   const dragBehavior = effective.find((b) => b.type === 'draggable') as DraggableBehaviorConfig | undefined;
   const physics = effective.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
 
   // Une entité n'a de physique dynamique que si le composant 'physics' est présent et n'est pas statique
   const hasDynamicPhysics = !!physics && physics.isStatic !== true;
 
+  if (puppetBehavior && puppetBehavior.enabled !== false) {
+    return {
+      canDrag: true,
+      throwable: puppetBehavior.throwable !== false && hasDynamicPhysics,
+      maxThrowSpeed: puppetBehavior.maxThrowSpeed || 1500,
+      hasDynamicPhysics,
+    };
+  }
+
   if (dragBehavior) {
     return {
       canDrag: dragBehavior.enabled !== false,
-      throwable: (dragBehavior.throwable !== false) && hasDynamicPhysics,
+      throwable: dragBehavior.throwable !== false && hasDynamicPhysics,
       maxThrowSpeed: dragBehavior.maxThrowSpeed || 1500,
       hasDynamicPhysics,
     };
   }
 
-  // Par défaut en mode Play, les entités ne sont PAS draggables sans le composant 'draggable' actif
+  // Par défaut en mode Play, les entités ne sont PAS draggables sans composant actif
   return {
     canDrag: false,
     throwable: false,
@@ -162,6 +175,104 @@ const particleEmitterAccumulators = new Map<string, number>();
 const hierarchyGroupIds = new Map<string, number>();
 let nextNegativeGroupId = -100;
 
+interface PuppetRuntimeState {
+  domHovered: boolean;
+  wasHovered: boolean;
+  hoverTime: number;
+  hoverEnterTimer: number;
+  hoverExitTimer: number;
+  dragPhaseActive: boolean;
+  wasDragging: boolean;
+  hadDragMovement: boolean;
+  dragTime: number;
+  dragStartTimer: number;
+  dragReleaseTimer: number;
+  lastDragX: number;
+  lastDragY: number;
+  smoothDragVx: number;
+  pendulumAngle: number;
+  pendulumVel: number;
+  shakeCount: number;
+  shakeWindowTimer: number;
+  shakeActiveTimer: number;
+  lastVxSign: -1 | 0 | 1;
+  wasGrounded: boolean;
+  groundedGraceTimer: number;
+  airborneTime: number;
+  peakAirY: number;
+  maxFallDropPx: number;
+  landTimer: number;
+}
+const puppetRuntimeStates = new Map<string, PuppetRuntimeState>();
+
+function getOrCreatePuppetRuntime(entityId: string, x = 0, y = 0): PuppetRuntimeState {
+  let rt = puppetRuntimeStates.get(entityId);
+  if (!rt) {
+    rt = {
+      domHovered: false,
+      wasHovered: false,
+      hoverTime: 0,
+      hoverEnterTimer: 0,
+      hoverExitTimer: 0,
+      dragPhaseActive: false,
+      wasDragging: false,
+      hadDragMovement: false,
+      dragTime: 0,
+      dragStartTimer: 0,
+      dragReleaseTimer: 0,
+      lastDragX: x,
+      lastDragY: y,
+      smoothDragVx: 0,
+      pendulumAngle: 0,
+      pendulumVel: 0,
+      shakeCount: 0,
+      shakeWindowTimer: 0,
+      shakeActiveTimer: 0,
+      lastVxSign: 0,
+      wasGrounded: true,
+      groundedGraceTimer: 0.075,
+      airborneTime: 0,
+      peakAirY: y,
+      maxFallDropPx: 0,
+      landTimer: 0,
+    };
+    puppetRuntimeStates.set(entityId, rt);
+  }
+  return rt;
+}
+
+export function notifyEntityHoverState(entityId: string, isHovered: boolean) {
+  const rt = getOrCreatePuppetRuntime(entityId);
+  rt.domHovered = isHovered;
+}
+
+export function notifyEntityDragLifecycle(
+  entityId: string,
+  phase: 'start' | 'move' | 'end',
+  pos?: Position,
+  hadMovement?: boolean
+) {
+  const rt = getOrCreatePuppetRuntime(entityId, pos?.x ?? 0, pos?.y ?? 0);
+  if (phase === 'start') {
+    rt.dragPhaseActive = true;
+    rt.hadDragMovement = false;
+    if (pos) {
+      rt.lastDragX = pos.x;
+      rt.lastDragY = pos.y;
+    }
+  } else if (phase === 'move') {
+    rt.dragPhaseActive = true;
+    if (hadMovement) {
+      rt.hadDragMovement = true;
+    }
+  } else {
+    rt.dragPhaseActive = false;
+    if (hadMovement !== undefined) {
+      rt.hadDragMovement = hadMovement;
+    }
+  }
+}
+
 interface HealthRuntimeState {
   hp: number;
   maxHp: number;
@@ -171,6 +282,81 @@ interface HealthRuntimeState {
   dead: boolean;
 }
 const healthRuntimeMap = new Map<string, HealthRuntimeState>();
+
+interface LookAtOrbitRuntime {
+  ox: number;
+  oy: number;
+  anchorX?: number;
+  anchorY?: number;
+}
+const lookAtOrbitStates = new Map<string, LookAtOrbitRuntime>();
+
+function resolveTargetWorldPoint(
+  selfId: string,
+  selfX: number,
+  selfY: number,
+  targetType: 'mouse' | 'entity' | 'nearest_type' | 'nearest_tag',
+  targetEntityId: string | undefined,
+  targetEntityType: string | undefined,
+  targetTag: string | undefined,
+  entities: Record<string, Entity>,
+  mousePos?: { x: number; y: number } | null
+): Position | null {
+  if (targetType === 'mouse') {
+    return mousePos ? { x: mousePos.x, y: mousePos.y } : null;
+  }
+  if (targetType === 'entity' && targetEntityId) {
+    const targetEntity = entities[targetEntityId];
+    if (!targetEntity) return null;
+    const tOffset = colliderOffsets.get(targetEntity.id) || {
+      relCenterX: targetEntity.size.width / 2,
+      relCenterY: targetEntity.size.height / 2,
+    };
+    return {
+      x: targetEntity.position.x + tOffset.relCenterX,
+      y: targetEntity.position.y + tOffset.relCenterY,
+    };
+  }
+  if (targetType === 'nearest_type' || targetType === 'nearest_tag') {
+    const cleanTag = targetTag ? targetTag.toLowerCase().trim().replace(/^#/, '') : '';
+    let nearest: Entity | undefined;
+    let minDistSq = Infinity;
+    for (const candidate of Object.values(entities)) {
+      if (candidate.id === selfId) continue;
+      if (targetType === 'nearest_type') {
+        if (!targetEntityType || candidate.type !== targetEntityType) continue;
+      } else {
+        if (
+          !cleanTag ||
+          !(candidate.tags || []).some((t) => t.toLowerCase().trim().replace(/^#/, '') === cleanTag)
+        ) {
+          continue;
+        }
+      }
+      const cOffset = colliderOffsets.get(candidate.id) || {
+        relCenterX: candidate.size.width / 2,
+        relCenterY: candidate.size.height / 2,
+      };
+      const cx = candidate.position.x + cOffset.relCenterX;
+      const cy = candidate.position.y + cOffset.relCenterY;
+      const distSq = (cx - selfX) ** 2 + (cy - selfY) ** 2;
+      if (distSq < minDistSq) {
+        minDistSq = distSq;
+        nearest = candidate;
+      }
+    }
+    if (!nearest) return null;
+    const nOffset = colliderOffsets.get(nearest.id) || {
+      relCenterX: nearest.size.width / 2,
+      relCenterY: nearest.size.height / 2,
+    };
+    return {
+      x: nearest.position.x + nOffset.relCenterX,
+      y: nearest.position.y + nOffset.relCenterY,
+    };
+  }
+  return null;
+}
 
 export function getEntityRuntimeHealth(entityId: string): {
   hp: number;
@@ -437,6 +623,8 @@ export function resetMatterPhysicsRuntime() {
   particleEmitterAccumulators.clear();
   hierarchyGroupIds.clear();
   healthRuntimeMap.clear();
+  puppetRuntimeStates.clear();
+  lookAtOrbitStates.clear();
   nextNegativeGroupId = -100;
 }
 
@@ -537,7 +725,7 @@ export function syncEntityDragPosition(
 }
 
 export interface PhysicsTickResult {
-  updatedTransforms: Record<string, { position: Position; rotation?: number; flipX?: boolean }>;
+  updatedTransforms: Record<string, { position?: Position; rotation?: number; flipX?: boolean; runtimeTilt?: number }>;
   entitiesToDestroy?: string[];
   stateChanges?: Record<string, string>;
 }
@@ -884,6 +1072,8 @@ function ensurePhysicsWorld(
       bodySignatures.delete(id);
       patrolStates.delete(id);
       wanderingStates.delete(id);
+      puppetRuntimeStates.delete(id);
+      lookAtOrbitStates.delete(id);
     }
   }
 
@@ -1092,7 +1282,7 @@ export function stepMatterPhysics(params: {
   ensurePhysicsWorld(canvasBounds, entities, colliderLayers);
   if (!engine) return { updatedTransforms: {} };
 
-  const updatedTransforms: Record<string, { position: Position; rotation?: number; flipX?: boolean }> = {};
+  const updatedTransforms: Record<string, { position?: Position; rotation?: number; flipX?: boolean; runtimeTilt?: number }> = {};
   const flipUpdates = new Map<string, boolean>();
   const entitiesToDestroy: string[] = [];
   const stateChanges: Record<string, string> = {};
@@ -1619,44 +1809,26 @@ export function stepMatterPhysics(params: {
     }
 
     // 6b. Flee (Fuir une menace)
-    if (flee) {
-      let threatX = body.position.x;
-      let threatY = body.position.y;
-      let hasThreat = false;
-
-      if (flee.targetType === 'mouse' && mousePos) {
-        threatX = mousePos.x;
-        threatY = mousePos.y;
-        hasThreat = true;
-      } else if (flee.targetType === 'entity' && flee.targetEntityId) {
-        const threatEntity = entities[flee.targetEntityId];
-        if (threatEntity) {
-          const tOffset = colliderOffsets.get(threatEntity.id) || { relCenterX: threatEntity.size.width / 2, relCenterY: threatEntity.size.height / 2 };
-          threatX = threatEntity.position.x + tOffset.relCenterX;
-          threatY = threatEntity.position.y + tOffset.relCenterY;
-          hasThreat = true;
-        }
-      } else if (flee.targetType === 'nearest_type' || flee.targetType === 'nearest_tag') {
-        const nearestThreat = findNearestTarget(
-          flee.targetType,
-          flee.targetEntityType,
-          flee.targetTag
-        );
-        if (nearestThreat) {
-          const tOffset = colliderOffsets.get(nearestThreat.id) || { relCenterX: nearestThreat.size.width / 2, relCenterY: nearestThreat.size.height / 2 };
-          threatX = nearestThreat.position.x + tOffset.relCenterX;
-          threatY = nearestThreat.position.y + tOffset.relCenterY;
-          hasThreat = true;
-        }
-      }
+    if (flee && (flee.speed ?? 160) > 0) {
+      const fleeThreat = resolveTargetWorldPoint(
+        entity.id,
+        body.position.x,
+        body.position.y,
+        flee.targetType || 'mouse',
+        flee.targetEntityId,
+        flee.targetEntityType,
+        flee.targetTag,
+        entities,
+        mousePos
+      );
 
       const fleeAccel = flee.acceleration ?? 0.35;
       const fleeDamp = flee.damping ?? 0.85;
       const axisMode = flee.axisMode || 'free_2d';
 
-      if (hasThreat) {
-        const dx = body.position.x - threatX;
-        const dy = body.position.y - threatY;
+      if (fleeThreat) {
+        const dx = body.position.x - fleeThreat.x;
+        const dy = body.position.y - fleeThreat.y;
         const dist = Math.hypot(dx, dy);
         const radius = flee.fleeRadius ?? 220;
         const shouldFlee = radius <= 0 || dist < radius;
@@ -1693,44 +1865,33 @@ export function stepMatterPhysics(params: {
       }
     }
 
-    // 7. Look At
-    if (lookAt) {
-      let targetX = body.position.x;
-      let targetY = body.position.y;
-      let hasValidTarget = false;
+    // 7. Look At (mode rotation pour entités racines)
+    if (lookAt && (lookAt.lookMode || 'rotate') === 'rotate') {
+      const targetPt = resolveTargetWorldPoint(
+        entity.id,
+        body.position.x,
+        body.position.y,
+        lookAt.targetType,
+        lookAt.targetEntityId,
+        lookAt.targetEntityType,
+        lookAt.targetTag,
+        entities,
+        mousePos
+      );
 
-      if (lookAt.targetType === 'mouse' && mousePos) {
-        targetX = mousePos.x;
-        targetY = mousePos.y;
-        hasValidTarget = true;
-      } else if (lookAt.targetType === 'entity' && lookAt.targetEntityId) {
-        const targetEntity = entities[lookAt.targetEntityId];
-        if (targetEntity) {
-          const targetOffset = colliderOffsets.get(targetEntity.id) || { relCenterX: targetEntity.size.width / 2, relCenterY: targetEntity.size.height / 2 };
-          targetX = targetEntity.position.x + targetOffset.relCenterX;
-          targetY = targetEntity.position.y + targetOffset.relCenterY;
-          hasValidTarget = true;
-        }
-      } else if (lookAt.targetType === 'nearest_type' || lookAt.targetType === 'nearest_tag') {
-        const nearestEntity = findNearestTarget(
-          lookAt.targetType,
-          lookAt.targetEntityType,
-          lookAt.targetTag
-        );
-        if (nearestEntity) {
-          const targetOffset = colliderOffsets.get(nearestEntity.id) || { relCenterX: nearestEntity.size.width / 2, relCenterY: nearestEntity.size.height / 2 };
-          targetX = nearestEntity.position.x + targetOffset.relCenterX;
-          targetY = nearestEntity.position.y + targetOffset.relCenterY;
-          hasValidTarget = true;
-        }
-      }
+      if (targetPt) {
+        const dx = targetPt.x - body.position.x;
+        const dy = targetPt.y - body.position.y;
+        const anchorRad = ((lookAt.rotationOffset || 0) * Math.PI) / 180;
+        let targetAngleRad = Math.atan2(dy, dx) + anchorRad;
 
-      if (hasValidTarget) {
-        const dx = targetX - body.position.x;
-        const dy = targetY - body.position.y;
-        const targetAngleRad = Math.atan2(dy, dx) + ((lookAt.rotationOffset || 0) * Math.PI) / 180;
+        if (lookAt.maxAngle && lookAt.maxAngle > 0 && lookAt.maxAngle < 180) {
+          const maxRad = (lookAt.maxAngle * Math.PI) / 180;
+          const diffFromAnchor = shortestAngleDiffRad(anchorRad, targetAngleRad);
+          targetAngleRad = anchorRad + Math.max(-maxRad, Math.min(maxRad, diffFromAnchor));
+        }
+
         const diff = shortestAngleDiffRad(body.angle, targetAngleRad);
-
         const smoothSpeed = lookAt.smoothSpeed ?? 0;
         if (smoothSpeed > 0) {
           const maxStep = ((smoothSpeed * Math.PI) / 180) * dt;
@@ -1853,13 +2014,18 @@ export function stepMatterPhysics(params: {
     let newY = entity.position.y;
     let newRot = currentState?.rotation || 0;
     let nextFlipX = flipUpdates.get(entity.id) ?? (entity.flipX ?? false);
+    let nextRuntimeTilt = entity.runtimeTilt ?? 0;
+
+    let pendingPosUpdate: Position | undefined;
+    let pendingRotUpdate: number | undefined;
+    let pendingFlipUpdate: boolean | undefined;
 
     // Cas 1 : Entité enfant attachée à un parent (suivi cinématique exact)
     if (entity.parentId && entities[entity.parentId]) {
       const parent = entities[entity.parentId];
       const parentTransform = resolvedTransforms.get(parent.id) || {
         position: parent.position,
-        rotation: parent.states[parent.currentStateId]?.rotation || 0,
+        rotation: (parent.states[parent.currentStateId]?.rotation || 0) + (parent.runtimeTilt || 0),
         flipX: parent.flipX ?? false,
       };
 
@@ -1879,15 +2045,81 @@ export function stepMatterPhysics(params: {
       const rotatedX = localX * cosA - localY * sinA;
       const rotatedY = localX * sinA + localY * cosA;
 
-      const childCenterX = parentCenterX + rotatedX;
-      const childCenterY = parentCenterY + rotatedY;
+      let childCenterX = parentCenterX + rotatedX;
+      let childCenterY = parentCenterY + rotatedY;
+
+      const rotOffset = (offset.rotationOffset || 0) * (inheritFlip && parentTransform.flipX ? -1 : 1);
+      const baseRot = (inheritRot ? parentTransform.rotation : 0) + rotOffset;
+      newRot = Math.round(baseRot * 10) / 10;
+      nextFlipX = inheritFlip ? parentTransform.flipX : (entity.flipX ?? false);
+
+      // LookAt sur entité enfant attachée (ex: Tête avec cône maxAngle ou Pupille en Orbite)
+      const childLookAt = effectiveBehaviors.find((b) => b.type === 'look_at') as LookAtBehaviorConfig | undefined;
+      if (childLookAt && childLookAt.enabled !== false) {
+        const targetPt = resolveTargetWorldPoint(
+          entity.id,
+          childCenterX,
+          childCenterY,
+          childLookAt.targetType,
+          childLookAt.targetEntityId,
+          childLookAt.targetEntityType,
+          childLookAt.targetTag,
+          entities,
+          mousePos
+        );
+
+        if ((childLookAt.lookMode || 'rotate') === 'pupil_orbit') {
+          let orbitRt = lookAtOrbitStates.get(entity.id);
+          if (!orbitRt) {
+            orbitRt = { ox: 0, oy: 0 };
+            lookAtOrbitStates.set(entity.id, orbitRt);
+          }
+          const rx = Math.max(1, childLookAt.orbitRadius ?? 8);
+          const ry = Math.max(1, childLookAt.orbitRadiusY ?? rx);
+          let tx = 0;
+          let ty = 0;
+          if (targetPt) {
+            const dx = targetPt.x - childCenterX;
+            const dy = targetPt.y - childCenterY;
+            const dist = Math.hypot(dx, dy);
+            if (dist > 0.5) {
+              const mag = Math.min(1, dist / Math.max(18, Math.max(rx, ry) * 2.5));
+              tx = (dx / dist) * rx * mag;
+              ty = (dy / dist) * ry * mag;
+            }
+          }
+          const smooth = childLookAt.smoothSpeed ?? 0;
+          const alpha = smooth > 0 ? Math.min(1, dt * Math.max(3, smooth / 22)) : 1;
+          orbitRt.ox += (tx - orbitRt.ox) * alpha;
+          orbitRt.oy += (ty - orbitRt.oy) * alpha;
+          childCenterX += orbitRt.ox;
+          childCenterY += orbitRt.oy;
+        } else if (targetPt) {
+          const dx = targetPt.x - childCenterX;
+          const dy = targetPt.y - childCenterY;
+          const baseRotRad = (baseRot * Math.PI) / 180;
+          let targetAngleRad = Math.atan2(dy, dx) + ((childLookAt.rotationOffset || 0) * Math.PI) / 180;
+
+          if (childLookAt.maxAngle && childLookAt.maxAngle > 0 && childLookAt.maxAngle < 180) {
+            const maxRad = (childLookAt.maxAngle * Math.PI) / 180;
+            const diffFromBase = shortestAngleDiffRad(baseRotRad, targetAngleRad);
+            targetAngleRad = baseRotRad + Math.max(-maxRad, Math.min(maxRad, diffFromBase));
+          }
+
+          const currentAngleRad = ((currentState?.rotation || 0) * Math.PI) / 180;
+          const diff = shortestAngleDiffRad(currentAngleRad, targetAngleRad);
+          const smoothSpeed = childLookAt.smoothSpeed ?? 0;
+          let nextAngleRad = targetAngleRad;
+          if (smoothSpeed > 0) {
+            const maxStep = ((smoothSpeed * Math.PI) / 180) * dt;
+            nextAngleRad = Math.abs(diff) <= maxStep ? targetAngleRad : currentAngleRad + Math.sign(diff) * maxStep;
+          }
+          newRot = Math.round(((nextAngleRad * 180) / Math.PI) * 10) / 10;
+        }
+      }
 
       newX = Math.round((childCenterX - entity.size.width / 2) * 10) / 10;
       newY = Math.round((childCenterY - entity.size.height / 2) * 10) / 10;
-
-      const rotOffset = (offset.rotationOffset || 0) * (inheritFlip && parentTransform.flipX ? -1 : 1);
-      newRot = Math.round(((inheritRot ? parentTransform.rotation : 0) + rotOffset) * 10) / 10;
-      nextFlipX = inheritFlip ? parentTransform.flipX : (entity.flipX ?? false);
 
       // Synchroniser le corps Matter.js du capteur/collider de l'enfant avec sa position monde réelle
       if (body) {
@@ -1906,18 +2138,15 @@ export function stepMatterPhysics(params: {
       const rotChanged = Math.abs(newRot - (currentState?.rotation || 0)) > 0.1;
       const flipChanged = (entity.flipX ?? false) !== nextFlipX;
 
-      if (posChanged || rotChanged || flipChanged) {
-        updatedTransforms[entity.id] = {
-          position: { x: newX, y: newY },
-          ...(rotChanged ? { rotation: newRot } : {}),
-          ...(flipChanged ? { flipX: nextFlipX } : {}),
-        };
-      }
+      if (posChanged) pendingPosUpdate = { x: newX, y: newY };
+      if (rotChanged) pendingRotUpdate = newRot;
+      if (flipChanged) pendingFlipUpdate = nextFlipX;
     } else if (body) {
       // Cas 2 : Entité indépendante (ou parent racine)
+      const rootLookAt = effectiveBehaviors.find((b) => b.type === 'look_at') as LookAtBehaviorConfig | undefined;
       const hasRotationBehavior = effectiveBehaviors.some(
         (b) =>
-          b.type === 'look_at' ||
+          (b.type === 'look_at' && ((b as LookAtBehaviorConfig).lookMode || 'rotate') === 'rotate') ||
           (b.type === 'constant_velocity' && !!(b as ConstantVelocityBehaviorConfig).angularVelocity) ||
           (b.type === 'wandering' && !!(b as WanderingBehaviorConfig).orientToMovement)
       );
@@ -1927,6 +2156,53 @@ export function stepMatterPhysics(params: {
         const dp = activeDragPositions[entity.id];
         newX = dp.x;
         newY = dp.y;
+      } else if (rootLookAt && rootLookAt.enabled !== false && rootLookAt.lookMode === 'pupil_orbit') {
+        let orbitRt = lookAtOrbitStates.get(entity.id);
+        if (!orbitRt) {
+          orbitRt = {
+            ox: 0,
+            oy: 0,
+            anchorX: entity.position.x + entity.size.width / 2,
+            anchorY: entity.position.y + entity.size.height / 2,
+          };
+          lookAtOrbitStates.set(entity.id, orbitRt);
+        }
+        const ax = orbitRt.anchorX ?? entity.position.x + entity.size.width / 2;
+        const ay = orbitRt.anchorY ?? entity.position.y + entity.size.height / 2;
+        const targetPt = resolveTargetWorldPoint(
+          entity.id,
+          ax,
+          ay,
+          rootLookAt.targetType,
+          rootLookAt.targetEntityId,
+          rootLookAt.targetEntityType,
+          rootLookAt.targetTag,
+          entities,
+          mousePos
+        );
+        const rx = Math.max(1, rootLookAt.orbitRadius ?? 8);
+        const ry = Math.max(1, rootLookAt.orbitRadiusY ?? rx);
+        let tx = 0;
+        let ty = 0;
+        if (targetPt) {
+          const dx = targetPt.x - ax;
+          const dy = targetPt.y - ay;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 0.5) {
+            const mag = Math.min(1, dist / Math.max(18, Math.max(rx, ry) * 2.5));
+            tx = (dx / dist) * rx * mag;
+            ty = (dy / dist) * ry * mag;
+          }
+        }
+        const smooth = rootLookAt.smoothSpeed ?? 0;
+        const alpha = smooth > 0 ? Math.min(1, dt * Math.max(3, smooth / 22)) : 1;
+        orbitRt.ox += (tx - orbitRt.ox) * alpha;
+        orbitRt.oy += (ty - orbitRt.oy) * alpha;
+        newX = Math.round((ax + orbitRt.ox - entity.size.width / 2) * 10) / 10;
+        newY = Math.round((ay + orbitRt.oy - entity.size.height / 2) * 10) / 10;
+        if (Math.abs(newX - entity.position.x) > 0.05 || Math.abs(newY - entity.position.y) > 0.05) {
+          pendingPosUpdate = { x: newX, y: newY };
+        }
       } else if (!body.isStatic || hasRotationBehavior) {
         const offset = colliderOffsets.get(entity.id) || {
           relCenterX: entity.size.width / 2,
@@ -1941,19 +2217,360 @@ export function stepMatterPhysics(params: {
         const rotChanged = !isRotFrozen && Math.abs(newRot - (currentState?.rotation || 0)) > 0.1;
         const flipChanged = flipUpdates.has(entity.id) && (entity.flipX ?? false) !== nextFlipX;
 
-        if (posChanged || rotChanged || flipChanged) {
-          updatedTransforms[entity.id] = {
-            position: { x: newX, y: newY },
-            ...(rotChanged ? { rotation: newRot } : isRotFrozen ? { rotation: 0 } : {}),
-            ...(flipChanged ? { flipX: nextFlipX } : {}),
-          };
+        if (posChanged) pendingPosUpdate = { x: newX, y: newY };
+        if (rotChanged) pendingRotUpdate = newRot;
+        else if (isRotFrozen && Math.abs(currentState?.rotation || 0) > 0.1) pendingRotUpdate = 0;
+        if (flipChanged) pendingFlipUpdate = nextFlipX;
+      }
+    }
+
+    // Cas 6a : Calcul du pendule & cycle Marionnette Interactive (avant resolvedTransforms pour que les enfants suivent)
+    const puppet = effectiveBehaviors.find((b) => b.type === 'interactive_puppet') as
+      | InteractivePuppetBehaviorConfig
+      | undefined;
+    let puppetDesiredStateId: string | undefined;
+
+    if (puppet && puppet.enabled !== false) {
+      const rt = getOrCreatePuppetRuntime(entity.id, newX, newY);
+      const activeDragKeys = Object.keys(activeDragPositions);
+      const isActivelyDragged = Boolean(activeDragPositions[entity.id]) || rt.dragPhaseActive;
+      const otherBeingDragged = activeDragKeys.some((id) => id !== entity.id);
+
+      const worldBounds = getEntityWorldColliderBounds(
+        { ...entity, position: { x: newX, y: newY } },
+        currentState
+      );
+
+      // Distance du curseur au bord du collider (0 = curseur à l'intérieur)
+      let distToCollider = Infinity;
+      if (mousePos) {
+        if (worldBounds.colliderType === 'circle') {
+          distToCollider = Math.max(
+            0,
+            Math.hypot(mousePos.x - worldBounds.centerX, mousePos.y - worldBounds.centerY) - worldBounds.radius
+          );
+        } else {
+          const dx = Math.max(worldBounds.x - mousePos.x, 0, mousePos.x - (worldBounds.x + worldBounds.width));
+          const dy = Math.max(worldBounds.y - mousePos.y, 0, mousePos.y - (worldBounds.y + worldBounds.height));
+          distToCollider = Math.hypot(dx, dy);
         }
       }
+
+      const isHovered = !otherBeingDragged && !isActivelyDragged && (rt.domHovered || (mousePos !== null && distToCollider === 0));
+
+      // Cycle Survol
+      if (!isActivelyDragged) {
+        if (isHovered && !rt.wasHovered) {
+          rt.hoverEnterTimer = Math.max(0.04, puppet.hoverEnterDuration ?? 0.18);
+          rt.hoverTime = 0;
+          rt.hoverExitTimer = 0;
+        } else if (isHovered) {
+          rt.hoverTime += dt;
+          rt.hoverEnterTimer = Math.max(0, rt.hoverEnterTimer - dt);
+        } else if (!isHovered && rt.wasHovered) {
+          rt.hoverExitTimer = Math.max(0.04, puppet.hoverExitDuration ?? 0.2);
+          rt.hoverTime = 0;
+          rt.hoverEnterTimer = 0;
+        } else {
+          rt.hoverExitTimer = Math.max(0, rt.hoverExitTimer - dt);
+        }
+      }
+      rt.wasHovered = isHovered;
+
+      // Cycle Drag, Balancement & Secousse
+      if (isActivelyDragged && !rt.wasDragging) {
+        rt.dragStartTimer = Math.max(0.04, puppet.dragStartDuration ?? 0.18);
+        rt.dragTime = 0;
+        rt.dragReleaseTimer = 0;
+        rt.lastDragX = newX;
+        rt.lastDragY = newY;
+        rt.smoothDragVx = 0;
+        rt.shakeCount = 0;
+        rt.shakeWindowTimer = 0;
+        rt.shakeActiveTimer = 0;
+        rt.lastVxSign = 0;
+      } else if (isActivelyDragged) {
+        rt.dragTime += dt;
+        rt.dragStartTimer = Math.max(0, rt.dragStartTimer - dt);
+        const instVx = Math.max(-3000, Math.min(3000, (newX - rt.lastDragX) / dt));
+        rt.lastDragX = newX;
+        rt.lastDragY = newY;
+        rt.smoothDragVx += (instVx - rt.smoothDragVx) * Math.min(1, dt * 14);
+
+        if (rt.shakeWindowTimer > 0) {
+          rt.shakeWindowTimer = Math.max(0, rt.shakeWindowTimer - dt);
+          if (rt.shakeWindowTimer === 0) rt.shakeCount = 0;
+        }
+        if (rt.shakeActiveTimer > 0) {
+          rt.shakeActiveTimer = Math.max(0, rt.shakeActiveTimer - dt);
+        }
+        const vxSign: -1 | 0 | 1 = Math.abs(instVx) > 260 ? (instVx > 0 ? 1 : -1) : 0;
+        if (vxSign !== 0 && vxSign !== rt.lastVxSign) {
+          if (rt.lastVxSign !== 0) {
+            rt.shakeCount += 1;
+          }
+          rt.lastVxSign = vxSign;
+          rt.shakeWindowTimer = 0.45;
+          if (rt.shakeCount >= Math.max(2, puppet.shakeThreshold ?? 3)) {
+            rt.shakeActiveTimer = 0.45;
+            rt.shakeCount = 0;
+          }
+        }
+      } else if (!isActivelyDragged && rt.wasDragging) {
+        if (rt.hadDragMovement) {
+          rt.dragReleaseTimer = Math.max(0.04, puppet.dragReleaseDuration ?? 0.2);
+        }
+        rt.dragTime = 0;
+        rt.dragStartTimer = 0;
+        rt.smoothDragVx = 0;
+        rt.shakeCount = 0;
+        rt.shakeActiveTimer = 0;
+        rt.lastVxSign = 0;
+        rt.hadDragMovement = false;
+      } else {
+        rt.dragReleaseTimer = Math.max(0, rt.dragReleaseTimer - dt);
+        rt.smoothDragVx *= Math.max(0, 1 - dt * 10);
+      }
+      rt.wasDragging = isActivelyDragged;
+
+      // Pendule physique (ressort amorti sur vitesse horizontale)
+      const swingMode = puppet.swingMode || 'both';
+      const usePendulum = swingMode === 'pendulum' || swingMode === 'both';
+      if (usePendulum) {
+        const intensity = Math.max(0.1, puppet.pendulumIntensity ?? 1.0);
+        const maxAngle = Math.max(5, Math.min(75, puppet.pendulumMaxAngle ?? 32));
+        const smoothing = Math.max(0.05, Math.min(0.5, puppet.pendulumSmoothing ?? 0.18));
+        const targetAngle = isActivelyDragged
+          ? Math.max(-maxAngle, Math.min(maxAngle, (rt.smoothDragVx / 850) * maxAngle * intensity))
+          : 0;
+        const springK = 140 + (1 - smoothing) * 160;
+        const dampingC = 11 + smoothing * 14;
+        const accel = springK * (targetAngle - rt.pendulumAngle) - dampingC * rt.pendulumVel;
+        rt.pendulumVel += accel * dt;
+        rt.pendulumAngle += rt.pendulumVel * dt;
+        if (!isActivelyDragged && Math.abs(rt.pendulumAngle) < 0.15 && Math.abs(rt.pendulumVel) < 0.8) {
+          rt.pendulumAngle = 0;
+          rt.pendulumVel = 0;
+        }
+      } else {
+        rt.pendulumAngle = 0;
+        rt.pendulumVel = 0;
+      }
+      nextRuntimeTilt = Math.round(rt.pendulumAngle * 10) / 10;
+
+      // Gravité / Chute / Atterrissage (si physique dynamique présente)
+      const hasDynamicBody = Boolean(body && !body.isStatic);
+      const isBottomFloor = Boolean(body && !body.isSensor && body.bounds.max.y >= canvasBounds.height - 3);
+      const rawGrounded = hasDynamicBody && body
+        ? (groundedEntityIds.has(entity.id) || isBottomFloor) && body.velocity.y >= -0.75
+        : true;
+      const minFallHeight = Math.max(0, puppet.minFallHeight ?? 20);
+
+      if (isActivelyDragged || !hasDynamicBody || !body) {
+        rt.wasGrounded = true;
+        rt.groundedGraceTimer = 0.075;
+        rt.airborneTime = 0;
+        rt.peakAirY = body?.position.y ?? newY;
+        rt.maxFallDropPx = 0;
+        rt.landTimer = 0;
+      } else {
+        if (rawGrounded) {
+          rt.groundedGraceTimer = 0.075;
+        } else if (rt.groundedGraceTimer > 0 && body.velocity.y >= -0.85) {
+          rt.groundedGraceTimer = Math.max(0, rt.groundedGraceTimer - dt);
+        } else {
+          rt.groundedGraceTimer = 0;
+        }
+        const isGrounded = rawGrounded || rt.groundedGraceTimer > 0;
+        if (!isGrounded) {
+          if (rt.wasGrounded) {
+            rt.peakAirY = body.position.y;
+            rt.maxFallDropPx = 0;
+          } else {
+            rt.peakAirY = Math.min(rt.peakAirY, body.position.y);
+          }
+          const currentDrop = Math.max(0, body.position.y - rt.peakAirY);
+          rt.maxFallDropPx = Math.max(rt.maxFallDropPx, currentDrop);
+          rt.airborneTime += dt;
+          rt.landTimer = 0;
+          rt.wasGrounded = false;
+        } else {
+          const hasFallenEnough =
+            minFallHeight === 0 ? rt.airborneTime >= 0.04 : rt.maxFallDropPx >= minFallHeight;
+          if (!rt.wasGrounded && hasFallenEnough) {
+            rt.landTimer = Math.max(0.05, Math.min(1.0, puppet.landDuration ?? 0.18));
+          } else if (rt.landTimer > 0) {
+            rt.landTimer = Math.max(0, rt.landTimer - dt);
+          }
+          rt.airborneTime = 0;
+          rt.peakAirY = body.position.y;
+          rt.maxFallDropPx = 0;
+          rt.wasGrounded = true;
+        }
+      }
+
+      // Détection Drag Over sur cibles (Entités / Types / #Tags / Calques collider)
+      let dragOverStateId: string | undefined;
+      if (isActivelyDragged && puppet.dragOverTargets && puppet.dragOverTargets.length > 0) {
+        for (const rule of puppet.dragOverTargets) {
+          if (!rule.stateId || !entity.states[rule.stateId]) continue;
+          let matched = false;
+          const cleanTag = (rule.targetTag || '').toLowerCase().trim().replace(/^#/, '');
+
+          for (const other of entityList) {
+            if (other.id === entity.id) continue;
+            const matchesTarget =
+              (rule.targetMode === 'entity' && other.id === rule.targetEntityId) ||
+              (rule.targetMode === 'type' && other.type === rule.targetEntityType) ||
+              (rule.targetMode === 'tag' &&
+                cleanTag &&
+                (other.tags || []).some((t) => t.toLowerCase().trim().replace(/^#/, '') === cleanTag));
+            if (!matchesTarget) continue;
+
+            const ob = getEntityWorldColliderBounds(other, other.states[other.currentStateId]);
+            if (worldBounds.colliderType === 'circle' && ob.colliderType === 'circle') {
+              matched =
+                Math.hypot(worldBounds.centerX - ob.centerX, worldBounds.centerY - ob.centerY) <=
+                worldBounds.radius + ob.radius + 2;
+            } else {
+              matched =
+                worldBounds.x <= ob.x + ob.width + 2 &&
+                worldBounds.x + worldBounds.width + 2 >= ob.x &&
+                worldBounds.y <= ob.y + ob.height + 2 &&
+                worldBounds.y + worldBounds.height + 2 >= ob.y;
+            }
+            if (matched) break;
+          }
+
+          if (!matched && rule.targetMode === 'tag' && cleanTag && colliderLayers.length > 0) {
+            for (const layer of colliderLayers) {
+              const lTags = (layer.colliderTags || []).map((t) => t.toLowerCase().trim().replace(/^#/, ''));
+              if (!lTags.includes(cleanTag)) continue;
+              if (checkEntityAgainstColliderLayer(worldBounds, entity.id, layer, canvasBounds, 2).colliding) {
+                matched = true;
+                break;
+              }
+            }
+          }
+
+          if (matched) {
+            dragOverStateId = rule.stateId;
+            break;
+          }
+        }
+      }
+
+      // Résolution d'état avec garde-fou non-écrasant
+      const sb = puppet.stateBindings || {};
+      const boundIds = new Set(
+        [
+          sb.idleStateId,
+          sb.approachFarStateId,
+          sb.approachNearStateId,
+          sb.hoverEnterStateId,
+          sb.hoverStateId,
+          sb.hoverDwellStateId,
+          sb.hoverExitStateId,
+          sb.dragStartStateId,
+          sb.dragStateId,
+          sb.dragDwellStateId,
+          sb.swingStateId,
+          sb.swingLeftStateId,
+          sb.swingRightStateId,
+          sb.shakeStateId,
+          sb.dragReleaseStateId,
+          sb.fallStateId,
+          sb.landStateId,
+          ...(puppet.dragOverTargets || []).map((r) => r.stateId),
+        ].filter((sid): sid is string => Boolean(sid && entity.states[sid]))
+      );
+
+      if (boundIds.size > 0 && boundIds.has(entity.currentStateId)) {
+        const hasState = (sid?: string): sid is string => Boolean(sid && entity.states[sid]);
+        const isGroundedNow = !hasDynamicBody || !body || rawGrounded || rt.groundedGraceTimer > 0;
+        const fallDropNow = body ? Math.max(0, body.position.y - rt.peakAirY) : 0;
+        const canShowFall = minFallHeight === 0 ? rt.airborneTime >= 0.03 : fallDropNow >= minFallHeight;
+        const useSwingStates = swingMode === 'states' || swingMode === 'both';
+        const swingSpeedThresh = Math.max(40, puppet.swingSpeedThreshold ?? 320);
+
+        if (isActivelyDragged) {
+          if (dragOverStateId) {
+            puppetDesiredStateId = dragOverStateId;
+          } else if (rt.dragStartTimer > 0 && hasState(sb.dragStartStateId)) {
+            puppetDesiredStateId = sb.dragStartStateId;
+          } else if (rt.shakeActiveTimer > 0 && hasState(sb.shakeStateId)) {
+            puppetDesiredStateId = sb.shakeStateId;
+          } else if (useSwingStates && Math.abs(rt.smoothDragVx) >= swingSpeedThresh) {
+            if (rt.smoothDragVx < 0 && hasState(sb.swingLeftStateId)) {
+              puppetDesiredStateId = sb.swingLeftStateId;
+            } else if (rt.smoothDragVx > 0 && hasState(sb.swingRightStateId)) {
+              puppetDesiredStateId = sb.swingRightStateId;
+            } else if (hasState(sb.swingStateId)) {
+              puppetDesiredStateId = sb.swingStateId;
+            } else if (rt.dragTime >= (puppet.dragDwellDelay ?? 2.0) && hasState(sb.dragDwellStateId)) {
+              puppetDesiredStateId = sb.dragDwellStateId;
+            } else if (hasState(sb.dragStateId)) {
+              puppetDesiredStateId = sb.dragStateId;
+            }
+          } else if (rt.dragTime >= (puppet.dragDwellDelay ?? 2.0) && hasState(sb.dragDwellStateId)) {
+            puppetDesiredStateId = sb.dragDwellStateId;
+          } else if (hasState(sb.dragStateId)) {
+            puppetDesiredStateId = sb.dragStateId;
+          }
+        } else if (
+          !isGroundedNow &&
+          hasDynamicBody &&
+          body &&
+          body.velocity.y > 0.75 &&
+          canShowFall &&
+          hasState(sb.fallStateId)
+        ) {
+          puppetDesiredStateId = sb.fallStateId;
+        } else if (rt.dragReleaseTimer > 0 && hasState(sb.dragReleaseStateId)) {
+          puppetDesiredStateId = sb.dragReleaseStateId;
+        } else if (isGroundedNow && rt.landTimer > 0 && hasState(sb.landStateId)) {
+          puppetDesiredStateId = sb.landStateId;
+        } else if (isHovered) {
+          if (rt.hoverEnterTimer > 0 && hasState(sb.hoverEnterStateId)) {
+            puppetDesiredStateId = sb.hoverEnterStateId;
+          } else if (rt.hoverTime >= (puppet.hoverDwellDelay ?? 1.5) && hasState(sb.hoverDwellStateId)) {
+            puppetDesiredStateId = sb.hoverDwellStateId;
+          } else if (hasState(sb.hoverStateId)) {
+            puppetDesiredStateId = sb.hoverStateId;
+          }
+        } else if (rt.hoverExitTimer > 0 && hasState(sb.hoverExitStateId)) {
+          puppetDesiredStateId = sb.hoverExitStateId;
+        } else if (mousePos !== null && !otherBeingDragged) {
+          const nearDist = Math.max(0, puppet.approachNearDistance ?? 120);
+          const farDist = Math.max(nearDist, puppet.approachFarDistance ?? 280);
+          if (distToCollider <= nearDist && hasState(sb.approachNearStateId)) {
+            puppetDesiredStateId = sb.approachNearStateId;
+          } else if (distToCollider <= farDist && hasState(sb.approachFarStateId)) {
+            puppetDesiredStateId = sb.approachFarStateId;
+          } else if (hasState(sb.idleStateId)) {
+            puppetDesiredStateId = sb.idleStateId;
+          }
+        } else if (hasState(sb.idleStateId)) {
+          puppetDesiredStateId = sb.idleStateId;
+        }
+      }
+    } else if ((entity.runtimeTilt ?? 0) !== 0) {
+      nextRuntimeTilt = 0;
+    }
+
+    const tiltChanged = Math.abs(nextRuntimeTilt - (entity.runtimeTilt ?? 0)) > 0.1 || (nextRuntimeTilt === 0 && (entity.runtimeTilt ?? 0) !== 0);
+    if (pendingPosUpdate || pendingRotUpdate !== undefined || pendingFlipUpdate !== undefined || tiltChanged) {
+      updatedTransforms[entity.id] = {
+        ...(pendingPosUpdate ? { position: pendingPosUpdate } : {}),
+        ...(pendingRotUpdate !== undefined ? { rotation: pendingRotUpdate } : {}),
+        ...(pendingFlipUpdate !== undefined ? { flipX: pendingFlipUpdate } : {}),
+        ...(tiltChanged ? { runtimeTilt: nextRuntimeTilt } : {}),
+      };
     }
 
     resolvedTransforms.set(entity.id, {
       position: { x: newX, y: newY },
-      rotation: newRot,
+      rotation: newRot + nextRuntimeTilt,
       flipX: nextFlipX,
     });
 
@@ -2237,6 +2854,59 @@ export function stepMatterPhysics(params: {
 
         if (desiredStateId && desiredStateId !== entity.currentStateId) {
           stateChanges[entity.id] = desiredStateId;
+        }
+      }
+    }
+
+    // Cas 6b : Appliquer la transition d'état de la Marionnette Interactive (si non déjà modifiée par Santé/Controller)
+    if (!stateChanges[entity.id] && puppetDesiredStateId && puppetDesiredStateId !== entity.currentStateId) {
+      stateChanges[entity.id] = puppetDesiredStateId;
+    }
+
+    // Cas 6c : États visuels de Peur / Conscience du curseur sur Flee (garde-fou actif)
+    const fleeBeh = effectiveBehaviors.find((b) => b.type === 'flee') as FleeBehaviorConfig | undefined;
+    if (!stateChanges[entity.id] && fleeBeh && fleeBeh.enabled !== false && fleeBeh.stateBindings) {
+      const fsb = fleeBeh.stateBindings;
+      const fBound = new Set(
+        [fsb.calmStateId, fsb.scaredStateId].filter((sid): sid is string => Boolean(sid && entity.states[sid]))
+      );
+      if (fBound.size > 0 && fBound.has(entity.currentStateId)) {
+        let isSelfOrAncestorDragged = Boolean(activeDragPositions[entity.id]);
+        let ancId = entity.parentId;
+        let depthGuard = 0;
+        while (!isSelfOrAncestorDragged && ancId && entities[ancId] && depthGuard < 16) {
+          if (activeDragPositions[ancId]) {
+            isSelfOrAncestorDragged = true;
+            break;
+          }
+          ancId = entities[ancId].parentId;
+          depthGuard += 1;
+        }
+        const pausedByDrag = fleeBeh.pauseWhileDragged !== false && isSelfOrAncestorDragged;
+        const selfCx = newX + entity.size.width / 2;
+        const selfCy = newY + entity.size.height / 2;
+        const threatPt = resolveTargetWorldPoint(
+          entity.id,
+          selfCx,
+          selfCy,
+          fleeBeh.targetType || 'mouse',
+          fleeBeh.targetEntityId,
+          fleeBeh.targetEntityType,
+          fleeBeh.targetTag,
+          entities,
+          mousePos
+        );
+        const radius = fleeBeh.fleeRadius ?? 220;
+        const dist = threatPt ? Math.hypot(selfCx - threatPt.x, selfCy - threatPt.y) : Infinity;
+        const isScared = Boolean(threatPt && !pausedByDrag && (radius <= 0 || dist < radius));
+        const nextFleeState =
+          isScared && fsb.scaredStateId && entity.states[fsb.scaredStateId]
+            ? fsb.scaredStateId
+            : !isScared && fsb.calmStateId && entity.states[fsb.calmStateId]
+            ? fsb.calmStateId
+            : undefined;
+        if (nextFleeState && nextFleeState !== entity.currentStateId) {
+          stateChanges[entity.id] = nextFleeState;
         }
       }
     }

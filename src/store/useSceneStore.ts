@@ -264,7 +264,7 @@ interface SceneState {
   updateEntityBehaviors: (entityId: EntityId, behaviors: EntityBehavior[]) => void;
   updateStateBehaviorOverride: (entityId: EntityId, stateId: StateId, behaviorId: string, override: BehaviorOverride) => void;
   removeStateBehaviorOverride: (entityId: EntityId, stateId: StateId, behaviorId: string) => void;
-  batchUpdateEntityTransforms: (updates: Record<EntityId, { position?: Position; rotation?: number; flipX?: boolean }>) => void;
+  batchUpdateEntityTransforms: (updates: Record<EntityId, { position?: Position; rotation?: number; flipX?: boolean; runtimeTilt?: number }>) => void;
   setEntityParent: (childId: EntityId, parentId: EntityId | null, customOffset?: ParentOffset) => void;
   updateEntityParentOffset: (childId: EntityId, partial: Partial<ParentOffset>) => void;
   detachEntity: (childId: EntityId) => void;
@@ -1960,6 +1960,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           modified = true;
         }
 
+        if (transform.runtimeTilt !== undefined && (entity.runtimeTilt ?? 0) !== transform.runtimeTilt) {
+          modified = true;
+        }
+
         if (modified) {
           hasChanges = true;
           nextEntities[id] = {
@@ -1967,6 +1971,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
             position: newPos,
             states: newStates,
             ...(transform.flipX !== undefined ? { flipX: transform.flipX } : {}),
+            ...(transform.runtimeTilt !== undefined ? { runtimeTilt: transform.runtimeTilt } : {}),
           };
         }
       });

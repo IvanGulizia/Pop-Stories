@@ -90,6 +90,7 @@ export interface ColliderBounds {
 export type BehaviorType =
   | 'physics'
   | 'draggable'
+  | 'interactive_puppet'
   | 'auto_destroy'
   | 'constant_velocity'
   | 'look_at'
@@ -150,8 +151,12 @@ export interface LookAtBehaviorConfig extends BaseBehaviorConfig {
   targetEntityId?: string;
   targetEntityType?: EntityType;
   targetTag?: string;
+  lookMode?: 'rotate' | 'pupil_orbit'; // défaut 'rotate' ; 'pupil_orbit' déplace l'enfant dans un rayon autour de son attache
   rotationOffset: number; // degrees, default 0
   smoothSpeed: number;    // 0 = instant, >0 = smooth lerp speed
+  maxAngle?: number;      // 0 ou >= 180 = libre 360° ; sinon cône max ±maxAngle° (ex: tête ±35°)
+  orbitRadius?: number;   // px (mode 'pupil_orbit'), rayon horizontal max, défaut 8
+  orbitRadiusY?: number;  // px optionnel (mode 'pupil_orbit'), rayon vertical max, défaut = orbitRadius
 }
 
 export interface FollowBehaviorConfig extends BaseBehaviorConfig {
@@ -279,13 +284,18 @@ export interface FleeBehaviorConfig extends BaseBehaviorConfig {
   targetEntityId?: string;
   targetEntityType?: EntityType;
   targetTag?: string;
-  speed: number;           // px/s, default 160
+  speed: number;           // px/s, default 160 (0 = réaction sur place uniquement)
   fleeRadius: number;      // rayon de fuite en px (0 = toujours fuir), default 220
   axisMode?: 'free_2d' | 'horizontal'; // 2D libre ou sol horizontal
   acceleration?: number;   // 0.05..1
   damping?: number;        // 0..0.98
   flipOnMove?: boolean;
   flipInvert?: boolean;
+  pauseWhileDragged?: boolean; // défaut true : ne pas fuir pendant que le joueur tient l'entité
+  stateBindings?: {
+    calmStateId?: StateId;
+    scaredStateId?: StateId;
+  };
 }
 
 export interface HealthBehaviorConfig extends BaseBehaviorConfig {
@@ -301,9 +311,67 @@ export interface HealthBehaviorConfig extends BaseBehaviorConfig {
   deathStateId?: StateId;
 }
 
+export interface InteractivePuppetDragOverRule {
+  id: string;
+  targetMode: 'entity' | 'type' | 'tag';
+  targetEntityId?: string;
+  targetEntityType?: EntityType;
+  targetTag?: string;
+  stateId?: StateId;
+}
+
+export interface InteractivePuppetBehaviorConfig extends BaseBehaviorConfig {
+  type: 'interactive_puppet';
+  // Drag & Lancer
+  throwable?: boolean;
+  maxThrowSpeed?: number;
+  // Balancement & Pendule (les deux pistes : auto-tilt physique et/ou états visuels)
+  swingMode?: 'pendulum' | 'states' | 'both';
+  pendulumIntensity?: number;   // 0.2..2.5, défaut 1.0
+  pendulumMaxAngle?: number;    // degrés max 5..75, défaut 32
+  pendulumSmoothing?: number;   // 0.05..0.5, défaut 0.18
+  swingSpeedThreshold?: number; // px/s, défaut 320
+  shakeThreshold?: number;      // inversions rapides pour état Secousse, défaut 3
+  // Seuils de distance curseur (avant hover)
+  approachFarDistance?: number;  // px, défaut 280
+  approachNearDistance?: number; // px, défaut 120
+  // Temporisations & Chute
+  hoverEnterDuration?: number;   // s, défaut 0.18
+  hoverDwellDelay?: number;      // s, défaut 1.5
+  hoverExitDuration?: number;    // s, défaut 0.2
+  dragStartDuration?: number;    // s, défaut 0.18
+  dragDwellDelay?: number;       // s, défaut 2.0
+  dragReleaseDuration?: number;  // s, défaut 0.2
+  minFallHeight?: number;        // px, défaut 20
+  landDuration?: number;         // s, défaut 0.18
+  // Détection drag au-dessus d'autres entités / tags
+  dragOverTargets?: InteractivePuppetDragOverRule[];
+  // Liaisons automatiques d'états visuels (avec garde-fou non-écrasant)
+  stateBindings?: {
+    idleStateId?: StateId;
+    approachFarStateId?: StateId;
+    approachNearStateId?: StateId;
+    hoverEnterStateId?: StateId;
+    hoverStateId?: StateId;
+    hoverDwellStateId?: StateId;
+    hoverExitStateId?: StateId;
+    dragStartStateId?: StateId;
+    dragStateId?: StateId;
+    dragDwellStateId?: StateId;
+    swingStateId?: StateId;
+    swingLeftStateId?: StateId;
+    swingRightStateId?: StateId;
+    shakeStateId?: StateId;
+    dragReleaseStateId?: StateId;
+    fallStateId?: StateId;
+    landStateId?: StateId;
+  };
+}
+
 export type EntityBehavior =
   | PhysicsBehaviorConfig
   | DraggableBehaviorConfig
+  | InteractivePuppetBehaviorConfig
   | AutoDestroyBehaviorConfig
   | ConstantVelocityBehaviorConfig
   | LookAtBehaviorConfig
@@ -389,6 +457,7 @@ export interface Entity {
   colliderReferenceStateId?: StateId; // État de référence pour la géométrie du collider partagé
   sharedColliderType?: ColliderType;
   sharedColliderBounds?: ColliderBounds;
+  runtimeTilt?: number; // Inclinaison pendulaire transitoire en mode Play (non sauvegardée en Édition)
 }
 
 export type TriggerType =
