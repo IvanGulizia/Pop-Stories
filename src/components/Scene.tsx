@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useSceneStore } from '../store/useSceneStore';
+import { useSceneStore, EMPTY_LIST, EMPTY_RECORD } from '../store/useSceneStore';
 import { VectorPath } from '../types';
 import { Apple } from './Apple';
 import { Plant } from './Plant';
@@ -55,7 +55,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
   const selectedLayerId = useSceneStore((state) => state.selectedLayerId);
   const setLayerVectorPaths = useSceneStore((state) => state.setLayerVectorPaths);
-  const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
+  const customArchetypes = useSceneStore((state) => state.customArchetypes || EMPTY_RECORD);
   const selectEntity = useSceneStore((state) => state.selectEntity);
   const spawnEntity = useSceneStore((state) => state.spawnEntity);
   const settings = useSceneStore((state) => state.settings);
@@ -260,7 +260,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
     }
   };
 
-  const layerGroups = useSceneStore((state) => state.layerGroups || []);
+  const layerGroups = useSceneStore((state) => state.layerGroups || EMPTY_LIST);
 
   const backgroundGroups = layerGroups.filter((g) => g.kind === 'background');
   const colliderGroups = layerGroups.filter((g) => g.kind === 'collider');
@@ -533,9 +533,13 @@ function DirectCanvasDrawingOverlay({
     : Math.max(12, strokeWidth * 1.4);
 
   useEffect(() => {
-    const paths: VectorPath[] = layer.vectorPaths || [];
+    const paths: VectorPath[] = layer.vectorPaths || EMPTY_LIST;
     latestPathsRef.current = paths;
-    setSelectedIds((prev) => prev.filter((id) => paths.some((p) => p.id === id)));
+    setSelectedIds((prev) => {
+      if (prev.length === 0) return prev;
+      const next = prev.filter((id) => paths.some((p) => p.id === id));
+      return next.length === prev.length ? prev : next;
+    });
   }, [layer.vectorPaths]);
 
   // Nettoyer une polyligne en cours si on change d'outil ou de calque

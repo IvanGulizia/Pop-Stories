@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useSceneStore } from '../store/useSceneStore';
+import { useSceneStore, EMPTY_LIST } from '../store/useSceneStore';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 
 interface CreateEntityModalProps {
@@ -33,7 +33,7 @@ export function CreateEntityModal({ isOpen, onClose }: CreateEntityModalProps) {
       onEntityTagsChange={setTagInput}
       showTagsInput={showTagsSystem}
       saveButtonLabel="Ajouter à la scène"
-      initialPaths={[]}
+      initialPaths={EMPTY_LIST}
       initialColliderType="box"
       enableFlipbook={true}
       onSave={(

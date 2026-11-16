@@ -24,7 +24,7 @@ import {
   CustomParticlePreset,
   CustomParticleUsageMode,
 } from '../types';
-import { useSceneStore } from '../store/useSceneStore';
+import { useSceneStore, EMPTY_LIST, EMPTY_RECORD } from '../store/useSceneStore';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { ParticleEditorModal } from './ParticleEditorModal';
 import { InteractivePuppetControls } from './InteractivePuppetControls';
@@ -59,17 +59,22 @@ import {
 interface BehaviorManagerProps {
   entity: Entity;
   selectedStateId?: string;
+  onEditStateDrawing?: (stateId: string) => void;
 }
 
-export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProps) {
+export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }: BehaviorManagerProps) {
   const updateEntityBehaviors = useSceneStore((state) => state.updateEntityBehaviors);
   const updateStateBehaviorOverride = useSceneStore((state) => state.updateStateBehaviorOverride);
   const removeStateBehaviorOverride = useSceneStore((state) => state.removeStateBehaviorOverride);
+  const addStateToEntity = useSceneStore((state) => state.addStateToEntity);
+  const addStateFolder = useSceneStore((state) => state.addStateFolder);
+  const updateEntityDetails = useSceneStore((state) => state.updateEntityDetails);
+  const updateStateProperties = useSceneStore((state) => state.updateStateProperties);
   const entities = useSceneStore((state) => state.entities);
-  const customArchetypes = useSceneStore((state) => state.customArchetypes);
-  const rules = useSceneStore((state) => state.rules);
-  const layerGroups = useSceneStore((state) => state.layerGroups || []);
-  const customParticles = useSceneStore((state) => state.customParticles || []);
+  const customArchetypes = useSceneStore((state) => state.customArchetypes || EMPTY_RECORD);
+  const rules = useSceneStore((state) => state.rules || EMPTY_LIST);
+  const layerGroups = useSceneStore((state) => state.layerGroups || EMPTY_LIST);
+  const customParticles = useSceneStore((state) => state.customParticles || EMPTY_LIST);
   const addCustomParticle = useSceneStore((state) => state.addCustomParticle);
   const updateCustomParticle = useSceneStore((state) => state.updateCustomParticle);
   const deleteCustomParticle = useSceneStore((state) => state.deleteCustomParticle);
@@ -141,6 +146,19 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
 
   const generateBehaviorId = (type: BehaviorType) => {
     return `${type}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  };
+
+  const handleQuickCreateState = (suggestedName: string, folderName?: string) => {
+    const cleanBase = suggestedName.trim() || 'État';
+    const existingNames = new Set(stateList.map((s) => s.name.trim().toLowerCase()));
+    let candidate = cleanBase;
+    let idx = 2;
+    while (existingNames.has(candidate.toLowerCase())) {
+      candidate = `${cleanBase} ${idx}`;
+      idx += 1;
+    }
+    const folderId = folderName ? addStateFolder(entity.id, folderName) : undefined;
+    return addStateToEntity(entity.id, candidate, folderId);
   };
 
   const handleAddBehavior = (type: BehaviorType) => {
@@ -512,10 +530,9 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
         </div>
       )}
 
-      {/* Liste des Composants attachés */}
-      {baseBehaviors.length > 0 && (
-        <div className="space-y-2">
-          {baseBehaviors.map((behavior) => {
+      {/* Liste des Composants attachés (+ carte Hitbox & Collider par défaut) */}
+      <div className="space-y-2">
+        {baseBehaviors.map((behavior) => {
             const isExpanded = expandedBehaviorId === behavior.id;
             const overrides = targetState?.behaviorOverrides || {};
             const override = overrides[behavior.id];
@@ -687,14 +704,203 @@ export function BehaviorManager({ entity, selectedStateId }: BehaviorManagerProp
                         deleteCustomParticle(presetId);
                         invalidateCustomParticleSprite(presetId);
                       },
+                      onQuickCreateState: handleQuickCreateState,
+                      onEditStateDrawing,
                     })}
                   </div>
                 )}
               </div>
             );
           })}
-        </div>
-      )}
+
+        {/* Carte par défaut : Hitbox & Collider (toujours présente dans Composants & Physique) */}
+        {(() => {
+          const isHitboxExpanded = expandedBehaviorId === '__hitbox__';
+          const refStateId =
+            entity.colliderReferenceStateId ||
+            Object.keys(entity.states)[0] ||
+            entity.currentStateId;
+          const refState = entity.states[refStateId];
+          const activeMode = targetState?.colliderBounds?.mode || entity.colliderBounds?.mode || 'auto';
+          const activeShape =
+            targetState?.colliderBounds?.shape ||
+            targetState?.colliderType ||
+            entity.colliderBounds?.shape ||
+            entity.colliderType ||
+            (entity.type === 'apple' ? 'circle' : 'box');
+          const shapeLabel =
+            activeShape === 'circle' ? 'Cercle' : activeShape === 'polygon' ? 'Polyligne' : 'Rectangle';
+          const modeLabel = activeMode === 'manual' ? 'Manuel' : 'Auto';
+          const isOverridden = Boolean(targetState?.overrideCollider);
+
+          return (
+            <div className="bg-white rounded-2xl border border-slate-200 hover:border-slate-300 transition-all shadow-2xs overflow-hidden">
+              <div
+                onClick={() => setExpandedBehaviorId(isHitboxExpanded ? null : '__hitbox__')}
+                className="p-2.5 flex items-center justify-between gap-2 cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <button
+                    type="button"
+                    className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    {isHitboxExpanded ? (
+                      <ChevronDown className="w-4 h-4" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4" />
+                    )}
+                  </button>
+                  <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center shrink-0">
+                    <Shield className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 truncate">
+                      <span>Hitbox & Collider</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 flex items-center gap-1 truncate">
+                      {entity.sharedCollider ? (
+                        <span className="text-emerald-700 font-semibold">
+                          Partagée ({refState?.name || 'Réf'}) • {modeLabel}
+                        </span>
+                      ) : (
+                        <span>
+                          Par défaut • {modeLabel} • {shapeLabel}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {onEditStateDrawing && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditStateDrawing(activeStateId || entity.currentStateId);
+                    }}
+                    className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[10px] font-bold cursor-pointer shrink-0"
+                    title="Configurer la hitbox dans l'atelier de dessin"
+                  >
+                    Configurer
+                  </button>
+                )}
+              </div>
+
+              {isHitboxExpanded && (
+                <div className="px-3 pb-3 pt-2 border-t border-slate-100 bg-slate-50/50 space-y-2 text-xs">
+                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-700 text-xs">Hitbox de l'état « {targetState?.name} »</div>
+                      <div className="text-[10px] text-emerald-700 font-semibold">
+                        {modeLabel} • {shapeLabel}
+                      </div>
+                    </div>
+                    {onEditStateDrawing && (
+                      <button
+                        type="button"
+                        onClick={() => onEditStateDrawing(activeStateId || entity.currentStateId)}
+                        className="px-2.5 py-1 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-[11px] font-bold cursor-pointer shadow-2xs shrink-0"
+                      >
+                        Ajuster dans Dessin
+                      </button>
+                    )}
+                  </div>
+
+                  {stateList.length > 1 && (
+                    <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="font-bold text-slate-700 text-xs">
+                            Collider commun entre les états
+                          </div>
+                          <div className="text-[10px] text-slate-400 leading-snug">
+                            Conserve la même hitbox quand l'état change (évite les boucles Enter/Exit).
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(entity.sharedCollider)}
+                          onChange={(e) =>
+                            updateEntityDetails(entity.id, {
+                              sharedCollider: e.target.checked,
+                              colliderReferenceStateId:
+                                entity.colliderReferenceStateId ||
+                                Object.keys(entity.states)[0] ||
+                                entity.currentStateId,
+                            })
+                          }
+                          className="w-4 h-4 accent-emerald-600 rounded cursor-pointer shrink-0"
+                        />
+                      </div>
+
+                      {entity.sharedCollider && (
+                        <div className="space-y-2 pt-2 border-t border-slate-100">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-semibold text-slate-600">
+                              État de référence :
+                            </span>
+                            <select
+                              value={refStateId}
+                              onChange={(e) =>
+                                updateEntityDetails(entity.id, {
+                                  colliderReferenceStateId: e.target.value,
+                                })
+                              }
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 max-w-[165px]"
+                            >
+                              {stateList.map((st) => (
+                                <option key={st.id} value={st.id}>
+                                  {st.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {targetState && targetState.id !== refStateId && (
+                            <div className="p-2 bg-indigo-50/50 rounded-xl border border-indigo-200/80 space-y-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <div>
+                                  <div className="text-[11px] font-bold text-indigo-950">
+                                    Surcharger sur « {targetState.name} »
+                                  </div>
+                                  <div className="text-[10px] text-slate-500">
+                                    Utiliser une hitbox propre pour cet état uniquement
+                                  </div>
+                                </div>
+                                <input
+                                  type="checkbox"
+                                  checked={isOverridden}
+                                  onChange={(e) =>
+                                    updateStateProperties(entity.id, targetState.id, {
+                                      overrideCollider: e.target.checked,
+                                    })
+                                  }
+                                  className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
+                                />
+                              </div>
+                              {isOverridden && onEditStateDrawing && (
+                                <div className="flex justify-end pt-1 border-t border-indigo-100">
+                                  <button
+                                    type="button"
+                                    onClick={() => onEditStateDrawing(targetState.id)}
+                                    className="px-2 py-0.5 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-[10px] font-bold cursor-pointer"
+                                  >
+                                    Modifier cette hitbox
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </div>
 
       {/* Modal / Sélecteur d'Ajout de Composant */}
       {isAddModalOpen && (
@@ -1132,6 +1338,8 @@ function renderBehaviorControls({
   onOpenParticleDrawer,
   onOpenParticleEditor,
   onDeleteCustomParticle,
+  onQuickCreateState,
+  onEditStateDrawing,
 }: {
   behavior: EntityBehavior;
   override?: BehaviorOverride;
@@ -1146,6 +1354,8 @@ function renderBehaviorControls({
   onOpenParticleDrawer: (editingPreset?: CustomParticlePreset) => void;
   onOpenParticleEditor: () => void;
   onDeleteCustomParticle: (presetId: string) => void;
+  onQuickCreateState: (suggestedName: string, folderName?: string) => string;
+  onEditStateDrawing?: (stateId: string) => void;
 }) {
   const update = (partial: any) => {
     if (isOverridden) {
@@ -1295,6 +1505,8 @@ function renderBehaviorControls({
           targetEntityOptions={targetEntityOptions}
           entityTypeOptions={entityTypeOptions}
           availableTags={availableTags}
+          onQuickCreateState={onQuickCreateState}
+          onEditStateDrawing={onEditStateDrawing}
         />
       );
     }
@@ -1731,112 +1943,112 @@ function renderBehaviorControls({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-indigo-100">
                 <span className="text-[11px] font-bold text-slate-700">Repos (Idle)</span>
-                <select
-                  value={b.stateBindings?.idleStateId || ''}
-                  onChange={(e) =>
-                    update({
-                      stateBindings: {
-                        ...(b.stateBindings || {}),
-                        idleStateId: e.target.value || undefined,
-                      },
-                    })
-                  }
-                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[155px]"
-                >
-                  <option value="">-- Non défini --</option>
-                  {stateList.map((st) => (
-                    <option key={st.id} value={st.id}>
-                      {st.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-1 shrink-0">
+                  <select
+                    value={b.stateBindings?.idleStateId || ''}
+                    onChange={(e) =>
+                      update({
+                        stateBindings: {
+                          ...(b.stateBindings || {}),
+                          idleStateId: e.target.value || undefined,
+                        },
+                      })
+                    }
+                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[140px]"
+                  >
+                    <option value="">-- Non défini --</option>
+                    {stateList.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const createdId = onQuickCreateState('Idle', 'Contrôleur');
+                      if (createdId) update({ stateBindings: { ...(b.stateBindings || {}), idleStateId: createdId } });
+                    }}
+                    className="p-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg cursor-pointer"
+                    title="Créer et lier l'état « Idle »"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                  {b.stateBindings?.idleStateId && onEditStateDrawing && (
+                    <button
+                      type="button"
+                      onClick={() => onEditStateDrawing(b.stateBindings!.idleStateId!)}
+                      className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+                      title="Dessiner cet état"
+                    >
+                      <Paintbrush className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-indigo-100">
                 <span className="text-[11px] font-bold text-slate-700">Marche / Mouvement</span>
-                <select
-                  value={b.stateBindings?.moveStateId || ''}
-                  onChange={(e) =>
-                    update({
-                      stateBindings: {
-                        ...(b.stateBindings || {}),
-                        moveStateId: e.target.value || undefined,
-                      },
-                    })
-                  }
-                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[155px]"
-                >
-                  <option value="">-- Non défini --</option>
-                  {stateList.map((st) => (
-                    <option key={st.id} value={st.id}>
-                      {st.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-1 shrink-0">
+                  <select
+                    value={b.stateBindings?.moveStateId || ''}
+                    onChange={(e) =>
+                      update({
+                        stateBindings: {
+                          ...(b.stateBindings || {}),
+                          moveStateId: e.target.value || undefined,
+                        },
+                      })
+                    }
+                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[140px]"
+                  >
+                    <option value="">-- Non défini --</option>
+                    {stateList.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const createdId = onQuickCreateState('Walk', 'Contrôleur');
+                      if (createdId) update({ stateBindings: { ...(b.stateBindings || {}), moveStateId: createdId } });
+                    }}
+                    className="p-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg cursor-pointer"
+                    title="Créer et lier l'état « Walk »"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                  {b.stateBindings?.moveStateId && onEditStateDrawing && (
+                    <button
+                      type="button"
+                      onClick={() => onEditStateDrawing(b.stateBindings!.moveStateId!)}
+                      className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+                      title="Dessiner cet état"
+                    >
+                      <Paintbrush className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               {b.mode === 'platformer' && (
                 <>
                   <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-indigo-100">
                     <span className="text-[11px] font-bold text-slate-700">Saut (Montée)</span>
-                    <select
-                      value={b.stateBindings?.jumpStateId || ''}
-                      onChange={(e) =>
-                        update({
-                          stateBindings: {
-                            ...(b.stateBindings || {}),
-                            jumpStateId: e.target.value || undefined,
-                          },
-                        })
-                      }
-                      className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[155px]"
-                    >
-                      <option value="">-- Non défini --</option>
-                      {stateList.map((st) => (
-                        <option key={st.id} value={st.id}>
-                          {st.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-indigo-100">
-                    <span className="text-[11px] font-bold text-slate-700">Chute (Descente)</span>
-                    <select
-                      value={b.stateBindings?.fallStateId || ''}
-                      onChange={(e) =>
-                        update({
-                          stateBindings: {
-                            ...(b.stateBindings || {}),
-                            fallStateId: e.target.value || undefined,
-                          },
-                        })
-                      }
-                      className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[155px]"
-                    >
-                      <option value="">-- Non défini --</option>
-                      {stateList.map((st) => (
-                        <option key={st.id} value={st.id}>
-                          {st.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="bg-white p-1.5 rounded-lg border border-indigo-100 space-y-1.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-bold text-slate-700">Atterrissage (Land)</span>
+                    <div className="flex items-center gap-1 shrink-0">
                       <select
-                        value={b.stateBindings?.landStateId || ''}
+                        value={b.stateBindings?.jumpStateId || ''}
                         onChange={(e) =>
                           update({
                             stateBindings: {
                               ...(b.stateBindings || {}),
-                              landStateId: e.target.value || undefined,
+                              jumpStateId: e.target.value || undefined,
                             },
                           })
                         }
-                        className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[155px]"
+                        className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[140px]"
                       >
                         <option value="">-- Non défini --</option>
                         {stateList.map((st) => (
@@ -1845,6 +2057,121 @@ function renderBehaviorControls({
                           </option>
                         ))}
                       </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const createdId = onQuickCreateState('Jump', 'Contrôleur');
+                          if (createdId) update({ stateBindings: { ...(b.stateBindings || {}), jumpStateId: createdId } });
+                        }}
+                        className="p-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg cursor-pointer"
+                        title="Créer et lier l'état « Jump »"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                      {b.stateBindings?.jumpStateId && onEditStateDrawing && (
+                        <button
+                          type="button"
+                          onClick={() => onEditStateDrawing(b.stateBindings!.jumpStateId!)}
+                          className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+                          title="Dessiner cet état"
+                        >
+                          <Paintbrush className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-indigo-100">
+                    <span className="text-[11px] font-bold text-slate-700">Chute (Descente)</span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <select
+                        value={b.stateBindings?.fallStateId || ''}
+                        onChange={(e) =>
+                          update({
+                            stateBindings: {
+                              ...(b.stateBindings || {}),
+                              fallStateId: e.target.value || undefined,
+                            },
+                          })
+                        }
+                        className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[140px]"
+                      >
+                        <option value="">-- Non défini --</option>
+                        {stateList.map((st) => (
+                          <option key={st.id} value={st.id}>
+                            {st.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const createdId = onQuickCreateState('Fall', 'Contrôleur');
+                          if (createdId) update({ stateBindings: { ...(b.stateBindings || {}), fallStateId: createdId } });
+                        }}
+                        className="p-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg cursor-pointer"
+                        title="Créer et lier l'état « Fall »"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                      {b.stateBindings?.fallStateId && onEditStateDrawing && (
+                        <button
+                          type="button"
+                          onClick={() => onEditStateDrawing(b.stateBindings!.fallStateId!)}
+                          className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+                          title="Dessiner cet état"
+                        >
+                          <Paintbrush className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-1.5 rounded-lg border border-indigo-100 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold text-slate-700">Atterrissage (Land)</span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <select
+                          value={b.stateBindings?.landStateId || ''}
+                          onChange={(e) =>
+                            update({
+                              stateBindings: {
+                                ...(b.stateBindings || {}),
+                                landStateId: e.target.value || undefined,
+                              },
+                            })
+                          }
+                          className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[140px]"
+                        >
+                          <option value="">-- Non défini --</option>
+                          {stateList.map((st) => (
+                            <option key={st.id} value={st.id}>
+                              {st.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const createdId = onQuickCreateState('Land', 'Contrôleur');
+                            if (createdId) update({ stateBindings: { ...(b.stateBindings || {}), landStateId: createdId } });
+                          }}
+                          className="p-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg cursor-pointer"
+                          title="Créer et lier l'état « Land »"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                        {b.stateBindings?.landStateId && onEditStateDrawing && (
+                          <button
+                            type="button"
+                            onClick={() => onEditStateDrawing(b.stateBindings!.landStateId!)}
+                            className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+                            title="Dessiner cet état"
+                          >
+                            <Paintbrush className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                     {b.stateBindings?.landStateId && (
                       <div className="flex items-center gap-2 pt-1 border-t border-indigo-50">
@@ -2788,47 +3115,93 @@ function renderBehaviorControls({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-rose-100">
                 <span className="text-[11px] font-bold text-slate-700">État Calme (Hors rayon)</span>
-                <select
-                  value={b.stateBindings?.calmStateId || ''}
-                  onChange={(e) =>
-                    update({
-                      stateBindings: {
-                        ...(b.stateBindings || {}),
-                        calmStateId: e.target.value || undefined,
-                      },
-                    })
-                  }
-                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[155px]"
-                >
-                  <option value="">-- Non défini --</option>
-                  {stateList.map((st) => (
-                    <option key={st.id} value={st.id}>
-                      {st.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-1 shrink-0">
+                  <select
+                    value={b.stateBindings?.calmStateId || ''}
+                    onChange={(e) =>
+                      update({
+                        stateBindings: {
+                          ...(b.stateBindings || {}),
+                          calmStateId: e.target.value || undefined,
+                        },
+                      })
+                    }
+                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[140px]"
+                  >
+                    <option value="">-- Non défini --</option>
+                    {stateList.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const createdId = onQuickCreateState('Calme', 'Expressions');
+                      if (createdId) update({ stateBindings: { ...(b.stateBindings || {}), calmStateId: createdId } });
+                    }}
+                    className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg cursor-pointer"
+                    title="Créer et lier l'état « Calme »"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                  {b.stateBindings?.calmStateId && onEditStateDrawing && (
+                    <button
+                      type="button"
+                      onClick={() => onEditStateDrawing(b.stateBindings!.calmStateId!)}
+                      className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+                      title="Dessiner cet état"
+                    >
+                      <Paintbrush className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-rose-100">
                 <span className="text-[11px] font-bold text-slate-700">État Apeuré (Menace proche)</span>
-                <select
-                  value={b.stateBindings?.scaredStateId || ''}
-                  onChange={(e) =>
-                    update({
-                      stateBindings: {
-                        ...(b.stateBindings || {}),
-                        scaredStateId: e.target.value || undefined,
-                      },
-                    })
-                  }
-                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[155px]"
-                >
-                  <option value="">-- Non défini --</option>
-                  {stateList.map((st) => (
-                    <option key={st.id} value={st.id}>
-                      {st.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-1 shrink-0">
+                  <select
+                    value={b.stateBindings?.scaredStateId || ''}
+                    onChange={(e) =>
+                      update({
+                        stateBindings: {
+                          ...(b.stateBindings || {}),
+                          scaredStateId: e.target.value || undefined,
+                        },
+                      })
+                    }
+                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[140px]"
+                  >
+                    <option value="">-- Non défini --</option>
+                    {stateList.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const createdId = onQuickCreateState('Apeuré', 'Expressions');
+                      if (createdId) update({ stateBindings: { ...(b.stateBindings || {}), scaredStateId: createdId } });
+                    }}
+                    className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg cursor-pointer"
+                    title="Créer et lier l'état « Apeuré »"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                  {b.stateBindings?.scaredStateId && onEditStateDrawing && (
+                    <button
+                      type="button"
+                      onClick={() => onEditStateDrawing(b.stateBindings!.scaredStateId!)}
+                      className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+                      title="Dessiner cet état"
+                    >
+                      <Paintbrush className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

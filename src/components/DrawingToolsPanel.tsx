@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useSceneStore, DEFAULT_PROJECT_PALETTE } from '../store/useSceneStore';
+import { useSceneStore, DEFAULT_PROJECT_PALETTE, EMPTY_LIST } from '../store/useSceneStore';
 import { SceneLayer, SceneLayerGroup, UnifiedDrawTool } from '../types';
 import {
   MousePointer,
@@ -42,7 +42,7 @@ export function DrawingToolsPanel({
   onClearLayer,
 }: DrawingToolsPanelProps) {
   const selectedLayerId = useSceneStore((state) => state.selectedLayerId);
-  const layerGroups = useSceneStore((state) => state.layerGroups || []);
+  const layerGroups = useSceneStore((state) => state.layerGroups || EMPTY_LIST);
   const drawingTool = useSceneStore((state) => state.drawingTool);
   const drawingStrokeColor = useSceneStore((state) => state.drawingStrokeColor);
   const drawingFillColor = useSceneStore((state) => state.drawingFillColor);

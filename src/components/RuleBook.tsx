@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useSceneStore } from '../store/useSceneStore';
+import { useSceneStore, EMPTY_LIST, EMPTY_RECORD } from '../store/useSceneStore';
 import {
   TriggerType,
   TriggerPhase,
@@ -290,10 +290,10 @@ interface WizardData {
 
 export function RuleBook() {
   const entities = useSceneStore((state) => state.entities);
-  const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
+  const customArchetypes = useSceneStore((state) => state.customArchetypes || EMPTY_RECORD);
   const rules = useSceneStore((state) => state.rules);
-  const folders = useSceneStore((state) => state.folders || []);
-  const customSounds = useSceneStore((state) => state.customSounds || []);
+  const folders = useSceneStore((state) => state.folders || EMPTY_LIST);
+  const customSounds = useSceneStore((state) => state.customSounds || EMPTY_LIST);
   const addRule = useSceneStore((state) => state.addRule);
   const updateRule = useSceneStore((state) => state.updateRule);
   const deleteRule = useSceneStore((state) => state.deleteRule);
@@ -303,7 +303,7 @@ export function RuleBook() {
   const addFolder = useSceneStore((state) => state.addFolder);
   const deleteFolder = useSceneStore((state) => state.deleteFolder);
   const settings = useSceneStore((state) => state.settings);
-  const customParticles = useSceneStore((state) => state.customParticles || []);
+  const customParticles = useSceneStore((state) => state.customParticles || EMPTY_LIST);
   const addCustomParticle = useSceneStore((state) => state.addCustomParticle);
   const updateCustomParticle = useSceneStore((state) => state.updateCustomParticle);
   const deleteCustomParticle = useSceneStore((state) => state.deleteCustomParticle);
@@ -333,7 +333,7 @@ export function RuleBook() {
   const [newFolderName, setNewFolderName] = useState<string>('');
   const [isSoundModalOpen, setIsSoundModalOpen] = useState<boolean>(false);
   const [playingSoundId, setPlayingSoundId] = useState<string | null>(null);
-  const collapsedRuleIds = useSceneStore((state) => state.collapsedRuleIds || {});
+  const collapsedRuleIds = useSceneStore((state) => state.collapsedRuleIds || EMPTY_RECORD);
   const toggleCollapseRule = useSceneStore((state) => state.toggleRuleCollapse);
 
   // Sound preview helper
@@ -368,7 +368,7 @@ export function RuleBook() {
 
   const entityList = Object.values(entities);
 
-  const layerGroups = useSceneStore((state) => state.layerGroups || []);
+  const layerGroups = useSceneStore((state) => state.layerGroups || EMPTY_LIST);
 
   // Tous les #tags utilisés dans le projet (entités, archétypes, calques collider, règles)
   const allProjectTags = useMemo(() => {

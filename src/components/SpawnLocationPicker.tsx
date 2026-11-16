@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Entity, Size, SpawnLocationMode, SpawnReferenceMode } from '../types';
-import { useSceneStore } from '../store/useSceneStore';
+import { useSceneStore, EMPTY_RECORD, DEFAULT_SCENE_BOUNDS } from '../store/useSceneStore';
 import { EntityMiniPreview } from './EntityMiniPreview';
 import {
   MapPin,
@@ -77,8 +77,8 @@ export function SpawnLocationPicker({
   onCancel,
 }: SpawnLocationPickerProps) {
   const entities = useSceneStore((state) => state.entities);
-  const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
-  const sceneBounds = useSceneStore((state) => state.sceneBounds || { width: 800, height: 500 });
+  const customArchetypes = useSceneStore((state) => state.customArchetypes || EMPTY_RECORD);
+  const sceneBounds = useSceneStore((state) => state.sceneBounds || DEFAULT_SCENE_BOUNDS);
 
   const inferredRefMode: SpawnReferenceMode =
     initialReferenceMode ||

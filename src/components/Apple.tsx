@@ -294,11 +294,11 @@ export function Apple({ entity, style }: AppleProps) {
       onDrag={handleDrag}
       onDragEnd={handleDragEnd}
       animate={{
-        scale: currentState.scale,
-        rotate: currentState.rotation + (appMode === 'play' ? (entity.runtimeTilt || 0) : 0),
+        scale: currentState.scale ?? 1,
+        rotate: (currentState.rotation ?? 0) + (appMode === 'play' ? (entity.runtimeTilt || 0) : 0),
       }}
       transition={appMode === 'play' ? { duration: 0 } : undefined}
-      whileHover={enableHoverScaleAnimation ? { scale: currentState.scale * (isSelected ? 1.0 : 1.03) } : undefined}
+      whileHover={enableHoverScaleAnimation ? { scale: (currentState.scale ?? 1) * (isSelected ? 1.0 : 1.03) } : undefined}
     >
       {/* Hitbox interactive délimitée par le collider vert */}
       <div

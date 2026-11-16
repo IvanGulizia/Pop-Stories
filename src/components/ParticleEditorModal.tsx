@@ -13,7 +13,7 @@ import {
   Flame,
 } from 'lucide-react';
 import { CustomParticlePreset, CustomParticleUsageMode, ParticleShape } from '../types';
-import { useSceneStore } from '../store/useSceneStore';
+import { useSceneStore, EMPTY_LIST } from '../store/useSceneStore';
 import {
   createParticlePool,
   invalidateCustomParticleSprite,
@@ -167,7 +167,7 @@ export function ParticleEditorModal({
   onApply,
   onClose,
 }: ParticleEditorModalProps) {
-  const customParticles = useSceneStore((state) => state.customParticles || []);
+  const customParticles = useSceneStore((state) => state.customParticles || EMPTY_LIST);
   const addCustomParticle = useSceneStore((state) => state.addCustomParticle);
   const updateCustomParticle = useSceneStore((state) => state.updateCustomParticle);
   const deleteCustomParticle = useSceneStore((state) => state.deleteCustomParticle);

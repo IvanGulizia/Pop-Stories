@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useSceneStore } from '../store/useSceneStore';
+import React, { useState, useMemo } from 'react';
+import { useSceneStore, EMPTY_RECORD } from '../store/useSceneStore';
 import { Entity, EntityState } from '../types';
 import {
   Sparkles,
@@ -8,13 +8,16 @@ import {
   Tag,
   X,
   Paintbrush,
-  Hand,
   Layers,
-  Edit3,
   Check,
   Link2,
   Unlink,
   Copy,
+  FolderPlus,
+  Folder,
+  FolderOpen,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { OnionStateOption } from './DrawingCanvas';
@@ -35,7 +38,11 @@ export function Inspector() {
   const setEntityParent = useSceneStore((state) => state.setEntityParent);
   const updateEntityParentOffset = useSceneStore((state) => state.updateEntityParentOffset);
   const detachEntity = useSceneStore((state) => state.detachEntity);
-  const customArchetypes = useSceneStore((state) => state.customArchetypes || {});
+  const addStateFolder = useSceneStore((state) => state.addStateFolder);
+  const updateStateFolder = useSceneStore((state) => state.updateStateFolder);
+  const deleteStateFolder = useSceneStore((state) => state.deleteStateFolder);
+  const setStateFolder = useSceneStore((state) => state.setStateFolder);
+  const customArchetypes = useSceneStore((state) => state.customArchetypes || EMPTY_RECORD);
   const showTagsSystem = useSceneStore((state) => state.settings.showTagsSystem);
 
   const [newTagInput, setNewTagInput] = useState('');
@@ -44,6 +51,12 @@ export function Inspector() {
   const [editingStateDrawingId, setEditingStateDrawingId] = useState<string | null>(null);
   const [renamingStateId, setRenamingStateId] = useState<string | null>(null);
   const [tempStateName, setTempStateName] = useState('');
+  const [showAddFolderInput, setShowAddFolderInput] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [tempFolderName, setTempFolderName] = useState('');
+  const [draggingStateId, setDraggingStateId] = useState<string | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | 'root' | null>(null);
 
   const selectedEntity: Entity | null = selectedEntityId
     ? entities[selectedEntityId] ||
@@ -55,7 +68,7 @@ export function Inspector() {
 
   if (!selectedEntity) {
     return (
-      <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-2xs text-center flex flex-col items-center justify-center min-h-[300px]">
+      <div className="p-6 text-center flex flex-col items-center justify-center min-h-[300px]">
         <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 mb-3 border border-slate-200">
           <Layers className="w-6 h-6 text-slate-400" />
         </div>
@@ -95,20 +108,21 @@ export function Inspector() {
   };
 
   // Prepare onion states for the full screen drawing modal
-  const onionStates: OnionStateOption[] = editingStateDrawingId
-    ? Object.values(selectedEntity.states)
-        .filter((s) => s.id !== editingStateDrawingId)
-        .map((s) => ({
-          id: s.id,
-          name: s.name,
-          vectorPaths: s.vectorPaths || (s.id === selectedEntity.currentStateId ? selectedEntity.vectorPaths : []),
-        }))
-    : [];
+  const onionStates: OnionStateOption[] = useMemo(() => {
+    if (!editingStateDrawingId || !selectedEntity) return [];
+    return Object.values(selectedEntity.states)
+      .filter((s) => s.id !== editingStateDrawingId)
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        vectorPaths: s.vectorPaths || (s.id === selectedEntity.currentStateId ? selectedEntity.vectorPaths : []),
+      }));
+  }, [editingStateDrawingId, selectedEntity]);
 
   const editingState = editingStateDrawingId ? selectedEntity.states[editingStateDrawingId] : null;
 
   return (
-    <div className="bg-white rounded-3xl border border-slate-200 p-4 shadow-2xs space-y-5 text-slate-800">
+    <div className="space-y-5 text-slate-800">
       {/* Modal d'édition de dessin par état en plein écran */}
       {editingStateDrawingId && (() => {
         const refStateId =
@@ -203,11 +217,8 @@ export function Inspector() {
         </div>
 
         <div
-          className="flex items-center gap-2 bg-slate-50 hover:bg-white focus-within:bg-white border border-slate-200 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 rounded-2xl p-2 transition-all"
+          className="flex items-center gap-2 bg-slate-50 hover:bg-white focus-within:bg-white border border-slate-200 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 rounded-2xl px-3 py-2 transition-all"
         >
-          <div className="w-9 h-9 rounded-xl bg-white border border-slate-200/80 flex items-center justify-center text-lg shrink-0 shadow-2xs">
-            {selectedEntity.type === 'plant' ? '🌱' : selectedEntity.type === 'apple' ? '🍎' : '🎨'}
-          </div>
           <div className="flex-1 min-w-0">
             <label className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider">
               Nom de l'objet
@@ -414,410 +425,529 @@ export function Inspector() {
         );
       })()}
 
-      {/* Moteur Physique Arcade 2D & Composants modulaires */}
-      <BehaviorManager entity={selectedEntity} selectedStateId={selectedEntity.currentStateId} />
+      {/* Moteur Physique Arcade 2D & Composants modulaires (inclut Hitbox & Collider) */}
+      <BehaviorManager
+        entity={selectedEntity}
+        selectedStateId={selectedEntity.currentStateId}
+        onEditStateDrawing={(sid) => setEditingStateDrawingId(sid)}
+      />
 
-      {/* Liste des États (A, B, C...) */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-amber-500" /> États ({Object.keys(selectedEntity.states).length})
-          </label>
-          
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleQuickAddState}
-              className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 cursor-pointer shadow-2xs transition-all active:scale-95"
-              title="Ajouter un nouvel état (canvas vide)"
-            >
-              <Plus className="w-3.5 h-3.5" /> Nouvel état
-            </button>
-          </div>
-        </div>
+      {/* Liste des États (A, B, C...) & Dossiers */}
+      {(() => {
+        const allStates = Object.values(selectedEntity.states);
+        const folders = selectedEntity.stateFolders || [];
+        const folderIds = new Set(folders.map((f) => f.id));
+        const rootStates = allStates.filter((st) => !st.folderId || !folderIds.has(st.folderId));
+        const draggedStateObj = draggingStateId ? selectedEntity.states[draggingStateId] : undefined;
+        const canDropToRoot = Boolean(draggedStateObj?.folderId && folderIds.has(draggedStateObj.folderId));
 
-        {/* Formulaire personnalisé de renommage / ajout si souhaité */}
-        {showAddStateInput && (
-          <form onSubmit={handleAddState} className="flex gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200">
-            <input
-              type="text"
-              placeholder="Nom de l'état (ex: C)..."
-              value={newStateName}
-              onChange={(e) => setNewStateName(e.target.value)}
-              className="flex-1 text-xs font-bold border border-slate-300 bg-white text-slate-800 rounded-xl px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              autoFocus
-            />
-            <button
-              type="submit"
-              className="bg-indigo-600 text-white text-xs px-3 py-1.5 rounded-xl font-bold hover:bg-indigo-700 cursor-pointer"
-            >
-              OK
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowAddStateInput(false)}
-              className="text-xs text-slate-500 px-2 py-1.5 hover:bg-slate-200 rounded-xl cursor-pointer"
-            >
-              X
-            </button>
-          </form>
-        )}
+        const extractDroppedStateId = (e: React.DragEvent): string | null => {
+          try {
+            const raw = e.dataTransfer.getData('application/json');
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed?.kind === 'entity-state' && parsed?.entityType === selectedEntity.type && parsed?.stateId) {
+                return parsed.stateId;
+              }
+            }
+          } catch {
+            // fallback to local React state
+          }
+          return draggingStateId;
+        };
 
-        {/* Cartes d'États A, B, C */}
-        <div className="grid grid-cols-2 gap-2.5">
-          {Object.values(selectedEntity.states).map((st) => {
-            const isActive = selectedEntity.currentStateId === st.id;
-            const statePaths = st.vectorPaths || (st.id === selectedEntity.currentStateId ? selectedEntity.vectorPaths : []) || [];
-            const canDelete = Object.keys(selectedEntity.states).length > 1;
+        const handleCreateFolder = (e: React.FormEvent) => {
+          e.preventDefault();
+          const trimmed = newFolderName.trim();
+          if (trimmed) {
+            addStateFolder(selectedEntity.id, trimmed);
+          }
+          setNewFolderName('');
+          setShowAddFolderInput(false);
+        };
 
-            const handleStateDragStart = (e: React.DragEvent) => {
-              const dragData = {
-                kind: 'entity-state',
-                entityId: selectedEntity.id,
-                entityType: selectedEntity.type,
-                stateId: st.id,
-                stateName: st.name,
-              };
-              e.dataTransfer.setData('application/json', JSON.stringify(dragData));
-              e.dataTransfer.setData('text/plain', `${selectedEntity.type}:${st.id}`);
-              e.dataTransfer.effectAllowed = 'copy';
+        const renderStateCard = (st: EntityState) => {
+          const isActive = selectedEntity.currentStateId === st.id;
+          const statePaths = st.vectorPaths || (st.id === selectedEntity.currentStateId ? selectedEntity.vectorPaths : []) || [];
+          const canDelete = allStates.length > 1;
+
+          const handleStateDragStart = (e: React.DragEvent) => {
+            const dragData = {
+              kind: 'entity-state',
+              entityId: selectedEntity.id,
+              entityType: selectedEntity.type,
+              stateId: st.id,
+              stateName: st.name,
             };
+            e.dataTransfer.setData('application/json', JSON.stringify(dragData));
+            e.dataTransfer.setData('text/plain', `${selectedEntity.type}:${st.id}`);
+            e.dataTransfer.effectAllowed = 'copyMove';
+            setDraggingStateId(st.id);
+          };
 
-            return (
-              <div
-                key={st.id}
-                draggable
-                onDragStart={handleStateDragStart}
-                onClick={() => updateEntityState(selectedEntity.id, st.id)}
-                className={`p-3 rounded-2xl border transition-all cursor-grab active:cursor-grabbing flex flex-col items-center justify-between gap-2 relative group ${
-                  isActive
-                    ? 'bg-indigo-50/90 border-indigo-500 shadow-xs ring-2 ring-indigo-500/20'
-                    : 'bg-slate-50/80 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
-                }`}
-                title="Cliquer pour activer cet état • Glissez sur une case de règle"
-              >
-                {/* Boutons Dupliquer & Supprimer état */}
-                <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const newId = duplicateStateInEntity(selectedEntity.id, st.id);
-                      if (newId) updateEntityState(selectedEntity.id, newId);
-                    }}
-                    className="text-slate-400 hover:text-indigo-600 p-1 rounded-md hover:bg-indigo-50 cursor-pointer"
-                    title="Dupliquer cet état (avec son dessin et ses overrides)"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                  </button>
-                  {canDelete && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeStateFromEntity(selectedEntity.id, st.id);
-                      }}
-                      className="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 cursor-pointer"
-                      title="Supprimer cet état"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
+          const handleStateDragEnd = () => {
+            setDraggingStateId(null);
+            setDragOverFolderId(null);
+          };
 
-                {/* Nom de l'état (avec possibilité de renommage) */}
-                {renamingStateId === st.id ? (
-                  <div
-                    onClick={(e) => e.stopPropagation()}
-                    className="flex items-center gap-1 w-full"
-                  >
-                    <input
-                      type="text"
-                      value={tempStateName}
-                      onChange={(e) => setTempStateName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (tempStateName.trim()) {
-                            updateStateProperties(selectedEntity.id, st.id, { name: tempStateName.trim() });
-                          }
-                          setRenamingStateId(null);
-                        } else if (e.key === 'Escape') {
-                          setRenamingStateId(null);
-                        }
-                      }}
-                      autoFocus
-                      onFocus={(e) => e.target.select()}
-                      className="text-xs font-bold bg-white text-slate-800 border border-indigo-300 rounded-lg px-1.5 py-0.5 w-full outline-none focus:ring-1 focus:ring-indigo-500 shadow-2xs"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (tempStateName.trim()) {
-                          updateStateProperties(selectedEntity.id, st.id, { name: tempStateName.trim() });
-                        }
-                        setRenamingStateId(null);
-                      }}
-                      className="p-1 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 cursor-pointer shrink-0"
-                      title="Valider le nom"
-                    >
-                      <Check className="w-3 h-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRenamingStateId(null)}
-                      className="p-1 text-slate-400 hover:bg-slate-200 rounded-md cursor-pointer shrink-0"
-                      title="Annuler"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ) : (
-                  <div
-                    onClick={(e) => e.stopPropagation()}
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      setRenamingStateId(st.id);
-                      setTempStateName(st.name);
-                    }}
-                    className="flex items-center gap-1 max-w-full cursor-text hover:text-indigo-600 group/name select-text"
-                    title="Double-cliquez pour renommer cet état"
-                  >
-                    <span
-                      className={`text-xs font-black tracking-tight truncate ${
-                        isActive ? 'text-indigo-900' : 'text-slate-700'
-                      } group-hover/name:text-indigo-600 underline decoration-dotted decoration-slate-300 underline-offset-2`}
-                    >
-                      {st.name}
-                    </span>
-                  </div>
-                )}
-
-                {/* Visual Thumbnail */}
-                <div
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    setEditingStateDrawingId(st.id);
-                  }}
-                  className="w-14 h-14 bg-white rounded-xl border border-slate-200 flex items-center justify-center p-1.5 relative overflow-hidden shadow-2xs hover:border-indigo-400 cursor-pointer"
-                  title="Double-cliquez sur le dessin pour modifier"
-                >
-                  {statePaths.length > 0 ? (
-                    <svg viewBox="0 0 200 200" className="w-full h-full pointer-events-none">
-                      {(() => {
-                        const stLayers = st.drawingLayers || (st.id === selectedEntity.currentStateId ? selectedEntity.drawingLayers : undefined);
-                        if (!stLayers || stLayers.length === 0) {
-                          return statePaths.map((p) => (
-                            <path
-                              key={p.id}
-                              d={p.d}
-                              stroke={p.stroke}
-                              strokeWidth={p.strokeWidth}
-                              fill={p.fill || 'none'}
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          ));
-                        }
-                        const fallbackLayerId = stLayers[stLayers.length - 1]?.id || 'layer-1';
-                        const layerIds = new Set(stLayers.map((l) => l.id));
-                        return [...stLayers].reverse().map((layer) => {
-                          if (!layer.visible) return null;
-                          const layerPaths = statePaths.filter((p) => {
-                            const resolvedId = p.layerId && layerIds.has(p.layerId) ? p.layerId : fallbackLayerId;
-                            return resolvedId === layer.id;
-                          });
-                          return (
-                            <g key={layer.id} opacity={layer.opacity ?? 1}>
-                              {layerPaths.map((p) => (
-                                <path
-                                  key={p.id}
-                                  d={p.d}
-                                  stroke={p.stroke}
-                                  strokeWidth={p.strokeWidth}
-                                  fill={p.fill || 'none'}
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              ))}
-                            </g>
-                          );
-                        });
-                      })()}
-                    </svg>
-                  ) : (
-                    <span className="text-[10px] text-slate-400 font-medium italic">
-                      Vide
-                    </span>
-                  )}
-                  {(st.frames?.length || 0) > 1 && (
-                    <span
-                      className="absolute bottom-0.5 right-0.5 bg-violet-600/90 text-white text-[9px] font-mono font-bold px-1 rounded shadow-2xs pointer-events-none"
-                      title={`Animation Flipbook : ${st.frames?.length} frames (${st.frameRate || 8} FPS)`}
-                    >
-                      🎞️{st.frames?.length}
-                    </span>
-                  )}
-                </div>
-
-                {/* Bouton Dessiner cet état */}
+          return (
+            <div
+              key={st.id}
+              draggable
+              onDragStart={handleStateDragStart}
+              onDragEnd={handleStateDragEnd}
+              onClick={() => updateEntityState(selectedEntity.id, st.id)}
+              className={`p-3 rounded-2xl border transition-all cursor-grab active:cursor-grabbing flex flex-col items-center justify-between gap-2 relative group ${
+                isActive
+                  ? 'bg-indigo-50/90 border-indigo-500 shadow-xs ring-2 ring-indigo-500/20'
+                  : 'bg-slate-50/80 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+              }`}
+              title="Cliquer pour activer • Glisser sur une case de règle ou dans un dossier"
+            >
+              {/* Boutons Dupliquer & Supprimer état */}
+              <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setEditingStateDrawingId(st.id);
+                    const newId = duplicateStateInEntity(selectedEntity.id, st.id);
+                    if (newId) updateEntityState(selectedEntity.id, newId);
                   }}
-                  className="w-full py-1 px-2 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 bg-white hover:bg-indigo-100/70 border border-indigo-200 rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                  title="Modifier le dessin de cet état"
+                  className="text-slate-400 hover:text-indigo-600 p-1 rounded-md hover:bg-indigo-50 cursor-pointer"
+                  title="Dupliquer cet état (avec son dessin et ses overrides)"
                 >
-                  <Paintbrush className="w-3 h-3 text-indigo-600" /> Dessiner
+                  <Copy className="w-3.5 h-3.5" />
                 </button>
+                {canDelete && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeStateFromEntity(selectedEntity.id, st.id);
+                    }}
+                    className="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 cursor-pointer"
+                    title="Supprimer cet état"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
-            );
-          })}
-        </div>
 
-        {/* Option Collider unifié & Surcharge par état */}
-        <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
-          {Object.keys(selectedEntity.states).length > 1 && (
-            <>
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="font-bold text-slate-700 text-xs">
-                    Collider commun entre les états
-                  </div>
-                  <div className="text-[10px] text-slate-400 leading-snug">
-                    Conserve la même hitbox quand l'état change (évite les boucles Enter/Exit).
-                  </div>
+              {/* Nom de l'état (avec possibilité de renommage) */}
+              {renamingStateId === st.id ? (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-1 w-full"
+                >
+                  <input
+                    type="text"
+                    value={tempStateName}
+                    onChange={(e) => setTempStateName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (tempStateName.trim()) {
+                          updateStateProperties(selectedEntity.id, st.id, { name: tempStateName.trim() });
+                        }
+                        setRenamingStateId(null);
+                      } else if (e.key === 'Escape') {
+                        setRenamingStateId(null);
+                      }
+                    }}
+                    autoFocus
+                    onFocus={(e) => e.target.select()}
+                    className="text-xs font-bold bg-white text-slate-800 border border-indigo-300 rounded-lg px-1.5 py-0.5 w-full outline-none focus:ring-1 focus:ring-indigo-500 shadow-2xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (tempStateName.trim()) {
+                        updateStateProperties(selectedEntity.id, st.id, { name: tempStateName.trim() });
+                      }
+                      setRenamingStateId(null);
+                    }}
+                    className="p-1 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 cursor-pointer shrink-0"
+                    title="Valider le nom"
+                  >
+                    <Check className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRenamingStateId(null)}
+                    className="p-1 text-slate-400 hover:bg-slate-200 rounded-md cursor-pointer shrink-0"
+                    title="Annuler"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={Boolean(selectedEntity.sharedCollider)}
-                  onChange={(e) =>
-                    updateEntityDetails(selectedEntity.id, {
-                      sharedCollider: e.target.checked,
-                      colliderReferenceStateId:
-                        selectedEntity.colliderReferenceStateId ||
-                        Object.keys(selectedEntity.states)[0] ||
-                        selectedEntity.currentStateId,
-                    })
-                  }
-                  className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
-                />
-              </div>
-
-              {selectedEntity.sharedCollider && (
-                <div className="space-y-2 pt-1.5 border-t border-slate-200/70">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-semibold text-slate-600">
-                      État de référence :
-                    </span>
-                    <select
-                      value={
-                        selectedEntity.colliderReferenceStateId ||
-                        Object.keys(selectedEntity.states)[0] ||
-                        selectedEntity.currentStateId
-                      }
-                      onChange={(e) =>
-                        updateEntityDetails(selectedEntity.id, {
-                          colliderReferenceStateId: e.target.value,
-                        })
-                      }
-                      className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 max-w-[140px]"
-                    >
-                      {Object.values(selectedEntity.states).map((st) => (
-                        <option key={st.id} value={st.id}>
-                          {st.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Surcharge du collider sur l'état actuellement sélectionné */}
-                  {(() => {
-                    const curSt = selectedEntity.states[selectedEntity.currentStateId];
-                    const refId =
-                      selectedEntity.colliderReferenceStateId ||
-                      Object.keys(selectedEntity.states)[0] ||
-                      selectedEntity.currentStateId;
-                    if (!curSt || curSt.id === refId) return null;
-                    const isOverridden = Boolean(curSt.overrideCollider);
-                    const ovrShape = curSt.colliderBounds?.shape || curSt.colliderType || 'box';
-                    const ovrMode = curSt.colliderBounds?.mode || 'auto';
-                    return (
-                      <div className="p-2 bg-white rounded-xl border border-indigo-200/80 space-y-1.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <div className="text-[11px] font-bold text-indigo-950">
-                              Surcharger sur « {curSt.name} »
-                            </div>
-                            <div className="text-[9px] text-slate-500">
-                              Utiliser un collider propre (auto ou manuel) pour cet état
-                            </div>
-                          </div>
-                          <input
-                            type="checkbox"
-                            checked={isOverridden}
-                            onChange={(e) =>
-                              updateStateProperties(selectedEntity.id, curSt.id, {
-                                overrideCollider: e.target.checked,
-                              })
-                            }
-                            className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
-                          />
-                        </div>
-                        {isOverridden && (
-                          <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-100 text-[10px]">
-                            <span className="font-semibold text-emerald-700">
-                              Mode : {ovrMode === 'manual' ? 'Manuel' : 'Auto'} ({ovrShape === 'circle' ? 'Cercle' : ovrShape === 'polygon' ? 'Polyligne' : 'Rectangle'})
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setEditingStateDrawingId(curSt.id)}
-                              className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg font-bold cursor-pointer"
-                            >
-                              Ajuster dans Dessin
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
+              ) : (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setRenamingStateId(st.id);
+                    setTempStateName(st.name);
+                  }}
+                  className="flex items-center gap-1 max-w-full cursor-text hover:text-indigo-600 group/name select-text"
+                  title="Double-cliquez pour renommer cet état"
+                >
+                  <span
+                    className={`text-xs font-black tracking-tight truncate ${
+                      isActive ? 'text-indigo-900' : 'text-slate-700'
+                    } group-hover/name:text-indigo-600 underline decoration-dotted decoration-slate-300 underline-offset-2`}
+                  >
+                    {st.name}
+                  </span>
                 </div>
               )}
-            </>
-          )}
 
-          {/* Raccourci édition collider (même avec 1 seul état) */}
-          {(() => {
-            const curSt = selectedEntity.states[selectedEntity.currentStateId];
-            const activeMode = curSt?.colliderBounds?.mode || selectedEntity.colliderBounds?.mode || 'auto';
-            const activeShape =
-              curSt?.colliderBounds?.shape ||
-              curSt?.colliderType ||
-              selectedEntity.colliderBounds?.shape ||
-              selectedEntity.colliderType ||
-              (selectedEntity.type === 'apple' ? 'circle' : 'box');
-            return (
-              <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60 text-[10px]">
-                <span className="font-semibold text-slate-600">
-                  Hitbox actuelle :{' '}
-                  <strong className="text-emerald-700">
-                    {activeMode === 'manual' ? 'Manuel' : 'Auto'} •{' '}
-                    {activeShape === 'circle' ? 'Cercle' : activeShape === 'polygon' ? 'Polyligne' : 'Rectangle'}
-                  </strong>
-                </span>
+              {/* Visual Thumbnail */}
+              <div
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  setEditingStateDrawingId(st.id);
+                }}
+                className="w-14 h-14 bg-white rounded-xl border border-slate-200 flex items-center justify-center p-1.5 relative overflow-hidden shadow-2xs hover:border-indigo-400 cursor-pointer"
+                title="Double-cliquez sur le dessin pour modifier"
+              >
+                {statePaths.length > 0 ? (
+                  <svg viewBox="0 0 200 200" className="w-full h-full pointer-events-none">
+                    {(() => {
+                      const stLayers = st.drawingLayers || (st.id === selectedEntity.currentStateId ? selectedEntity.drawingLayers : undefined);
+                      if (!stLayers || stLayers.length === 0) {
+                        return statePaths.map((p) => (
+                          <path
+                            key={p.id}
+                            d={p.d}
+                            stroke={p.stroke}
+                            strokeWidth={p.strokeWidth}
+                            fill={p.fill || 'none'}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        ));
+                      }
+                      const fallbackLayerId = stLayers[stLayers.length - 1]?.id || 'layer-1';
+                      const layerIds = new Set(stLayers.map((l) => l.id));
+                      return [...stLayers].reverse().map((layer) => {
+                        if (!layer.visible) return null;
+                        const layerPaths = statePaths.filter((p) => {
+                          const resolvedId = p.layerId && layerIds.has(p.layerId) ? p.layerId : fallbackLayerId;
+                          return resolvedId === layer.id;
+                        });
+                        return (
+                          <g key={layer.id} opacity={layer.opacity ?? 1}>
+                            {layerPaths.map((p) => (
+                              <path
+                                key={p.id}
+                                d={p.d}
+                                stroke={p.stroke}
+                                strokeWidth={p.strokeWidth}
+                                fill={p.fill || 'none'}
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            ))}
+                          </g>
+                        );
+                      });
+                    })()}
+                  </svg>
+                ) : (
+                  <span className="text-[10px] text-slate-400 font-medium italic">
+                    Vide
+                  </span>
+                )}
+                {(st.frames?.length || 0) > 1 && (
+                  <span
+                    className="absolute bottom-0.5 right-0.5 bg-violet-600/90 text-white text-[9px] font-mono font-bold px-1 rounded shadow-2xs pointer-events-none"
+                    title={`Animation Flipbook : ${st.frames?.length} frames (${st.frameRate || 8} FPS)`}
+                  >
+                    🎞️{st.frames?.length}
+                  </span>
+                )}
+              </div>
+
+              {/* Bouton Dessiner cet état */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditingStateDrawingId(st.id);
+                }}
+                className="w-full py-1 px-2 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 bg-white hover:bg-indigo-100/70 border border-indigo-200 rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                title="Modifier le dessin de cet état"
+              >
+                <Paintbrush className="w-3 h-3 text-indigo-600" /> Dessiner
+              </button>
+            </div>
+          );
+        };
+
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" /> États ({allStates.length})
+              </label>
+
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => setEditingStateDrawingId(selectedEntity.currentStateId)}
-                  className="px-2 py-1 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-bold cursor-pointer shadow-2xs"
+                  onClick={() => setShowAddFolderInput((v) => !v)}
+                  className="text-xs font-bold text-slate-600 hover:text-indigo-700 flex items-center gap-1 px-2 py-1 rounded-xl bg-slate-100 hover:bg-indigo-50 border border-slate-200 cursor-pointer shadow-2xs transition-all"
+                  title="Créer un dossier pour ranger vos états"
                 >
-                  Configurer
+                  <FolderPlus className="w-3.5 h-3.5" /> Dossier
+                </button>
+                <button
+                  type="button"
+                  onClick={handleQuickAddState}
+                  className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 cursor-pointer shadow-2xs transition-all active:scale-95"
+                  title="Ajouter un nouvel état (canvas vide)"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Nouvel état
                 </button>
               </div>
-            );
-          })()}
-        </div>
-      </div>
+            </div>
+
+            {/* Création de dossier */}
+            {showAddFolderInput && (
+              <form onSubmit={handleCreateFolder} className="flex gap-1.5 bg-slate-50 p-2 rounded-2xl border border-slate-200">
+                <input
+                  type="text"
+                  placeholder="Nom du dossier (ex: Visage, Corps)..."
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  className="flex-1 text-xs font-bold border border-slate-300 bg-white text-slate-800 rounded-xl px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  className="bg-indigo-600 text-white text-xs px-3 py-1.5 rounded-xl font-bold hover:bg-indigo-700 cursor-pointer"
+                >
+                  Créer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddFolderInput(false);
+                    setNewFolderName('');
+                  }}
+                  className="text-xs text-slate-500 px-2 py-1.5 hover:bg-slate-200 rounded-xl cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </form>
+            )}
+
+            {/* Formulaire personnalisé de renommage / ajout si souhaité */}
+            {showAddStateInput && (
+              <form onSubmit={handleAddState} className="flex gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200">
+                <input
+                  type="text"
+                  placeholder="Nom de l'état (ex: C)..."
+                  value={newStateName}
+                  onChange={(e) => setNewStateName(e.target.value)}
+                  className="flex-1 text-xs font-bold border border-slate-300 bg-white text-slate-800 rounded-xl px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  className="bg-indigo-600 text-white text-xs px-3 py-1.5 rounded-xl font-bold hover:bg-indigo-700 cursor-pointer"
+                >
+                  OK
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddStateInput(false)}
+                  className="text-xs text-slate-500 px-2 py-1.5 hover:bg-slate-200 rounded-xl cursor-pointer"
+                >
+                  X
+                </button>
+              </form>
+            )}
+
+            {/* Dossiers d'états */}
+            {folders.length > 0 && (
+              <div className="space-y-2">
+                {folders.map((folder) => {
+                  const folderStates = allStates.filter((s) => s.folderId === folder.id);
+                  const isCollapsed = Boolean(folder.isCollapsed);
+                  const isDropTarget = dragOverFolderId === folder.id;
+                  return (
+                    <div
+                      key={folder.id}
+                      onDragOver={(e) => {
+                        if (!draggingStateId) return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        if (dragOverFolderId !== folder.id) setDragOverFolderId(folder.id);
+                      }}
+                      onDragLeave={(e) => {
+                        if (!e.currentTarget.contains(e.relatedTarget as Node) && dragOverFolderId === folder.id) {
+                          setDragOverFolderId(null);
+                        }
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const stateId = extractDroppedStateId(e);
+                        if (stateId) {
+                          setStateFolder(selectedEntity.id, stateId, folder.id);
+                        }
+                        setDraggingStateId(null);
+                        setDragOverFolderId(null);
+                      }}
+                      className={`rounded-2xl border transition-all ${
+                        isDropTarget
+                          ? 'bg-indigo-50/90 border-indigo-400 ring-2 ring-indigo-300/60'
+                          : 'bg-slate-50/70 border-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1.5 px-2.5 py-2">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateStateFolder(selectedEntity.id, folder.id, { isCollapsed: !isCollapsed })
+                            }
+                            className="p-0.5 text-slate-500 hover:text-indigo-700 rounded cursor-pointer shrink-0"
+                            title={isCollapsed ? 'Déplier le dossier' : 'Replier le dossier'}
+                          >
+                            {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                          </button>
+                          {isCollapsed ? (
+                            <Folder className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                          ) : (
+                            <FolderOpen className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                          )}
+                          {renamingFolderId === folder.id ? (
+                            <input
+                              type="text"
+                              value={tempFolderName}
+                              onChange={(e) => setTempFolderName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  if (tempFolderName.trim()) {
+                                    updateStateFolder(selectedEntity.id, folder.id, { name: tempFolderName.trim() });
+                                  }
+                                  setRenamingFolderId(null);
+                                } else if (e.key === 'Escape') {
+                                  setRenamingFolderId(null);
+                                }
+                              }}
+                              onBlur={() => {
+                                if (tempFolderName.trim()) {
+                                  updateStateFolder(selectedEntity.id, folder.id, { name: tempFolderName.trim() });
+                                }
+                                setRenamingFolderId(null);
+                              }}
+                              autoFocus
+                              onFocus={(e) => e.target.select()}
+                              className="text-xs font-bold bg-white text-slate-800 border border-indigo-300 rounded px-1.5 py-0.5 flex-1 min-w-0 outline-none"
+                            />
+                          ) : (
+                            <span
+                              onDoubleClick={() => {
+                                setRenamingFolderId(folder.id);
+                                setTempFolderName(folder.name);
+                              }}
+                              className="text-xs font-bold text-slate-700 truncate cursor-text hover:text-indigo-600"
+                              title="Double-cliquez pour renommer le dossier"
+                            >
+                              {folder.name}
+                            </span>
+                          )}
+                          <span className="text-[10px] font-bold text-slate-400 bg-white border border-slate-200 px-1.5 rounded-full shrink-0">
+                            {folderStates.length}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newId = addStateToEntity(selectedEntity.id, '', folder.id);
+                              if (newId) {
+                                updateEntityState(selectedEntity.id, newId);
+                                setEditingStateDrawingId(newId);
+                              }
+                            }}
+                            className="p-1 text-indigo-600 hover:bg-indigo-100 rounded-lg cursor-pointer"
+                            title={`Créer un état dans « ${folder.name} »`}
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteStateFolder(selectedEntity.id, folder.id)}
+                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                            title="Supprimer le dossier (les états restent conservés)"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {!isCollapsed && (
+                        <div className="px-2.5 pb-2.5">
+                          {folderStates.length === 0 ? (
+                            <div className="text-[11px] text-slate-400 italic text-center py-3 border border-dashed border-slate-200 rounded-xl bg-white/60">
+                              Glissez un état ici ou cliquez sur +
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 gap-2">
+                              {folderStates.map((st) => renderStateCard(st))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Zone de dépôt pour sortir un état d'un dossier vers la racine */}
+            {canDropToRoot && (
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (dragOverFolderId !== 'root') setDragOverFolderId('root');
+                }}
+                onDragLeave={() => {
+                  if (dragOverFolderId === 'root') setDragOverFolderId(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const stateId = extractDroppedStateId(e);
+                  if (stateId) {
+                    setStateFolder(selectedEntity.id, stateId, undefined);
+                  }
+                  setDraggingStateId(null);
+                  setDragOverFolderId(null);
+                }}
+                className={`text-[11px] font-bold text-center py-2 px-3 rounded-xl border-2 border-dashed transition-all ${
+                  dragOverFolderId === 'root'
+                    ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                    : 'border-slate-300 bg-slate-50 text-slate-500'
+                }`}
+              >
+                Déposer ici pour sortir du dossier (Racine)
+              </div>
+            )}
+
+            {/* Cartes d'États à la racine (sans dossier) */}
+            {rootStates.length > 0 && (
+              <div className="grid grid-cols-2 gap-2.5">
+                {rootStates.map((st) => renderStateCard(st))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronRight,
   Layers,
+  Paintbrush,
   Plus,
   Sparkles,
   Trash2,
@@ -21,6 +22,8 @@ interface InteractivePuppetControlsProps {
   targetEntityOptions: Entity[];
   entityTypeOptions: { type: string; label: string }[];
   availableTags: string[];
+  onQuickCreateState?: (suggestedName: string, folderName?: string) => string;
+  onEditStateDrawing?: (stateId: string) => void;
 }
 
 export function InteractivePuppetControls({
@@ -30,6 +33,8 @@ export function InteractivePuppetControls({
   targetEntityOptions,
   entityTypeOptions,
   availableTags,
+  onQuickCreateState,
+  onEditStateDrawing,
 }: InteractivePuppetControlsProps) {
   const [phaseTab, setPhaseTab] = useState<'hover' | 'drag' | 'air'>('drag');
   const [showShortTimings, setShowShortTimings] = useState(false);
@@ -51,27 +56,56 @@ export function InteractivePuppetControls({
   const renderStateSelect = (
     label: string,
     key: keyof NonNullable<InteractivePuppetBehaviorConfig['stateBindings']>,
-    hint?: string
-  ) => (
-    <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-violet-100">
-      <div className="min-w-0">
-        <div className="text-[11px] font-bold text-slate-700 truncate">{label}</div>
-        {hint && <div className="text-[9px] text-slate-400 truncate">{hint}</div>}
+    hint?: string,
+    suggestedName?: string
+  ) => {
+    const selectedId = sb[key] || '';
+    return (
+      <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-violet-100">
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-bold text-slate-700 truncate">{label}</div>
+          {hint && <div className="text-[9px] text-slate-400 truncate">{hint}</div>}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <select
+            value={selectedId}
+            onChange={(e) => updateBinding(key, e.target.value)}
+            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[140px]"
+          >
+            <option value="">-- Non défini --</option>
+            {stateList.map((st) => (
+              <option key={st.id} value={st.id}>
+                {st.name}
+              </option>
+            ))}
+          </select>
+          {onQuickCreateState && (
+            <button
+              type="button"
+              onClick={() => {
+                const createdId = onQuickCreateState(suggestedName || label, 'Marionnette');
+                if (createdId) updateBinding(key, createdId);
+              }}
+              className="p-1 bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 rounded-lg cursor-pointer transition-colors"
+              title={`Créer automatiquement l'état « ${suggestedName || label} »`}
+            >
+              <Plus className="w-3 h-3" />
+            </button>
+          )}
+          {selectedId && onEditStateDrawing && (
+            <button
+              type="button"
+              onClick={() => onEditStateDrawing(selectedId)}
+              className="p-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg cursor-pointer transition-colors"
+              title="Dessiner cet état"
+            >
+              <Paintbrush className="w-3 h-3" />
+            </button>
+          )}
+        </div>
       </div>
-      <select
-        value={sb[key] || ''}
-        onChange={(e) => updateBinding(key, e.target.value)}
-        className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[148px] shrink-0"
-      >
-        <option value="">-- Non défini --</option>
-        {stateList.map((st) => (
-          <option key={st.id} value={st.id}>
-            {st.name}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
+    );
+  };
 
   const hoverCount = [
     sb.approachFarStateId,
@@ -572,18 +606,44 @@ export function InteractivePuppetControls({
 
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[10px] font-semibold text-amber-800">➔ État affiché :</span>
-                  <select
-                    value={rule.stateId || ''}
-                    onChange={(e) => handleUpdateDragOverRule(rule.id, { stateId: e.target.value || undefined })}
-                    className="bg-amber-50/70 border border-amber-200 rounded px-2 py-0.5 text-[10px] font-bold text-slate-800 max-w-[165px]"
-                  >
-                    <option value="">-- Choisir état --</option>
-                    {stateList.map((st) => (
-                      <option key={st.id} value={st.id}>
-                        {st.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center gap-1">
+                    <select
+                      value={rule.stateId || ''}
+                      onChange={(e) => handleUpdateDragOverRule(rule.id, { stateId: e.target.value || undefined })}
+                      className="bg-amber-50/70 border border-amber-200 rounded px-2 py-0.5 text-[10px] font-bold text-slate-800 max-w-[155px]"
+                    >
+                      <option value="">-- Choisir état --</option>
+                      {stateList.map((st) => (
+                        <option key={st.id} value={st.id}>
+                          {st.name}
+                        </option>
+                      ))}
+                    </select>
+                    {onQuickCreateState && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const baseLabel = rule.targetTag ? `Sur ${rule.targetTag}` : 'Drag Over';
+                          const createdId = onQuickCreateState(baseLabel, 'Marionnette');
+                          if (createdId) handleUpdateDragOverRule(rule.id, { stateId: createdId });
+                        }}
+                        className="p-0.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded cursor-pointer"
+                        title="Créer un état dédié pour cette cible"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    )}
+                    {rule.stateId && onEditStateDrawing && (
+                      <button
+                        type="button"
+                        onClick={() => onEditStateDrawing(rule.stateId!)}
+                        className="p-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded cursor-pointer"
+                        title="Dessiner cet état"
+                      >
+                        <Paintbrush className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -637,37 +697,37 @@ export function InteractivePuppetControls({
         <div className="space-y-1.5">
           {phaseTab === 'hover' && (
             <>
-              {renderStateSelect('Approche Lointaine', 'approachFarStateId', `Curseur ≤ ${b.approachFarDistance ?? 280} px`)}
-              {renderStateSelect('Approche Proche', 'approachNearStateId', `Curseur ≤ ${b.approachNearDistance ?? 120} px`)}
-              {renderStateSelect('Entrée Survol (Enter)', 'hoverEnterStateId', 'Transition courte à l’entrée')}
-              {renderStateSelect('Survol (Hover)', 'hoverStateId', 'Tant que le curseur est dessus')}
-              {renderStateSelect('Survol Maintenu (Dwell)', 'hoverDwellStateId', `Après ${(b.hoverDwellDelay ?? 1.5).toFixed(1)}s`)}
-              {renderStateSelect('Sortie Survol (Exit)', 'hoverExitStateId', 'Transition courte à la sortie')}
+              {renderStateSelect('Approche Lointaine', 'approachFarStateId', `Curseur ≤ ${b.approachFarDistance ?? 280} px`, 'Approche Loin')}
+              {renderStateSelect('Approche Proche', 'approachNearStateId', `Curseur ≤ ${b.approachNearDistance ?? 120} px`, 'Approche Proche')}
+              {renderStateSelect('Entrée Survol (Enter)', 'hoverEnterStateId', 'Transition courte à l’entrée', 'Hover Enter')}
+              {renderStateSelect('Survol (Hover)', 'hoverStateId', 'Tant que le curseur est dessus', 'Survol')}
+              {renderStateSelect('Survol Maintenu (Dwell)', 'hoverDwellStateId', `Après ${(b.hoverDwellDelay ?? 1.5).toFixed(1)}s`, 'Survol Long')}
+              {renderStateSelect('Sortie Survol (Exit)', 'hoverExitStateId', 'Transition courte à la sortie', 'Hover Exit')}
             </>
           )}
 
           {phaseTab === 'drag' && (
             <>
-              {renderStateSelect('Saisie (Drag Start)', 'dragStartStateId', 'Juste au moment où on l’attrape')}
-              {renderStateSelect('Tenue (Drag)', 'dragStateId', 'Tenu sous le curseur')}
-              {renderStateSelect('Tenue Maintenue (Dwell)', 'dragDwellStateId', `Tenu > ${(b.dragDwellDelay ?? 2.0).toFixed(1)}s`)}
+              {renderStateSelect('Saisie (Drag Start)', 'dragStartStateId', 'Juste au moment où on l’attrape', 'Drag Start')}
+              {renderStateSelect('Tenue (Drag)', 'dragStateId', 'Tenu sous le curseur', 'Drag')}
+              {renderStateSelect('Tenue Maintenue (Dwell)', 'dragDwellStateId', `Tenu > ${(b.dragDwellDelay ?? 2.0).toFixed(1)}s`, 'Drag Long')}
               {showSwingStates && (
                 <>
-                  {renderStateSelect('Balancement (Rapide)', 'swingStateId', 'Générique gauche/droite')}
-                  {renderStateSelect('Balancement Gauche', 'swingLeftStateId', 'Optionnel (remplace générique)')}
-                  {renderStateSelect('Balancement Droite', 'swingRightStateId', 'Optionnel (remplace générique)')}
+                  {renderStateSelect('Balancement (Rapide)', 'swingStateId', 'Générique gauche/droite', 'Balancement')}
+                  {renderStateSelect('Balancement Gauche', 'swingLeftStateId', 'Optionnel (remplace générique)', 'Balance Gauche')}
+                  {renderStateSelect('Balancement Droite', 'swingRightStateId', 'Optionnel (remplace générique)', 'Balance Droite')}
                 </>
               )}
-              {renderStateSelect('Secousse / Vertige', 'shakeStateId', 'Allers-retours rapides')}
-              {renderStateSelect('Relâchement (Release)', 'dragReleaseStateId', 'Juste après avoir lâché')}
+              {renderStateSelect('Secousse / Vertige', 'shakeStateId', 'Allers-retours rapides', 'Secousse')}
+              {renderStateSelect('Relâchement (Release)', 'dragReleaseStateId', 'Juste après avoir lâché', 'Drag Release')}
             </>
           )}
 
           {phaseTab === 'air' && (
             <>
-              {renderStateSelect('Repos (Idle)', 'idleStateId', 'État par défaut au calme')}
-              {renderStateSelect('Chute (Fall)', 'fallStateId', `Après chute > ${b.minFallHeight ?? 20} px`)}
-              {renderStateSelect('Atterrissage (Land)', 'landStateId', 'À la réception au sol')}
+              {renderStateSelect('Repos (Idle)', 'idleStateId', 'État par défaut au calme', 'Repos')}
+              {renderStateSelect('Chute (Fall)', 'fallStateId', `Après chute > ${b.minFallHeight ?? 20} px`, 'Chute')}
+              {renderStateSelect('Atterrissage (Land)', 'landStateId', 'À la réception au sol', 'Land')}
             </>
           )}
         </div>

@@ -9,7 +9,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { ProjectSlotsModal } from './components/ProjectSlotsModal';
 import { FullScreenDrawingModal } from './components/FullScreenDrawingModal';
 import { DrawingToolsPanel } from './components/DrawingToolsPanel';
-import { useSceneStore } from './store/useSceneStore';
+import { useSceneStore, EMPTY_LIST } from './store/useSceneStore';
 import { SceneLayer, SceneLayerGroup } from './types';
 import {
   Play,
@@ -81,6 +81,7 @@ export default function App() {
     let prevSig = {
       entities: initialState.entities,
       customArchetypes: initialState.customArchetypes,
+      entityGroups: initialState.entityGroups,
       rules: initialState.rules,
       folders: initialState.folders,
       customSounds: initialState.customSounds,
@@ -95,6 +96,7 @@ export default function App() {
       const changed =
         state.entities !== prevSig.entities ||
         state.customArchetypes !== prevSig.customArchetypes ||
+        state.entityGroups !== prevSig.entityGroups ||
         state.rules !== prevSig.rules ||
         state.folders !== prevSig.folders ||
         state.customSounds !== prevSig.customSounds ||
@@ -107,6 +109,7 @@ export default function App() {
       prevSig = {
         entities: state.entities,
         customArchetypes: state.customArchetypes,
+        entityGroups: state.entityGroups,
         rules: state.rules,
         folders: state.folders,
         customSounds: state.customSounds,
@@ -572,7 +575,7 @@ export default function App() {
       <div className="flex-1 flex gap-3 px-3 sm:px-6 pb-4 overflow-hidden min-h-0">
         {/* 1. LEFT DRAWER: ENTITIES & SCENE HIERARCHY */}
         {isEntitiesOpen && (
-          <aside className="w-64 sm:w-76 bg-white rounded-3xl border border-slate-300/80 shadow-xs flex flex-col overflow-hidden shrink-0 transition-all">
+          <aside className="w-80 lg:w-96 bg-white rounded-3xl border border-slate-300/80 shadow-xs flex flex-col overflow-hidden shrink-0 transition-all">
             {/* Header with Segmented Switcher */}
             <div className="p-2.5 bg-slate-50/90 border-b border-slate-200/80 flex items-center justify-between shrink-0 gap-2">
               <div className="flex items-center bg-slate-200/80 p-0.5 rounded-2xl flex-1">
@@ -651,7 +654,7 @@ export default function App() {
 
         {/* 3. RIGHT DRAWER: INSPECTOR, DRAWING TOOLS OR SETTINGS */}
         {rightPanel !== 'none' && (
-          <aside className="w-72 sm:w-80 bg-white rounded-3xl border border-slate-300/80 shadow-xs flex flex-col overflow-hidden shrink-0 transition-all">
+          <aside className="w-80 lg:w-96 bg-white rounded-3xl border border-slate-300/80 shadow-xs flex flex-col overflow-hidden shrink-0 transition-all">
             <div className="p-3.5 bg-slate-50/80 border-b border-slate-200/80 flex items-center justify-between shrink-0">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                 {selectedLayerId ? (
@@ -718,7 +721,7 @@ export default function App() {
           title={`Dessiner : ${editingLayer.layer.name}`}
           subtitle={`Groupe : ${editingLayer.group.name} (${editingLayer.group.kind === 'background' ? 'Arrière-plan' : 'Premier-plan'})`}
           currentEditingStateName={editingLayer.layer.name}
-          initialPaths={editingLayer.layer.vectorPaths || []}
+          initialPaths={editingLayer.layer.vectorPaths || EMPTY_LIST}
           onSave={(paths) => {
             setLayerVectorPaths(editingLayer.layer.id, paths);
             setEditingLayer(null);

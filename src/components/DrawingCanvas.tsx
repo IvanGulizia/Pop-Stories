@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import {
   MousePointer,
   Pencil,
@@ -127,16 +127,20 @@ export type DrawTool =
   | 'eraser_partial'
   | 'hotspot';
 
+const EMPTY_PATHS: VectorPath[] = [];
+const EMPTY_LAYERS: DrawingLayer[] = [];
+const EMPTY_ONION_STATES: OnionStateOption[] = [];
+
 export function DrawingCanvas({
   onVectorChange,
-  initialPaths = [],
-  initialLayers = [],
+  initialPaths = EMPTY_PATHS,
+  initialLayers = EMPTY_LAYERS,
   onLayersChange,
   initialColliderType = 'box',
   initialColliderBounds,
   initialStrokeColor = '#000000',
   initialFillColor = 'none',
-  onionStates = [],
+  onionStates = EMPTY_ONION_STATES,
   currentEditingStateName,
   onColliderChange,
   isSharedColliderEntity = false,
@@ -392,7 +396,10 @@ export function DrawingCanvas({
   const [gridSnapSize] = useState(10);
 
   // Onion skinning state
-  const availableOnionStates = onionStates.filter((s) => s.vectorPaths && s.vectorPaths.length > 0);
+  const availableOnionStates = useMemo(
+    () => onionStates.filter((s) => s.vectorPaths && s.vectorPaths.length > 0),
+    [onionStates]
+  );
   const [onionSkinEnabled, setOnionSkinEnabled] = useState(availableOnionStates.length > 0);
   const [selectedOnionStateId, setSelectedOnionStateId] = useState<string>(
     availableOnionStates[0]?.id || ''
@@ -403,6 +410,7 @@ export function DrawingCanvas({
   selectedIdsRef.current = selectedPathIds;
   const pathsRef = useRef<VectorPath[]>(paths);
   pathsRef.current = paths;
+  const lastReportedHistoryRef = useRef<DrawingCanvasHistoryState | null>(null);
 
   // Exposer Annuler / Rétablir / Effacer / Pelure au header parent (Mode Dessin Unifié)
   useEffect(() => {
@@ -417,15 +425,27 @@ export function DrawingCanvas({
   });
 
   useEffect(() => {
-    if (onHistoryStateChange) {
-      onHistoryStateChange({
-        canUndo: historyIndexRef.current > 0,
-        canRedo: historyIndexRef.current < historyRef.current.length - 1,
-        pathCount: paths.length,
-        onionEnabled: onionSkinEnabled,
-        hasOnion: availableOnionStates.length > 0,
-      });
+    if (!onHistoryStateChange) return;
+    const nextState: DrawingCanvasHistoryState = {
+      canUndo: historyIndexRef.current > 0,
+      canRedo: historyIndexRef.current < historyRef.current.length - 1,
+      pathCount: paths.length,
+      onionEnabled: onionSkinEnabled,
+      hasOnion: availableOnionStates.length > 0,
+    };
+    const prev = lastReportedHistoryRef.current;
+    if (
+      prev &&
+      prev.canUndo === nextState.canUndo &&
+      prev.canRedo === nextState.canRedo &&
+      prev.pathCount === nextState.pathCount &&
+      prev.onionEnabled === nextState.onionEnabled &&
+      prev.hasOnion === nextState.hasOnion
+    ) {
+      return;
     }
+    lastReportedHistoryRef.current = nextState;
+    onHistoryStateChange(nextState);
   }, [paths.length, historyVersion, onionSkinEnabled, availableOnionStates.length, onHistoryStateChange]);
 
   // Raccourcis clavier (Cmd/Ctrl+Z, Shift+Z / Y, Suppr sélection, Échap polyligne)

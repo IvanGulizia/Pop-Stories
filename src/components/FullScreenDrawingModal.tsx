@@ -142,6 +142,10 @@ function renderFrameThumbnailSvg(frame: AnimationFrame) {
   );
 }
 
+const EMPTY_PATHS: VectorPath[] = [];
+const EMPTY_LAYERS: DrawingLayer[] = [];
+const EMPTY_ONION_STATES: OnionStateOption[] = [];
+
 export function FullScreenDrawingModal({
   mode = 'edit',
   title,
@@ -152,8 +156,8 @@ export function FullScreenDrawingModal({
   onEntityTagsChange,
   showTagsInput = false,
   saveButtonLabel,
-  initialPaths = [],
-  initialLayers = [],
+  initialPaths = EMPTY_PATHS,
+  initialLayers = EMPTY_LAYERS,
   initialFrames,
   initialFrameRate = 8,
   initialAnimationLoop = 'loop',
@@ -163,7 +167,7 @@ export function FullScreenDrawingModal({
   isSharedColliderEntity = false,
   isReferenceStateForSharedCollider = false,
   initialOverrideCollider = false,
-  onionStates = [],
+  onionStates = EMPTY_ONION_STATES,
   currentEditingStateName,
   referenceGuide,
   availableReferenceGuides,

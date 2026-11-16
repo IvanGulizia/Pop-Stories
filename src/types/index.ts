@@ -399,12 +399,19 @@ export interface AnimationFrame {
   drawingLayers?: DrawingLayer[];
 }
 
+export interface StateFolder {
+  id: string;
+  name: string;
+  isCollapsed?: boolean;
+}
+
 export interface EntityState {
   id: StateId;
   name: string;
   color: string;
   scale: number;
   rotation: number;
+  folderId?: string;
   colliderType?: ColliderType;
   colliderBounds?: ColliderBounds;
   overrideCollider?: boolean; // Lorsque sharedCollider est actif sur l'entité, force cet état à utiliser son propre collider
@@ -457,6 +464,7 @@ export interface Entity {
   colliderReferenceStateId?: StateId; // État de référence pour la géométrie du collider partagé
   sharedColliderType?: ColliderType;
   sharedColliderBounds?: ColliderBounds;
+  stateFolders?: StateFolder[];
   runtimeTilt?: number; // Inclinaison pendulaire transitoire en mode Play (non sauvegardée en Édition)
 }
 
@@ -789,12 +797,20 @@ export interface SceneLayerGroup {
   layers: SceneLayer[];
 }
 
+export interface EntityGroup {
+  id: string;
+  name: string;
+  isCollapsed?: boolean;
+  entityTypes: string[];
+}
+
 export interface ProjectExportData {
   version: number;
   name?: string;
   exportedAt: string;
   entities: Record<EntityId, Entity>;
   customArchetypes?: Record<string, Entity>;
+  entityGroups?: EntityGroup[];
   rules: DynamicRule[];
   folders?: RuleFolder[];
   customSounds?: CustomSound[];

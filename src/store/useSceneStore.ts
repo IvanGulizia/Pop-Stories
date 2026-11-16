@@ -36,6 +36,8 @@ import {
   AnimationFrame,
   AnimationLoopMode,
   AutoSaveDraft,
+  StateFolder,
+  EntityGroup,
 } from '../types';
 import { soundSynth } from '../utils/sound';
 import { getEntityWorldColliderBounds } from '../utils/collider';
@@ -69,6 +71,10 @@ import {
   clearAutoSaveDraftFromDB,
 } from '../utils/localStorageDB';
 import defaultCursorPack from '../data/defaultCursorPack.json';
+
+export const EMPTY_RECORD: Record<string, never> = {};
+export const EMPTY_LIST: never[] = [];
+export const DEFAULT_SCENE_BOUNDS = { width: 800, height: 500 };
 
 export const DEFAULT_PROJECT_PALETTE: ProjectPaletteColor[] = [
   { id: 'pal-1', name: 'Noir encre', color: '#000000' },
@@ -160,7 +166,8 @@ function loadLocalCollectionFromStorage(): Record<string, Entity> {
   try {
     const raw = window.localStorage.getItem(COLLECTION_STORAGE_KEY);
     if (!raw) return {};
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch (e) {
     console.error('Failed to load local entity collection:', e);
     return {};
@@ -185,6 +192,7 @@ interface SceneState {
   importCollectionJSON: (data: any) => { success: boolean; message: string; count: number };
   rules: DynamicRule[];
   folders: RuleFolder[];
+  entityGroups: EntityGroup[];
   customSounds: CustomSound[];
   customParticles: CustomParticlePreset[];
   addCustomParticle: (preset: Omit<CustomParticlePreset, 'id' | 'createdAt'>) => string;
@@ -268,9 +276,17 @@ interface SceneState {
   setEntityParent: (childId: EntityId, parentId: EntityId | null, customOffset?: ParentOffset) => void;
   updateEntityParentOffset: (childId: EntityId, partial: Partial<ParentOffset>) => void;
   detachEntity: (childId: EntityId) => void;
-  addStateToEntity: (entityId: EntityId, name?: string) => string;
+  addStateToEntity: (entityId: EntityId, name?: string, folderId?: string) => string;
   duplicateStateInEntity: (entityId: EntityId, stateId: StateId) => string;
   removeStateFromEntity: (entityId: EntityId, stateId: StateId) => void;
+  addStateFolder: (entityId: EntityId, name: string) => string;
+  updateStateFolder: (entityId: EntityId, folderId: string, partial: Partial<Pick<StateFolder, 'name' | 'isCollapsed'>>) => void;
+  deleteStateFolder: (entityId: EntityId, folderId: string) => void;
+  setStateFolder: (entityId: EntityId, stateId: StateId, folderId: string | undefined) => void;
+  addEntityGroup: (name: string) => string;
+  updateEntityGroup: (groupId: string, partial: Partial<Pick<EntityGroup, 'name' | 'isCollapsed'>>) => void;
+  deleteEntityGroup: (groupId: string) => void;
+  assignEntityTypeToGroup: (entityType: string, groupId: string | null) => void;
   addEntity: (type: EntityType) => void;
   addCustomEntity: (customData: {
     name: string;
@@ -1026,6 +1042,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   rules: [],
   folders: initialFolders,
+  entityGroups: [],
   customSounds: [],
   customParticles: [],
   activeCollisions: {},
@@ -2084,7 +2101,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     });
   },
 
-  addStateToEntity: (entityId, name) => {
+  addStateToEntity: (entityId, name, folderId) => {
     const targetEntity = findTargetEntityOrArchetype(get(), entityId);
 
     if (!targetEntity) return '';
@@ -2094,7 +2111,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const nextLetter = alphabet[existingStateKeys.length] || `État ${existingStateKeys.length + 1}`;
     const stateName = name && name.trim() ? name.trim() : nextLetter;
-    const newId = `state_${stateName.toLowerCase().replace(/[^a-z0-9]/gi, '_')}_${Date.now().toString(36)}`;
+    const newId = `state_${stateName.toLowerCase().replace(/[^a-z0-9]/gi, '_')}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
 
     const newState: EntityState = {
       id: newId,
@@ -2102,6 +2119,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       color: targetEntity.states[targetEntity.currentStateId]?.color || '#3b82f6',
       scale: 1,
       rotation: 0,
+      ...(folderId ? { folderId } : {}),
       stemHeight: 50,
       flowerColor: '#a855f7',
       flowerPetals: 6,
@@ -2137,6 +2155,176 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     });
 
     return newId;
+  },
+
+  addStateFolder: (entityId, name) => {
+    const targetEntity = findTargetEntityOrArchetype(get(), entityId);
+    if (!targetEntity) return '';
+    const targetType = targetEntity.type;
+    const cleanName = name.trim() || 'Nouveau dossier';
+    const existing = (targetEntity.stateFolders || []).find(
+      (f) => f.name.toLowerCase() === cleanName.toLowerCase()
+    );
+    if (existing) return existing.id;
+
+    const newFolder: StateFolder = {
+      id: `stfolder_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
+      name: cleanName,
+      isCollapsed: false,
+    };
+
+    set((state) => {
+      const updatedEntities = { ...state.entities };
+      Object.values(updatedEntities).forEach((e) => {
+        if (e.type === targetType) {
+          updatedEntities[e.id] = {
+            ...e,
+            stateFolders: [...(e.stateFolders || []), newFolder],
+          };
+        }
+      });
+      const updatedArchetypes = { ...state.customArchetypes };
+      if (updatedArchetypes[targetType]) {
+        updatedArchetypes[targetType] = {
+          ...updatedArchetypes[targetType],
+          stateFolders: [...(updatedArchetypes[targetType].stateFolders || []), newFolder],
+        };
+      }
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
+    });
+    return newFolder.id;
+  },
+
+  updateStateFolder: (entityId, folderId, partial) => {
+    set((state) => {
+      const targetEntity = findTargetEntityOrArchetype(state, entityId);
+      if (!targetEntity) return state;
+      const targetType = targetEntity.type;
+      const patchFolders = (list?: StateFolder[]) =>
+        (list || []).map((f) => (f.id === folderId ? { ...f, ...partial } : f));
+
+      const updatedEntities = { ...state.entities };
+      Object.values(updatedEntities).forEach((e) => {
+        if (e.type === targetType) {
+          updatedEntities[e.id] = { ...e, stateFolders: patchFolders(e.stateFolders) };
+        }
+      });
+      const updatedArchetypes = { ...state.customArchetypes };
+      if (updatedArchetypes[targetType]) {
+        updatedArchetypes[targetType] = {
+          ...updatedArchetypes[targetType],
+          stateFolders: patchFolders(updatedArchetypes[targetType].stateFolders),
+        };
+      }
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
+    });
+  },
+
+  deleteStateFolder: (entityId, folderId) => {
+    set((state) => {
+      const targetEntity = findTargetEntityOrArchetype(state, entityId);
+      if (!targetEntity) return state;
+      const targetType = targetEntity.type;
+      const cleanStates = (states: Record<StateId, EntityState>) => {
+        const next: Record<StateId, EntityState> = {};
+        Object.entries(states).forEach(([sid, st]) => {
+          next[sid] = st.folderId === folderId ? { ...st, folderId: undefined } : st;
+        });
+        return next;
+      };
+
+      const updatedEntities = { ...state.entities };
+      Object.values(updatedEntities).forEach((e) => {
+        if (e.type === targetType) {
+          updatedEntities[e.id] = {
+            ...e,
+            stateFolders: (e.stateFolders || []).filter((f) => f.id !== folderId),
+            states: cleanStates(e.states),
+          };
+        }
+      });
+      const updatedArchetypes = { ...state.customArchetypes };
+      if (updatedArchetypes[targetType]) {
+        updatedArchetypes[targetType] = {
+          ...updatedArchetypes[targetType],
+          stateFolders: (updatedArchetypes[targetType].stateFolders || []).filter((f) => f.id !== folderId),
+          states: cleanStates(updatedArchetypes[targetType].states),
+        };
+      }
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
+    });
+  },
+
+  setStateFolder: (entityId, stateId, folderId) => {
+    set((state) => {
+      const targetEntity = findTargetEntityOrArchetype(state, entityId);
+      if (!targetEntity || !targetEntity.states[stateId]) return state;
+      const targetType = targetEntity.type;
+
+      const updatedEntities = { ...state.entities };
+      Object.values(updatedEntities).forEach((e) => {
+        if (e.type === targetType && e.states[stateId]) {
+          updatedEntities[e.id] = {
+            ...e,
+            states: {
+              ...e.states,
+              [stateId]: { ...e.states[stateId], folderId },
+            },
+          };
+        }
+      });
+      const updatedArchetypes = { ...state.customArchetypes };
+      if (updatedArchetypes[targetType] && updatedArchetypes[targetType].states[stateId]) {
+        updatedArchetypes[targetType] = {
+          ...updatedArchetypes[targetType],
+          states: {
+            ...updatedArchetypes[targetType].states,
+            [stateId]: { ...updatedArchetypes[targetType].states[stateId], folderId },
+          },
+        };
+      }
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
+    });
+  },
+
+  addEntityGroup: (name) => {
+    const id = `entgroup_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+    const newGroup: EntityGroup = {
+      id,
+      name: name.trim() || 'Nouveau groupe',
+      isCollapsed: false,
+      entityTypes: [],
+    };
+    set((state) => ({
+      entityGroups: [...(state.entityGroups || []), newGroup],
+    }));
+    return id;
+  },
+
+  updateEntityGroup: (groupId, partial) => {
+    set((state) => ({
+      entityGroups: (state.entityGroups || []).map((g) =>
+        g.id === groupId ? { ...g, ...partial } : g
+      ),
+    }));
+  },
+
+  deleteEntityGroup: (groupId) => {
+    set((state) => ({
+      entityGroups: (state.entityGroups || []).filter((g) => g.id !== groupId),
+    }));
+  },
+
+  assignEntityTypeToGroup: (entityType, groupId) => {
+    set((state) => ({
+      entityGroups: (state.entityGroups || []).map((g) => {
+        const cleaned = g.entityTypes.filter((t) => t !== entityType);
+        if (groupId && g.id === groupId) {
+          return { ...g, entityTypes: [...cleaned, entityType] };
+        }
+        return cleaned.length !== g.entityTypes.length ? { ...g, entityTypes: cleaned } : g;
+      }),
+    }));
   },
 
   duplicateStateInEntity: (entityId, stateId) => {
@@ -2473,6 +2661,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         customArchetypes: remainingArchetypes,
         entities: remainingEntities,
         entityOrder: updatedOrder,
+        entityGroups: (state.entityGroups || []).map((g) => ({
+          ...g,
+          entityTypes: g.entityTypes.filter((t) => t !== type),
+        })),
         selectedEntityId: nextSelected,
         rules: cleanedRules,
       };
@@ -2625,6 +2817,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       entityOrder: [],
       rules: [],
       folders: initialFolders,
+      entityGroups: [],
       customSounds: [],
       customParticles: [],
       layerGroups: JSON.parse(JSON.stringify(initialSceneLayerGroups)),
@@ -2645,6 +2838,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       entities: JSON.parse(JSON.stringify(initialEntities)),
       entityOrder: ['plant-1', 'apple-1'],
       customArchetypes: JSON.parse(JSON.stringify(defaultCustomArchetypes)),
+      entityGroups: [],
       rules: JSON.parse(JSON.stringify(initialRules)),
       folders: JSON.parse(JSON.stringify(initialFolders)),
       customSounds: [],
@@ -2664,13 +2858,14 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   exportProject: () => {
-    const { entities, customArchetypes, rules, folders, customSounds, customParticles, layerGroups, settings, projectPalette } = get();
+    const { entities, customArchetypes, entityGroups, rules, folders, customSounds, customParticles, layerGroups, settings, projectPalette } = get();
     return {
       version: 1,
       name: 'Projet Atelier Vivant',
       exportedAt: new Date().toISOString(),
       entities,
       customArchetypes,
+      entityGroups,
       rules,
       folders,
       customSounds,
@@ -2712,6 +2907,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       }
       const importedRules = Array.isArray(data.rules) ? data.rules : [];
       const importedFolders = Array.isArray(data.folders) ? data.folders : initialFolders;
+      const importedEntityGroups = Array.isArray(data.entityGroups) ? data.entityGroups : [];
       const importedCustomSounds = Array.isArray(data.customSounds) ? data.customSounds : [];
       const importedCustomParticles = Array.isArray(data.customParticles) ? data.customParticles : [];
       const rawLayerGroups: SceneLayerGroup[] = Array.isArray(data.layerGroups) && data.layerGroups.length > 0
@@ -2745,6 +2941,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       set((state) => ({
         entities: importedEntities,
         customArchetypes: importedArchetypes,
+        entityGroups: importedEntityGroups,
         rules: importedRules,
         folders: importedFolders,
         customSounds: importedCustomSounds,

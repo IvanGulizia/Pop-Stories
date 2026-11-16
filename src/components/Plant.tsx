@@ -300,11 +300,11 @@ export function Plant({ entity, style }: PlantProps) {
       onDrag={handleDrag}
       onDragEnd={handleDragEnd}
       animate={{
-        scale: currentState.scale,
-        rotate: currentState.rotation + (appMode === 'play' ? (entity.runtimeTilt || 0) : 0),
+        scale: currentState.scale ?? 1,
+        rotate: (currentState.rotation ?? 0) + (appMode === 'play' ? (entity.runtimeTilt || 0) : 0),
       }}
       transition={appMode === 'play' ? { duration: 0 } : { type: 'spring', bounce: 0.35, duration: 0.6 }}
-      whileHover={enableHoverScaleAnimation ? { scale: currentState.scale * (isSelected ? 1.0 : 1.03) } : undefined}
+      whileHover={enableHoverScaleAnimation ? { scale: (currentState.scale ?? 1) * (isSelected ? 1.0 : 1.03) } : undefined}
     >
       {/* Hitbox interactive délimitée strictement par le collider vert */}
       <div
