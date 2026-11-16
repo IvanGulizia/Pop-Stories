@@ -380,6 +380,24 @@ export function InteractivePuppetControls({
           </div>
           <div>
             <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
+              <span className="font-semibold">Retour après survol</span>
+              <span className="font-mono font-bold text-violet-600">{(b.hoverReturnDelay ?? 0).toFixed(2)}s</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="3"
+              step="0.05"
+              value={b.hoverReturnDelay ?? 0}
+              onChange={(e) => update({ hoverReturnDelay: parseFloat(e.target.value) })}
+              className="w-full accent-violet-600 h-1.5"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100">
+          <div>
+            <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
               <span className="font-semibold">Drag maintenu</span>
               <span className="font-mono font-bold text-violet-600">{(b.dragDwellDelay ?? 2.0).toFixed(1)}s</span>
             </div>
@@ -390,6 +408,54 @@ export function InteractivePuppetControls({
               step="0.1"
               value={b.dragDwellDelay ?? 2.0}
               onChange={(e) => update({ dragDwellDelay: parseFloat(e.target.value) })}
+              className="w-full accent-violet-600 h-1.5"
+            />
+          </div>
+          <div>
+            <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
+              <span className="font-semibold">Retour Balancement</span>
+              <span className="font-mono font-bold text-violet-600">{(b.swingReturnDelay ?? 0.15).toFixed(2)}s</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="2"
+              step="0.05"
+              value={b.swingReturnDelay ?? 0.15}
+              onChange={(e) => update({ swingReturnDelay: parseFloat(e.target.value) })}
+              className="w-full accent-violet-600 h-1.5"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100">
+          <div>
+            <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
+              <span className="font-semibold">Maintien Secousse</span>
+              <span className="font-mono font-bold text-violet-600">{(b.shakeHoldDuration ?? 0.45).toFixed(2)}s</span>
+            </div>
+            <input
+              type="range"
+              min="0.1"
+              max="2.5"
+              step="0.05"
+              value={b.shakeHoldDuration ?? 0.45}
+              onChange={(e) => update({ shakeHoldDuration: parseFloat(e.target.value) })}
+              className="w-full accent-violet-600 h-1.5"
+            />
+          </div>
+          <div>
+            <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
+              <span className="font-semibold">Retour Drag Cible</span>
+              <span className="font-mono font-bold text-violet-600">{(b.dragOverReturnDelay ?? 0).toFixed(2)}s</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="2"
+              step="0.05"
+              value={b.dragOverReturnDelay ?? 0}
+              onChange={(e) => update({ dragOverReturnDelay: parseFloat(e.target.value) })}
               className="w-full accent-violet-600 h-1.5"
             />
           </div>
@@ -447,7 +513,7 @@ export function InteractivePuppetControls({
               <input
                 type="range"
                 min="0.05"
-                max="0.8"
+                max="1.5"
                 step="0.05"
                 value={b.hoverEnterDuration ?? 0.18}
                 onChange={(e) => update({ hoverEnterDuration: parseFloat(e.target.value) })}
@@ -462,7 +528,7 @@ export function InteractivePuppetControls({
               <input
                 type="range"
                 min="0.05"
-                max="0.8"
+                max="1.5"
                 step="0.05"
                 value={b.hoverExitDuration ?? 0.2}
                 onChange={(e) => update({ hoverExitDuration: parseFloat(e.target.value) })}
@@ -477,7 +543,7 @@ export function InteractivePuppetControls({
               <input
                 type="range"
                 min="0.05"
-                max="0.8"
+                max="1.5"
                 step="0.05"
                 value={b.dragStartDuration ?? 0.18}
                 onChange={(e) => update({ dragStartDuration: parseFloat(e.target.value) })}
@@ -492,7 +558,7 @@ export function InteractivePuppetControls({
               <input
                 type="range"
                 min="0.05"
-                max="0.8"
+                max="1.5"
                 step="0.05"
                 value={b.dragReleaseDuration ?? 0.2}
                 onChange={(e) => update({ dragReleaseDuration: parseFloat(e.target.value) })}

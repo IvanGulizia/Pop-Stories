@@ -71,6 +71,7 @@ import {
   clearAutoSaveDraftFromDB,
 } from '../utils/localStorageDB';
 import defaultCursorPack from '../data/defaultCursorPack.json';
+import { DEFAULT_GIZMO_SETTINGS, resolveGizmoSettings } from '../utils/gizmoHelpers';
 
 export const EMPTY_RECORD: Record<string, never> = {};
 export const EMPTY_LIST: never[] = [];
@@ -637,6 +638,10 @@ function clearPlayRuntimeState() {
 
 // Vérification de la collision avec support précis des Colliders (flipX + scale centrée) et écoute native Matter.js
 const checkCollision = (ent1: Entity, ent2: Entity, tolerancePx: number = 3) => {
+  if (ent1.colliderMode === 'disabled' || ent2.colliderMode === 'disabled') {
+    return false;
+  }
+
   // 1. Détection prioritaire directe depuis le moteur physique Matter.js
   const activePairs = getActivePhysicsCollisionPairs();
   if (activePairs.has(`${ent1.id}:::${ent2.id}`) || activePairs.has(`${ent2.id}:::${ent1.id}`)) {
@@ -1210,6 +1215,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     gridStyle: 'dots',
     showTagsSystem: false,
     showRuleFilters: false,
+    showColliderDebugGizmos: true,
+    gizmos: JSON.parse(JSON.stringify(DEFAULT_GIZMO_SETTINGS)),
     useCustomCursors: true,
     cursorShadow: false,
     cursorSourceMode: 'custom_drawn',
@@ -1225,9 +1232,26 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   updateSettings: (partial) => {
-    set((state) => ({
-      settings: { ...state.settings, ...partial },
-    }));
+    set((state) => {
+      const nextSettings: AppSettings = { ...state.settings, ...partial };
+      // Synchronisation bidirectionnelle showColliderDebugGizmos <-> gizmos.categories.hitboxes
+      if (partial.showColliderDebugGizmos !== undefined && !partial.gizmos) {
+        const resolved = resolveGizmoSettings(nextSettings);
+        nextSettings.gizmos = {
+          ...resolved,
+          categories: {
+            ...resolved.categories,
+            hitboxes: partial.showColliderDebugGizmos ? 'both' : 'off',
+          },
+        };
+      } else if (partial.gizmos) {
+        const hitMode = partial.gizmos.categories?.hitboxes;
+        if (hitMode !== undefined) {
+          nextSettings.showColliderDebugGizmos = partial.gizmos.masterEnabled && hitMode !== 'off';
+        }
+      }
+      return { settings: nextSettings };
+    });
   },
 
   setAspectRatio: (ratio) => {
@@ -2949,7 +2973,12 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         layerGroups: importedLayerGroups,
         projectPalette: importedPalette,
         settings: importedSettings
-          ? { ...state.settings, ...importedSettings, projectPalette: importedPalette }
+          ? {
+              ...state.settings,
+              ...importedSettings,
+              gizmos: resolveGizmoSettings({ ...state.settings, ...importedSettings }),
+              projectPalette: importedPalette,
+            }
           : { ...state.settings, projectPalette: importedPalette },
         selectedEntityId: Object.keys(importedEntities)[0] || null,
         selectedLayerId: null,
@@ -3828,6 +3857,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           // B. Collisions Entité <-> Calques Colliders de décor (via #Tags ou 'any')
           if (activeColliderLayers.length > 0) {
             for (const ent of allEntitiesList) {
+              if (ent.colliderMode === 'disabled') continue;
               const matchAsSubject = matchesEntityFilter(
                 ent,
                 rule.trigger.subjectMode,

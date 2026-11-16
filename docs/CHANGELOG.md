@@ -1,3 +1,19 @@
+## [Phase 10.21] - 2026-11-16
+### Ajouté & Amélioré
+- **Carte Parenting pliable (`Inspector.tsx`)** : Ajout d'un bouton chevron sur la carte *Parenting & Attachement* affichant un résumé compact lorsque repliée.
+- **Système unifié de Gizmos de scène & Paramètres dédiés (`types/index.ts`, `gizmoHelpers.ts`, `SettingsPanel.tsx`, `SceneGizmoOverlay.tsx`, `Scene.tsx`, `CustomShape.tsx`, `Apple.tsx`, `Plant.tsx`)** :
+  - Ajout de la section accordéon *3. Gizmos & Debug Visuel* dans `SettingsPanel.tsx` avec interrupteur maître, présets rapides, filtre *Objet sélectionné uniquement*, et sélecteur 4 états (`Off | Édit | Play | Les 2`) par catégorie.
+  - Centralisation du rendu SVG non-clippé dans `<SceneGizmoOverlay />` (`z-[45]`) pour 7 catégories : *Hitboxes*, *Calques Colliders*, *Hiérarchie & Pivots*, *LookAt / Cône d'angle / Orbite Pupille*, *Zones Marionnette*, *Zones IA* et *Vecteurs & Émetteurs*, avec flux debug temps réel `getGizmoRuntimeDebugData()`.
+  - Activation de toutes les catégories sur `Les 2` (`both`) par défaut et synchronisation avec l'ancien interrupteur `showColliderDebugGizmos`.
+- **Hitbox Modulaire : Modes Collider & Délégation Souris Parent (`types/index.ts`, `dragDelegationRegistry.ts`, `BehaviorManager.tsx`, `matterPhysicsEngine.ts`, `useSceneStore.ts`, `CustomShape.tsx`, `Apple.tsx`, `Plant.tsx`)** :
+  - Ajout de `colliderMode` (`default` | `trigger_only` | `disabled`) ignoré proprement par Matter.js et les règles de collision lorsque désactivé.
+  - Ajout de `pointerDelegation` (`self` | `parent` | `root_parent`) et `ignorePointer` (Mode Play uniquement) pour transférer clic, survol et drag des enfants vers le parent ou le parent final.
+- **LookAt Flip Horizontal Contextuel & Cône Visuel (`types/index.ts`, `matterPhysicsEngine.ts`, `BehaviorManager.tsx`, `SceneGizmoOverlay.tsx`)** :
+  - Ajout de `flipMode` (`none` | `flipX`), `facingDirection` (`right` | `left`) et `flipDeadzone` (`0..40 px`) avec hystérésis `lookAtFlipStates`, calcul du repos en cône `maxAngle` et support des racines sans collider (`!body`).
+- **Temporisations étendues sur `interactive_puppet` (`types/index.ts`, `matterPhysicsEngine.ts`, `InteractivePuppetControls.tsx`, `BehaviorManager.tsx`)** :
+  - Ajout de `hoverReturnDelay`, `swingReturnDelay`, `shakeHoldDuration` et `dragOverReturnDelay` dans le runtime Marionnette et ses sliders associés.
+- **Documentation d'architecture durable (`docs/ARCHITECTURE.md`, `docs/DECISIONS.md`, `docs/TODO.md`, `docs/PROJECT_STATE.md`, `docs/ROADMAP.md`)** : Formalisation des invariants Gizmos (ADR-002) et Hiérarchie/Hitbox (ADR-003).
+
 ## [Phase 10.20] - 2026-11-14
 ### Ajouté & Corrigé
 - **Character Controller sur calques colliders & hauteur min. Fall/Land (`types/index.ts`, `matterPhysicsEngine.ts`, `BehaviorManager.tsx`)** : Ajout du suivi `keyboardMoveInput`, grâce de contact sol (`75 ms`) et de maintien marche (`80 ms`), assouplissement des contacts sur segments (`normalY > 0.38`), et curseur `minFallHeight` (`0–160 px`, défaut `20 px`) mesurant le dénivelé depuis `peakAirY` avant de passer en état `fall` ou `land`.

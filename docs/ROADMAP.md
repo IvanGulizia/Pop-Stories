@@ -1,28 +1,21 @@
 # Roadmap & Prototypes
 
-Ce projet suivra un développement par prototypes verticaux pour valider l'expérience utilisateur avant de construire les systèmes complexes.
+Ce projet suit un développement itératif structuré pour garder une expérience fluide et modulaire.
 
-## Prototype 0 : Preuve de Concept (MVP Actuel)
-**Objectif :** Valider que "donner vie à un dessin" est amusant avec la boucle la plus courte possible.
-- [x] Dessiner un objet simple (ex: Plante) avec 2 états (Pousse, Fleur).
-- [x] Dessiner un deuxième objet (ex: Pomme).
-- [x] Rendre la Pomme manipulable (Draggable).
-- [x] Implémenter une règle en dur : "Quand Pomme touche Plante -> Plante passe à l'état Fleur".
-- [x] Interpolation visuelle (couleur/taille) gérée par `motion`.
+## Prototypes Fondateurs (Complétés)
+- [x] **Prototype 0–4** : Scène interactive, éditeur d'états, RuleBook visuel (`Quand [Événement] -> Alors [Action]`), moteur physique Matter.js & comportements modulaires, atelier de dessin vectoriel & flipbook par état.
 
-## Prototype 1 : L'Éditeur d'États
-- [ ] Interface basique pour basculer entre les états d'une entité.
-- [ ] Modifier l'apparence d'un état sans affecter les autres.
-- [ ] Animation automatique entre les états.
+## Phases Récentes & Architecture Active
+- [x] **Physique, Colliders & Audio Studio (Phases 10.12–10.20)** : Calques Colliders `#tags`, Flipbook frame par frame, Sound Studio FX, Character Controller (`Idle/Move/Jump/Fall/Land`), Composant `Santé & Dégâts`, Auto-Save local IndexedDB.
+- [x] **Outils Éditeur & Comportements Avancés (Phase 10.21)** :
+  - [x] Inspecteur repliable pour le Parenting.
+  - [x] Système centralisé de Gizmos de scène (7 catégories configurables `Off / Édit / Play / Les 2` dans les Paramètres).
+  - [x] Modes de Hitbox (`default / trigger_only / disabled`) & délégation souris Parent/Racine (`pointerDelegation`, `ignorePointer`).
+  - [x] `LookAt` avec retournement contextuel (`flipX`), sens d'origine, zone morte et gizmo cône `±maxAngle`.
+  - [x] Délais complets de retour à la normale sur *Marionnette Interactive* (`hoverReturnDelay`, `swingReturnDelay`, `shakeHoldDuration`, `dragOverReturnDelay`).
 
-## Prototype 2 : Le Rule Book Visuel
-- [ ] Interface simple `Quand [Événement] -> Alors [Action]`.
-- [ ] Déclencheurs : Click, Toucher un autre objet.
-- [ ] Actions : Changer d'état.
+## Prochaines Pistes
+- [ ] Presets de démarrage / modèles de mini-jeux pré-configurés.
+- [ ] Contrôles de parallaxe active sur les calques de décor.
+- [ ] Extraction continue des modales volumineuses (`RuleBook.tsx`, `DrawingCanvas.tsx`).
 
-## Prototype 3 : Comportements & Composition
-- [ ] Ajout de briques de comportement (ex: "Tomber", "Rebondir").
-- [ ] Intégration d'un moteur de collision simple (AABB).
-
-## Prototype 4 : Outil de Dessin Intégré
-- [ ] Remplacer les SVG importés/codés en dur par un mini-canvas de dessin vectoriel.

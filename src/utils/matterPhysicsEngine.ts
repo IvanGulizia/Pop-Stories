@@ -180,6 +180,7 @@ interface PuppetRuntimeState {
   wasHovered: boolean;
   hoverTime: number;
   hoverEnterTimer: number;
+  hoverReturnTimer: number;
   hoverExitTimer: number;
   dragPhaseActive: boolean;
   wasDragging: boolean;
@@ -190,6 +191,10 @@ interface PuppetRuntimeState {
   lastDragX: number;
   lastDragY: number;
   smoothDragVx: number;
+  swingHoldTimer: number;
+  swingLastStateId?: string;
+  dragOverHoldTimer: number;
+  lastDragOverStateId?: string;
   pendulumAngle: number;
   pendulumVel: number;
   shakeCount: number;
@@ -213,6 +218,7 @@ function getOrCreatePuppetRuntime(entityId: string, x = 0, y = 0): PuppetRuntime
       wasHovered: false,
       hoverTime: 0,
       hoverEnterTimer: 0,
+      hoverReturnTimer: 0,
       hoverExitTimer: 0,
       dragPhaseActive: false,
       wasDragging: false,
@@ -223,6 +229,10 @@ function getOrCreatePuppetRuntime(entityId: string, x = 0, y = 0): PuppetRuntime
       lastDragX: x,
       lastDragY: y,
       smoothDragVx: 0,
+      swingHoldTimer: 0,
+      swingLastStateId: undefined,
+      dragOverHoldTimer: 0,
+      lastDragOverStateId: undefined,
       pendulumAngle: 0,
       pendulumVel: 0,
       shakeCount: 0,
@@ -290,6 +300,28 @@ interface LookAtOrbitRuntime {
   anchorY?: number;
 }
 const lookAtOrbitStates = new Map<string, LookAtOrbitRuntime>();
+const lookAtFlipStates = new Map<string, boolean>();
+const debugLookAtTargets = new Map<string, Position>();
+
+export function getGizmoRuntimeDebugData(): {
+  wanderOrigins: Record<string, { origin: Position; targetPoint: Position | null }>;
+  patrolOrigins: Record<string, Position>;
+  lookAtTargets: Record<string, Position>;
+} {
+  const wanderOrigins: Record<string, { origin: Position; targetPoint: Position | null }> = {};
+  wanderingStates.forEach((v, k) => {
+    wanderOrigins[k] = { origin: v.origin, targetPoint: v.targetPoint };
+  });
+  const patrolOrigins: Record<string, Position> = {};
+  patrolStates.forEach((v, k) => {
+    patrolOrigins[k] = v.initialPos;
+  });
+  const lookAtTargets: Record<string, Position> = {};
+  debugLookAtTargets.forEach((v, k) => {
+    lookAtTargets[k] = v;
+  });
+  return { wanderOrigins, patrolOrigins, lookAtTargets };
+}
 
 function resolveTargetWorldPoint(
   selfId: string,
@@ -625,6 +657,8 @@ export function resetMatterPhysicsRuntime() {
   healthRuntimeMap.clear();
   puppetRuntimeStates.clear();
   lookAtOrbitStates.clear();
+  lookAtFlipStates.clear();
+  debugLookAtTargets.clear();
   nextNegativeGroupId = -100;
 }
 
@@ -737,6 +771,94 @@ export interface PhysicsTickResult {
 function shortestAngleDiffRad(fromRad: number, toRad: number): number {
   const twoPi = Math.PI * 2;
   return ((((toRad - fromRad) % twoPi) + twoPi + Math.PI) % twoPi) - Math.PI;
+}
+
+function computeLookAtRotationAndFlip(params: {
+  entityId: string;
+  originX: number;
+  originY: number;
+  targetPt: Position;
+  lookAt: LookAtBehaviorConfig;
+  currentAngleDeg: number;
+  baseRestRotDeg: number;
+  currentFlipX: boolean;
+  dt: number;
+}): {
+  nextAngleRad: number;
+  nextRotDeg: number;
+  nextFlipX: boolean;
+  flipUpdated: boolean;
+} {
+  const {
+    entityId,
+    originX,
+    originY,
+    targetPt,
+    lookAt,
+    currentAngleDeg,
+    baseRestRotDeg,
+    currentFlipX,
+    dt,
+  } = params;
+
+  const dx = targetPt.x - originX;
+  const dy = targetPt.y - originY;
+  const useFlipX = lookAt.flipMode === 'flipX';
+  const baseLeft = lookAt.facingDirection === 'left';
+  let nextFlipX = currentFlipX;
+  let targetAngleRad: number;
+
+  if (useFlipX) {
+    const dz = Math.max(0, lookAt.flipDeadzone ?? 12);
+    let lookingLeft = lookAtFlipStates.get(entityId) ?? (baseLeft ? !currentFlipX : currentFlipX);
+    if (dx < -dz) {
+      lookingLeft = true;
+    } else if (dx > dz) {
+      lookingLeft = false;
+    }
+    lookAtFlipStates.set(entityId, lookingLeft);
+
+    nextFlipX = baseLeft ? !lookingLeft : lookingLeft;
+    const rawAngle = lookingLeft ? Math.atan2(-dy, -dx) : Math.atan2(dy, dx);
+    const sideOffsetRad = (nextFlipX ? -1 : 1) * (((lookAt.rotationOffset || 0) * Math.PI) / 180);
+    targetAngleRad = rawAngle + sideOffsetRad;
+
+    if (lookAt.maxAngle && lookAt.maxAngle > 0 && lookAt.maxAngle < 180) {
+      const maxRad = (lookAt.maxAngle * Math.PI) / 180;
+      const restAngleRad = (baseRestRotDeg * Math.PI) / 180 + sideOffsetRad;
+      const diffFromRest = shortestAngleDiffRad(restAngleRad, targetAngleRad);
+      targetAngleRad = restAngleRad + Math.max(-maxRad, Math.min(maxRad, diffFromRest));
+    }
+  } else {
+    const offsetRad = ((lookAt.rotationOffset || 0) * Math.PI) / 180;
+    const facingOffset = baseLeft ? Math.PI : 0;
+    const restAngleRad = (baseRestRotDeg * Math.PI) / 180 + offsetRad;
+    targetAngleRad = Math.atan2(dy, dx) + facingOffset + offsetRad;
+
+    if (lookAt.maxAngle && lookAt.maxAngle > 0 && lookAt.maxAngle < 180) {
+      const maxRad = (lookAt.maxAngle * Math.PI) / 180;
+      const diffFromRest = shortestAngleDiffRad(restAngleRad, targetAngleRad);
+      targetAngleRad = restAngleRad + Math.max(-maxRad, Math.min(maxRad, diffFromRest));
+    }
+  }
+
+  const currentAngleRad = (currentAngleDeg * Math.PI) / 180;
+  const diff = shortestAngleDiffRad(currentAngleRad, targetAngleRad);
+  const smoothSpeed = lookAt.smoothSpeed ?? 0;
+  let nextAngleRad = targetAngleRad;
+  if (smoothSpeed > 0) {
+    const maxStep = ((smoothSpeed * Math.PI) / 180) * dt;
+    nextAngleRad =
+      Math.abs(diff) <= maxStep ? targetAngleRad : currentAngleRad + Math.sign(diff) * maxStep;
+  }
+
+  const nextRotDeg = Math.round(((nextAngleRad * 180) / Math.PI) * 10) / 10;
+  return {
+    nextAngleRad,
+    nextRotDeg,
+    nextFlipX,
+    flipUpdated: useFlipX,
+  };
 }
 
 /**
@@ -1079,6 +1201,20 @@ function ensurePhysicsWorld(
 
   // Créer ou mettre à jour les corps existants
   for (const entity of entityList) {
+    const colliderMode = entity.colliderMode || 'default';
+    if (colliderMode === 'disabled') {
+      const existing = bodyMap.get(entity.id);
+      if (existing) {
+        rebuildingBodyIds.add(entity.id);
+        World.remove(engine.world, existing);
+        rebuildingBodyIds.delete(entity.id);
+        bodyMap.delete(entity.id);
+        bodySignatures.delete(entity.id);
+        colliderOffsets.delete(entity.id);
+      }
+      continue;
+    }
+
     const currentState = entity.states[entity.currentStateId];
     const effectiveBehaviors = getEffectiveBehaviors(entity, currentState);
 
@@ -1103,7 +1239,7 @@ function ensurePhysicsWorld(
       isStatic = false;
     }
 
-    const isSensor = physics ? (physics.isTrigger === true) : true;
+    const isSensor = colliderMode === 'trigger_only' ? true : physics ? physics.isTrigger === true : true;
     const collisionGroup = getHierarchyCollisionGroup(entity, entities);
 
     // Calcul précis du collider issu du mode dessin (supporte sharedCollider entre états)
@@ -1126,7 +1262,7 @@ function ensurePhysicsWorld(
     const colliderRadius = Math.max(6, Math.round(geom.radius * Math.max(scaleX, scaleY)));
 
     const freezeRotation = physics?.freezeRotation === true;
-    const signature = `${colliderType}_${colliderWidth}_${colliderHeight}_${colliderRadius}_${isStatic}_${isSensor}_${freezeRotation}`;
+    const signature = `${colliderMode}_${colliderType}_${colliderWidth}_${colliderHeight}_${colliderRadius}_${isStatic}_${isSensor}_${freezeRotation}`;
     let body = bodyMap.get(entity.id);
 
     // Si le corps n'existe pas ou si la forme du collider a été modifiée dans le mode dessin, le recréer
@@ -1192,7 +1328,7 @@ function ensurePhysicsWorld(
         });
       }
       colliderOffsets.set(entity.id, { relCenterX, relCenterY });
-      body.isSensor = physics ? (physics.isTrigger === true) : true;
+      body.isSensor = isSensor;
       body.collisionFilter.group = collisionGroup;
       if (physics) {
         const nextFriction = Math.max(0, Math.min(1, physics.friction ?? 0.6));
@@ -1288,6 +1424,7 @@ export function stepMatterPhysics(params: {
   const stateChanges: Record<string, string> = {};
   const entityList = Object.values(entities);
   keyboardMoveInput.clear();
+  debugLookAtTargets.clear();
 
   for (const entity of entityList) {
     const currentState = entity.states[entity.currentStateId];
@@ -1865,7 +2002,7 @@ export function stepMatterPhysics(params: {
       }
     }
 
-    // 7. Look At (mode rotation pour entités racines)
+    // 7. Look At (mode rotation pour entités racines avec corps)
     if (lookAt && (lookAt.lookMode || 'rotate') === 'rotate') {
       const targetPt = resolveTargetWorldPoint(
         entity.id,
@@ -1880,28 +2017,21 @@ export function stepMatterPhysics(params: {
       );
 
       if (targetPt) {
-        const dx = targetPt.x - body.position.x;
-        const dy = targetPt.y - body.position.y;
-        const anchorRad = ((lookAt.rotationOffset || 0) * Math.PI) / 180;
-        let targetAngleRad = Math.atan2(dy, dx) + anchorRad;
-
-        if (lookAt.maxAngle && lookAt.maxAngle > 0 && lookAt.maxAngle < 180) {
-          const maxRad = (lookAt.maxAngle * Math.PI) / 180;
-          const diffFromAnchor = shortestAngleDiffRad(anchorRad, targetAngleRad);
-          targetAngleRad = anchorRad + Math.max(-maxRad, Math.min(maxRad, diffFromAnchor));
-        }
-
-        const diff = shortestAngleDiffRad(body.angle, targetAngleRad);
-        const smoothSpeed = lookAt.smoothSpeed ?? 0;
-        if (smoothSpeed > 0) {
-          const maxStep = ((smoothSpeed * Math.PI) / 180) * dt;
-          if (Math.abs(diff) <= maxStep) {
-            Body.setAngle(body, body.angle + diff);
-          } else {
-            Body.setAngle(body, body.angle + Math.sign(diff) * maxStep);
-          }
-        } else {
-          Body.setAngle(body, body.angle + diff);
+        debugLookAtTargets.set(entity.id, targetPt);
+        const res = computeLookAtRotationAndFlip({
+          entityId: entity.id,
+          originX: body.position.x,
+          originY: body.position.y,
+          targetPt,
+          lookAt,
+          currentAngleDeg: (body.angle * 180) / Math.PI,
+          baseRestRotDeg: 0,
+          currentFlipX: entity.flipX ?? false,
+          dt,
+        });
+        Body.setAngle(body, res.nextAngleRad);
+        if (res.flipUpdated) {
+          flipUpdates.set(entity.id, res.nextFlipX);
         }
       }
     }
@@ -2068,6 +2198,10 @@ export function stepMatterPhysics(params: {
           mousePos
         );
 
+        if (targetPt) {
+          debugLookAtTargets.set(entity.id, targetPt);
+        }
+
         if ((childLookAt.lookMode || 'rotate') === 'pupil_orbit') {
           let orbitRt = lookAtOrbitStates.get(entity.id);
           if (!orbitRt) {
@@ -2095,26 +2229,21 @@ export function stepMatterPhysics(params: {
           childCenterX += orbitRt.ox;
           childCenterY += orbitRt.oy;
         } else if (targetPt) {
-          const dx = targetPt.x - childCenterX;
-          const dy = targetPt.y - childCenterY;
-          const baseRotRad = (baseRot * Math.PI) / 180;
-          let targetAngleRad = Math.atan2(dy, dx) + ((childLookAt.rotationOffset || 0) * Math.PI) / 180;
-
-          if (childLookAt.maxAngle && childLookAt.maxAngle > 0 && childLookAt.maxAngle < 180) {
-            const maxRad = (childLookAt.maxAngle * Math.PI) / 180;
-            const diffFromBase = shortestAngleDiffRad(baseRotRad, targetAngleRad);
-            targetAngleRad = baseRotRad + Math.max(-maxRad, Math.min(maxRad, diffFromBase));
+          const res = computeLookAtRotationAndFlip({
+            entityId: entity.id,
+            originX: childCenterX,
+            originY: childCenterY,
+            targetPt,
+            lookAt: childLookAt,
+            currentAngleDeg: currentState?.rotation || 0,
+            baseRestRotDeg: baseRot,
+            currentFlipX: nextFlipX,
+            dt,
+          });
+          newRot = res.nextRotDeg;
+          if (res.flipUpdated) {
+            nextFlipX = res.nextFlipX;
           }
-
-          const currentAngleRad = ((currentState?.rotation || 0) * Math.PI) / 180;
-          const diff = shortestAngleDiffRad(currentAngleRad, targetAngleRad);
-          const smoothSpeed = childLookAt.smoothSpeed ?? 0;
-          let nextAngleRad = targetAngleRad;
-          if (smoothSpeed > 0) {
-            const maxStep = ((smoothSpeed * Math.PI) / 180) * dt;
-            nextAngleRad = Math.abs(diff) <= maxStep ? targetAngleRad : currentAngleRad + Math.sign(diff) * maxStep;
-          }
-          newRot = Math.round(((nextAngleRad * 180) / Math.PI) * 10) / 10;
         }
       }
 
@@ -2141,8 +2270,8 @@ export function stepMatterPhysics(params: {
       if (posChanged) pendingPosUpdate = { x: newX, y: newY };
       if (rotChanged) pendingRotUpdate = newRot;
       if (flipChanged) pendingFlipUpdate = nextFlipX;
-    } else if (body) {
-      // Cas 2 : Entité indépendante (ou parent racine)
+    } else {
+      // Cas 2 : Entité indépendante (ou parent racine, avec ou sans corps physique)
       const rootLookAt = effectiveBehaviors.find((b) => b.type === 'look_at') as LookAtBehaviorConfig | undefined;
       const hasRotationBehavior = effectiveBehaviors.some(
         (b) =>
@@ -2180,6 +2309,9 @@ export function stepMatterPhysics(params: {
           entities,
           mousePos
         );
+        if (targetPt) {
+          debugLookAtTargets.set(entity.id, targetPt);
+        }
         const rx = Math.max(1, rootLookAt.orbitRadius ?? 8);
         const ry = Math.max(1, rootLookAt.orbitRadiusY ?? rx);
         let tx = 0;
@@ -2202,6 +2334,45 @@ export function stepMatterPhysics(params: {
         newY = Math.round((ay + orbitRt.oy - entity.size.height / 2) * 10) / 10;
         if (Math.abs(newX - entity.position.x) > 0.05 || Math.abs(newY - entity.position.y) > 0.05) {
           pendingPosUpdate = { x: newX, y: newY };
+        }
+      } else if (!body) {
+        // Entité racine sans collider (colliderMode === 'disabled') : supporter LookAt rotate
+        if (rootLookAt && rootLookAt.enabled !== false && (rootLookAt.lookMode || 'rotate') === 'rotate') {
+          const cx = entity.position.x + entity.size.width / 2;
+          const cy = entity.position.y + entity.size.height / 2;
+          const targetPt = resolveTargetWorldPoint(
+            entity.id,
+            cx,
+            cy,
+            rootLookAt.targetType,
+            rootLookAt.targetEntityId,
+            rootLookAt.targetEntityType,
+            rootLookAt.targetTag,
+            entities,
+            mousePos
+          );
+          if (targetPt) {
+            debugLookAtTargets.set(entity.id, targetPt);
+            const res = computeLookAtRotationAndFlip({
+              entityId: entity.id,
+              originX: cx,
+              originY: cy,
+              targetPt,
+              lookAt: rootLookAt,
+              currentAngleDeg: currentState?.rotation || 0,
+              baseRestRotDeg: 0,
+              currentFlipX: nextFlipX,
+              dt,
+            });
+            newRot = res.nextRotDeg;
+            if (res.flipUpdated) nextFlipX = res.nextFlipX;
+            if (Math.abs(newRot - (currentState?.rotation || 0)) > 0.1) {
+              pendingRotUpdate = newRot;
+            }
+            if (res.flipUpdated && (entity.flipX ?? false) !== nextFlipX) {
+              pendingFlipUpdate = nextFlipX;
+            }
+          }
         }
       } else if (!body.isStatic || hasRotationBehavior) {
         const offset = colliderOffsets.get(entity.id) || {
@@ -2256,26 +2427,44 @@ export function stepMatterPhysics(params: {
         }
       }
 
-      const isHovered = !otherBeingDragged && !isActivelyDragged && (rt.domHovered || (mousePos !== null && distToCollider === 0));
+      const rawHovered = !otherBeingDragged && !isActivelyDragged && (rt.domHovered || (mousePos !== null && distToCollider === 0));
+      const hoverReturnDelay = Math.max(0, puppet.hoverReturnDelay ?? 0);
 
-      // Cycle Survol
+      // Cycle Survol (avec délai de maintien avant retour au repos si configuré)
       if (!isActivelyDragged) {
-        if (isHovered && !rt.wasHovered) {
-          rt.hoverEnterTimer = Math.max(0.04, puppet.hoverEnterDuration ?? 0.18);
-          rt.hoverTime = 0;
+        if (rawHovered && !rt.wasHovered) {
+          if (rt.hoverReturnTimer <= 0) {
+            rt.hoverEnterTimer = Math.max(0.04, puppet.hoverEnterDuration ?? 0.18);
+            rt.hoverTime = 0;
+          }
           rt.hoverExitTimer = 0;
-        } else if (isHovered) {
+          rt.hoverReturnTimer = hoverReturnDelay;
+        } else if (rawHovered) {
           rt.hoverTime += dt;
           rt.hoverEnterTimer = Math.max(0, rt.hoverEnterTimer - dt);
-        } else if (!isHovered && rt.wasHovered) {
-          rt.hoverExitTimer = Math.max(0.04, puppet.hoverExitDuration ?? 0.2);
-          rt.hoverTime = 0;
-          rt.hoverEnterTimer = 0;
+          rt.hoverReturnTimer = hoverReturnDelay;
+        } else if (!rawHovered && rt.wasHovered) {
+          rt.hoverReturnTimer = hoverReturnDelay;
+          if (rt.hoverReturnTimer <= 0) {
+            rt.hoverExitTimer = Math.max(0.04, puppet.hoverExitDuration ?? 0.2);
+            rt.hoverTime = 0;
+            rt.hoverEnterTimer = 0;
+          }
+        } else if (rt.hoverReturnTimer > 0) {
+          rt.hoverTime += dt;
+          rt.hoverEnterTimer = Math.max(0, rt.hoverEnterTimer - dt);
+          rt.hoverReturnTimer = Math.max(0, rt.hoverReturnTimer - dt);
+          if (rt.hoverReturnTimer === 0) {
+            rt.hoverExitTimer = Math.max(0.04, puppet.hoverExitDuration ?? 0.2);
+            rt.hoverTime = 0;
+            rt.hoverEnterTimer = 0;
+          }
         } else {
           rt.hoverExitTimer = Math.max(0, rt.hoverExitTimer - dt);
         }
       }
-      rt.wasHovered = isHovered;
+      rt.wasHovered = rawHovered;
+      const isHovered = rawHovered || rt.hoverReturnTimer > 0;
 
       // Cycle Drag, Balancement & Secousse
       if (isActivelyDragged && !rt.wasDragging) {
@@ -2285,6 +2474,10 @@ export function stepMatterPhysics(params: {
         rt.lastDragX = newX;
         rt.lastDragY = newY;
         rt.smoothDragVx = 0;
+        rt.swingHoldTimer = 0;
+        rt.swingLastStateId = undefined;
+        rt.dragOverHoldTimer = 0;
+        rt.lastDragOverStateId = undefined;
         rt.shakeCount = 0;
         rt.shakeWindowTimer = 0;
         rt.shakeActiveTimer = 0;
@@ -2312,7 +2505,7 @@ export function stepMatterPhysics(params: {
           rt.lastVxSign = vxSign;
           rt.shakeWindowTimer = 0.45;
           if (rt.shakeCount >= Math.max(2, puppet.shakeThreshold ?? 3)) {
-            rt.shakeActiveTimer = 0.45;
+            rt.shakeActiveTimer = Math.max(0.05, puppet.shakeHoldDuration ?? 0.45);
             rt.shakeCount = 0;
           }
         }
@@ -2323,6 +2516,10 @@ export function stepMatterPhysics(params: {
         rt.dragTime = 0;
         rt.dragStartTimer = 0;
         rt.smoothDragVx = 0;
+        rt.swingHoldTimer = 0;
+        rt.swingLastStateId = undefined;
+        rt.dragOverHoldTimer = 0;
+        rt.lastDragOverStateId = undefined;
         rt.shakeCount = 0;
         rt.shakeActiveTimer = 0;
         rt.lastVxSign = 0;
@@ -2493,6 +2690,42 @@ export function stepMatterPhysics(params: {
         const useSwingStates = swingMode === 'states' || swingMode === 'both';
         const swingSpeedThresh = Math.max(40, puppet.swingSpeedThreshold ?? 320);
 
+        if (dragOverStateId) {
+          rt.lastDragOverStateId = dragOverStateId;
+          rt.dragOverHoldTimer = Math.max(0, puppet.dragOverReturnDelay ?? 0);
+        } else if (rt.dragOverHoldTimer > 0 && hasState(rt.lastDragOverStateId)) {
+          rt.dragOverHoldTimer = Math.max(0, rt.dragOverHoldTimer - dt);
+          dragOverStateId = rt.lastDragOverStateId;
+          if (rt.dragOverHoldTimer === 0) {
+            rt.lastDragOverStateId = undefined;
+          }
+        } else {
+          rt.lastDragOverStateId = undefined;
+        }
+
+        let activeSwingStateId: string | undefined;
+        if (useSwingStates && Math.abs(rt.smoothDragVx) >= swingSpeedThresh) {
+          if (rt.smoothDragVx < 0 && hasState(sb.swingLeftStateId)) {
+            activeSwingStateId = sb.swingLeftStateId;
+          } else if (rt.smoothDragVx > 0 && hasState(sb.swingRightStateId)) {
+            activeSwingStateId = sb.swingRightStateId;
+          } else if (hasState(sb.swingStateId)) {
+            activeSwingStateId = sb.swingStateId;
+          }
+          if (activeSwingStateId) {
+            rt.swingLastStateId = activeSwingStateId;
+            rt.swingHoldTimer = Math.max(0, puppet.swingReturnDelay ?? 0);
+          }
+        } else if (useSwingStates && rt.swingHoldTimer > 0 && hasState(rt.swingLastStateId)) {
+          rt.swingHoldTimer = Math.max(0, rt.swingHoldTimer - dt);
+          activeSwingStateId = rt.swingLastStateId;
+          if (rt.swingHoldTimer === 0) {
+            rt.swingLastStateId = undefined;
+          }
+        } else {
+          rt.swingLastStateId = undefined;
+        }
+
         if (isActivelyDragged) {
           if (dragOverStateId) {
             puppetDesiredStateId = dragOverStateId;
@@ -2500,18 +2733,8 @@ export function stepMatterPhysics(params: {
             puppetDesiredStateId = sb.dragStartStateId;
           } else if (rt.shakeActiveTimer > 0 && hasState(sb.shakeStateId)) {
             puppetDesiredStateId = sb.shakeStateId;
-          } else if (useSwingStates && Math.abs(rt.smoothDragVx) >= swingSpeedThresh) {
-            if (rt.smoothDragVx < 0 && hasState(sb.swingLeftStateId)) {
-              puppetDesiredStateId = sb.swingLeftStateId;
-            } else if (rt.smoothDragVx > 0 && hasState(sb.swingRightStateId)) {
-              puppetDesiredStateId = sb.swingRightStateId;
-            } else if (hasState(sb.swingStateId)) {
-              puppetDesiredStateId = sb.swingStateId;
-            } else if (rt.dragTime >= (puppet.dragDwellDelay ?? 2.0) && hasState(sb.dragDwellStateId)) {
-              puppetDesiredStateId = sb.dragDwellStateId;
-            } else if (hasState(sb.dragStateId)) {
-              puppetDesiredStateId = sb.dragStateId;
-            }
+          } else if (activeSwingStateId) {
+            puppetDesiredStateId = activeSwingStateId;
           } else if (rt.dragTime >= (puppet.dragDwellDelay ?? 2.0) && hasState(sb.dragDwellStateId)) {
             puppetDesiredStateId = sb.dragDwellStateId;
           } else if (hasState(sb.dragStateId)) {

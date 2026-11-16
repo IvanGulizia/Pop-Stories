@@ -1,4 +1,4 @@
-import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, Filter, MousePointer2, Paintbrush, Undo2, Scan, Sparkles, Moon, ChevronDown, ChevronRight, FolderArchive, Tv, Layers, Zap, X } from 'lucide-react';
+import { Sliders, Eye, Grid, Tag, Trash2, RotateCcw, Volume2, Download, Upload, Filter, MousePointer2, Paintbrush, Undo2, Scan, Sparkles, Moon, ChevronDown, ChevronRight, FolderArchive, Tv, Layers, Zap, X, Crosshair } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
 import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -6,7 +6,8 @@ import { CursorState, cursorMetadata, renderCursorSvg, getHugeIconGuidePaths, ge
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { ReferenceGuideOption } from './DrawingCanvas';
 import { useSceneStore } from '../store/useSceneStore';
-import { SceneAspectRatio } from '../types';
+import { GizmoCategoryId, GizmoVisibilityMode, SceneAspectRatio } from '../types';
+import { GIZMO_CATEGORY_LIST, resolveGizmoSettings } from '../utils/gizmoHelpers';
 
 interface SettingsPanelProps {
   onOpenClearModal?: () => void;
@@ -31,10 +32,50 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     files: false,
     canvas: false,
+    gizmos: false,
     rules: false,
     cursors: false,
     play: false,
   });
+
+  const gizmos = resolveGizmoSettings(settings);
+
+  const updateGizmos = (patch: Partial<typeof gizmos>) => {
+    updateSettings({
+      gizmos: {
+        ...gizmos,
+        ...patch,
+        categories: {
+          ...gizmos.categories,
+          ...(patch.categories || {}),
+        },
+      },
+    });
+  };
+
+  const setAllGizmosMode = (mode: GizmoVisibilityMode) => {
+    const nextCategories = { ...gizmos.categories };
+    GIZMO_CATEGORY_LIST.forEach((cat) => {
+      nextCategories[cat.id] = mode;
+    });
+    updateSettings({
+      gizmos: {
+        ...gizmos,
+        masterEnabled: mode !== 'off',
+        categories: nextCategories,
+      },
+      showColliderDebugGizmos: mode !== 'off',
+    });
+  };
+
+  const setCategoryMode = (id: GizmoCategoryId, mode: GizmoVisibilityMode) => {
+    updateGizmos({
+      categories: {
+        ...gizmos.categories,
+        [id]: mode,
+      },
+    });
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cursorFileInputRef = useRef<HTMLInputElement>(null);
@@ -522,21 +563,26 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
             )}
 
             {/* Gizmo Debug Colliders */}
-            <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200">
-              <div className="flex items-center gap-2">
-                <Scan className="w-4 h-4 text-emerald-600" />
-                <span className="text-xs font-bold text-slate-800">Gizmo Debug Hitbox Vert</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => updateSettings({ showColliderDebugGizmos: !settings.showColliderDebugGizmos })}
-                className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
-                  settings.showColliderDebugGizmos ? 'bg-emerald-600 justify-end' : 'bg-slate-300 justify-start'
-                }`}
-              >
-                <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
-              </button>
-            </div>
+            {(() => {
+              const isHitboxGizmoOn = gizmos.masterEnabled && gizmos.categories.hitboxes !== 'off';
+              return (
+                <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200">
+                  <div className="flex items-center gap-2">
+                    <Scan className="w-4 h-4 text-emerald-600" />
+                    <span className="text-xs font-bold text-slate-800">Gizmo Debug Hitbox Vert</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => updateSettings({ showColliderDebugGizmos: !isHitboxGizmoOn })}
+                    className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
+                      isHitboxGizmoOn ? 'bg-emerald-600 justify-end' : 'bg-slate-300 justify-start'
+                    }`}
+                  >
+                    <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+                  </button>
+                </div>
+              );
+            })()}
 
             {/* Tags System */}
             <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200">
@@ -559,7 +605,133 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
       </div>
 
       {/* ========================================================================= */}
-      {/* ACCORDION CATEGORY 3: RÈGLES & RULEBOOK */}
+      {/* ACCORDION CATEGORY 3: GIZMOS & DEBUG VISUEL */}
+      {/* ========================================================================= */}
+      <div className="rounded-2xl border border-cyan-200 bg-cyan-50/40 overflow-hidden transition-all shadow-2xs">
+        <button
+          type="button"
+          onClick={() => toggleSection('gizmos')}
+          className="w-full p-3 flex items-center justify-between bg-cyan-100/60 hover:bg-cyan-100/90 transition-colors cursor-pointer text-left"
+        >
+          <div className="flex items-center gap-2 text-xs font-black text-cyan-950 uppercase tracking-wider">
+            <Crosshair className="w-4 h-4 text-cyan-600" />
+            <span>3. Gizmos & Debug Visuel</span>
+          </div>
+          {openSections.gizmos ? <ChevronDown className="w-4 h-4 text-cyan-700" /> : <ChevronRight className="w-4 h-4 text-cyan-700" />}
+        </button>
+
+        {openSections.gizmos && (
+          <div className="p-3 space-y-2.5 animate-in fade-in duration-150">
+            {/* Master switch */}
+            <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-cyan-200">
+              <div>
+                <div className="text-xs font-bold text-slate-800">Afficher les Gizmos sur la scène</div>
+                <div className="text-[10px] text-slate-500">Interrupteur général (Édition & Jeu)</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateGizmos({ masterEnabled: !gizmos.masterEnabled })}
+                className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center shrink-0 ${
+                  gizmos.masterEnabled ? 'bg-cyan-600 justify-end' : 'bg-slate-300 justify-start'
+                }`}
+              >
+                <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+              </button>
+            </div>
+
+            {/* Présets rapides */}
+            <div className="p-2 bg-white rounded-xl border border-cyan-200 space-y-1.5">
+              <div className="text-[10px] font-bold text-slate-500 uppercase">Présets rapides :</div>
+              <div className="grid grid-cols-4 gap-1">
+                {[
+                  { id: 'both', label: 'Tout Les 2' },
+                  { id: 'edit', label: 'Édit seul' },
+                  { id: 'play', label: 'Play seul' },
+                  { id: 'off', label: 'Tout Off' },
+                ].map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => setAllGizmosMode(preset.id as GizmoVisibilityMode)}
+                    className="py-1 px-1 rounded-lg text-[10px] font-bold bg-slate-100 hover:bg-cyan-50 hover:text-cyan-800 text-slate-700 cursor-pointer transition-colors"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Filtre objet sélectionné uniquement */}
+            <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-cyan-200">
+              <div>
+                <div className="text-xs font-bold text-slate-800">Objet sélectionné uniquement</div>
+                <div className="text-[10px] text-slate-500">N'affiche les gizmos d'entité que pour la sélection</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateGizmos({ onlySelected: !gizmos.onlySelected })}
+                className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center shrink-0 ${
+                  gizmos.onlySelected ? 'bg-cyan-600 justify-end' : 'bg-slate-300 justify-start'
+                }`}
+              >
+                <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+              </button>
+            </div>
+
+            {/* Liste des 7 catégories de gizmos */}
+            <div className="space-y-1.5">
+              {GIZMO_CATEGORY_LIST.map((cat) => {
+                const currentMode = gizmos.categories[cat.id] || 'off';
+                return (
+                  <div
+                    key={cat.id}
+                    className="p-2 bg-white rounded-xl border border-cyan-200/80 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: cat.dotColor }}
+                        />
+                        <span className="text-xs font-bold text-slate-800 truncate">{cat.label}</span>
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-slate-400 leading-snug">{cat.description}</div>
+                    <div className="grid grid-cols-4 gap-1 bg-slate-100 p-0.5 rounded-lg">
+                      {(
+                        [
+                          { id: 'off', label: 'Off' },
+                          { id: 'edit', label: 'Édit' },
+                          { id: 'play', label: 'Play' },
+                          { id: 'both', label: 'Les 2' },
+                        ] as { id: GizmoVisibilityMode; label: string }[]
+                      ).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setCategoryMode(cat.id, opt.id)}
+                          className={`py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition-all ${
+                            currentMode === opt.id
+                              ? opt.id === 'off'
+                                ? 'bg-slate-600 text-white shadow-2xs'
+                                : 'bg-cyan-600 text-white shadow-2xs'
+                              : 'text-slate-600 hover:bg-white/70'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ========================================================================= */}
+      {/* ACCORDION CATEGORY 4: RÈGLES & RULEBOOK */}
       {/* ========================================================================= */}
       <div className="rounded-2xl border border-amber-200 bg-amber-50/40 overflow-hidden transition-all shadow-2xs">
         <button
@@ -569,7 +741,7 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
         >
           <div className="flex items-center gap-2 text-xs font-black text-amber-950 uppercase tracking-wider">
             <Zap className="w-4 h-4 text-amber-600 fill-amber-600" />
-            <span>3. Règles & RuleBook</span>
+            <span>4. Règles & RuleBook</span>
           </div>
           {openSections.rules ? <ChevronDown className="w-4 h-4 text-amber-700" /> : <ChevronRight className="w-4 h-4 text-amber-700" />}
         </button>
@@ -641,7 +813,7 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
       </div>
 
       {/* ========================================================================= */}
-      {/* ACCORDION CATEGORY 4: CURSEURS VECTORIELS DYNAMIQUES */}
+      {/* ACCORDION CATEGORY 5: CURSEURS VECTORIELS DYNAMIQUES */}
       {/* ========================================================================= */}
       <div className="rounded-2xl border border-purple-200 bg-purple-50/40 overflow-hidden transition-all shadow-2xs">
         <button
@@ -651,7 +823,7 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
         >
           <div className="flex items-center gap-2 text-xs font-black text-purple-950 uppercase tracking-wider">
             <MousePointer2 className="w-4 h-4 text-purple-600" />
-            <span>4. Curseurs Vectoriels Dynamiques</span>
+            <span>5. Curseurs Vectoriels Dynamiques</span>
           </div>
           {openSections.cursors ? <ChevronDown className="w-4 h-4 text-purple-700" /> : <ChevronRight className="w-4 h-4 text-purple-700" />}
         </button>
@@ -782,7 +954,7 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
       </div>
 
       {/* ========================================================================= */}
-      {/* ACCORDION CATEGORY 5: MODE PLAY & SYNTHÉTISEUR AUDIO */}
+      {/* ACCORDION CATEGORY 6: MODE PLAY & SYNTHÉTISEUR AUDIO */}
       {/* ========================================================================= */}
       <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 overflow-hidden transition-all shadow-2xs">
         <button
@@ -792,7 +964,7 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
         >
           <div className="flex items-center gap-2 text-xs font-black text-emerald-950 uppercase tracking-wider">
             <Moon className="w-4 h-4 text-emerald-600" />
-            <span>5. Mode Play & Présentation</span>
+            <span>6. Mode Play & Présentation</span>
           </div>
           {openSections.play ? <ChevronDown className="w-4 h-4 text-emerald-700" /> : <ChevronRight className="w-4 h-4 text-emerald-700" />}
         </button>

@@ -57,6 +57,7 @@ export function Inspector() {
   const [tempFolderName, setTempFolderName] = useState('');
   const [draggingStateId, setDraggingStateId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | 'root' | null>(null);
+  const [isParentingCollapsed, setIsParentingCollapsed] = useState(false);
 
   const selectedEntity: Entity | null = selectedEntityId
     ? entities[selectedEntityId] ||
@@ -65,6 +66,18 @@ export function Inspector() {
       Object.values(customArchetypes).find((a) => a.type === selectedEntityId) ||
       null
     : null;
+
+  // Prepare onion states for the full screen drawing modal (must stay above early return)
+  const onionStates: OnionStateOption[] = useMemo(() => {
+    if (!editingStateDrawingId || !selectedEntity) return [];
+    return Object.values(selectedEntity.states)
+      .filter((s) => s.id !== editingStateDrawingId)
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        vectorPaths: s.vectorPaths || (s.id === selectedEntity.currentStateId ? selectedEntity.vectorPaths : []),
+      }));
+  }, [editingStateDrawingId, selectedEntity]);
 
   if (!selectedEntity) {
     return (
@@ -106,18 +119,6 @@ export function Inspector() {
     addTagToEntity(selectedEntity.id, newTagInput.trim());
     setNewTagInput('');
   };
-
-  // Prepare onion states for the full screen drawing modal
-  const onionStates: OnionStateOption[] = useMemo(() => {
-    if (!editingStateDrawingId || !selectedEntity) return [];
-    return Object.values(selectedEntity.states)
-      .filter((s) => s.id !== editingStateDrawingId)
-      .map((s) => ({
-        id: s.id,
-        name: s.name,
-        vectorPaths: s.vectorPaths || (s.id === selectedEntity.currentStateId ? selectedEntity.vectorPaths : []),
-      }));
-  }, [editingStateDrawingId, selectedEntity]);
 
   const editingState = editingStateDrawingId ? selectedEntity.states[editingStateDrawingId] : null;
 
@@ -294,21 +295,43 @@ export function Inspector() {
 
         return (
           <div className="space-y-2 bg-slate-50/70 p-3 rounded-2xl border border-slate-200">
-            <div className="flex items-center justify-between">
-              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
-                <Link2 className="w-3.5 h-3.5 text-indigo-600" /> Parenting & Attachement
-              </label>
+            <div
+              onClick={() => setIsParentingCollapsed((v) => !v)}
+              className="flex items-center justify-between gap-2 cursor-pointer select-none"
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-slate-400 hover:text-slate-600 shrink-0">
+                  {isParentingCollapsed ? (
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  )}
+                </span>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5 truncate">
+                  <Link2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span>Parenting & Attachement</span>
+                </span>
+                {isParentingCollapsed && (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-600 truncate max-w-[125px]">
+                    {activeParent ? `→ ${activeParent.name}` : 'Indépendant'}
+                  </span>
+                )}
+              </div>
               {activeParent && (
                 <button
                   type="button"
-                  onClick={() => detachEntity(selectedEntity.id)}
-                  className="text-[10px] font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2 py-0.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    detachEntity(selectedEntity.id);
+                  }}
+                  className="text-[10px] font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2 py-0.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors shrink-0"
                 >
                   <Unlink className="w-3 h-3" /> Détacher
                 </button>
               )}
             </div>
 
+            {!isParentingCollapsed && (
             <div className="space-y-1.5">
               {/* Ligne 1 : Objet Parent */}
               <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
@@ -421,6 +444,7 @@ export function Inspector() {
                 </>
               )}
             </div>
+            )}
           </div>
         );
       })()}

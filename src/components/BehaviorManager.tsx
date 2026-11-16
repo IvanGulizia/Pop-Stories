@@ -191,9 +191,13 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
           approachNearDistance: 120,
           hoverEnterDuration: 0.18,
           hoverDwellDelay: 1.5,
+          hoverReturnDelay: 0,
           hoverExitDuration: 0.2,
           dragStartDuration: 0.18,
           dragDwellDelay: 2.0,
+          swingReturnDelay: 0.15,
+          shakeHoldDuration: 0.45,
+          dragOverReturnDelay: 0,
           dragReleaseDuration: 0.2,
           minFallHeight: 20,
           landDuration: 0.18,
@@ -249,6 +253,9 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
           orbitRadius: 8,
           orbitRadiusY: 8,
           smoothSpeed: 0,
+          flipMode: 'none',
+          facingDirection: 'right',
+          flipDeadzone: 12,
         } as LookAtBehaviorConfig;
         break;
       case 'follow':
@@ -732,6 +739,10 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
             activeShape === 'circle' ? 'Cercle' : activeShape === 'polygon' ? 'Polyligne' : 'Rectangle';
           const modeLabel = activeMode === 'manual' ? 'Manuel' : 'Auto';
           const isOverridden = Boolean(targetState?.overrideCollider);
+          const colliderMode = entity.colliderMode || 'default';
+          const pointerDelegation = entity.pointerDelegation || 'self';
+          const ignorePointer = Boolean(entity.ignorePointer);
+          const parentEntity = entity.parentId ? entities[entity.parentId] : undefined;
 
           return (
             <div className="bg-white rounded-2xl border border-slate-200 hover:border-slate-300 transition-all shadow-2xs overflow-hidden">
@@ -750,12 +761,40 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
                       <ChevronRight className="w-4 h-4" />
                     )}
                   </button>
-                  <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center shrink-0">
-                    <Shield className="w-4 h-4 text-emerald-600" />
+                  <div
+                    className={`w-7 h-7 rounded-lg border flex items-center justify-center shrink-0 ${
+                      colliderMode === 'disabled'
+                        ? 'bg-slate-100 border-slate-300 text-slate-500'
+                        : colliderMode === 'trigger_only'
+                        ? 'bg-sky-50 border-sky-200 text-sky-600'
+                        : 'bg-emerald-50 border-emerald-200 text-emerald-600'
+                    }`}
+                  >
+                    <Shield className="w-4 h-4" />
                   </div>
                   <div className="min-w-0">
                     <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 truncate">
                       <span>Hitbox & Collider</span>
+                      {colliderMode === 'disabled' && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                          Désactivé
+                        </span>
+                      )}
+                      {colliderMode === 'trigger_only' && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-sky-50 text-sky-700">
+                          Capteur
+                        </span>
+                      )}
+                      {pointerDelegation !== 'self' && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">
+                          → {pointerDelegation === 'parent' ? 'Parent' : 'Racine'}
+                        </span>
+                      )}
+                      {ignorePointer && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-50 text-rose-600">
+                          Ignorer souris
+                        </span>
+                      )}
                     </div>
                     <div className="text-[10px] text-slate-500 flex items-center gap-1 truncate">
                       {entity.sharedCollider ? (
@@ -804,6 +843,112 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
                         Ajuster dans Dessin
                       </button>
                     )}
+                  </div>
+
+                  {/* Mode de collision physique */}
+                  <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+                    <div>
+                      <div className="font-bold text-slate-700 text-xs">Mode du Collider physique</div>
+                      <div className="text-[10px] text-slate-400 leading-snug">
+                        {colliderMode === 'disabled'
+                          ? 'Aucune collision physique ni détection de contact (visuel et LookAt actifs).'
+                          : colliderMode === 'trigger_only'
+                          ? 'Capteur traversable uniquement (ne repousse jamais les autres objets).'
+                          : 'Suit le comportement normal (solide si Physique activée, sinon capteur).'}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-lg">
+                      {[
+                        { id: 'default', label: 'Normal' },
+                        { id: 'trigger_only', label: 'Capteur' },
+                        { id: 'disabled', label: 'Désactivé' },
+                      ].map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() =>
+                            updateEntityDetails(entity.id, {
+                              colliderMode: opt.id as Entity['colliderMode'],
+                            })
+                          }
+                          className={`py-1 rounded-md text-[10px] font-bold cursor-pointer transition-all ${
+                            colliderMode === opt.id
+                              ? opt.id === 'disabled'
+                                ? 'bg-slate-700 text-white shadow-2xs'
+                                : opt.id === 'trigger_only'
+                                ? 'bg-sky-600 text-white shadow-2xs'
+                                : 'bg-emerald-600 text-white shadow-2xs'
+                              : 'text-slate-600 hover:bg-white/70'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Délégation souris / Drag parent-enfant */}
+                  <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
+                    <div>
+                      <div className="font-bold text-slate-700 text-xs">Interaction Souris / Drag (Mode Play)</div>
+                      <div className="text-[10px] text-slate-400 leading-snug">
+                        {pointerDelegation === 'self'
+                          ? 'Les clics, survols et drags agissent directement sur cet objet.'
+                          : pointerDelegation === 'parent'
+                          ? `Transmet les clics, survols et drags au parent direct${parentEntity ? ` (« ${parentEntity.name} »)` : ''}.`
+                          : 'Remonte et transmet toute interaction souris au parent final racine du groupe.'}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-lg">
+                      {[
+                        { id: 'self', label: 'Soi-même' },
+                        { id: 'parent', label: 'Parent direct' },
+                        { id: 'root_parent', label: 'Parent final' },
+                      ].map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() =>
+                            updateEntityDetails(entity.id, {
+                              pointerDelegation: opt.id as Entity['pointerDelegation'],
+                            })
+                          }
+                          className={`py-1 rounded-md text-[10px] font-bold cursor-pointer transition-all ${
+                            pointerDelegation === opt.id
+                              ? 'bg-indigo-600 text-white shadow-2xs'
+                              : 'text-slate-600 hover:bg-white/70'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    {pointerDelegation !== 'self' && !parentEntity && (
+                      <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                        Cet objet n’a pas encore de parent : tant qu’il est indépendant, il répond lui-même.
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                      <div>
+                        <div className="font-bold text-slate-700 text-[11px]">
+                          Ignorer la souris en Mode Play
+                        </div>
+                        <div className="text-[10px] text-slate-400 leading-snug">
+                          Laisse passer les clics/survols à travers cet élément (ex: pupille sur œil).
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={ignorePointer}
+                        onChange={(e) =>
+                          updateEntityDetails(entity.id, {
+                            ignorePointer: e.target.checked,
+                          })
+                        }
+                        className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
+                      />
+                    </div>
                   </div>
 
                   {stateList.length > 1 && (
@@ -2704,6 +2849,85 @@ function renderBehaviorControls({
 
           {lookMode === 'rotate' ? (
             <>
+              {/* Orientation du dessin & Flip contextuel Gauche/Droite */}
+              <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-slate-700 text-xs">Comportement Gauche/Droite</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => update({ flipMode: 'none' })}
+                    className={`py-1 px-2 rounded-md text-[10px] font-bold cursor-pointer transition-all ${
+                      (b.flipMode || 'none') === 'none'
+                        ? 'bg-indigo-600 text-white shadow-2xs'
+                        : 'text-slate-600 hover:bg-white/70'
+                    }`}
+                  >
+                    Rotation libre 360°
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => update({ flipMode: 'flipX' })}
+                    className={`py-1 px-2 rounded-md text-[10px] font-bold cursor-pointer transition-all ${
+                      b.flipMode === 'flipX'
+                        ? 'bg-indigo-600 text-white shadow-2xs'
+                        : 'text-slate-600 hover:bg-white/70'
+                    }`}
+                  >
+                    Flip miroir auto (Tête)
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                  <span className="text-[11px] font-semibold text-slate-600">Dessin orienté vers :</span>
+                  <div className="grid grid-cols-2 gap-1 bg-slate-100 p-0.5 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => update({ facingDirection: 'right' })}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                        (b.facingDirection || 'right') === 'right'
+                          ? 'bg-white text-indigo-700 shadow-2xs'
+                          : 'text-slate-500'
+                      }`}
+                    >
+                      Droite →
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => update({ facingDirection: 'left' })}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                        b.facingDirection === 'left'
+                          ? 'bg-white text-indigo-700 shadow-2xs'
+                          : 'text-slate-500'
+                      }`}
+                    >
+                      ← Gauche
+                    </button>
+                  </div>
+                </div>
+
+                {b.flipMode === 'flipX' && (
+                  <div className="pt-1 border-t border-slate-100">
+                    <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
+                      <span className="font-semibold">Zone morte flip (Anti-scintillement)</span>
+                      <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[10px]">
+                        {b.flipDeadzone ?? 12} px
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="40"
+                      step="2"
+                      value={b.flipDeadzone ?? 12}
+                      onChange={(e) => update({ flipDeadzone: parseInt(e.target.value, 10) || 0 })}
+                      className="w-full accent-indigo-600 h-1.5"
+                    />
+                  </div>
+                )}
+              </div>
+
               {/* Ligne 3: Décalage angulaire */}
               <div className="p-2 bg-white rounded-xl border border-slate-200">
                 <div className="flex justify-between items-center text-xs text-slate-700 mb-1">

@@ -157,6 +157,9 @@ export interface LookAtBehaviorConfig extends BaseBehaviorConfig {
   maxAngle?: number;      // 0 ou >= 180 = libre 360° ; sinon cône max ±maxAngle° (ex: tête ±35°)
   orbitRadius?: number;   // px (mode 'pupil_orbit'), rayon horizontal max, défaut 8
   orbitRadiusY?: number;  // px optionnel (mode 'pupil_orbit'), rayon vertical max, défaut = orbitRadius
+  flipMode?: 'none' | 'flipX';         // 'flipX' retourne horizontalement quand la cible change de côté (évite la tête à l'envers)
+  facingDirection?: 'right' | 'left';  // Orientation d'origine du dessin (défaut 'right' = 0°)
+  flipDeadzone?: number;               // Zone morte horizontale en px (défaut 12) anti-scintillement
 }
 
 export interface FollowBehaviorConfig extends BaseBehaviorConfig {
@@ -335,12 +338,16 @@ export interface InteractivePuppetBehaviorConfig extends BaseBehaviorConfig {
   // Seuils de distance curseur (avant hover)
   approachFarDistance?: number;  // px, défaut 280
   approachNearDistance?: number; // px, défaut 120
-  // Temporisations & Chute
+  // Temporisations, Maintiens & Chute
   hoverEnterDuration?: number;   // s, défaut 0.18
   hoverDwellDelay?: number;      // s, défaut 1.5
+  hoverReturnDelay?: number;     // s, défaut 0 (grâce avant retour à la normale quand le curseur quitte)
   hoverExitDuration?: number;    // s, défaut 0.2
   dragStartDuration?: number;    // s, défaut 0.18
   dragDwellDelay?: number;       // s, défaut 2.0
+  swingReturnDelay?: number;     // s, défaut 0.15 (maintien de l'état Balancement avant retour au Drag normal)
+  shakeHoldDuration?: number;    // s, défaut 0.45 (maintien de l'état Secousse avant retour à la normale)
+  dragOverReturnDelay?: number;  // s, défaut 0 (maintien du sous-état sur cible avant retour au Drag)
   dragReleaseDuration?: number;  // s, défaut 0.2
   minFallHeight?: number;        // px, défaut 20
   landDuration?: number;         // s, défaut 0.18
@@ -439,6 +446,9 @@ export interface ParentOffset {
   inheritFlip?: boolean;
 }
 
+export type EntityColliderMode = 'default' | 'trigger_only' | 'disabled';
+export type PointerDelegationMode = 'self' | 'parent' | 'root_parent';
+
 export interface Entity {
   id: EntityId;
   name: string;
@@ -450,6 +460,9 @@ export interface Entity {
   isDraggable: boolean;
   colliderType?: ColliderType;
   colliderBounds?: ColliderBounds;
+  colliderMode?: EntityColliderMode;         // 'default' | 'trigger_only' | 'disabled' (désactive le collider physique/règles)
+  pointerDelegation?: PointerDelegationMode; // 'self' | 'parent' | 'root_parent' (transmet clic/survol/drag en Play)
+  ignorePointer?: boolean;                   // En Mode Play, rend la hitbox transparente à la souris (pointer-events: none)
   states: Record<StateId, EntityState>;
   icon?: string;
   drawingDataUrl?: string;
@@ -734,13 +747,31 @@ export interface AutoSaveDraft {
   data: ProjectExportData;
 }
 
+export type GizmoVisibilityMode = 'off' | 'edit' | 'play' | 'both';
+
+export type GizmoCategoryId =
+  | 'hitboxes'
+  | 'colliderLayers'
+  | 'hierarchy'
+  | 'lookAt'
+  | 'puppetZones'
+  | 'aiZones'
+  | 'physicsVectors';
+
+export interface GizmoSettings {
+  masterEnabled: boolean;
+  onlySelected: boolean;
+  categories: Record<GizmoCategoryId, GizmoVisibilityMode>;
+}
+
 export interface AppSettings {
   showCanvasLabels: boolean;
   showGrid: boolean;
   gridStyle: 'dots' | 'lines' | 'clean';
   showTagsSystem: boolean;
   showRuleFilters?: boolean;
-  showColliderDebugGizmos?: boolean;
+  showColliderDebugGizmos?: boolean; // Rétrocompatibilité synchronisée avec gizmos.categories.hitboxes
+  gizmos?: GizmoSettings;
   useCustomCursors?: boolean;
   cursorShadow?: boolean;
   cursorSourceMode?: 'hugeicons' | 'custom_drawn';

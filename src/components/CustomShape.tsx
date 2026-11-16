@@ -15,6 +15,12 @@ import {
   notifyEntityDragLifecycle,
 } from '../utils/matterPhysicsEngine';
 import { HealthBehaviorConfig } from '../types';
+import {
+  registerEntityDragControls,
+  unregisterEntityDragControls,
+  getEntityDragControls,
+  resolvePointerTargetEntity,
+} from '../utils/dragDelegationRegistry';
 
 interface CustomShapeProps {
   entity: Entity;
@@ -30,7 +36,6 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
   const updateEntitySize = useSceneStore((state) => state.updateEntitySize);
   const evaluateRulesWithTemp = useSceneStore((state) => state.evaluateRulesWithTemp);
   const showCanvasLabels = useSceneStore((state) => state.settings.showCanvasLabels);
-  const showColliderDebugGizmos = useSceneStore((state) => state.settings.showColliderDebugGizmos);
   const enableHoverScaleAnimation = useSceneStore((state) => state.settings.enableHoverScaleAnimation);
   const appMode = useSceneStore((state) => state.appMode);
 
@@ -41,6 +46,8 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
   const hasMovedBeyondDragThresholdRef = useRef(false);
   const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
   const pointerDownTimeRef = useRef<number>(0);
+  const pointerDownTargetIdRef = useRef<string | null>(null);
+  const hoveredTargetIdRef = useRef<string | null>(null);
   const lastHandledClickTimeRef = useRef<number>(0);
   const upHandledForPointerRef = useRef<boolean>(false);
   const dragControls = useDragControls();
@@ -134,21 +141,55 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
   const isDraggable = canDrag;
   const isHoveringRef = useRef(false);
 
-  const getHoverState = (): import('../utils/cursorIcons').CursorState => {
-    if (isDraggable && hasClickRules) {
+  const getTargetInteractionFlags = (target: Entity) => {
+    const tState = target.states[target.currentStateId];
+    const tDrag = isEntityDraggable(target, tState);
+    const tHasClick = rules.some(
+      (r) =>
+        r.enabled &&
+        r.trigger.type === 'click' &&
+        ((r.trigger.subjectMode === 'instance' && r.trigger.subjectId === target.id) ||
+          (r.trigger.subjectMode === 'type' && r.trigger.subjectType === target.type) ||
+          (r.trigger.subjectMode === 'tag' && r.trigger.subjectTag && target.tags?.includes(r.trigger.subjectTag)) ||
+          (!r.trigger.subjectMode && (r.trigger.subjectId === target.id || r.trigger.subjectType === target.type)))
+    );
+    return { canDragTarget: tDrag.canDrag, hasClickRulesTarget: tHasClick };
+  };
+
+  const getHoverStateFor = (target: Entity): import('../utils/cursorIcons').CursorState => {
+    const { canDragTarget, hasClickRulesTarget } =
+      target.id === entity.id
+        ? { canDragTarget: isDraggable, hasClickRulesTarget: hasClickRules }
+        : getTargetInteractionFlags(target);
+    const effectiveDrag = appMode !== 'play' ? !isResizing : canDragTarget;
+    const effectiveClick = hasClickRulesTarget || appMode !== 'play';
+
+    if (effectiveDrag && hasClickRulesTarget) {
       return 'hover_drag_click';
     }
-    if (isDraggable) {
+    if (effectiveDrag) {
       return 'hover_drag';
     }
-    if (isClickable) {
+    if (effectiveClick) {
       return 'hover_click';
     }
     return 'idle';
   };
 
+  const getHoverState = (): import('../utils/cursorIcons').CursorState => getHoverStateFor(entity);
+
+  const getPlayPointerTarget = (): Entity => {
+    if (appMode !== 'play') return entity;
+    return resolvePointerTargetEntity(entity, useSceneStore.getState().entities);
+  };
+
   const x = useMotionValue(entity.position.x);
   const y = useMotionValue(entity.position.y);
+
+  useEffect(() => {
+    registerEntityDragControls(entity.id, dragControls);
+    return () => unregisterEntityDragControls(entity.id, dragControls);
+  }, [entity.id, dragControls]);
 
   useEffect(() => {
     if (isDraggingRef.current) return;
@@ -159,6 +200,9 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
   useEffect(() => {
     return () => {
       setActiveDragPosition(entity.id, null);
+      if (hoveredTargetIdRef.current && hoveredTargetIdRef.current !== entity.id) {
+        notifyEntityHoverState(hoveredTargetIdRef.current, false);
+      }
       notifyEntityHoverState(entity.id, false);
       notifyEntityDragLifecycle(entity.id, 'end', undefined, false);
     };
@@ -384,7 +428,9 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
     >
       {/* Hitbox interactive délimitée strictement par le collider vert */}
       <div
-        className={`absolute inset-0 pointer-events-auto flex items-center justify-center z-10 ${
+        className={`absolute inset-0 ${
+          appMode === 'play' && entity.ignorePointer ? 'pointer-events-none' : 'pointer-events-auto'
+        } flex items-center justify-center z-10 ${
           canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
         }`}
         style={{
@@ -401,18 +447,26 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
             currentState
           );
           if (isInside) {
-            setCursorState(getHoverState());
-            if (!isHoveringRef.current) {
+            const target = getPlayPointerTarget();
+            setCursorState(getHoverStateFor(target));
+            if (!isHoveringRef.current || hoveredTargetIdRef.current !== target.id) {
+              if (hoveredTargetIdRef.current && hoveredTargetIdRef.current !== target.id) {
+                notifyEntityHoverState(hoveredTargetIdRef.current, false);
+                triggerPointerEvent(hoveredTargetIdRef.current, 'exit', pt);
+              }
               isHoveringRef.current = true;
-              notifyEntityHoverState(entity.id, true);
-              triggerPointerEvent(entity.id, 'enter', pt);
+              hoveredTargetIdRef.current = target.id;
+              notifyEntityHoverState(target.id, true);
+              triggerPointerEvent(target.id, 'enter', pt);
             }
           } else {
             setCursorState('idle');
             if (isHoveringRef.current) {
+              const exitId = hoveredTargetIdRef.current || entity.id;
               isHoveringRef.current = false;
-              notifyEntityHoverState(entity.id, false);
-              triggerPointerEvent(entity.id, 'exit', pt);
+              hoveredTargetIdRef.current = null;
+              notifyEntityHoverState(exitId, false);
+              triggerPointerEvent(exitId, 'exit', pt);
             }
           }
         }}
@@ -427,27 +481,37 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
             currentState
           );
           if (isInside) {
-            setCursorState(getHoverState());
-            if (!isHoveringRef.current) {
+            const target = getPlayPointerTarget();
+            setCursorState(getHoverStateFor(target));
+            if (!isHoveringRef.current || hoveredTargetIdRef.current !== target.id) {
+              if (hoveredTargetIdRef.current && hoveredTargetIdRef.current !== target.id) {
+                notifyEntityHoverState(hoveredTargetIdRef.current, false);
+                triggerPointerEvent(hoveredTargetIdRef.current, 'exit', pt);
+              }
               isHoveringRef.current = true;
-              notifyEntityHoverState(entity.id, true);
-              triggerPointerEvent(entity.id, 'enter', pt);
+              hoveredTargetIdRef.current = target.id;
+              notifyEntityHoverState(target.id, true);
+              triggerPointerEvent(target.id, 'enter', pt);
             }
           } else {
             setCursorState('idle');
             if (isHoveringRef.current) {
+              const exitId = hoveredTargetIdRef.current || entity.id;
               isHoveringRef.current = false;
-              notifyEntityHoverState(entity.id, false);
-              triggerPointerEvent(entity.id, 'exit', pt);
+              hoveredTargetIdRef.current = null;
+              notifyEntityHoverState(exitId, false);
+              triggerPointerEvent(exitId, 'exit', pt);
             }
           }
         }}
         onPointerLeave={(e) => {
           if (appMode === 'play' && isHoveringRef.current) {
+            const exitId = hoveredTargetIdRef.current || entity.id;
             isHoveringRef.current = false;
-            notifyEntityHoverState(entity.id, false);
+            hoveredTargetIdRef.current = null;
+            notifyEntityHoverState(exitId, false);
             setCursorState('idle');
-            triggerPointerEvent(entity.id, 'exit', getSceneEventPosition(e.clientX, e.clientY));
+            triggerPointerEvent(exitId, 'exit', getSceneEventPosition(e.clientX, e.clientY));
           }
         }}
         onPointerDown={(e) => {
@@ -473,26 +537,47 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
           hasMovedBeyondDragThresholdRef.current = false;
           isDraggingRef.current = false;
 
-          if (canDrag) {
-            dragControls.start(e);
-            if (appMode === 'play') setCursorState('drag');
-          } else {
-            if (appMode === 'play') setCursorState('click');
+          if (appMode !== 'play') {
+            pointerDownTargetIdRef.current = entity.id;
+            if (canDrag) {
+              dragControls.start(e);
+            }
+            return;
           }
-          if (appMode === 'play') {
-            upHandledForPointerRef.current = false;
-            const pt = getSceneEventPosition(e.clientX, e.clientY);
-            triggerPointerEvent(entity.id, 'mouse_down', pt);
 
-            const handleGlobalUp = (upEvent: PointerEvent) => {
-              window.removeEventListener('pointerup', handleGlobalUp);
-              if (upHandledForPointerRef.current) return;
-              upHandledForPointerRef.current = true;
-              const upPt = getSceneEventPosition(upEvent.clientX, upEvent.clientY);
-              triggerPointerEvent(entity.id, 'mouse_up', upPt);
-            };
-            window.addEventListener('pointerup', handleGlobalUp, { once: true });
+          const target = getPlayPointerTarget();
+          pointerDownTargetIdRef.current = target.id;
+          const { canDragTarget } =
+            target.id === entity.id
+              ? { canDragTarget: canDrag }
+              : getTargetInteractionFlags(target);
+
+          if (target.id !== entity.id) {
+            if (canDragTarget) {
+              getEntityDragControls(target.id)?.start(e);
+              setCursorState('drag');
+            } else {
+              setCursorState('click');
+            }
+          } else if (canDrag) {
+            dragControls.start(e);
+            setCursorState('drag');
+          } else {
+            setCursorState('click');
           }
+
+          upHandledForPointerRef.current = false;
+          const pt = getSceneEventPosition(e.clientX, e.clientY);
+          triggerPointerEvent(target.id, 'mouse_down', pt);
+
+          const handleGlobalUp = (upEvent: PointerEvent) => {
+            window.removeEventListener('pointerup', handleGlobalUp);
+            if (upHandledForPointerRef.current) return;
+            upHandledForPointerRef.current = true;
+            const upPt = getSceneEventPosition(upEvent.clientX, upEvent.clientY);
+            triggerPointerEvent(target.id, 'mouse_up', upPt);
+          };
+          window.addEventListener('pointerup', handleGlobalUp, { once: true });
         }}
         onPointerUp={(e) => {
           const isInside = isPointInsideEntityCollider(
@@ -512,6 +597,9 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
             return;
           }
 
+          const target =
+            (pointerDownTargetIdRef.current && useSceneStore.getState().entities[pointerDownTargetIdRef.current]) ||
+            getPlayPointerTarget();
           upHandledForPointerRef.current = true;
           const pt = getSceneEventPosition(e.clientX, e.clientY);
           const duration = Date.now() - (pointerDownTimeRef.current || 0);
@@ -523,19 +611,19 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
 
           if (isPureClick && isInside) {
             lastHandledClickTimeRef.current = Date.now();
-            selectEntity(entity.id);
-            triggerPointerEvent(entity.id, 'click', pt);
-            triggerPointerEvent(entity.id, 'mouse_up', pt);
-            setCursorState(getHoverState());
+            selectEntity(target.id);
+            triggerPointerEvent(target.id, 'click', pt);
+            triggerPointerEvent(target.id, 'mouse_up', pt);
+            setCursorState(getHoverStateFor(target));
           } else if (!hasMovedBeyondDragThresholdRef.current) {
             isDraggingRef.current = false;
             setIsDragging(false);
             if (isInside) {
-              setCursorState(getHoverState());
-              triggerPointerEvent(entity.id, 'mouse_up', pt);
+              setCursorState(getHoverStateFor(target));
+              triggerPointerEvent(target.id, 'mouse_up', pt);
             } else {
               setCursorState('idle');
-              triggerPointerEvent(entity.id, 'mouse_up', pt);
+              triggerPointerEvent(target.id, 'mouse_up', pt);
             }
           }
         }}
@@ -559,48 +647,20 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
             return;
           }
 
-          selectEntity(entity.id);
+          const dist = pointerDownPosRef.current
+            ? Math.hypot(e.clientX - pointerDownPosRef.current.x, e.clientY - pointerDownPosRef.current.y)
+            : 0;
+          if (dist >= 6) return;
+
+          const target = getPlayPointerTarget();
+          selectEntity(target.id);
           if (!hasMovedBeyondDragThresholdRef.current && performance.now() - lastDragEndTimeRef.current >= 130) {
             lastHandledClickTimeRef.current = Date.now();
-            setCursorState(getHoverState());
-            triggerPointerEvent(entity.id, 'click', getSceneEventPosition(e.clientX, e.clientY));
+            setCursorState(getHoverStateFor(target));
+            triggerPointerEvent(target.id, 'click', getSceneEventPosition(e.clientX, e.clientY));
           }
         }}
       />
-      {/* Gizmo Debug des Colliders (si activé dans les réglages) */}
-      {showColliderDebugGizmos && (
-        <div className="absolute inset-0 pointer-events-none z-50">
-          <svg viewBox="0 0 200 200" className="w-full h-full overflow-visible">
-            {colliderGeometry.colliderType === 'circle' ? (
-              <circle
-                cx={colliderGeometry.centerX}
-                cy={colliderGeometry.centerY}
-                r={colliderGeometry.radius}
-                fill="rgba(16, 185, 129, 0.15)"
-                stroke="#10b981"
-                strokeWidth="2"
-                strokeDasharray="4 3"
-              />
-            ) : (
-              <rect
-                x={colliderGeometry.x}
-                y={colliderGeometry.y}
-                width={colliderGeometry.width}
-                height={colliderGeometry.height}
-                fill="rgba(16, 185, 129, 0.15)"
-                stroke="#10b981"
-                strokeWidth="2"
-                strokeDasharray="4 3"
-                rx="4"
-              />
-            )}
-          </svg>
-          <div className="absolute -top-3.5 -left-3.5 bg-emerald-700 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs flex items-center gap-1 whitespace-nowrap">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-ping" />
-            <span>Zone : {colliderGeometry.colliderType}</span>
-          </div>
-        </div>
-      )}
 
       {/* Anneau de sélection et poignée de redimensionnement */}
       {isSelected && appMode !== 'play' && (

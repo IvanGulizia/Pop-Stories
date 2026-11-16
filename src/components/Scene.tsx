@@ -20,6 +20,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { ParticleCanvasOverlay } from './ParticleCanvasOverlay';
+import { SceneGizmoOverlay } from './SceneGizmoOverlay';
 import {
   stepMatterPhysics,
   startKeyboardListening,
@@ -448,6 +449,9 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
             );
           })}
         </div>
+
+        {/* 3.5. CALQUE UNIFIÉ DE GIZMOS & DEBUG VISUEL (z-45) */}
+        <SceneGizmoOverlay mousePosRef={mousePosRef} />
 
         {/* 4. OVERLAY DE DESSIN EN DIRECT SUR SCÈNE (QUAND UN CALQUE DÉCOR EST SÉLECTIONNÉ) */}
         {selectedLayerId && !isPlayMode && (() => {
