@@ -4,13 +4,13 @@ export const DEFAULT_GIZMO_SETTINGS: GizmoSettings = {
   masterEnabled: true,
   onlySelected: false,
   categories: {
-    hitboxes: 'both',
-    colliderLayers: 'both',
-    hierarchy: 'both',
-    lookAt: 'both',
-    puppetZones: 'both',
-    aiZones: 'both',
-    physicsVectors: 'both',
+    hitboxes: 'edit',
+    colliderLayers: 'edit',
+    hierarchy: 'edit',
+    lookAt: 'edit',
+    puppetZones: 'edit',
+    aiZones: 'edit',
+    physicsVectors: 'edit',
   },
 };
 
@@ -77,7 +77,7 @@ export const GIZMO_CATEGORY_LIST: GizmoCategoryMeta[] = [
 export function resolveGizmoSettings(settings?: AppSettings): GizmoSettings {
   const raw = settings?.gizmos;
   const legacyHitboxes: GizmoVisibilityMode =
-    settings?.showColliderDebugGizmos === false && !raw ? 'off' : 'both';
+    settings?.showColliderDebugGizmos === false && !raw ? 'off' : 'edit';
 
   return {
     masterEnabled: raw?.masterEnabled ?? DEFAULT_GIZMO_SETTINGS.masterEnabled,

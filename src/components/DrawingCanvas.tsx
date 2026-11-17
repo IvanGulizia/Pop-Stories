@@ -1,39 +1,5 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import {
-  MousePointer,
-  Pencil,
-  Slash,
-  GitCommit,
-  Square,
-  Circle,
-  Lasso,
-  PaintBucket,
-  Eraser,
-  Scissors,
-  RotateCcw,
-  Undo2,
-  Redo2,
-  Layers,
-  Pipette,
-  Eye,
-  EyeOff,
-  Trash2,
-  Copy,
-  Check,
-  Grid,
-  Magnet,
-  Sparkles,
-  Shield,
-  Shapes,
-  Target,
-  Crosshair,
-  Download,
-  Lock,
-  Unlock,
-  ChevronUp,
-  ChevronDown,
-  Plus,
-} from 'lucide-react';
+import { RotateCcw, Undo2, Redo2 } from 'lucide-react';
 import { VectorPath, VectorPoint, VectorRect, ColliderType, ColliderBounds, DrawingLayer } from '../types';
 import { applyBucketFill } from '../utils/floodFill';
 import { computeAutoColliderBoundsFromPaths } from '../utils/collider';
@@ -52,22 +18,27 @@ import {
   erasePathsAtPoint,
   eraseWholeStrokesAtPoint,
 } from '../utils/vectorDrawing';
+import { DrawingCanvasTopBar } from './drawing/DrawingCanvasTopBar';
+import {
+  DrawingCanvasColliderOverlay,
+  ColliderDragAction,
+  ManualColliderRect,
+} from './drawing/DrawingCanvasColliderOverlay';
+import { DrawingToolGrid, DrawingCanvasToolId } from './drawing/DrawingToolGrid';
+import { DrawingLayersSection } from './drawing/DrawingLayersSection';
+import { DrawingColliderSection } from './drawing/DrawingColliderSection';
+import { DrawingSelectionInspector } from './drawing/DrawingSelectionInspector';
+import { DrawingColorPaletteSection } from './drawing/DrawingColorPaletteSection';
+import {
+  DrawingGuidesAndOnionSection,
+  OnionStateOptionItem,
+  ReferenceGuideOptionItem,
+} from './drawing/DrawingGuidesAndOnionSection';
 
 export { generateRoundedRectPath, pointsToSmoothPath, pointsToPolylinePath };
 
-export interface OnionStateOption {
-  id: string;
-  name: string;
-  vectorPaths?: VectorPath[];
-}
-
-export interface ReferenceGuideOption {
-  id: string;
-  name: string;
-  paths?: Array<{ d: string; stroke?: string; fill?: string; strokeWidth?: number }>;
-  hotspot?: { x: number; y: number };
-  isCustom?: boolean;
-}
+export type OnionStateOption = OnionStateOptionItem;
+export type ReferenceGuideOption = ReferenceGuideOptionItem;
 
 export interface DrawingCanvasActionsHandle {
   undo: () => void;
@@ -114,18 +85,7 @@ interface DrawingCanvasProps {
 export const FINE_CROSSHAIR_CURSOR =
   'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABMAAAATCAYAAAByUDbMAAAAN0lEQVR4nGNgIAD+IwFCagkCkCH84lqjho08w/4TAWCGEQJwmynFcMOo5rLBGwGjhg0Bw4hNRwArM0of2vmpUwAAAABJRU5ErkJggg==") 9 9, crosshair';
 
-export type DrawTool =
-  | 'select'
-  | 'pencil'
-  | 'line'
-  | 'polyline'
-  | 'rectangle'
-  | 'circle'
-  | 'lasso_fill'
-  | 'bucket'
-  | 'eraser_stroke'
-  | 'eraser_partial'
-  | 'hotspot';
+export type DrawTool = DrawingCanvasToolId;
 
 const EMPTY_PATHS: VectorPath[] = [];
 const EMPTY_LAYERS: DrawingLayer[] = [];
@@ -313,15 +273,7 @@ export function DrawingCanvas({
     initialColliderBounds?.mode === 'manual' ? 'manual' : 'auto'
   );
   const [overrideCollider, setOverrideCollider] = useState<boolean>(initialOverrideCollider);
-  const [manualCollider, setManualCollider] = useState<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    centerX: number;
-    centerY: number;
-    radius: number;
-  }>(() => {
+  const [manualCollider, setManualCollider] = useState<ManualColliderRect>(() => {
     const autoInit = computeAutoColliderBoundsFromPaths(
       initialPaths,
       initialColliderBounds?.shape || initialColliderType
@@ -336,19 +288,10 @@ export function DrawingCanvas({
     return { x, y, width, height, centerX, centerY, radius };
   });
   const [isColliderBodyDraggable, setIsColliderBodyDraggable] = useState(false);
-  const [colliderDragAction, setColliderDragAction] = useState<
-    | null
-    | 'move_box'
-    | 'resize_nw'
-    | 'resize_ne'
-    | 'resize_se'
-    | 'resize_sw'
-    | 'move_circle'
-    | 'resize_circle_r'
-  >(null);
+  const [colliderDragAction, setColliderDragAction] = useState<ColliderDragAction>(null);
   const colliderDragOriginRef = useRef<{
     mouse: VectorPoint;
-    initial: { x: number; y: number; width: number; height: number; centerX: number; centerY: number; radius: number };
+    initial: ManualColliderRect;
   } | null>(null);
   const [showColliderPreview, setShowColliderPreview] = useState(true);
 
@@ -1435,166 +1378,30 @@ export function DrawingCanvas({
       {/* Zone de dessin Vectorielle SVG principale */}
       <div className="flex-1 bg-slate-100 border-2 border-slate-200 rounded-3xl p-3 sm:p-4 flex flex-col items-center justify-center relative shadow-inner min-h-[360px] overflow-hidden">
         {/* Top Info Bar */}
-        <div className="w-full flex items-center justify-between px-3 py-1 mb-2 text-xs text-slate-500 font-medium select-none flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            {currentEditingStateName && (
-              <span className="font-bold text-slate-700 bg-white px-2.5 py-0.5 rounded-lg border border-slate-200 shadow-2xs">
-                État en cours : <strong className="text-indigo-600 font-mono">{currentEditingStateName}</strong>
-              </span>
-            )}
-            {tool === 'line' && (
-              <span className="bg-indigo-100 text-indigo-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px]">
-                Ligne Droite (Glissez d'un point à l'autre)
-              </span>
-            )}
-            {tool === 'circle' && (
-              <span className="bg-indigo-100 text-indigo-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px]">
-                Cercle (Glissez pour tracer)
-              </span>
-            )}
-            {tool === 'polyline' && activePolylinePoints.length > 0 && (
-              <span className="bg-amber-100 text-amber-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px] animate-pulse">
-                Polyligne : {activePolylinePoints.length} pts (double-clic pour terminer)
-              </span>
-            )}
-            {tool === 'lasso_fill' && (
-              <span className="bg-purple-100 text-purple-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px]">
-                Lasso Plein (Fill)
-              </span>
-            )}
-            {tool === 'bucket' && (
-              <span className="bg-teal-100 text-teal-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px]">
-                Pot de Peinture : Cliquez sur une forme ou son intérieur
-              </span>
-            )}
-            {tool === 'eraser_partial' && (
-              <span className="bg-rose-100 text-rose-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px]">
-                Gomme Précise (Efface les bouts de traits)
-              </span>
-            )}
-            {tool === 'eraser_stroke' && (
-              <span className="bg-rose-100 text-rose-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px]">
-                Gomme Trait (Efface la forme entière)
-              </span>
-            )}
-            {tool === 'select' && selectedPathIds.length > 0 && (
-              <span className="bg-indigo-100 text-indigo-800 font-bold px-2.5 py-0.5 rounded-lg text-[11px]">
-                {selectedPathIds.length > 1
-                  ? `${selectedPathIds.length} formes sélectionnées`
-                  : '1 forme sélectionnée'}
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* Annuler / Rétablir toujours accessibles en haut (masqués uniquement si déjà portés par la barre haute de la modale) */}
-            {!hideTopHistoryButtons && (
-              <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200 shadow-2xs">
-                <button
-                  type="button"
-                  onClick={handleUndo}
-                  disabled={historyIndexRef.current <= 0}
-                  className="px-2 py-1 rounded-lg text-[11px] font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-35 disabled:cursor-not-allowed flex items-center gap-1 transition-all cursor-pointer active:scale-95"
-                  title="Annuler (Cmd/Ctrl+Z)"
-                >
-                  <Undo2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Annuler</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRedo}
-                  disabled={historyIndexRef.current >= historyRef.current.length - 1}
-                  className="px-2 py-1 rounded-lg text-[11px] font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-35 disabled:cursor-not-allowed flex items-center gap-1 transition-all cursor-pointer active:scale-95"
-                  title="Rétablir (Cmd/Ctrl+Shift+Z)"
-                >
-                  <Redo2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Rétablir</span>
-                </button>
-              </div>
-            )}
-
-            {/* Guide & Hotspot Quick Toggles */}
-            {(activeReferenceGuide || isCursorMode) && (
-              <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200 shadow-2xs">
-                {activeReferenceGuide && (
-                  <button
-                    type="button"
-                    onClick={() => setGuideOpacity(guideOpacity > 0 ? 0 : 0.45)}
-                    className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                      guideOpacity > 0
-                        ? 'bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs'
-                        : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
-                    }`}
-                    title="Afficher/Masquer le dessin repère (calque modèle)"
-                  >
-                    <Target className="w-3 h-3" />
-                    <span>Modèle {guideOpacity > 0 ? 'On' : 'Off'}</span>
-                  </button>
-                )}
-
-                {isCursorMode && (
-                  <button
-                    type="button"
-                    onClick={() => setShowHotspot(!showHotspot)}
-                    className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                      showHotspot
-                        ? 'bg-rose-100 text-rose-700 border border-rose-200 shadow-2xs'
-                        : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
-                    }`}
-                    title="Afficher/Masquer le point d'impact réel du curseur"
-                  >
-                    <Crosshair className="w-3 h-3" />
-                    <span>Impact ({Math.round(hotspot.x)}, {Math.round(hotspot.y)})</span>
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Grille & Magnétisme Toggles */}
-            <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200 shadow-2xs">
-              <button
-                type="button"
-                onClick={() => setShowGrid(!showGrid)}
-                className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                  showGrid
-                    ? 'bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
-                }`}
-                title="Afficher/Masquer la grille de repère"
-              >
-                <Grid className="w-3 h-3" />
-                <span>Grille {showGrid ? 'On' : 'Off'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSnapToGrid(!snapToGrid)}
-                className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                  snapToGrid
-                    ? 'bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
-                }`}
-                title="Activer/Désactiver l'aimant Snap to Grid"
-              >
-                <Magnet className="w-3 h-3" />
-                <span>Snap {snapToGrid ? 'On' : 'Off'}</span>
-              </button>
-            </div>
-
-            {tool === 'polyline' && activePolylinePoints.length >= 2 && (
-              <button
-                type="button"
-                onClick={() => finishPolyline(false)}
-                className="px-2 py-0.5 bg-indigo-600 text-white rounded-lg font-bold text-[11px] hover:bg-indigo-700 flex items-center gap-1 cursor-pointer"
-              >
-                <Check className="w-3 h-3" /> Valider
-              </button>
-            )}
-            <span className="bg-white text-slate-600 font-bold px-2.5 py-0.5 rounded-full font-mono border border-slate-200 shadow-2xs text-[11px]">
-              {paths.length} {paths.length > 1 ? 'formes' : 'forme'}
-            </span>
-          </div>
-        </div>
+        <DrawingCanvasTopBar
+          currentEditingStateName={currentEditingStateName}
+          tool={tool}
+          activePolylineCount={activePolylinePoints.length}
+          selectedCount={selectedPathIds.length}
+          hideTopHistoryButtons={hideTopHistoryButtons}
+          canUndo={historyIndexRef.current > 0}
+          canRedo={historyIndexRef.current < historyRef.current.length - 1}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          hasReferenceGuide={Boolean(activeReferenceGuide)}
+          guideOpacity={guideOpacity}
+          onToggleGuide={() => setGuideOpacity(guideOpacity > 0 ? 0 : 0.45)}
+          isCursorMode={isCursorMode}
+          showHotspot={showHotspot}
+          hotspot={hotspot}
+          onToggleHotspot={() => setShowHotspot(!showHotspot)}
+          showGrid={showGrid}
+          onToggleGrid={() => setShowGrid(!showGrid)}
+          snapToGrid={snapToGrid}
+          onToggleSnapToGrid={() => setSnapToGrid(!snapToGrid)}
+          onFinishPolyline={() => finishPolyline(false)}
+          pathCount={paths.length}
+        />
 
         {/* SVG Drawing Canvas */}
         <div className="flex-1 w-full flex items-center justify-center relative">
@@ -1694,13 +1501,17 @@ export function DrawingCanvas({
             )}
 
             {/* Aperçu du Collider actif (Auto ou Manuel interactif) */}
-            {showColliderPreview && (() => {
-              const isInheritedShared = isSharedColliderEntity && !isReferenceStateForSharedCollider && !overrideCollider;
-              const isManualEditable = colliderMode === 'manual' && !isInheritedShared;
-              const startColliderDrag = (
-                action: NonNullable<typeof colliderDragAction>,
-                e: React.PointerEvent<SVGElement>
-              ) => {
+            <DrawingCanvasColliderOverlay
+              showColliderPreview={showColliderPreview}
+              isSharedColliderEntity={isSharedColliderEntity}
+              isReferenceStateForSharedCollider={isReferenceStateForSharedCollider}
+              overrideCollider={overrideCollider}
+              colliderMode={colliderMode}
+              colliderType={colliderType}
+              manualCollider={manualCollider}
+              isColliderBodyDraggable={isColliderBodyDraggable}
+              overallBounds={overallBounds}
+              onStartColliderDrag={(action, e) => {
                 e.stopPropagation();
                 try {
                   (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -1710,199 +1521,8 @@ export function DrawingCanvas({
                   mouse: getSVGCoordinates(e),
                   initial: { ...manualCollider },
                 };
-              };
-
-              if (colliderMode === 'manual' && !isInheritedShared) {
-                if (colliderType === 'circle') {
-                  const cx = manualCollider.centerX;
-                  const cy = manualCollider.centerY;
-                  const r = manualCollider.radius;
-                  return (
-                    <g className="select-none">
-                      <circle
-                        cx={cx}
-                        cy={cy}
-                        r={r}
-                        fill={isColliderBodyDraggable ? 'rgba(16, 185, 129, 0.14)' : 'rgba(16, 185, 129, 0.05)'}
-                        stroke="#10b981"
-                        strokeWidth="1.8"
-                        strokeDasharray="4 3"
-                        className={isColliderBodyDraggable ? 'cursor-move' : undefined}
-                        style={{ pointerEvents: isColliderBodyDraggable ? 'auto' : 'none' }}
-                        onPointerDown={(e) => isColliderBodyDraggable && startColliderDrag('move_circle', e)}
-                      />
-                      {/* Anneau de bordure cliquable pour déplacer le cercle à tout moment */}
-                      <circle
-                        cx={cx}
-                        cy={cy}
-                        r={r}
-                        fill="none"
-                        stroke="transparent"
-                        strokeWidth="8"
-                        className="cursor-move"
-                        style={{ pointerEvents: 'stroke' }}
-                        onPointerDown={(e) => startColliderDrag('move_circle', e)}
-                      />
-                      {/* Poignée centrale de déplacement */}
-                      <circle
-                        cx={cx}
-                        cy={cy}
-                        r="4.5"
-                        fill="#10b981"
-                        stroke="#ffffff"
-                        strokeWidth="1.5"
-                        className="cursor-move"
-                        style={{ pointerEvents: isManualEditable ? 'auto' : 'none' }}
-                        onPointerDown={(e) => startColliderDrag('move_circle', e)}
-                      />
-                      {/* Poignée droite de rayon */}
-                      <circle
-                        cx={Math.min(196, cx + r)}
-                        cy={cy}
-                        r="5"
-                        fill="#ffffff"
-                        stroke="#059669"
-                        strokeWidth="2"
-                        className="cursor-ew-resize"
-                        style={{ pointerEvents: 'auto' }}
-                        onPointerDown={(e) => startColliderDrag('resize_circle_r', e)}
-                      />
-                    </g>
-                  );
-                }
-
-                // Manuel Rectangle (Box)
-                const bx = manualCollider.x;
-                const by = manualCollider.y;
-                const bw = manualCollider.width;
-                const bh = manualCollider.height;
-                return (
-                  <g className="select-none">
-                    <rect
-                      x={bx}
-                      y={by}
-                      width={bw}
-                      height={bh}
-                      fill={isColliderBodyDraggable ? 'rgba(16, 185, 129, 0.14)' : 'rgba(16, 185, 129, 0.05)'}
-                      stroke="#10b981"
-                      strokeWidth="1.8"
-                      strokeDasharray="4 3"
-                      rx="3"
-                      className={isColliderBodyDraggable ? 'cursor-move' : undefined}
-                      style={{ pointerEvents: isColliderBodyDraggable ? 'auto' : 'none' }}
-                      onPointerDown={(e) => isColliderBodyDraggable && startColliderDrag('move_box', e)}
-                    />
-                    {/* Contour transparent saisissable pour déplacer le rectangle */}
-                    <rect
-                      x={bx}
-                      y={by}
-                      width={bw}
-                      height={bh}
-                      fill="none"
-                      stroke="transparent"
-                      strokeWidth="8"
-                      className="cursor-move"
-                      style={{ pointerEvents: 'stroke' }}
-                      onPointerDown={(e) => startColliderDrag('move_box', e)}
-                    />
-                    {/* 4 Poignées d'angle pour redimensionner */}
-                    <rect
-                      x={bx - 4}
-                      y={by - 4}
-                      width="8"
-                      height="8"
-                      rx="2"
-                      fill="#ffffff"
-                      stroke="#059669"
-                      strokeWidth="2"
-                      className="cursor-nwse-resize"
-                      style={{ pointerEvents: 'auto' }}
-                      onPointerDown={(e) => startColliderDrag('resize_nw', e)}
-                    />
-                    <rect
-                      x={bx + bw - 4}
-                      y={by - 4}
-                      width="8"
-                      height="8"
-                      rx="2"
-                      fill="#ffffff"
-                      stroke="#059669"
-                      strokeWidth="2"
-                      className="cursor-nesw-resize"
-                      style={{ pointerEvents: 'auto' }}
-                      onPointerDown={(e) => startColliderDrag('resize_ne', e)}
-                    />
-                    <rect
-                      x={bx + bw - 4}
-                      y={by + bh - 4}
-                      width="8"
-                      height="8"
-                      rx="2"
-                      fill="#ffffff"
-                      stroke="#059669"
-                      strokeWidth="2"
-                      className="cursor-nwse-resize"
-                      style={{ pointerEvents: 'auto' }}
-                      onPointerDown={(e) => startColliderDrag('resize_se', e)}
-                    />
-                    <rect
-                      x={bx - 4}
-                      y={by + bh - 4}
-                      width="8"
-                      height="8"
-                      rx="2"
-                      fill="#ffffff"
-                      stroke="#059669"
-                      strokeWidth="2"
-                      className="cursor-nesw-resize"
-                      style={{ pointerEvents: 'auto' }}
-                      onPointerDown={(e) => startColliderDrag('resize_sw', e)}
-                    />
-                  </g>
-                );
-              }
-
-              return (
-                <g className={`pointer-events-none select-none ${isInheritedShared ? 'opacity-45' : 'opacity-80'}`}>
-                  {colliderType === 'circle' && (
-                    <circle
-                      cx={overallBounds.x + overallBounds.width / 2}
-                      cy={overallBounds.y + overallBounds.height / 2}
-                      r={Math.max(overallBounds.width, overallBounds.height) / 2}
-                      fill="rgba(16, 185, 129, 0.05)"
-                      stroke="#10b981"
-                      strokeWidth="1.5"
-                      strokeDasharray="4 3"
-                    />
-                  )}
-                  {colliderType === 'box' && (
-                    <rect
-                      x={overallBounds.x}
-                      y={overallBounds.y}
-                      width={overallBounds.width}
-                      height={overallBounds.height}
-                      fill="rgba(16, 185, 129, 0.05)"
-                      stroke="#10b981"
-                      strokeWidth="1.5"
-                      strokeDasharray="4 3"
-                      rx="4"
-                    />
-                  )}
-                  {colliderType === 'polygon' && (
-                    <rect
-                      x={overallBounds.x}
-                      y={overallBounds.y}
-                      width={overallBounds.width}
-                      height={overallBounds.height}
-                      fill="rgba(16, 185, 129, 0.05)"
-                      stroke="#10b981"
-                      strokeWidth="1.5"
-                      strokeDasharray="3 3"
-                    />
-                  )}
-                </g>
-              );
-            })()}
+              }}
+            />
 
             {/* Tracés existants groupés par calques (rendus de bas en haut) */}
             {[...layers].reverse().map((layer) => {
@@ -2227,1197 +1847,117 @@ export function DrawingCanvas({
       {/* Barre d'outils vectorielle latérale (Outils, Colliders, Inspecteur, Palette Stroke & Fill) */}
       <div className="w-full lg:w-84 bg-slate-50 border border-slate-200 p-3.5 sm:p-4 rounded-3xl flex flex-col justify-between gap-3 shrink-0 shadow-2xs overflow-y-auto max-h-full">
         <div className="space-y-3.5">
-          {/* Choix d'outil unifié (10 outils) */}
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Outils de dessin
-            </span>
-            <div className="grid grid-cols-5 gap-1 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-2xs">
-              {/* Pointeur / Sélection */}
-              <button
-                type="button"
-                onClick={() => setTool('select')}
-                className={`p-1.5 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
-                  tool === 'select'
-                    ? 'bg-indigo-600 text-white font-bold shadow-2xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Sélection, déplacement & redimensionnement"
-              >
-                <MousePointer className="w-3.5 h-3.5" />
-                <span className="text-[9px]">Sélect</span>
-              </button>
+          <DrawingToolGrid
+            tool={tool}
+            showHotspotTool={Boolean(isCursorMode || referenceGuide || initialHotspot)}
+            onSelectTool={(nextTool) => {
+              setTool(nextTool);
+              if (nextTool !== 'select') {
+                setSelectedPathIds([]);
+              }
+              if (nextTool === 'polyline') {
+                setActivePolylinePoints([]);
+              }
+            }}
+          />
 
-              {/* Crayon libre */}
-              <button
-                type="button"
-                onClick={() => {
-                  setTool('pencil');
-                  setSelectedPathIds([]);
-                }}
-                className={`p-1.5 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
-                  tool === 'pencil'
-                    ? 'bg-indigo-600 text-white font-bold shadow-2xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Crayon / Dessin libre"
-              >
-                <Pencil className="w-3.5 h-3.5" />
-                <span className="text-[9px]">Crayon</span>
-              </button>
+          <DrawingLayersSection
+            layers={layers}
+            activeLayerId={activeLayerId}
+            activeLayer={activeLayer}
+            paths={paths}
+            editingLayerId={editingLayerId}
+            editingLayerName={editingLayerName}
+            onSetEditingLayerId={setEditingLayerId}
+            onSetEditingLayerName={setEditingLayerName}
+            onSelectActiveLayer={setActiveLayerId}
+            onAddLayer={handleAddLayer}
+            onRenameLayer={handleRenameLayer}
+            onToggleVisibility={handleToggleLayerVisibility}
+            onToggleLock={handleToggleLayerLock}
+            onMoveLayer={handleMoveLayer}
+            onDeleteLayer={handleDeleteLayer}
+            onOpacityChange={handleLayerOpacityChange}
+          />
 
-              {/* Ligne droite */}
-              <button
-                type="button"
-                onClick={() => {
-                  setTool('line');
-                  setSelectedPathIds([]);
-                }}
-                className={`p-1.5 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
-                  tool === 'line'
-                    ? 'bg-indigo-600 text-white font-bold shadow-2xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Ligne droite (2 points)"
-              >
-                <Slash className="w-3.5 h-3.5" />
-                <span className="text-[9px]">Ligne</span>
-              </button>
+          <DrawingColliderSection
+            showColliderPreview={showColliderPreview}
+            onToggleShowColliderPreview={() => setShowColliderPreview(!showColliderPreview)}
+            onAutoDetectCollider={handleAutoDetectCollider}
+            isSharedColliderEntity={isSharedColliderEntity}
+            isReferenceStateForSharedCollider={isReferenceStateForSharedCollider}
+            overrideCollider={overrideCollider}
+            onToggleOverrideCollider={handleToggleOverrideCollider}
+            colliderMode={colliderMode}
+            onSwitchColliderMode={handleSwitchColliderMode}
+            colliderType={colliderType}
+            onSelectColliderType={handleColliderTypeSelect}
+            isColliderBodyDraggable={isColliderBodyDraggable}
+            onToggleColliderBodyDraggable={() => setIsColliderBodyDraggable(!isColliderBodyDraggable)}
+            onInitManualFromDrawing={() => handleInitManualFromDrawing()}
+            manualCollider={manualCollider}
+            onUpdateManualCollider={(shape, next) => {
+              setManualCollider(next);
+              emitColliderUpdate(shape, 'manual', next);
+            }}
+          />
 
-              {/* Polyligne */}
-              <button
-                type="button"
-                onClick={() => {
-                  setTool('polyline');
-                  setSelectedPathIds([]);
-                  setActivePolylinePoints([]);
-                }}
-                className={`p-1.5 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
-                  tool === 'polyline'
-                    ? 'bg-indigo-600 text-white font-bold shadow-2xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Polyligne (cliquez point par point)"
-              >
-                <GitCommit className="w-3.5 h-3.5" />
-                <span className="text-[9px]">Poly</span>
-              </button>
-
-              {/* Rectangle arrondi */}
-              <button
-                type="button"
-                onClick={() => {
-                  setTool('rectangle');
-                  setSelectedPathIds([]);
-                }}
-                className={`p-1.5 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
-                  tool === 'rectangle'
-                    ? 'bg-indigo-600 text-white font-bold shadow-2xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Rectangle (arrondi réglable)"
-              >
-                <Square className="w-3.5 h-3.5" />
-                <span className="text-[9px]">Rect</span>
-              </button>
-
-              {/* Cercle */}
-              <button
-                type="button"
-                onClick={() => {
-                  setTool('circle');
-                  setSelectedPathIds([]);
-                }}
-                className={`p-1.5 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
-                  tool === 'circle'
-                    ? 'bg-indigo-600 text-white font-bold shadow-2xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Cercle"
-              >
-                <Circle className="w-3.5 h-3.5" />
-                <span className="text-[9px]">Cercle</span>
-              </button>
-
-              {/* Lasso Fill */}
-              <button
-                type="button"
-                onClick={() => {
-                  setTool('lasso_fill');
-                  setSelectedPathIds([]);
-                }}
-                className={`p-1.5 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
-                  tool === 'lasso_fill'
-                    ? 'bg-indigo-600 text-white font-bold shadow-2xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Lasso / Pinceau plein (Remplissage fermé)"
-              >
-                <Lasso className="w-3.5 h-3.5" />
-                <span className="text-[9px]">Lasso</span>
-              </button>
-
-              {/* Pot de peinture */}
-              <button
-                type="button"
-                onClick={() => {
-                  setTool('bucket');
-                  setSelectedPathIds([]);
-                }}
-                className={`p-1.5 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
-                  tool === 'bucket'
-                    ? 'bg-teal-600 text-white font-bold shadow-2xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Pot de peinture (Remplir une forme ou zone fermée)"
-              >
-                <PaintBucket className="w-3.5 h-3.5" />
-                <span className="text-[9px]">Pot</span>
-              </button>
-
-              {/* Gomme Précise */}
-              <button
-                type="button"
-                onClick={() => {
-                  setTool('eraser_partial');
-                  setSelectedPathIds([]);
-                }}
-                className={`p-1.5 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
-                  tool === 'eraser_partial'
-                    ? 'bg-rose-600 text-white font-bold shadow-2xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Gomme Précise (Efface les bouts de traits)"
-              >
-                <Eraser className="w-3.5 h-3.5" />
-                <span className="text-[9px]">Gomme</span>
-              </button>
-
-              {/* Gomme Trait entier */}
-              <button
-                type="button"
-                onClick={() => {
-                  setTool('eraser_stroke');
-                  setSelectedPathIds([]);
-                }}
-                className={`p-1.5 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
-                  tool === 'eraser_stroke'
-                    ? 'bg-rose-600 text-white font-bold shadow-2xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Gomme Trait (Efface la forme entière)"
-              >
-                <Scissors className="w-3.5 h-3.5" />
-                <span className="text-[9px]">Objet</span>
-              </button>
-
-              {/* Point d'Impact Hotspot (Curseur) */}
-              {(isCursorMode || referenceGuide || initialHotspot) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTool('hotspot');
-                    setSelectedPathIds([]);
-                  }}
-                  className={`p-1.5 rounded-xl transition-all flex flex-col justify-center items-center gap-0.5 cursor-pointer ${
-                    tool === 'hotspot'
-                      ? 'bg-rose-600 text-white font-bold shadow-2xs'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                  title="Définir le point d'impact réel du curseur (Hotspot)"
-                >
-                  <Crosshair className="w-3.5 h-3.5 text-rose-500" />
-                  <span className="text-[9px]">Impact</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Section Calques de dessin */}
-          <div className="bg-white p-3 rounded-2xl border border-indigo-100 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-indigo-600" />
-                <span className="text-xs font-bold text-slate-800">Calques</span>
-                <span className="text-[10px] font-bold bg-indigo-50 text-indigo-600 px-1.5 py-0.2 rounded-full border border-indigo-200">
-                  {layers.length}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={handleAddLayer}
-                className="px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[10px] rounded-lg border border-indigo-200 flex items-center gap-1 transition-all cursor-pointer shadow-2xs active:scale-95"
-                title="Ajouter un nouveau calque au premier plan"
-              >
-                <Plus className="w-3 h-3" /> Nouveau
-              </button>
-            </div>
-
-            {/* Liste des calques ordonnée de haut en bas */}
-            <div className="space-y-1 max-h-36 overflow-y-auto pr-0.5">
-              {layers.map((layer, index) => {
-                const isActive = layer.id === activeLayerId;
-                const layerPathCount = paths.filter(
-                  (p) => (p.layerId || layers[layers.length - 1]?.id || 'layer-1') === layer.id
-                ).length;
-                return (
-                  <div
-                    key={layer.id}
-                    onClick={() => setActiveLayerId(layer.id)}
-                    className={`flex items-center justify-between p-1.5 rounded-xl border text-xs transition-all cursor-pointer ${
-                      isActive
-                        ? 'bg-indigo-50/90 border-indigo-300 ring-1 ring-indigo-400/40 text-indigo-950 font-semibold'
-                        : 'bg-slate-50/80 hover:bg-slate-100 border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                      {/* Pastille calque actif */}
-                      <div
-                        className={`w-2 h-2 rounded-full shrink-0 ${
-                          isActive ? 'bg-indigo-600' : 'bg-slate-300'
-                        }`}
-                      />
-
-                      {/* Nom du calque */}
-                      {editingLayerId === layer.id ? (
-                        <input
-                          type="text"
-                          value={editingLayerName}
-                          onChange={(e) => setEditingLayerName(e.target.value)}
-                          onBlur={() => {
-                            if (editingLayerName.trim()) {
-                              handleRenameLayer(layer.id, editingLayerName.trim());
-                            }
-                            setEditingLayerId(null);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              if (editingLayerName.trim()) {
-                                handleRenameLayer(layer.id, editingLayerName.trim());
-                              }
-                              setEditingLayerId(null);
-                            } else if (e.key === 'Escape') {
-                              setEditingLayerId(null);
-                            }
-                          }}
-                          autoFocus
-                          className="px-1.5 py-0.5 text-[11px] font-bold bg-white border border-indigo-400 rounded-md outline-none w-24"
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      ) : (
-                        <span
-                          onDoubleClick={(e) => {
-                            e.stopPropagation();
-                            setEditingLayerId(layer.id);
-                            setEditingLayerName(layer.name);
-                          }}
-                          className="text-[11px] truncate flex-1 select-none"
-                          title="Double-cliquer pour renommer"
-                        >
-                          {layer.name}
-                          <span className="text-[9px] text-slate-400 font-normal ml-1">
-                            ({layerPathCount})
-                          </span>
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Actions sur le calque */}
-                    <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      {/* Visibilité (Œil) */}
-                      <button
-                        type="button"
-                        onClick={() => handleToggleLayerVisibility(layer.id)}
-                        className={`p-1 rounded-md transition-colors cursor-pointer ${
-                          layer.visible
-                            ? 'text-slate-600 hover:text-indigo-600 hover:bg-white'
-                            : 'text-slate-400 bg-slate-200/60'
-                        }`}
-                        title={layer.visible ? 'Masquer le calque' : 'Afficher le calque'}
-                      >
-                        {layer.visible ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                      </button>
-
-                      {/* Verrouillage (Cadenas) */}
-                      <button
-                        type="button"
-                        onClick={() => handleToggleLayerLock(layer.id)}
-                        className={`p-1 rounded-md transition-colors cursor-pointer ${
-                          layer.locked
-                            ? 'text-amber-600 bg-amber-50 hover:bg-amber-100'
-                            : 'text-slate-400 hover:text-slate-700 hover:bg-white'
-                        }`}
-                        title={layer.locked ? 'Déverrouiller le calque' : 'Verrouiller le calque'}
-                      >
-                        {layer.locked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
-                      </button>
-
-                      {/* Monter */}
-                      <button
-                        type="button"
-                        disabled={index === 0}
-                        onClick={() => handleMoveLayer(layer.id, 'up')}
-                        className="p-1 text-slate-400 hover:text-slate-700 hover:bg-white disabled:opacity-20 rounded-md transition-colors cursor-pointer"
-                        title="Monter le calque (Premier plan)"
-                      >
-                        <ChevronUp className="w-3 h-3" />
-                      </button>
-
-                      {/* Descendre */}
-                      <button
-                        type="button"
-                        disabled={index === layers.length - 1}
-                        onClick={() => handleMoveLayer(layer.id, 'down')}
-                        className="p-1 text-slate-400 hover:text-slate-700 hover:bg-white disabled:opacity-20 rounded-md transition-colors cursor-pointer"
-                        title="Descendre le calque (Arrière plan)"
-                      >
-                        <ChevronDown className="w-3 h-3" />
-                      </button>
-
-                      {/* Supprimer */}
-                      {layers.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteLayer(layer.id)}
-                          className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
-                          title="Supprimer le calque"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Curseur d'opacité du calque actif */}
-            {activeLayer && (
-              <div className="flex items-center gap-2 pt-1 border-t border-slate-100 text-[10px] text-slate-500">
-                <span className="shrink-0 font-medium">Opacité :</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={activeLayer.opacity ?? 1}
-                  onChange={(e) => handleLayerOpacityChange(activeLayer.id, parseFloat(e.target.value))}
-                  className="w-full accent-indigo-600 h-1 bg-slate-200 rounded-lg cursor-pointer"
-                />
-                <span className="w-8 text-right font-mono font-bold text-slate-700">
-                  {Math.round((activeLayer.opacity ?? 1) * 100)}%
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* Section Définition des Colliders (Automatique ou Manuel + Partage / Surcharge) */}
-          <div className="bg-white p-3 rounded-2xl border border-emerald-200/80 shadow-2xs space-y-2.5">
-            <div className="flex items-center justify-between gap-1.5">
-              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5 text-emerald-600" /> Collider
-              </span>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setShowColliderPreview(!showColliderPreview)}
-                  className={`p-1 rounded-lg border text-[10px] cursor-pointer transition-colors ${
-                    showColliderPreview
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      : 'bg-slate-50 text-slate-400 border-slate-200'
-                  }`}
-                  title={showColliderPreview ? 'Masquer la zone collider' : 'Afficher la zone collider'}
-                >
-                  {showColliderPreview ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAutoDetectCollider}
-                  className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200 flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                  title="Calculer/détecter automatiquement d'après le dessin"
-                >
-                  <Sparkles className="w-3 h-3 text-emerald-600" /> Auto-dessin
-                </button>
-              </div>
-            </div>
-
-            {/* Statut Partagé / Surcharge d'état */}
-            {isSharedColliderEntity && (
-              <div className="p-2 rounded-xl bg-indigo-50/70 border border-indigo-200/80 space-y-1.5">
-                {isReferenceStateForSharedCollider ? (
-                  <div className="text-[10px] font-bold text-indigo-800 leading-snug">
-                    🔗 État de référence du collider partagé : toute modification ici s'applique aux états qui n'ont pas de surcharge.
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-[10px] font-bold text-indigo-900 leading-tight">
-                      {overrideCollider
-                        ? '✏️ Surcharge active pour cet état'
-                        : '🔗 Hérite du collider partagé'}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleOverrideCollider(!overrideCollider)}
-                      className={`px-2 py-0.5 rounded-lg text-[10px] font-black border cursor-pointer transition-all shrink-0 ${
-                        overrideCollider
-                          ? 'bg-indigo-600 text-white border-indigo-700'
-                          : 'bg-white text-indigo-700 border-indigo-300 hover:bg-indigo-100'
-                      }`}
-                    >
-                      {overrideCollider ? 'Surchargé ✓' : 'Surcharger'}
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Sélecteur Mode Auto vs Manuel (masqué uniquement si héritage strict sans surcharge) */}
-            {!(isSharedColliderEntity && !isReferenceStateForSharedCollider && !overrideCollider) && (
-              <>
-                <div className="grid grid-cols-2 p-0.5 bg-slate-100 rounded-xl gap-1">
-                  <button
-                    type="button"
-                    onClick={() => handleSwitchColliderMode('auto')}
-                    className={`py-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
-                      colliderMode === 'auto'
-                        ? 'bg-white text-emerald-700 shadow-2xs'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    Automatique
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSwitchColliderMode('manual')}
-                    className={`py-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
-                      colliderMode === 'manual'
-                        ? 'bg-white text-emerald-700 shadow-2xs'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    Manuel (Sur mesure)
-                  </button>
-                </div>
-
-                {/* Forme du Collider */}
-                <div className={`grid ${colliderMode === 'manual' ? 'grid-cols-2' : 'grid-cols-3'} gap-1.5`}>
-                  <button
-                    type="button"
-                    onClick={() => handleColliderTypeSelect('box')}
-                    className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                      colliderType === 'box'
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200 shadow-2xs'
-                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                    }`}
-                    title="Collider Rectangle"
-                  >
-                    <Square className="w-3 h-3" /> Rectangle
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleColliderTypeSelect('circle')}
-                    className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                      colliderType === 'circle'
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200 shadow-2xs'
-                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                    }`}
-                    title="Collider Cercle"
-                  >
-                    <Circle className="w-3 h-3" /> Cercle
-                  </button>
-                  {colliderMode === 'auto' && (
-                    <button
-                      type="button"
-                      onClick={() => handleColliderTypeSelect('polygon')}
-                      className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                        colliderType === 'polygon'
-                          ? 'bg-emerald-50 text-emerald-800 border-emerald-400 ring-2 ring-emerald-200 shadow-2xs'
-                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                      }`}
-                      title="Collider Polyligne / Polygone"
-                    >
-                      <Shapes className="w-3 h-3" /> Polyligne
-                    </button>
-                  )}
-                </div>
-
-                {/* Réglages précis en mode Manuel */}
-                {colliderMode === 'manual' && (
-                  <div className="p-2 bg-emerald-50/50 rounded-xl border border-emerald-200/80 space-y-2">
-                    <div className="flex items-center justify-between gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setIsColliderBodyDraggable(!isColliderBodyDraggable)}
-                        className={`flex-1 py-1 px-2 rounded-lg text-[10px] font-bold border cursor-pointer transition-all ${
-                          isColliderBodyDraggable
-                            ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
-                            : 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                        }`}
-                        title="Permet de saisir l'intérieur de la forme verte pour la déplacer (désactivez pour dessiner dedans)"
-                      >
-                        {isColliderBodyDraggable ? '✋ Déplacement actif' : '✋ Déplacer la zone'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleInitManualFromDrawing()}
-                        className="py-1 px-2 rounded-lg text-[10px] font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 cursor-pointer"
-                        title="Recaler sur les bords exacts du dessin"
-                      >
-                        Caler
-                      </button>
-                    </div>
-
-                    {colliderType === 'circle' ? (
-                      <div className="grid grid-cols-3 gap-1.5 text-[10px]">
-                        <label className="space-y-0.5">
-                          <span className="font-bold text-slate-500 block">Centre X</span>
-                          <input
-                            type="number"
-                            min={0}
-                            max={200}
-                            value={Math.round(manualCollider.centerX)}
-                            onChange={(e) => {
-                              const cx = Math.max(0, Math.min(200, Number(e.target.value) || 0));
-                              const next = { ...manualCollider, centerX: cx, x: cx - manualCollider.radius };
-                              setManualCollider(next);
-                              emitColliderUpdate('circle', 'manual', next);
-                            }}
-                            className="w-full px-1.5 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
-                          />
-                        </label>
-                        <label className="space-y-0.5">
-                          <span className="font-bold text-slate-500 block">Centre Y</span>
-                          <input
-                            type="number"
-                            min={0}
-                            max={200}
-                            value={Math.round(manualCollider.centerY)}
-                            onChange={(e) => {
-                              const cy = Math.max(0, Math.min(200, Number(e.target.value) || 0));
-                              const next = { ...manualCollider, centerY: cy, y: cy - manualCollider.radius };
-                              setManualCollider(next);
-                              emitColliderUpdate('circle', 'manual', next);
-                            }}
-                            className="w-full px-1.5 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
-                          />
-                        </label>
-                        <label className="space-y-0.5">
-                          <span className="font-bold text-slate-500 block">Rayon</span>
-                          <input
-                            type="number"
-                            min={6}
-                            max={130}
-                            value={Math.round(manualCollider.radius)}
-                            onChange={(e) => {
-                              const r = Math.max(6, Math.min(130, Number(e.target.value) || 10));
-                              const next = {
-                                ...manualCollider,
-                                radius: r,
-                                width: r * 2,
-                                height: r * 2,
-                                x: manualCollider.centerX - r,
-                                y: manualCollider.centerY - r,
-                              };
-                              setManualCollider(next);
-                              emitColliderUpdate('circle', 'manual', next);
-                            }}
-                            className="w-full px-1.5 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
-                          />
-                        </label>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-4 gap-1 text-[10px]">
-                        <label className="space-y-0.5">
-                          <span className="font-bold text-slate-500 block">X</span>
-                          <input
-                            type="number"
-                            min={0}
-                            max={190}
-                            value={Math.round(manualCollider.x)}
-                            onChange={(e) => {
-                              const nx = Math.max(0, Math.min(190, Number(e.target.value) || 0));
-                              const next = { ...manualCollider, x: nx, centerX: nx + manualCollider.width / 2 };
-                              setManualCollider(next);
-                              emitColliderUpdate('box', 'manual', next);
-                            }}
-                            className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
-                          />
-                        </label>
-                        <label className="space-y-0.5">
-                          <span className="font-bold text-slate-500 block">Y</span>
-                          <input
-                            type="number"
-                            min={0}
-                            max={190}
-                            value={Math.round(manualCollider.y)}
-                            onChange={(e) => {
-                              const ny = Math.max(0, Math.min(190, Number(e.target.value) || 0));
-                              const next = { ...manualCollider, y: ny, centerY: ny + manualCollider.height / 2 };
-                              setManualCollider(next);
-                              emitColliderUpdate('box', 'manual', next);
-                            }}
-                            className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
-                          />
-                        </label>
-                        <label className="space-y-0.5">
-                          <span className="font-bold text-slate-500 block">Larg.</span>
-                          <input
-                            type="number"
-                            min={10}
-                            max={200}
-                            value={Math.round(manualCollider.width)}
-                            onChange={(e) => {
-                              const nw = Math.max(10, Math.min(200, Number(e.target.value) || 10));
-                              const next = { ...manualCollider, width: nw, centerX: manualCollider.x + nw / 2 };
-                              setManualCollider(next);
-                              emitColliderUpdate('box', 'manual', next);
-                            }}
-                            className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
-                          />
-                        </label>
-                        <label className="space-y-0.5">
-                          <span className="font-bold text-slate-500 block">Haut.</span>
-                          <input
-                            type="number"
-                            min={10}
-                            max={200}
-                            value={Math.round(manualCollider.height)}
-                            onChange={(e) => {
-                              const nh = Math.max(10, Math.min(200, Number(e.target.value) || 10));
-                              const next = { ...manualCollider, height: nh, centerY: manualCollider.y + nh / 2 };
-                              setManualCollider(next);
-                              emitColliderUpdate('box', 'manual', next);
-                            }}
-                            className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
-                          />
-                        </label>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Inspecteur des formes sélectionnées */}
           {tool === 'select' && selectedPathIds.length > 0 && (
-            <div className="bg-indigo-50/70 border border-indigo-200 p-3 rounded-2xl space-y-2.5 animate-in fade-in duration-150">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-indigo-900 uppercase tracking-wider">
-                  {selectedPathIds.length > 1
-                    ? `${selectedPathIds.length} formes sélectionnées`
-                    : '1 forme sélectionnée'}
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={handleDuplicateSelected}
-                    className="p-1 text-indigo-600 hover:bg-indigo-200/60 rounded-lg cursor-pointer transition-colors"
-                    title="Dupliquer la sélection"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDeleteSelected}
-                    className="p-1 text-rose-600 hover:bg-rose-100 rounded-lg cursor-pointer transition-colors"
-                    title="Supprimer la sélection"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              {selectedPathIds.length === 1 && primarySelectedPath?.rect && (
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[11px] font-bold text-indigo-950">
-                    <span>Arrondi des angles (0 = rectangle, 50 = rond)</span>
-                    <span className="font-mono text-indigo-700">{cornerRadius}px</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="50"
-                    value={cornerRadius}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      setCornerRadius(val);
-                      updateSelectedShapeProperties({ cornerRadius: val });
-                    }}
-                    className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-indigo-200 rounded-lg"
-                  />
-                </div>
-              )}
-              {/* Déplacer vers un calque */}
-              <div className="flex items-center justify-between text-xs pt-1.5 border-t border-indigo-200/70">
-                <span className="text-[11px] font-bold text-indigo-900 flex items-center gap-1">
-                  <Layers className="w-3 h-3 text-indigo-600" /> Calque :
-                </span>
-                <select
-                  value={primarySelectedPath?.layerId || activeLayerId}
-                  onChange={(e) => handleMoveSelectedToLayer(e.target.value)}
-                  className="text-[11px] font-bold bg-white border border-indigo-200 rounded-lg px-2 py-0.5 text-indigo-950 focus:outline-none cursor-pointer"
-                >
-                  {layers.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+            <DrawingSelectionInspector
+              selectedCount={selectedPathIds.length}
+              primarySelectedPath={primarySelectedPath}
+              cornerRadius={cornerRadius}
+              layers={layers}
+              activeLayerId={activeLayerId}
+              onDuplicateSelected={handleDuplicateSelected}
+              onDeleteSelected={handleDeleteSelected}
+              onCornerRadiusChange={(val) => {
+                setCornerRadius(val);
+                updateSelectedShapeProperties({ cornerRadius: val });
+              }}
+              onMoveSelectedToLayer={handleMoveSelectedToLayer}
+            />
           )}
 
-          {/* Double Sélecteur Couleur Simultané : Contour & Remplissage + Épaisseur rapide */}
-          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
-                Palette du Projet (16 couleurs)
-              </span>
-              <button
-                type="button"
-                onClick={resetProjectPalette}
-                className="text-[9px] font-bold text-slate-400 hover:text-indigo-600 cursor-pointer transition-colors"
-                title="Réinitialiser les 16 couleurs par défaut de la palette du projet"
-              >
-                Réinitialiser
-              </button>
-            </div>
+          <DrawingColorPaletteSection
+            projectPalette={projectPalette}
+            strokeColor={strokeColor}
+            selectedStrokePaletteId={selectedStrokePaletteId}
+            fillColor={fillColor}
+            selectedFillPaletteId={selectedFillPaletteId}
+            strokeWidth={strokeWidth}
+            selectedCount={selectedPathIds.length}
+            onResetProjectPalette={resetProjectPalette}
+            onModifyPaletteColor={handleModifyPaletteColor}
+            onSetStrokeColor={setStrokeColor}
+            onSetSelectedStrokePaletteId={setSelectedStrokePaletteId}
+            onSetFillColor={setFillColor}
+            onSetSelectedFillPaletteId={setSelectedFillPaletteId}
+            onSetStrokeWidth={setStrokeWidth}
+            onUpdateSelectedProps={updateSelectedShapeProperties}
+          />
 
-            {/* 1. CONTOUR (STROKE) */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <div
-                    className="w-3.5 h-3.5 rounded-md border border-slate-300 shadow-2xs"
-                    style={{
-                      backgroundColor: strokeColor === 'none' ? 'transparent' : strokeColor,
-                      backgroundImage:
-                        strokeColor === 'none'
-                          ? 'linear-gradient(45deg, #e2e8f0 25%, transparent 25%, transparent 75%, #e2e8f0 75%), linear-gradient(45deg, #e2e8f0 25%, transparent 25%, transparent 75%, #e2e8f0 75%)'
-                          : undefined,
-                      backgroundSize: strokeColor === 'none' ? '6px 6px' : undefined,
-                      backgroundPosition: strokeColor === 'none' ? '0 0, 3px 3px' : undefined,
-                    }}
-                  />
-                  <span className="text-[11px] font-bold text-slate-700">Contour</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStrokeColor('none');
-                      setSelectedStrokePaletteId(null);
-                      if (selectedPathIds.length > 0) {
-                        updateSelectedShapeProperties({ stroke: 'none', strokeColorId: undefined });
-                      }
-                    }}
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-md border cursor-pointer ${
-                      strokeColor === 'none'
-                        ? 'bg-rose-50 text-rose-700 border-rose-300'
-                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    Sans trait
-                  </button>
-                  <label
-                    className="w-5 h-5 rounded-md border border-slate-300 cursor-pointer relative overflow-hidden flex items-center justify-center shrink-0"
-                    style={{ backgroundColor: strokeColor !== 'none' ? strokeColor : '#000000' }}
-                    title="Personnaliser la couleur de contour"
-                  >
-                    <input
-                      type="color"
-                      value={strokeColor.startsWith('#') && strokeColor.length === 7 ? strokeColor : '#000000'}
-                      onChange={(e) => {
-                        const c = e.target.value;
-                        setStrokeColor(c);
-                        if (selectedStrokePaletteId) {
-                          handleModifyPaletteColor(selectedStrokePaletteId, c);
-                        } else if (selectedPathIds.length > 0) {
-                          updateSelectedShapeProperties({ stroke: c });
-                        }
-                      }}
-                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
-                    />
-                    <Pipette className="w-2.5 h-2.5 text-white drop-shadow" />
-                  </label>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-8 gap-1">
-                {projectPalette.map((palItem, idx) => {
-                  const isSelected =
-                    selectedStrokePaletteId === palItem.id ||
-                    (!selectedStrokePaletteId &&
-                      strokeColor !== 'none' &&
-                      strokeColor.toLowerCase() === palItem.color.toLowerCase());
-                  const validHex =
-                    palItem.color.startsWith('#') && palItem.color.length === 7
-                      ? palItem.color
-                      : palItem.color.length === 4
-                      ? `#${palItem.color[1]}${palItem.color[1]}${palItem.color[2]}${palItem.color[2]}${palItem.color[3]}${palItem.color[3]}`
-                      : '#000000';
-                  return (
-                    <label
-                      key={`stroke-${palItem.id}`}
-                      className={`w-6 h-6 rounded-lg border transition-all cursor-pointer relative overflow-hidden flex items-center justify-center ${
-                        isSelected
-                          ? 'scale-110 ring-2 ring-indigo-500 ring-offset-1 z-10 shadow-sm border-white'
-                          : 'hover:scale-105 border-slate-300'
-                      }`}
-                      style={{ backgroundColor: palItem.color }}
-                      title={`${palItem.name || `Couleur #${idx + 1}`} (${palItem.color})`}
-                    >
-                      <input
-                        type="color"
-                        value={validHex}
-                        onClick={() => {
-                          setSelectedStrokePaletteId(palItem.id);
-                          setStrokeColor(palItem.color);
-                          if (selectedPathIds.length > 0) {
-                            updateSelectedShapeProperties({
-                              stroke: palItem.color,
-                              strokeColorId: palItem.id,
-                            });
-                          }
-                        }}
-                        onChange={(e) => {
-                          const newHex = e.target.value;
-                          setSelectedStrokePaletteId(palItem.id);
-                          setStrokeColor(newHex);
-                          handleModifyPaletteColor(palItem.id, newHex);
-                          if (selectedPathIds.length > 0) {
-                            updateSelectedShapeProperties({
-                              stroke: newHex,
-                              strokeColorId: palItem.id,
-                            });
-                          }
-                        }}
-                        className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
-                      />
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 2. REMPLISSAGE (FILL) */}
-            <div className="space-y-1.5 pt-2 border-t border-slate-100">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <div
-                    className="w-3.5 h-3.5 rounded-md border border-slate-300 shadow-2xs"
-                    style={{
-                      backgroundColor: fillColor === 'none' ? 'transparent' : fillColor,
-                      backgroundImage:
-                        fillColor === 'none'
-                          ? 'linear-gradient(45deg, #e2e8f0 25%, transparent 25%, transparent 75%, #e2e8f0 75%), linear-gradient(45deg, #e2e8f0 25%, transparent 25%, transparent 75%, #e2e8f0 75%)'
-                          : undefined,
-                      backgroundSize: fillColor === 'none' ? '6px 6px' : undefined,
-                      backgroundPosition: fillColor === 'none' ? '0 0, 3px 3px' : undefined,
-                    }}
-                  />
-                  <span className="text-[11px] font-bold text-slate-700">Remplissage</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFillColor('none');
-                      setSelectedFillPaletteId(null);
-                      if (selectedPathIds.length > 0) {
-                        updateSelectedShapeProperties({ fill: 'none', fillColorId: undefined });
-                      }
-                    }}
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-md border cursor-pointer ${
-                      fillColor === 'none'
-                        ? 'bg-rose-50 text-rose-700 border-rose-300'
-                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    Transparent
-                  </button>
-                  <label
-                    className="w-5 h-5 rounded-md border border-slate-300 cursor-pointer relative overflow-hidden flex items-center justify-center shrink-0"
-                    style={{ backgroundColor: fillColor !== 'none' ? fillColor : '#ffffff' }}
-                    title="Personnaliser la couleur de remplissage"
-                  >
-                    <input
-                      type="color"
-                      value={fillColor.startsWith('#') && fillColor.length === 7 ? fillColor : '#ffffff'}
-                      onChange={(e) => {
-                        const c = e.target.value;
-                        setFillColor(c);
-                        if (selectedFillPaletteId) {
-                          handleModifyPaletteColor(selectedFillPaletteId, c);
-                        } else if (selectedPathIds.length > 0) {
-                          updateSelectedShapeProperties({ fill: c });
-                        }
-                      }}
-                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
-                    />
-                    <Pipette className="w-2.5 h-2.5 text-slate-700" />
-                  </label>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-8 gap-1">
-                {projectPalette.map((palItem, idx) => {
-                  const isSelected =
-                    fillColor !== 'none' &&
-                    (selectedFillPaletteId === palItem.id ||
-                      (!selectedFillPaletteId &&
-                        fillColor.toLowerCase() === palItem.color.toLowerCase()));
-                  const validHex =
-                    palItem.color.startsWith('#') && palItem.color.length === 7
-                      ? palItem.color
-                      : palItem.color.length === 4
-                      ? `#${palItem.color[1]}${palItem.color[1]}${palItem.color[2]}${palItem.color[2]}${palItem.color[3]}${palItem.color[3]}`
-                      : '#ffffff';
-                  return (
-                    <label
-                      key={`fill-${palItem.id}`}
-                      className={`w-6 h-6 rounded-lg border transition-all cursor-pointer relative overflow-hidden flex items-center justify-center ${
-                        isSelected
-                          ? 'scale-110 ring-2 ring-indigo-500 ring-offset-1 z-10 shadow-sm border-white'
-                          : 'hover:scale-105 border-slate-300'
-                      }`}
-                      style={{ backgroundColor: palItem.color }}
-                      title={`${palItem.name || `Couleur #${idx + 1}`} (${palItem.color})`}
-                    >
-                      <input
-                        type="color"
-                        value={validHex}
-                        onClick={() => {
-                          setSelectedFillPaletteId(palItem.id);
-                          setFillColor(palItem.color);
-                          if (selectedPathIds.length > 0) {
-                            updateSelectedShapeProperties({
-                              fill: palItem.color,
-                              fillColorId: palItem.id,
-                            });
-                          }
-                        }}
-                        onChange={(e) => {
-                          const newHex = e.target.value;
-                          setSelectedFillPaletteId(palItem.id);
-                          setFillColor(newHex);
-                          handleModifyPaletteColor(palItem.id, newHex);
-                          if (selectedPathIds.length > 0) {
-                            updateSelectedShapeProperties({
-                              fill: newHex,
-                              fillColorId: palItem.id,
-                            });
-                          }
-                        }}
-                        className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
-                      />
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 3. ÉPAISSEUR DU TRAIT (Tailles rapides + Slider fin) */}
-            <div className="pt-2 border-t border-slate-100 space-y-1.5">
-              <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
-                <span>Épaisseur du trait</span>
-                <span className="font-mono text-indigo-600">{strokeWidth}px</span>
-              </div>
-              <div className="grid grid-cols-6 gap-1">
-                {[2, 4, 8, 12, 20, 32].map((w) => (
-                  <button
-                    key={w}
-                    type="button"
-                    onClick={() => {
-                      setStrokeWidth(w);
-                      if (selectedPathIds.length > 0) updateSelectedShapeProperties({ strokeWidth: w });
-                    }}
-                    className={`py-1 text-[10px] font-mono font-bold rounded-lg border transition-all cursor-pointer ${
-                      strokeWidth === w
-                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    {w}
-                  </button>
-                ))}
-              </div>
-              <input
-                type="range"
-                min="2"
-                max="32"
-                value={strokeWidth}
-                onChange={(e) => {
-                  const val = Number(e.target.value);
-                  setStrokeWidth(val);
-                  if (selectedPathIds.length > 0) updateSelectedShapeProperties({ strokeWidth: val });
-                }}
-                className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-100 rounded-lg"
-              />
-            </div>
-          </div>
-
-          {/* Module Modèle Repère & Point de Contact Curseur (Hotspot) */}
-          {(activeReferenceGuide || isCursorMode) && (
-            <div className="bg-indigo-50/80 p-3 rounded-2xl border border-indigo-200 shadow-2xs space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5 truncate max-w-[160px]">
-                  <Target className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  <span className="truncate">
-                    {activeReferenceGuide ? `Repère : ${activeReferenceGuide.name}` : "Point d'impact"}
-                  </span>
-                </span>
-                <div className="flex items-center gap-1 shrink-0">
-                  {activeReferenceGuide && (
-                    <button
-                      type="button"
-                      onClick={() => setGuideOpacity(guideOpacity > 0 ? 0 : 0.45)}
-                      className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer ${
-                        guideOpacity > 0
-                          ? 'bg-indigo-600 text-white shadow-2xs'
-                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      {guideOpacity > 0 ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                      Guide
-                    </button>
-                  )}
-                  {isCursorMode && (
-                    <button
-                      type="button"
-                      onClick={() => setShowHotspot(!showHotspot)}
-                      className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer ${
-                        showHotspot
-                          ? 'bg-rose-600 text-white shadow-2xs'
-                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Crosshair className="w-3 h-3" />
-                      Impact
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Sélecteur de repère si plusieurs sont disponibles */}
-              {availableReferenceGuides && availableReferenceGuides.length > 1 && (
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-indigo-900 block">
-                    Choisir le repère de calque :
-                  </label>
-                  <select
-                    value={selectedGuideId}
-                    onChange={(e) => {
-                      setSelectedGuideId(e.target.value);
-                      if (guideOpacity === 0) setGuideOpacity(0.45);
-                    }}
-                    className="w-full text-xs font-bold text-slate-800 bg-white border border-indigo-200 rounded-xl px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 shadow-2xs cursor-pointer"
-                  >
-                    {availableReferenceGuides.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.isCustom ? `🎨 ${g.name}` : `⚡ ${g.name}`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {activeReferenceGuide && guideOpacity > 0 && (
-                <div className="space-y-1.5 pt-1 border-t border-indigo-200/60">
-                  <div className="flex items-center justify-between text-[11px] font-bold text-indigo-900">
-                    <span>Opacité du dessin repère</span>
-                    <span className="font-mono">{Math.round(guideOpacity * 100)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.05"
-                    max="0.9"
-                    step="0.05"
-                    value={guideOpacity}
-                    onChange={(e) => setGuideOpacity(parseFloat(e.target.value))}
-                    className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-indigo-200/70 rounded-lg"
-                  />
-                  {activeReferenceGuide.paths && activeReferenceGuide.paths.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleCopyGuideToCanvas}
-                      className="w-full py-1.5 px-2 bg-white hover:bg-indigo-100/80 text-indigo-700 text-[11px] font-bold rounded-xl border border-indigo-300 transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer active:scale-98"
-                      title="Copie le tracé du repère directement sur votre canevas pour le retoucher ou le colorer"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      Copier le tracé du repère dans le dessin
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {isCursorMode && showHotspot && (
-                <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 bg-white p-2 rounded-xl border border-indigo-100 shadow-2xs">
-                  <span className="flex items-center gap-1.5 text-rose-700">
-                    <Crosshair className="w-3.5 h-3.5 text-rose-600" />
-                    Point : ({Math.round(hotspot.x)}, {Math.round(hotspot.y)})
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleResetHotspot}
-                    className="text-[10px] text-slate-500 hover:text-slate-800 underline cursor-pointer"
-                  >
-                    Réinitialiser
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Module Pelure d'Oignon (Onion Skinning) */}
-          {availableOnionStates.length > 0 && (
-            <div className="bg-white p-3 rounded-2xl border border-indigo-100 shadow-2xs space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <Layers className="w-3.5 h-3.5 text-indigo-600" /> Pelure d'oignon
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setOnionSkinEnabled(!onionSkinEnabled)}
-                  className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer ${
-                    onionSkinEnabled
-                      ? 'bg-indigo-600 text-white shadow-2xs'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  {onionSkinEnabled ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                  {onionSkinEnabled ? 'On' : 'Off'}
-                </button>
-              </div>
-
-              {onionSkinEnabled && (
-                <div className="space-y-1.5 pt-1 border-t border-slate-100 animate-in fade-in duration-150">
-                  <select
-                    value={selectedOnionStateId}
-                    onChange={(e) => setSelectedOnionStateId(e.target.value)}
-                    className="w-full text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 focus:outline-none cursor-pointer"
-                  >
-                    {availableOnionStates.map((st) => (
-                      <option key={st.id} value={st.id}>
-                        Repère : "{st.name}"
-                      </option>
-                    ))}
-                  </select>
-
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="0.8"
-                    step="0.05"
-                    value={onionOpacity}
-                    onChange={(e) => setOnionOpacity(parseFloat(e.target.value))}
-                    className="w-full accent-indigo-600 cursor-pointer h-1 bg-slate-100 rounded-lg"
-                  />
-                </div>
-              )}
-            </div>
-          )}
+          <DrawingGuidesAndOnionSection
+            activeReferenceGuide={activeReferenceGuide}
+            availableReferenceGuides={availableReferenceGuides}
+            selectedGuideId={selectedGuideId}
+            onSelectGuideId={setSelectedGuideId}
+            guideOpacity={guideOpacity}
+            onGuideOpacityChange={setGuideOpacity}
+            onCopyGuideToCanvas={handleCopyGuideToCanvas}
+            isCursorMode={isCursorMode}
+            showHotspot={showHotspot}
+            onToggleHotspot={() => setShowHotspot(!showHotspot)}
+            hotspot={hotspot}
+            onResetHotspot={handleResetHotspot}
+            availableOnionStates={availableOnionStates}
+            onionSkinEnabled={onionSkinEnabled}
+            onToggleOnionSkin={() => setOnionSkinEnabled(!onionSkinEnabled)}
+            selectedOnionStateId={selectedOnionStateId}
+            onSelectOnionStateId={setSelectedOnionStateId}
+            onionOpacity={onionOpacity}
+            onOnionOpacityChange={setOnionOpacity}
+          />
         </div>
 
         {/* Actions : Annuler, Rétablir & Effacer */}

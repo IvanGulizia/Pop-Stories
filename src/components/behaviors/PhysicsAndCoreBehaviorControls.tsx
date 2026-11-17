@@ -1,0 +1,859 @@
+import React from 'react';
+import { Layers, Paintbrush, Plus, RotateCcw } from 'lucide-react';
+import {
+  AutoDestroyBehaviorConfig,
+  BoundaryBehaviorConfig,
+  ConstantVelocityBehaviorConfig,
+  DraggableBehaviorConfig,
+  EntityState,
+  KeyboardControlBehaviorConfig,
+  PhysicsBehaviorConfig,
+} from '../../types';
+import { FlipControls, InertiaControls } from './BehaviorSharedControls';
+
+export function DraggableBehaviorControls({
+  b,
+  update,
+}: {
+  b: DraggableBehaviorConfig;
+  update: (partial: any) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      {/* Ligne 1: Inertie au lancer */}
+      <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+        <div>
+          <div className="font-bold text-slate-700 text-xs">Inertie au lancer (Throw)</div>
+          <div className="text-[10px] text-slate-400">Projette l'objet selon la vitesse du geste au lâcher</div>
+        </div>
+        <input
+          type="checkbox"
+          checked={b.throwable !== false}
+          onChange={(e) => update({ throwable: e.target.checked })}
+          className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+        />
+      </div>
+
+      {/* Ligne 2: Plafond de vitesse */}
+      {b.throwable !== false && (
+        <div className="p-2 bg-white rounded-xl border border-slate-200">
+          <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+            <span className="font-bold">Plafond de projection</span>
+            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+              {b.maxThrowSpeed || 1500} px/s
+            </span>
+          </div>
+          <input
+            type="range"
+            min="300"
+            max="3000"
+            step="100"
+            value={b.maxThrowSpeed || 1500}
+            onChange={(e) => update({ maxThrowSpeed: parseFloat(e.target.value) })}
+            className="w-full accent-indigo-600"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function PhysicsBehaviorControls({
+  b,
+  update,
+}: {
+  b: PhysicsBehaviorConfig;
+  update: (partial: any) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      {/* Ligne 1: Collider Solide vs Trigger */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+        <div>
+          <div className="font-bold text-slate-700 text-xs">Collider Solide</div>
+          <div className="text-[10px] text-slate-400">
+            {b.isTrigger ? 'Zone fantôme / Capteur (traverse sans bloquer)' : 'Corps solide (bloque et repousse)'}
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          checked={b.isTrigger !== true}
+          onChange={(e) => update({ isTrigger: !e.target.checked })}
+          className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+          title="Décocher pour en faire un Trigger (capteur sans collision physique)"
+        />
+      </div>
+
+      {/* Ligne 2: Obstacle Fixe */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+        <div>
+          <div className="font-bold text-slate-700 text-xs">Obstacle Fixe (Inamovible)</div>
+          <div className="text-[10px] text-slate-400">
+            {b.isStatic ? 'Immobile / Solide fixe (Masse infinie)' : 'Corps physique mobile (Dynamique)'}
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          checked={b.isStatic === true}
+          onChange={(e) => update({ isStatic: e.target.checked })}
+          className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+          title="Cocher pour un mur, un sol ou une plateforme infranchissable"
+        />
+      </div>
+
+      {/* Ligne 3: Gravité verticale (seulement si non statique) */}
+      {!b.isStatic && (
+        <div className="p-2 bg-white rounded-xl border border-slate-200">
+          <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+            <span className="font-bold">Gravité verticale</span>
+            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+              {b.gravity ?? 400} px/s²
+            </span>
+          </div>
+          <input
+            type="range"
+            min="-2000"
+            max="2000"
+            step="50"
+            value={b.gravity ?? 400}
+            onChange={(e) => update({ gravity: parseFloat(e.target.value) })}
+            className="w-full accent-indigo-600"
+          />
+        </div>
+      )}
+
+      {/* Ligne 4: Rebond sur les autres objets */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200">
+        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+          <div>
+            <span className="font-bold">Rebond (Restitution)</span>
+            <span className="text-[10px] text-slate-400 block">Élasticité du choc avec les autres objets</span>
+          </div>
+          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+            {Math.round((b.bounce ?? 0.4) * 100)}%
+          </span>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="1.2"
+          step="0.05"
+          value={b.bounce ?? 0.4}
+          onChange={(e) => update({ bounce: parseFloat(e.target.value) })}
+          className="w-full accent-indigo-600"
+        />
+      </div>
+
+      {/* Ligne 5: Friction / Adhérence au contact */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200">
+        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+          <div>
+            <span className="font-bold">Adhérence surface (Friction)</span>
+            <span className="text-[10px] text-slate-400 block">
+              0 = Glace (glisse) • 0.6+ = Accroche &amp; fait rouler les balles
+            </span>
+          </div>
+          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+            {Math.round((b.friction ?? 0.6) * 100)}%
+          </span>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          value={b.friction ?? 0.6}
+          onChange={(e) => update({ friction: parseFloat(e.target.value) })}
+          className="w-full accent-indigo-600"
+        />
+      </div>
+
+      {/* Ligne 5.5: Résistance de l'air (Friction Air) */}
+      {!b.isStatic && (
+        <div className="p-2 bg-white rounded-xl border border-slate-200">
+          <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+            <div>
+              <span className="font-bold">Résistance de l'air (Freinage)</span>
+              <span className="text-[10px] text-slate-400 block">
+                0 = Vide spatial (aucun freinage) • 0.05+ = Freinage fort
+              </span>
+            </div>
+            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+              {(b.frictionAir ?? 0.015).toFixed(3)}
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="0.25"
+            step="0.005"
+            value={b.frictionAir ?? 0.015}
+            onChange={(e) => update({ frictionAir: parseFloat(e.target.value) })}
+            className="w-full accent-indigo-600"
+          />
+        </div>
+      )}
+
+      {/* Ligne 6: Masse du corps */}
+      {!b.isStatic && (
+        <div className="p-2 bg-white rounded-xl border border-slate-200">
+          <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+            <div>
+              <span className="font-bold">Masse</span>
+              <span className="text-[10px] text-slate-400 block">Influence la résistance aux chocs</span>
+            </div>
+            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+              {b.mass ?? 1} kg
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0.1"
+            max="50"
+            step="0.1"
+            value={b.mass ?? 1}
+            onChange={(e) => update({ mass: parseFloat(e.target.value) })}
+            className="w-full accent-indigo-600"
+          />
+        </div>
+      )}
+
+      {/* Ligne 7: Figer la rotation (Freeze Rotation) */}
+      {!b.isStatic && (
+        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+          <div>
+            <div className="font-bold text-slate-700 text-xs flex items-center gap-1.5">
+              <RotateCcw className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Figer la rotation (Freeze Rotation)</span>
+            </div>
+            <div className="text-[10px] text-slate-400">
+              {b.freezeRotation ? 'Rotation bloquée (l\'objet reste droit sans basculer)' : 'Rotation libre sous l\'effet des chocs'}
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={b.freezeRotation === true}
+            onChange={(e) => update({ freezeRotation: e.target.checked })}
+            className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+            title="Empêche l'objet de pivoter lors des collisions physiques"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function AutoDestroyBehaviorControls({
+  b,
+  update,
+}: {
+  b: AutoDestroyBehaviorConfig;
+  update: (partial: any) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      {/* Ligne 1: Durée de vie avant autodestruction */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200">
+        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+          <div>
+            <span className="font-bold">Durée de vie (Délai)</span>
+            <span className="text-[10px] text-slate-400 block">Délai avant suppression automatique</span>
+          </div>
+          <span className="font-mono font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded text-[11px]">
+            {b.delay ?? 3} s
+          </span>
+        </div>
+        <input
+          type="range"
+          min="0.2"
+          max="20"
+          step="0.2"
+          value={b.delay ?? 3}
+          onChange={(e) => update({ delay: parseFloat(e.target.value) })}
+          className="w-full accent-orange-600"
+        />
+      </div>
+    </div>
+  );
+}
+
+export function ConstantVelocityBehaviorControls({
+  b,
+  update,
+}: {
+  b: ConstantVelocityBehaviorConfig;
+  update: (partial: any) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      {/* Ligne 1: Vitesse X */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+        <div>
+          <span className="font-bold text-slate-700 text-xs block">Vitesse horizontale X</span>
+          <span className="text-[10px] text-slate-400">Négatif = gauche, Positif = droite</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            value={b.vx}
+            onChange={(e) => update({ vx: parseFloat(e.target.value) || 0 })}
+            className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
+          />
+          <span className="text-slate-400 text-xs">px/s</span>
+        </div>
+      </div>
+
+      {/* Ligne 2: Vitesse Y */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+        <div>
+          <span className="font-bold text-slate-700 text-xs block">Vitesse verticale Y</span>
+          <span className="text-[10px] text-slate-400">Négatif = haut, Positif = bas</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            value={b.vy}
+            onChange={(e) => update({ vy: parseFloat(e.target.value) || 0 })}
+            className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
+          />
+          <span className="text-slate-400 text-xs">px/s</span>
+        </div>
+      </div>
+
+      {/* Ligne 3: Rotation continue */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200">
+        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+          <span className="font-bold">Rotation continue</span>
+          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+            {b.angularVelocity || 0} °/s
+          </span>
+        </div>
+        <input
+          type="range"
+          min="-360"
+          max="360"
+          step="10"
+          value={b.angularVelocity || 0}
+          onChange={(e) => update({ angularVelocity: parseFloat(e.target.value) })}
+          className="w-full accent-indigo-600"
+        />
+      </div>
+
+      <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0} update={update} />
+      <FlipControls flipOnMove={b.flipOnMove} flipInvert={b.flipInvert} update={update} />
+    </div>
+  );
+}
+
+export function KeyboardControlBehaviorControls({
+  b,
+  update,
+  stateList,
+  onQuickCreateState,
+  onEditStateDrawing,
+}: {
+  b: KeyboardControlBehaviorConfig;
+  update: (partial: any) => void;
+  stateList: EntityState[];
+  onQuickCreateState: (suggestedName: string, folderName?: string) => string;
+  onEditStateDrawing?: (stateId: string) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      {/* Ligne 1: Mode de jeu */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+        <span className="font-bold text-slate-700 text-xs">Mode de jeu</span>
+        <select
+          value={b.mode}
+          onChange={(e) => update({ mode: e.target.value as any })}
+          className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+        >
+          <option value="top_down">Vue de dessus (8 directions)</option>
+          <option value="platformer">Plateforme (Gauche/Droite + Saut)</option>
+        </select>
+      </div>
+
+      {/* Ligne 2: Type de touches */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+        <span className="font-bold text-slate-700 text-xs">Touches actives</span>
+        <select
+          value={b.layout}
+          onChange={(e) => update({ layout: e.target.value as any })}
+          className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+        >
+          <option value="both">Flèches & ZQSD / WASD</option>
+          <option value="arrows">Flèches uniquement</option>
+          <option value="wasd">Touches ZQSD / WASD</option>
+        </select>
+      </div>
+
+      {/* Ligne 3: Restriction Axe Horizontal */}
+      <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+        <div>
+          <div className="font-bold text-slate-700 text-xs">Mouvement horizontal (Gauche / Droite)</div>
+          <div className="text-[10px] text-slate-400">Autorise le déplacement sur l'axe X</div>
+        </div>
+        <input
+          type="checkbox"
+          checked={b.allowHorizontal !== false}
+          onChange={(e) => update({ allowHorizontal: e.target.checked })}
+          className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+        />
+      </div>
+
+      {/* Ligne 4: Restriction Axe Vertical (si mode Vue de dessus) */}
+      {b.mode === 'top_down' && (
+        <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+          <div>
+            <div className="font-bold text-slate-700 text-xs">Mouvement vertical (Haut / Bas)</div>
+            <div className="text-[10px] text-slate-400">Autorise le déplacement sur l'axe Y</div>
+          </div>
+          <input
+            type="checkbox"
+            checked={b.allowVertical !== false}
+            onChange={(e) => update({ allowVertical: e.target.checked })}
+            className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+          />
+        </div>
+      )}
+
+      {/* Ligne 5: Autoriser le saut (si mode Plateforme) */}
+      {b.mode === 'platformer' && (
+        <>
+          <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+            <div>
+              <div className="font-bold text-slate-700 text-xs">Autoriser le saut</div>
+              <div className="text-[10px] text-slate-400">Active l'impulsion verticale (Haut / Espace)</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={b.allowJump !== false}
+              onChange={(e) => update({ allowJump: e.target.checked })}
+              className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+            />
+          </div>
+
+          {b.allowJump !== false && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200">
+              <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                <span className="font-bold">Nombre de sauts max</span>
+                <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                  {b.maxJumps ?? 1} {(b.maxJumps ?? 1) > 1 ? 'sauts' : 'saut'}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="10"
+                step="1"
+                value={b.maxJumps ?? 1}
+                onChange={(e) => update({ maxJumps: parseInt(e.target.value, 10) || 1 })}
+                className="w-full accent-indigo-600 h-1.5"
+              />
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                1 = saut simple (au sol), 2 = double saut, etc.
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Ligne 6: Vitesse de déplacement */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200">
+        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+          <span className="font-bold">Vitesse de course</span>
+          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+            {b.speed} px/s
+          </span>
+        </div>
+        <input
+          type="range"
+          min="50"
+          max="500"
+          step="10"
+          value={b.speed}
+          onChange={(e) => update({ speed: parseFloat(e.target.value) })}
+          className="w-full accent-indigo-600"
+        />
+      </div>
+
+      {/* Ligne 7: Force de saut (si mode plateforme et saut autorisé) */}
+      {b.mode === 'platformer' && b.allowJump !== false && (
+        <div className="p-2 bg-white rounded-xl border border-slate-200">
+          <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+            <span className="font-bold">Impulsion de saut</span>
+            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+              {b.jumpForce || 450} px/s
+            </span>
+          </div>
+          <input
+            type="range"
+            min="200"
+            max="800"
+            step="25"
+            value={b.jumpForce || 450}
+            onChange={(e) => update({ jumpForce: parseFloat(e.target.value) })}
+            className="w-full accent-indigo-600"
+          />
+        </div>
+      )}
+
+      <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0.8} update={update} />
+      <FlipControls flipOnMove={b.flipOnMove} flipInvert={b.flipInvert} update={update} />
+
+      {/* Ligne 8: Liaisons automatiques d'états visuels + Garde-fou */}
+      <div className="p-2.5 bg-indigo-50/50 rounded-xl border border-indigo-200/80 space-y-2">
+        <div>
+          <div className="font-bold text-indigo-900 text-xs flex items-center gap-1.5">
+            <Layers className="w-3.5 h-3.5 text-indigo-600" />
+            <span>États visuels automatiques (Garde-fou actif)</span>
+          </div>
+          <div className="text-[10px] text-indigo-700/80 leading-snug mt-0.5">
+            Change d'état automatiquement selon le mouvement. Ne remplace jamais les autres états (ex : Blessé, Attaque).
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-indigo-100">
+            <span className="text-[11px] font-bold text-slate-700">Repos (Idle)</span>
+            <div className="flex items-center gap-1 shrink-0">
+              <select
+                value={b.stateBindings?.idleStateId || ''}
+                onChange={(e) =>
+                  update({
+                    stateBindings: {
+                      ...(b.stateBindings || {}),
+                      idleStateId: e.target.value || undefined,
+                    },
+                  })
+                }
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[140px]"
+              >
+                <option value="">-- Non défini --</option>
+                {stateList.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    {st.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  const createdId = onQuickCreateState('Idle', 'Contrôleur');
+                  if (createdId) update({ stateBindings: { ...(b.stateBindings || {}), idleStateId: createdId } });
+                }}
+                className="p-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg cursor-pointer"
+                title="Créer et lier l'état « Idle »"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+              {b.stateBindings?.idleStateId && onEditStateDrawing && (
+                <button
+                  type="button"
+                  onClick={() => onEditStateDrawing(b.stateBindings!.idleStateId!)}
+                  className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+                  title="Dessiner cet état"
+                >
+                  <Paintbrush className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-indigo-100">
+            <span className="text-[11px] font-bold text-slate-700">Marche / Mouvement</span>
+            <div className="flex items-center gap-1 shrink-0">
+              <select
+                value={b.stateBindings?.moveStateId || ''}
+                onChange={(e) =>
+                  update({
+                    stateBindings: {
+                      ...(b.stateBindings || {}),
+                      moveStateId: e.target.value || undefined,
+                    },
+                  })
+                }
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[140px]"
+              >
+                <option value="">-- Non défini --</option>
+                {stateList.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    {st.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  const createdId = onQuickCreateState('Walk', 'Contrôleur');
+                  if (createdId) update({ stateBindings: { ...(b.stateBindings || {}), moveStateId: createdId } });
+                }}
+                className="p-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg cursor-pointer"
+                title="Créer et lier l'état « Walk »"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+              {b.stateBindings?.moveStateId && onEditStateDrawing && (
+                <button
+                  type="button"
+                  onClick={() => onEditStateDrawing(b.stateBindings!.moveStateId!)}
+                  className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+                  title="Dessiner cet état"
+                >
+                  <Paintbrush className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {b.mode === 'platformer' && (
+            <>
+              <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-indigo-100">
+                <span className="text-[11px] font-bold text-slate-700">Saut (Montée)</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <select
+                    value={b.stateBindings?.jumpStateId || ''}
+                    onChange={(e) =>
+                      update({
+                        stateBindings: {
+                          ...(b.stateBindings || {}),
+                          jumpStateId: e.target.value || undefined,
+                        },
+                      })
+                    }
+                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[140px]"
+                  >
+                    <option value="">-- Non défini --</option>
+                    {stateList.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const createdId = onQuickCreateState('Jump', 'Contrôleur');
+                      if (createdId) update({ stateBindings: { ...(b.stateBindings || {}), jumpStateId: createdId } });
+                    }}
+                    className="p-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg cursor-pointer"
+                    title="Créer et lier l'état « Jump »"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                  {b.stateBindings?.jumpStateId && onEditStateDrawing && (
+                    <button
+                      type="button"
+                      onClick={() => onEditStateDrawing(b.stateBindings!.jumpStateId!)}
+                      className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+                      title="Dessiner cet état"
+                    >
+                      <Paintbrush className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-indigo-100">
+                <span className="text-[11px] font-bold text-slate-700">Chute (Descente)</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <select
+                    value={b.stateBindings?.fallStateId || ''}
+                    onChange={(e) =>
+                      update({
+                        stateBindings: {
+                          ...(b.stateBindings || {}),
+                          fallStateId: e.target.value || undefined,
+                        },
+                      })
+                    }
+                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[140px]"
+                  >
+                    <option value="">-- Non défini --</option>
+                    {stateList.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const createdId = onQuickCreateState('Fall', 'Contrôleur');
+                      if (createdId) update({ stateBindings: { ...(b.stateBindings || {}), fallStateId: createdId } });
+                    }}
+                    className="p-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg cursor-pointer"
+                    title="Créer et lier l'état « Fall »"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                  {b.stateBindings?.fallStateId && onEditStateDrawing && (
+                    <button
+                      type="button"
+                      onClick={() => onEditStateDrawing(b.stateBindings!.fallStateId!)}
+                      className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+                      title="Dessiner cet état"
+                    >
+                      <Paintbrush className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-white p-1.5 rounded-lg border border-indigo-100 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-slate-700">Atterrissage (Land)</span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <select
+                      value={b.stateBindings?.landStateId || ''}
+                      onChange={(e) =>
+                        update({
+                          stateBindings: {
+                            ...(b.stateBindings || {}),
+                            landStateId: e.target.value || undefined,
+                          },
+                        })
+                      }
+                      className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[140px]"
+                    >
+                      <option value="">-- Non défini --</option>
+                      {stateList.map((st) => (
+                        <option key={st.id} value={st.id}>
+                          {st.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const createdId = onQuickCreateState('Land', 'Contrôleur');
+                        if (createdId) update({ stateBindings: { ...(b.stateBindings || {}), landStateId: createdId } });
+                      }}
+                      className="p-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg cursor-pointer"
+                      title="Créer et lier l'état « Land »"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                    {b.stateBindings?.landStateId && onEditStateDrawing && (
+                      <button
+                        type="button"
+                        onClick={() => onEditStateDrawing(b.stateBindings!.landStateId!)}
+                        className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+                        title="Dessiner cet état"
+                      >
+                        <Paintbrush className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {b.stateBindings?.landStateId && (
+                  <div className="flex items-center gap-2 pt-1 border-t border-indigo-50">
+                    <span className="text-[10px] font-semibold text-slate-500 shrink-0">Durée :</span>
+                    <input
+                      type="range"
+                      min="0.05"
+                      max="0.6"
+                      step="0.05"
+                      value={b.stateBindings?.landDuration ?? 0.15}
+                      onChange={(e) =>
+                        update({
+                          stateBindings: {
+                            ...(b.stateBindings || {}),
+                            landDuration: parseFloat(e.target.value),
+                          },
+                        })
+                      }
+                      className="flex-1 accent-indigo-600"
+                    />
+                    <span className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded shrink-0">
+                      {(b.stateBindings?.landDuration ?? 0.15).toFixed(2)}s
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Hauteur minimale de chute avant Chute / Atterrissage */}
+              <div className="bg-white p-1.5 rounded-lg border border-indigo-100 space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-slate-700">Hauteur min. chute (Fall / Land)</span>
+                  <span className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">
+                    {b.stateBindings?.minFallHeight ?? 20} px
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="160"
+                  step="2"
+                  value={b.stateBindings?.minFallHeight ?? 20}
+                  onChange={(e) =>
+                    update({
+                      stateBindings: {
+                        ...(b.stateBindings || {}),
+                        minFallHeight: parseInt(e.target.value, 10) || 0,
+                      },
+                    })
+                  }
+                  className="w-full accent-indigo-600 h-1.5"
+                />
+                <div className="text-[9px] text-slate-400 leading-tight">
+                  Évite l'état Chute/Atterrissage sur de petits dénivelés ou calques irréguliers.
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function BoundaryBehaviorControls({
+  b,
+  update,
+}: {
+  b: BoundaryBehaviorConfig;
+  update: (partial: any) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      {/* Ligne 1: Comportement aux bords */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+        <span className="font-bold text-slate-700 text-xs">Comportement aux bords</span>
+        <select
+          value={b.mode}
+          onChange={(e) => update({ mode: e.target.value as any })}
+          className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+        >
+          <option value="bounce">Rebond élastique</option>
+          <option value="wrap">Téléportation continue (Wrap)</option>
+          <option value="clamp">Butée infranchissable (Clamp)</option>
+        </select>
+      </div>
+
+      {/* Ligne 2: Élasticité du rebond aux bords */}
+      {b.mode === 'bounce' && (
+        <div className="p-2 bg-white rounded-xl border border-slate-200">
+          <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+            <div>
+              <span className="font-bold">Rebond sur les bords</span>
+              <span className="text-[10px] text-slate-400 block">Élasticité spécifique contre le cadre du canvas</span>
+            </div>
+            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+              {Math.round((b.bounciness ?? 0.8) * 100)}%
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={b.bounciness ?? 0.8}
+            onChange={(e) => update({ bounciness: parseFloat(e.target.value) })}
+            className="w-full accent-indigo-600"
+          />
+        </div>
+      )}
+    </div>
+  );
+}

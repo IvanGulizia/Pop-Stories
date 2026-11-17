@@ -5,10 +5,10 @@
 - **Contexte :** Les gizmos de debug (auparavant limités à un booléen `showColliderDebugGizmos` rendu dans chaque entité) sont indispensables pour régler des comportements dont la portée dépasse la boîte de l'entité (rayons Marionnette `280px`, zones de fuite/balade, cônes `LookAt`, liens parent-enfant).
 - **Décision :**
   - Centraliser tous les gizmos dans `<SceneGizmoOverlay />` au niveau du canvas `Scene.tsx` (`z-[45]`, `pointer-events-none`).
-  - Structurer `AppSettings.gizmos` avec un mode par catégorie (`'off' | 'edit' | 'play' | 'both'`), un interrupteur maître et un filtre *Entité sélectionnée uniquement*.
+  - Structurer `AppSettings.gizmos` avec un mode par catégorie (`'off' | 'edit' | 'play' | 'both'`, défaut `'edit'`), un interrupteur maître et un filtre *Entité sélectionnée uniquement*.
   - Exposer ces contrôles dans une section dédiée *Gizmos & Debug Visuel* dans `SettingsPanel.tsx` (et non sur le canvas).
   - Règle pérenne : tout nouveau comportement géométrique ou spatial doit intégrer son rendu gizmo dans `SceneGizmoOverlay` et sa catégorie dans `gizmoConfig`.
-- **Conséquences :** Aucun découpage par `clipPath`, rendu uniforme, désactivation sélective selon le mode Édition/Play sans encombrer le canvas.
+- **Conséquences :** Aucun découpage par `clipPath`, rendu uniforme, désactivation sélective selon le mode Édition/Play sans encombrer le canvas ni la vue de jeu par défaut.
 
 ## ADR-002 : Composition Hiérarchique sur l'Entité « Parent Final » vs Objet Groupe
 - **Date :** 2026-11-16
@@ -24,3 +24,9 @@
 ## ADR-004 : Flip Contextuel dans `LookAt`
 - **Date :** 2026-11-16
 - **Décision :** Ajouter `flipMode: 'none' | 'flipX'`, `facingDirection: 'right' | 'left'` et `flipDeadzone` (px) à `LookAtBehaviorConfig`, avec un gizmo de secteur angulaire (`±maxAngle`) et d'axe de base. Permet à une tête ou un personnage de se retourner proprement sans jamais pivoter la tête à l'envers.
+
+## ADR-005 : Refactorisation progressive par Lots (Sans régression)
+- **Date :** 2026-11-16
+- **Décision :**
+  - Unifier toute la logique de pointeur/drag/resize/délégation des entités dans `src/hooks/useEntityPointerInteraction.ts` (Lot A), tout en conservant `Apple.tsx` et `Plant.tsx` discrètement pour rétrocompatibilité sans qu'aucun module cœur n'en dépende.
+  - Découper les grands composants UI par domaine (`src/components/behaviors/*` pour `BehaviorManager.tsx` en Lot B), avant de mener d'autres lots similaires (`RuleBook`, `useSceneStore`, `matterPhysicsEngine`) et une future phase dédiée aux interpolations intra-état / inter-états.

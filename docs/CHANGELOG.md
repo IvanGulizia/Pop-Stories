@@ -1,10 +1,38 @@
+## [Phase 10.25] - 2026-11-16
+### Refactorisé
+- **Lot E — Modularisation complète de `RuleBook.tsx` (`src/components/rulebook/*`)** :
+  - Réduction de `src/components/RuleBook.tsx` de **10 877 lignes à 1 467 lignes (-86 %)** par extraction pure en 10 modules cohésifs :
+    - `ruleBookTypes.ts` (254 L) : Contrats TypeScript partagés des modales d'édition et de l'assistant de création.
+    - `RuleActionSummaryBadge.tsx` (501 L) : Badges visuels d'actions pour les vues Storyboard repliée et dépliée + utilitaires de résolution d'entité/état.
+    - `RuleSlotEditModal.tsx` (297 L), `RuleSubjectTargetModal.tsx` (443 L), `RuleEventModal.tsx` (802 L), `RuleActionModal.tsx` (2 272 L) : Éditeurs directs de Sujet, Cible, Condition/Événement et Action avec fil d'Ariane 1-clic.
+    - `RuleCreationWizardModal.tsx` (340 L), `WizardStep1Condition.tsx` (685 L), `WizardStep2Objects.tsx` (520 L), `WizardStep3Actions.tsx` (1 210 L) : Assistant séquentiel de création de règle en 3 étapes avec navigation 1-clic.
+
+## [Phase 10.24] - 2026-11-16
+### Refactorisé & Testé
+- **Lot D + Vitest — Modularisation Store/Physique (`src/store/*`, `src/utils/physics/*`, `src/__tests__/*`)** :
+  - **Lot D1 (`useSceneStore.ts` 4 908 → 3 747 L)** : Extraction vers `storeDefaults.ts` (248 L), `parentingHelpers.ts` (141 L), `collisionHelpers.ts` (142 L) et `ruleExecutionEngine.ts` (766 L) avec pont de store découplé et ré-exports rétrocompatibles complets.
+  - **Lot D2 (`matterPhysicsEngine.ts` 3 144 → 2 626 L)** : Extraction vers `utils/physics/behaviorResolution.ts` (84 L), `lookAtSolver.ts` (170 L), `hierarchyPhysicsSync.ts` (54 L) et `colliderLayerPhysics.ts` (352 L) avec ré-exports rétrocompatibles complets.
+  - **Tests unitaires Vitest (`npm test`)** : Mise en place de `vitest` et de 15 tests automatisés (`parentingAndRules.test.ts` + `physicsSolvers.test.ts`) validant cinématique parent-enfant, filtres & collisions, `LookAt` + `flipX`, tri topologique et calques colliders.
+
+## [Phase 10.23] - 2026-11-16
+### Refactorisé
+- **Lot C — Extraction Timeline & Modularisation de `DrawingCanvas.tsx` (`components/timeline/*`, `components/drawing/*`)** :
+  - Extraction du dock Flipbook et de la modale d'aperçu hors de `FullScreenDrawingModal.tsx` (936 → 578 lignes) vers `FlipbookTimelineDock.tsx` et `FlipbookPreviewModal.tsx`.
+  - Extraction de 8 sous-composants UI et overlays depuis `DrawingCanvas.tsx` (3 457 → 1 996 lignes) vers `src/components/drawing/` (`DrawingCanvasTopBar`, `DrawingCanvasColliderOverlay`, `DrawingToolGrid`, `DrawingLayersSection`, `DrawingColliderSection`, `DrawingSelectionInspector`, `DrawingColorPaletteSection`, `DrawingGuidesAndOnionSection`) avec préservation intégrale des exports, du tracé sub-pixel et des raccourcis clavier.
+
+## [Phase 10.22] - 2026-11-16
+### Refactorisé & Ajusté
+- **Gizmos désactivés par défaut en Mode Play (`gizmoHelpers.ts`, `useSceneStore.ts`)** : Passage de `DEFAULT_GIZMO_SETTINGS.categories` et du fallback de rétrocompatibilité de `'both'` à `'edit'` (actifs en Mode Édition uniquement par défaut).
+- **Lot A — Hook unifié d'interaction pointeur (`hooks/useEntityPointerInteraction.ts`, `CustomShape.tsx`, `Apple.tsx`, `Plant.tsx`)** : Centralisation du drag, lancer physique, resize, délégation parent (`dragDelegationRegistry`), `ignorePointer`, détection pointeur/survol/clic et santé runtime dans un hook partagé ; `Apple.tsx` et `Plant.tsx` restent conservés discrètement pour rétrocompatibilité sans alourdir la maintenance.
+- **Lot B — Modularisation de `BehaviorManager.tsx` (`components/behaviors/*`)** : Découpage de l'ancien fichier monolithique (4 030 lignes) en 7 modules dédiés (`behaviorMetadata.tsx`, `BehaviorSharedControls.tsx`, `HitboxColliderCard.tsx`, `AddBehaviorModal.tsx`, `PhysicsAndCoreBehaviorControls.tsx`, `MovementAndAIBehaviorControls.tsx`, `VisualAndSurvivalBehaviorControls.tsx`) à comportement strictement identique.
+
 ## [Phase 10.21] - 2026-11-16
 ### Ajouté & Amélioré
 - **Carte Parenting pliable (`Inspector.tsx`)** : Ajout d'un bouton chevron sur la carte *Parenting & Attachement* affichant un résumé compact lorsque repliée.
 - **Système unifié de Gizmos de scène & Paramètres dédiés (`types/index.ts`, `gizmoHelpers.ts`, `SettingsPanel.tsx`, `SceneGizmoOverlay.tsx`, `Scene.tsx`, `CustomShape.tsx`, `Apple.tsx`, `Plant.tsx`)** :
   - Ajout de la section accordéon *3. Gizmos & Debug Visuel* dans `SettingsPanel.tsx` avec interrupteur maître, présets rapides, filtre *Objet sélectionné uniquement*, et sélecteur 4 états (`Off | Édit | Play | Les 2`) par catégorie.
   - Centralisation du rendu SVG non-clippé dans `<SceneGizmoOverlay />` (`z-[45]`) pour 7 catégories : *Hitboxes*, *Calques Colliders*, *Hiérarchie & Pivots*, *LookAt / Cône d'angle / Orbite Pupille*, *Zones Marionnette*, *Zones IA* et *Vecteurs & Émetteurs*, avec flux debug temps réel `getGizmoRuntimeDebugData()`.
-  - Activation de toutes les catégories sur `Les 2` (`both`) par défaut et synchronisation avec l'ancien interrupteur `showColliderDebugGizmos`.
+  - Synchronisation bidirectionnelle avec l'ancien interrupteur `showColliderDebugGizmos`.
 - **Hitbox Modulaire : Modes Collider & Délégation Souris Parent (`types/index.ts`, `dragDelegationRegistry.ts`, `BehaviorManager.tsx`, `matterPhysicsEngine.ts`, `useSceneStore.ts`, `CustomShape.tsx`, `Apple.tsx`, `Plant.tsx`)** :
   - Ajout de `colliderMode` (`default` | `trigger_only` | `disabled`) ignoré proprement par Matter.js et les règles de collision lorsque désactivé.
   - Ajout de `pointerDelegation` (`self` | `parent` | `root_parent`) et `ignorePointer` (Mode Play uniquement) pour transférer clic, survol et drag des enfants vers le parent ou le parent final.
