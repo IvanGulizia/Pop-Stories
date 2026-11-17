@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useSceneStore, EMPTY_RECORD } from '../store/useSceneStore';
-import { Entity, EntityState } from '../types';
+import { Entity, EntityPivot, EntityState, ParentAttachmentMode } from '../types';
 import {
   Sparkles,
   Plus,
@@ -18,10 +18,25 @@ import {
   FolderOpen,
   ChevronDown,
   ChevronRight,
+  Crosshair,
+  RotateCcw,
 } from 'lucide-react';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { OnionStateOption } from './DrawingCanvas';
 import { BehaviorManager } from './BehaviorManager';
+import { DEFAULT_PIVOT, resolveRawPivot, sanitizePivot } from '../utils/physics/pivotHelpers';
+
+const INSPECTOR_PIVOT_PRESETS: { label: string; x: number; y: number }[] = [
+  { label: 'Haut-Gauche', x: 0, y: 0 },
+  { label: 'Haut', x: 0.5, y: 0 },
+  { label: 'Haut-Droit', x: 1, y: 0 },
+  { label: 'Gauche', x: 0, y: 0.5 },
+  { label: 'Centre', x: 0.5, y: 0.5 },
+  { label: 'Droite', x: 1, y: 0.5 },
+  { label: 'Bas-Gauche', x: 0, y: 1 },
+  { label: 'Bas', x: 0.5, y: 1 },
+  { label: 'Bas-Droit', x: 1, y: 1 },
+];
 
 export function Inspector() {
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
@@ -58,6 +73,7 @@ export function Inspector() {
   const [draggingStateId, setDraggingStateId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | 'root' | null>(null);
   const [isParentingCollapsed, setIsParentingCollapsed] = useState(false);
+  const [isPivotCollapsed, setIsPivotCollapsed] = useState(true);
 
   const selectedEntity: Entity | null = selectedEntityId
     ? entities[selectedEntityId] ||
@@ -159,13 +175,33 @@ export function Inspector() {
             initialFrames={selectedEntity.states[editingStateDrawingId]?.frames}
             initialFrameRate={selectedEntity.states[editingStateDrawingId]?.frameRate}
             initialAnimationLoop={selectedEntity.states[editingStateDrawingId]?.animationLoop}
-            onSave={(paths, _dataUrl, colliderType, stateName, _hotspot, layers, colliderBounds, overrideCollider, animationData) => {
+            initialPivot={editingState?.pivot || selectedEntity.pivot || DEFAULT_PIVOT}
+            enablePivotEditing={true}
+            isStatePivotContext={true}
+            initialHasStatePivotOverride={Boolean(editingState?.pivot)}
+            baseEntityPivot={selectedEntity.pivot || DEFAULT_PIVOT}
+            onSave={(
+              paths,
+              _dataUrl,
+              colliderType,
+              stateName,
+              _hotspot,
+              layers,
+              colliderBounds,
+              overrideCollider,
+              animationData,
+              pivotData
+            ) => {
+              const sanitizedPivot = pivotData ? sanitizePivot(pivotData.pivot) : undefined;
               updateStateProperties(selectedEntity.id, editingStateDrawingId, {
                 vectorPaths: paths,
                 drawingLayers: layers,
                 colliderType: colliderType || 'box',
                 ...(colliderBounds !== undefined ? { colliderBounds } : {}),
                 overrideCollider,
+                ...(pivotData
+                  ? { pivot: pivotData.isStateOverride ? sanitizedPivot : undefined }
+                  : {}),
                 ...(stateName ? { name: stateName } : {}),
                 ...(animationData
                   ? {
@@ -175,6 +211,9 @@ export function Inspector() {
                     }
                   : {}),
               });
+              if (pivotData && !pivotData.isStateOverride && sanitizedPivot) {
+                updateEntityDetails(selectedEntity.id, { pivot: sanitizedPivot });
+              }
               if (selectedEntity.currentStateId === editingStateDrawingId) {
                 updateEntityDetails(selectedEntity.id, {
                   vectorPaths: paths,
@@ -269,6 +308,168 @@ export function Inspector() {
           </div>
         </div>
       )}
+
+      {/* Pivot de rotation & d'attachement */}
+      {(() => {
+        const curState = selectedEntity.states[selectedEntity.currentStateId];
+        const hasStateOverride = Boolean(curState?.pivot);
+        const activePivot = resolveRawPivot(selectedEntity, curState);
+        const applyPivot = (next: EntityPivot) => {
+          const clean = sanitizePivot(next);
+          if (hasStateOverride) {
+            updateStateProperties(selectedEntity.id, selectedEntity.currentStateId, { pivot: clean });
+          } else {
+            updateEntityDetails(selectedEntity.id, { pivot: clean });
+          }
+        };
+
+        return (
+          <div className="space-y-2 bg-slate-50/70 p-3 rounded-2xl border border-slate-200">
+            <div
+              onClick={() => setIsPivotCollapsed((v) => !v)}
+              className="flex items-center justify-between gap-2 cursor-pointer select-none"
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-slate-400 hover:text-slate-600 shrink-0">
+                  {isPivotCollapsed ? (
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  )}
+                </span>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5 truncate">
+                  <Crosshair className="w-3.5 h-3.5 text-fuchsia-600 shrink-0" />
+                  <span>Point de Pivot</span>
+                </span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                {hasStateOverride && (
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-fuchsia-100 text-fuchsia-700 border border-fuchsia-200">
+                    État
+                  </span>
+                )}
+                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-600">
+                  {Math.round(activePivot.x * 100)}%, {Math.round(activePivot.y * 100)}%
+                </span>
+              </div>
+            </div>
+
+            {!isPivotCollapsed && (
+              <div className="space-y-2 pt-1">
+                <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center gap-3">
+                  <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-lg border border-slate-200 shrink-0">
+                    {INSPECTOR_PIVOT_PRESETS.map((preset) => {
+                      const isSelected =
+                        Math.abs(activePivot.x - preset.x) < 0.01 &&
+                        Math.abs(activePivot.y - preset.y) < 0.01;
+                      return (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          title={preset.label}
+                          onClick={() => applyPivot({ x: preset.x, y: preset.y })}
+                          className={`w-4 h-4 rounded-sm flex items-center justify-center cursor-pointer transition-all ${
+                            isSelected
+                              ? 'bg-fuchsia-600 text-white shadow-2xs scale-105'
+                              : 'bg-white hover:bg-fuchsia-100 text-slate-400'
+                          }`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex-1 grid grid-cols-2 gap-1.5 items-center">
+                    <label className="flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]">
+                      <span className="font-bold text-slate-500">X</span>
+                      <input
+                        type="number"
+                        min={-50}
+                        max={150}
+                        step={5}
+                        value={Math.round(activePivot.x * 100)}
+                        onChange={(e) =>
+                          applyPivot({
+                            ...activePivot,
+                            x: (parseFloat(e.target.value) || 0) / 100,
+                          })
+                        }
+                        className="w-11 bg-transparent font-mono font-bold text-right text-slate-800 outline-none"
+                      />
+                      <span className="text-slate-400">%</span>
+                    </label>
+
+                    <label className="flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]">
+                      <span className="font-bold text-slate-500">Y</span>
+                      <input
+                        type="number"
+                        min={-50}
+                        max={150}
+                        step={5}
+                        value={Math.round(activePivot.y * 100)}
+                        onChange={(e) =>
+                          applyPivot({
+                            ...activePivot,
+                            y: (parseFloat(e.target.value) || 0) / 100,
+                          })
+                        }
+                        className="w-11 bg-transparent font-mono font-bold text-right text-slate-800 outline-none"
+                      />
+                      <span className="text-slate-400">%</span>
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => applyPivot({ ...DEFAULT_PIVOT })}
+                      className="text-[10px] font-semibold text-slate-500 hover:text-fuchsia-700 flex items-center gap-1 py-0.5 cursor-pointer"
+                    >
+                      <RotateCcw className="w-3 h-3" /> Centre
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setEditingStateDrawingId(selectedEntity.currentStateId)}
+                      className="text-[10px] font-bold text-fuchsia-700 hover:text-fuchsia-800 bg-fuchsia-50 hover:bg-fuchsia-100 border border-fuchsia-200 rounded-md px-1.5 py-0.5 flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <Paintbrush className="w-3 h-3" /> Atelier
+                    </button>
+                  </div>
+                </div>
+
+                {Object.keys(selectedEntity.states).length > 1 && (
+                  <label className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2 cursor-pointer">
+                    <div>
+                      <div className="font-bold text-slate-700 text-xs">
+                        Pivot spécifique à l'état « {curState?.name || selectedEntity.currentStateId} »
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        Sinon l'état hérite du pivot principal de l'objet
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={hasStateOverride}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          updateStateProperties(selectedEntity.id, selectedEntity.currentStateId, {
+                            pivot: sanitizePivot(selectedEntity.pivot || DEFAULT_PIVOT),
+                          });
+                        } else {
+                          updateStateProperties(selectedEntity.id, selectedEntity.currentStateId, {
+                            pivot: undefined,
+                          });
+                        }
+                      }}
+                      className="w-4 h-4 accent-fuchsia-600 rounded cursor-pointer shrink-0"
+                    />
+                  </label>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Parenting & Attachement (uniquement pour les instances sur la scène) */}
       {Boolean(entities[selectedEntity.id]) && (() => {
@@ -441,6 +642,150 @@ export function Inspector() {
                       className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
                     />
                   </div>
+
+                  {/* Ligne 7 : Mode d'attachement (Rigide, Ressort, Joint Physique) */}
+                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                    <span className="font-bold text-slate-700 text-xs">Mode d'attache</span>
+                    <select
+                      value={offset.attachmentMode || 'rigid'}
+                      onChange={(e) =>
+                        updateEntityParentOffset(selectedEntity.id, {
+                          attachmentMode: e.target.value as ParentAttachmentMode,
+                        })
+                      }
+                      className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[180px]"
+                    >
+                      <option value="rigid">Rigide (Soudé)</option>
+                      <option value="spring">Ressort / Damping élastique</option>
+                      <option value="physics_joint">Joint Physique (Pendule)</option>
+                    </select>
+                  </div>
+
+                  {(offset.attachmentMode === 'spring' || offset.attachmentMode === 'physics_joint') && (
+                    <div className="p-2 bg-indigo-50/40 rounded-xl border border-indigo-200 space-y-2">
+                      <div>
+                        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                          <span className="font-bold">Raideur du ressort</span>
+                          <span className="font-mono font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded text-[11px]">
+                            {Math.round(offset.springStiffness ?? 160)}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="20"
+                          max="500"
+                          step="10"
+                          value={offset.springStiffness ?? 160}
+                          onChange={(e) =>
+                            updateEntityParentOffset(selectedEntity.id, {
+                              springStiffness: parseFloat(e.target.value),
+                            })
+                          }
+                          className="w-full accent-indigo-600"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                          <span className="font-bold">Amortissement (Damping)</span>
+                          <span className="font-mono font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded text-[11px]">
+                            {(offset.springDamping ?? 12).toFixed(1)}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="1"
+                          max="40"
+                          step="0.5"
+                          value={offset.springDamping ?? 12}
+                          onChange={(e) =>
+                            updateEntityParentOffset(selectedEntity.id, {
+                              springDamping: parseFloat(e.target.value),
+                            })
+                          }
+                          className="w-full accent-indigo-600"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                          <span className="font-bold">Distance max (Laisse)</span>
+                          <span className="font-mono font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded text-[11px]">
+                            {(offset.springMaxDistance ?? 0) > 0
+                              ? `${Math.round(offset.springMaxDistance!)} px`
+                              : 'Libre'}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="350"
+                          step="10"
+                          value={offset.springMaxDistance ?? 0}
+                          onChange={(e) =>
+                            updateEntityParentOffset(selectedEntity.id, {
+                              springMaxDistance: parseFloat(e.target.value),
+                            })
+                          }
+                          className="w-full accent-indigo-600"
+                        />
+                      </div>
+
+                      {(offset.attachmentMode === 'spring' || offset.attachmentMode === 'physics_joint') && (
+                        <div>
+                          <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                            <span className="font-bold">Pesanteur locale</span>
+                            <span className="font-mono font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded text-[11px]">
+                              {Math.round(
+                                offset.springGravity ?? (offset.attachmentMode === 'physics_joint' ? 400 : 0)
+                              )}{' '}
+                              px/s²
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="-200"
+                            max="800"
+                            step="20"
+                            value={offset.springGravity ?? (offset.attachmentMode === 'physics_joint' ? 400 : 0)}
+                            onChange={(e) =>
+                              updateEntityParentOffset(selectedEntity.id, {
+                                springGravity: parseFloat(e.target.value),
+                              })
+                            }
+                            className="w-full accent-indigo-600"
+                          />
+                        </div>
+                      )}
+
+                      <div className="pt-1 border-t border-indigo-200/60 flex items-center justify-between gap-2">
+                        <div>
+                          <div className="font-bold text-slate-700 text-xs">
+                            Collisions avec murs, sols & objets
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            {offset.attachmentMode === 'physics_joint'
+                              ? 'Actif par défaut en Joint Physique (désactiver pour passer en capteur libre)'
+                              : 'Active la réponse physique avec le décor sans heurter le parent'}
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={
+                            offset.attachmentMode === 'physics_joint'
+                              ? offset.collideWithWorld !== false
+                              : Boolean(offset.collideWithWorld)
+                          }
+                          onChange={(e) =>
+                            updateEntityParentOffset(selectedEntity.id, {
+                              collideWithWorld: e.target.checked,
+                            })
+                          }
+                          className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>

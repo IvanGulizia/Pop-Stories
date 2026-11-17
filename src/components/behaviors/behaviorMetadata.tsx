@@ -12,6 +12,7 @@ import {
   Shield,
   Shuffle,
   Sparkles,
+  Waves,
   Wind,
 } from 'lucide-react';
 import {
@@ -26,6 +27,7 @@ import {
   FollowBehaviorConfig,
   HealthBehaviorConfig,
   InteractivePuppetBehaviorConfig,
+  JiggleBehaviorConfig,
   KeyboardControlBehaviorConfig,
   LookAtBehaviorConfig,
   MoveToBehaviorConfig,
@@ -234,6 +236,22 @@ export function createDefaultBehaviorConfig(type: BehaviorType, entity: Entity):
         showHealthBar: true,
         onDeath: 'destroy',
       } as HealthBehaviorConfig;
+    case 'jiggle':
+      return {
+        id: generateBehaviorId('jiggle'),
+        type: 'jiggle',
+        enabled: true,
+        stiffness: 180,
+        damping: 9,
+        inertia: 1.0,
+        maxAngle: 35,
+        gravityPull: 40,
+        restAngleOffset: 0,
+        initialAngleOffset: 0,
+        squashIntensity: 0.25,
+        collideWithWorld: true,
+        useCustomPivot: false,
+      } as JiggleBehaviorConfig;
   }
 }
 
@@ -269,6 +287,8 @@ export function getBehaviorIcon(type: BehaviorType): React.ReactNode {
       return <Sparkles className="w-4 h-4 text-amber-500" />;
     case 'health':
       return <Heart className="w-4 h-4 text-rose-500" />;
+    case 'jiggle':
+      return <Waves className="w-4 h-4 text-fuchsia-600" />;
   }
 }
 
@@ -304,5 +324,7 @@ export function getBehaviorTitle(type: BehaviorType): string {
       return 'Émetteur de Particules';
     case 'health':
       return 'Santé & Dégâts';
+    case 'jiggle':
+      return 'Jiggle & Ressort Rotatif';
   }
 }

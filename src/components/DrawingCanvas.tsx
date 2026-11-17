@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { RotateCcw, Undo2, Redo2 } from 'lucide-react';
-import { VectorPath, VectorPoint, VectorRect, ColliderType, ColliderBounds, DrawingLayer } from '../types';
+import { VectorPath, VectorPoint, VectorRect, ColliderType, ColliderBounds, DrawingLayer, EntityPivot } from '../types';
 import { applyBucketFill } from '../utils/floodFill';
 import { computeAutoColliderBoundsFromPaths } from '../utils/collider';
 import { useSceneStore, DEFAULT_PROJECT_PALETTE } from '../store/useSceneStore';
@@ -24,6 +24,8 @@ import {
   ColliderDragAction,
   ManualColliderRect,
 } from './drawing/DrawingCanvasColliderOverlay';
+import { DrawingCanvasPivotOverlay } from './drawing/DrawingCanvasPivotOverlay';
+import { DrawingPivotSection } from './drawing/DrawingPivotSection';
 import { DrawingToolGrid, DrawingCanvasToolId } from './drawing/DrawingToolGrid';
 import { DrawingLayersSection } from './drawing/DrawingLayersSection';
 import { DrawingColliderSection } from './drawing/DrawingColliderSection';
@@ -76,6 +78,12 @@ interface DrawingCanvasProps {
   initialHotspot?: { x: number; y: number };
   onHotspotChange?: (pos: { x: number; y: number }) => void;
   isCursorMode?: boolean;
+  initialPivot?: EntityPivot;
+  onPivotChange?: (pivot: EntityPivot, isStateOverride?: boolean) => void;
+  enablePivotEditing?: boolean;
+  isStatePivotContext?: boolean;
+  initialHasStatePivotOverride?: boolean;
+  baseEntityPivot?: EntityPivot;
   frameSyncKey?: string;
   actionsRef?: React.MutableRefObject<DrawingCanvasActionsHandle | null>;
   onHistoryStateChange?: (state: DrawingCanvasHistoryState) => void;
@@ -111,6 +119,12 @@ export function DrawingCanvas({
   initialHotspot,
   onHotspotChange,
   isCursorMode = false,
+  initialPivot,
+  onPivotChange,
+  enablePivotEditing = true,
+  isStatePivotContext = false,
+  initialHasStatePivotOverride = false,
+  baseEntityPivot,
   availableReferenceGuides,
   frameSyncKey,
   actionsRef,
@@ -288,6 +302,7 @@ export function DrawingCanvas({
     return { x, y, width, height, centerX, centerY, radius };
   });
   const [isColliderBodyDraggable, setIsColliderBodyDraggable] = useState(false);
+  const [isColliderLocked, setIsColliderLocked] = useState(false);
   const [colliderDragAction, setColliderDragAction] = useState<ColliderDragAction>(null);
   const colliderDragOriginRef = useRef<{
     mouse: VectorPoint;
@@ -311,6 +326,25 @@ export function DrawingCanvas({
   // Hotspot est strictement réservé au mode curseur
   const [showHotspot, setShowHotspot] = useState<boolean>(isCursorMode);
   const [isDraggingHotspot, setIsDraggingHotspot] = useState(false);
+
+  // Pivot WYSIWYG (centre de rotation & d'attachement normalisé 0..1)
+  const [hasStatePivotOverride, setHasStatePivotOverride] = useState<boolean>(
+    initialHasStatePivotOverride
+  );
+  const [pivot, setPivot] = useState<EntityPivot>(
+    initialPivot || baseEntityPivot || { x: 0.5, y: 0.5 }
+  );
+  const [showPivotPreview, setShowPivotPreview] = useState<boolean>(false);
+  const [isPivotLocked, setIsPivotLocked] = useState<boolean>(false);
+  const [isPivotPlacementActive, setIsPivotPlacementActive] = useState(false);
+  const [isDraggingPivot, setIsDraggingPivot] = useState(false);
+
+  const emitPivotChange = (nextPivot: EntityPivot, nextOverride = hasStatePivotOverride) => {
+    setPivot(nextPivot);
+    if (onPivotChange) {
+      onPivotChange(nextPivot, nextOverride);
+    }
+  };
 
   // Multi-Selection & Transform state
   const [selectedPathIds, setSelectedPathIds] = useState<string[]>([]);
@@ -741,6 +775,21 @@ export function DrawingCanvas({
 
     const pt = getSVGCoordinates(e);
 
+    if (isPivotPlacementActive && !isPivotLocked && enablePivotEditing && !isCursorMode) {
+      const nextPivot = {
+        x: Math.round((pt.x / 200) * 100) / 100,
+        y: Math.round((pt.y / 200) * 100) / 100,
+      };
+      const nextOverride = isStatePivotContext ? true : hasStatePivotOverride;
+      if (isStatePivotContext && !hasStatePivotOverride) {
+        setHasStatePivotOverride(true);
+      }
+      emitPivotChange(nextPivot, nextOverride);
+      setIsDraggingPivot(true);
+      setIsPivotPlacementActive(false);
+      return;
+    }
+
     // Si le calque actif est verrouillé, empêcher le dessin et l'effacement
     const currentActiveLayer = layers.find((l) => l.id === activeLayerId) || layers[0];
     if (
@@ -910,6 +959,19 @@ export function DrawingCanvas({
       setCursorPos(pt);
     }
 
+    if (isDraggingPivot) {
+      const nextPivot = {
+        x: Math.round((pt.x / 200) * 100) / 100,
+        y: Math.round((pt.y / 200) * 100) / 100,
+      };
+      const nextOverride = isStatePivotContext ? true : hasStatePivotOverride;
+      if (isStatePivotContext && !hasStatePivotOverride) {
+        setHasStatePivotOverride(true);
+      }
+      emitPivotChange(nextPivot, nextOverride);
+      return;
+    }
+
     if (isDraggingHotspot) {
       setHotspot(pt);
       if (onHotspotChange) onHotspotChange(pt);
@@ -1061,6 +1123,11 @@ export function DrawingCanvas({
       setColliderDragAction(null);
       colliderDragOriginRef.current = null;
       emitColliderUpdate(colliderType, 'manual', manualCollider);
+      return;
+    }
+
+    if (isDraggingPivot) {
+      setIsDraggingPivot(false);
       return;
     }
 
@@ -1510,8 +1577,10 @@ export function DrawingCanvas({
               colliderType={colliderType}
               manualCollider={manualCollider}
               isColliderBodyDraggable={isColliderBodyDraggable}
+              isLocked={isColliderLocked}
               overallBounds={overallBounds}
               onStartColliderDrag={(action, e) => {
+                if (isColliderLocked) return;
                 e.stopPropagation();
                 try {
                   (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -1840,6 +1909,24 @@ export function DrawingCanvas({
                 </g>
               </g>
             )}
+            {/* Repère visuel interactif du Pivot (Centre de rotation & d'attachement) */}
+            {enablePivotEditing && !isCursorMode && (
+              <DrawingCanvasPivotOverlay
+                showPivotPreview={showPivotPreview}
+                pivot={pivot}
+                isPlacementActive={isPivotPlacementActive}
+                isDraggingPivot={isDraggingPivot}
+                isLocked={isPivotLocked}
+                onStartPivotDrag={(e) => {
+                  if (isPivotLocked) return;
+                  try {
+                    (e.target as Element).setPointerCapture?.(e.pointerId);
+                  } catch (_) {}
+                  setShowPivotPreview(true);
+                  setIsDraggingPivot(true);
+                }}
+              />
+            )}
           </svg>
         </div>
       </div>
@@ -1880,28 +1967,6 @@ export function DrawingCanvas({
             onOpacityChange={handleLayerOpacityChange}
           />
 
-          <DrawingColliderSection
-            showColliderPreview={showColliderPreview}
-            onToggleShowColliderPreview={() => setShowColliderPreview(!showColliderPreview)}
-            onAutoDetectCollider={handleAutoDetectCollider}
-            isSharedColliderEntity={isSharedColliderEntity}
-            isReferenceStateForSharedCollider={isReferenceStateForSharedCollider}
-            overrideCollider={overrideCollider}
-            onToggleOverrideCollider={handleToggleOverrideCollider}
-            colliderMode={colliderMode}
-            onSwitchColliderMode={handleSwitchColliderMode}
-            colliderType={colliderType}
-            onSelectColliderType={handleColliderTypeSelect}
-            isColliderBodyDraggable={isColliderBodyDraggable}
-            onToggleColliderBodyDraggable={() => setIsColliderBodyDraggable(!isColliderBodyDraggable)}
-            onInitManualFromDrawing={() => handleInitManualFromDrawing()}
-            manualCollider={manualCollider}
-            onUpdateManualCollider={(shape, next) => {
-              setManualCollider(next);
-              emitColliderUpdate(shape, 'manual', next);
-            }}
-          />
-
           {tool === 'select' && selectedPathIds.length > 0 && (
             <DrawingSelectionInspector
               selectedCount={selectedPathIds.length}
@@ -1936,6 +2001,90 @@ export function DrawingCanvas({
             onSetStrokeWidth={setStrokeWidth}
             onUpdateSelectedProps={updateSelectedShapeProperties}
           />
+
+          <DrawingColliderSection
+            showColliderPreview={showColliderPreview}
+            onToggleShowColliderPreview={() => setShowColliderPreview(!showColliderPreview)}
+            onAutoDetectCollider={handleAutoDetectCollider}
+            isSharedColliderEntity={isSharedColliderEntity}
+            isReferenceStateForSharedCollider={isReferenceStateForSharedCollider}
+            overrideCollider={overrideCollider}
+            onToggleOverrideCollider={handleToggleOverrideCollider}
+            colliderMode={colliderMode}
+            onSwitchColliderMode={handleSwitchColliderMode}
+            colliderType={colliderType}
+            onSelectColliderType={handleColliderTypeSelect}
+            isColliderBodyDraggable={isColliderBodyDraggable}
+            onToggleColliderBodyDraggable={() => setIsColliderBodyDraggable(!isColliderBodyDraggable)}
+            isColliderLocked={isColliderLocked}
+            onToggleColliderLocked={() => {
+              setIsColliderLocked((prev) => {
+                const next = !prev;
+                if (next) setColliderDragAction(null);
+                return next;
+              });
+            }}
+            onInitManualFromDrawing={() => handleInitManualFromDrawing()}
+            manualCollider={manualCollider}
+            onUpdateManualCollider={(shape, next) => {
+              if (isColliderLocked) return;
+              setManualCollider(next);
+              emitColliderUpdate(shape, 'manual', next);
+            }}
+          />
+
+          {enablePivotEditing && !isCursorMode && (
+            <DrawingPivotSection
+              pivot={pivot}
+              showPivotPreview={showPivotPreview}
+              onToggleShowPivotPreview={() => setShowPivotPreview(!showPivotPreview)}
+              isPivotLocked={isPivotLocked}
+              onTogglePivotLocked={() => {
+                setIsPivotLocked((prev) => {
+                  const next = !prev;
+                  if (next) {
+                    setIsPivotPlacementActive(false);
+                    setIsDraggingPivot(false);
+                  }
+                  return next;
+                });
+              }}
+              isPlacementActive={isPivotPlacementActive}
+              onTogglePlacementActive={() => {
+                if (isPivotLocked) return;
+                setShowPivotPreview(true);
+                setIsPivotPlacementActive((v) => !v);
+              }}
+              onChangePivot={(next) => {
+                if (isPivotLocked) return;
+                setShowPivotPreview(true);
+                const nextOverride = isStatePivotContext ? true : hasStatePivotOverride;
+                if (isStatePivotContext && !hasStatePivotOverride) {
+                  setHasStatePivotOverride(true);
+                }
+                emitPivotChange(next, nextOverride);
+              }}
+              onResetPivot={() => {
+                if (isPivotLocked) return;
+                const next = { x: 0.5, y: 0.5 };
+                const nextOverride = isStatePivotContext ? true : hasStatePivotOverride;
+                if (isStatePivotContext && !hasStatePivotOverride) {
+                  setHasStatePivotOverride(true);
+                }
+                emitPivotChange(next, nextOverride);
+              }}
+              isStateContext={isStatePivotContext}
+              hasStateOverride={hasStatePivotOverride}
+              baseEntityPivot={baseEntityPivot}
+              onToggleStateOverride={(nextOvr) => {
+                setHasStatePivotOverride(nextOvr);
+                const targetPivot = nextOvr
+                  ? pivot
+                  : baseEntityPivot || { x: 0.5, y: 0.5 };
+                emitPivotChange(targetPivot, nextOvr);
+              }}
+            />
+          )}
 
           <DrawingGuidesAndOnionSection
             activeReferenceGuide={activeReferenceGuide}

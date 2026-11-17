@@ -11,6 +11,7 @@ export const DEFAULT_GIZMO_SETTINGS: GizmoSettings = {
     puppetZones: 'edit',
     aiZones: 'edit',
     physicsVectors: 'edit',
+    springsAndJiggle: 'edit',
   },
 };
 
@@ -43,6 +44,13 @@ export const GIZMO_CATEGORY_LIST: GizmoCategoryMeta[] = [
     description: 'Liens Parent → Enfant, pivots et décalages d’attachement',
     colorClass: 'text-indigo-700',
     dotColor: '#6366f1',
+  },
+  {
+    id: 'springsAndJiggle',
+    label: 'Ressorts, Laisses & Jiggle',
+    description: 'Liens élastiques (damping/spring), cônes Jiggle ±angle, gravité et collisions',
+    colorClass: 'text-fuchsia-700',
+    dotColor: '#d946ef',
   },
   {
     id: 'lookAt',
@@ -90,6 +98,7 @@ export function resolveGizmoSettings(settings?: AppSettings): GizmoSettings {
       puppetZones: raw?.categories?.puppetZones ?? DEFAULT_GIZMO_SETTINGS.categories.puppetZones,
       aiZones: raw?.categories?.aiZones ?? DEFAULT_GIZMO_SETTINGS.categories.aiZones,
       physicsVectors: raw?.categories?.physicsVectors ?? DEFAULT_GIZMO_SETTINGS.categories.physicsVectors,
+      springsAndJiggle: raw?.categories?.springsAndJiggle ?? DEFAULT_GIZMO_SETTINGS.categories.springsAndJiggle,
     },
   };
 }

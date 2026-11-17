@@ -1,6 +1,8 @@
 import { motion } from 'motion/react';
 import { Entity } from '../types';
 import { useEntityPointerInteraction } from '../hooks/useEntityPointerInteraction';
+import { resolveEffectivePivot } from '../utils/physics/pivotHelpers';
+import { EntitySelectionOverlay } from './EntitySelectionOverlay';
 
 interface PlantProps {
   entity: Entity;
@@ -22,6 +24,8 @@ export function Plant({ entity, style }: PlantProps) {
     handleDrag,
     handleDragEnd,
     handleResizePointerDown,
+    handleRotatePointerDown,
+    isRotating,
     colliderType,
     healthConfig,
     runtimeHealth,
@@ -50,6 +54,14 @@ export function Plant({ entity, style }: PlantProps) {
 
   const petalAngles = Array.from({ length: petals }, (_, i) => (360 / Math.max(1, petals)) * i);
 
+  const effPivot = resolveEffectivePivot(entity, currentState);
+  const baseScale = currentState.scale ?? 1;
+  const runtimeScaleX = appMode === 'play' ? (entity.runtimeScaleX ?? 1) : 1;
+  const runtimeScaleY = appMode === 'play' ? (entity.runtimeScaleY ?? 1) : 1;
+  const totalRotation =
+    (currentState.rotation ?? 0) +
+    (appMode === 'play' ? (entity.runtimeTilt || 0) + (entity.runtimeJiggleAngle || 0) : 0);
+
   return (
     <motion.div
       className="absolute flex flex-col items-center justify-end select-none"
@@ -60,6 +72,7 @@ export function Plant({ entity, style }: PlantProps) {
         y,
         width: entity.size.width,
         height: entity.size.height,
+        transformOrigin: `${effPivot.x * 100}% ${effPivot.y * 100}%`,
         zIndex: isSelected && appMode !== 'play' ? 30 : undefined,
         pointerEvents: 'none',
         ...style,
@@ -72,40 +85,34 @@ export function Plant({ entity, style }: PlantProps) {
       onDrag={handleDrag}
       onDragEnd={handleDragEnd}
       animate={{
-        scale: currentState.scale ?? 1,
-        rotate: (currentState.rotation ?? 0) + (appMode === 'play' ? (entity.runtimeTilt || 0) : 0),
+        scaleX: baseScale * runtimeScaleX,
+        scaleY: baseScale * runtimeScaleY,
+        rotate: totalRotation,
       }}
       transition={appMode === 'play' ? { duration: 0 } : { type: 'spring', bounce: 0.35, duration: 0.6 }}
-      whileHover={enableHoverScaleAnimation ? { scale: (currentState.scale ?? 1) * (isSelected ? 1.0 : 1.03) } : undefined}
+      whileHover={
+        enableHoverScaleAnimation
+          ? {
+              scaleX: baseScale * runtimeScaleX * (isSelected ? 1.0 : 1.03),
+              scaleY: baseScale * runtimeScaleY * (isSelected ? 1.0 : 1.03),
+            }
+          : undefined
+      }
     >
       {/* Hitbox interactive délimitée strictement par le collider vert */}
       <div {...hitboxProps} />
 
-      {/* Anneau de sélection & poignée de redimensionnement */}
+      {/* Anneau de sélection, rotation directe & poignée de redimensionnement */}
       {isSelected && appMode !== 'play' && (
-        <>
-          <motion.div
-            className={`absolute -inset-2 ${
-              colliderType === 'circle' ? 'rounded-full' : 'rounded-2xl'
-            } border-2 border-indigo-500 border-dashed pointer-events-none`}
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-          />
-
-          <div
-            onPointerDown={handleResizePointerDown}
-            onClick={(e) => e.stopPropagation()}
-            style={{ touchAction: 'none' }}
-            className="pointer-events-auto absolute -bottom-3 -right-3 w-6 h-6 bg-white border-2 border-indigo-600 rounded-full shadow-md cursor-nwse-resize z-40 flex items-center justify-center hover:scale-125 transition-transform group"
-            title="Glisser pour redimensionner"
-          >
-            <div className="w-2 h-2 bg-indigo-600 rounded-full group-hover:scale-110" />
-          </div>
-
-          <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-md shadow-xs pointer-events-none whitespace-nowrap">
-            {entity.size.width} × {entity.size.height} px
-          </div>
-        </>
+        <EntitySelectionOverlay
+          colliderType={colliderType}
+          width={entity.size.width}
+          height={entity.size.height}
+          rotation={currentState.rotation ?? 0}
+          isRotating={isRotating}
+          onResizePointerDown={handleResizePointerDown}
+          onRotatePointerDown={handleRotatePointerDown}
+        />
       )}
 
       {appMode === 'play' && healthConfig && healthConfig.showHealthBar !== false && runtimeHealth && (

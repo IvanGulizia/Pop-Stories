@@ -102,7 +102,8 @@ export type BehaviorType =
   | 'keyboard_control'
   | 'boundary_behavior'
   | 'particle_emitter'
-  | 'health';
+  | 'health'
+  | 'jiggle';
 
 export interface BaseBehaviorConfig {
   id: string;
@@ -173,6 +174,10 @@ export interface FollowBehaviorConfig extends BaseBehaviorConfig {
   smoothing: number;   // lerp factor 0..1, default 0.1
   acceleration?: number; // 0.05..1 (réactivité au démarrage)
   damping?: number;      // 0..0.99 (inertie / glisse à l'arrêt)
+  followMode?: 'constant_speed' | 'spring'; // défaut 'constant_speed'
+  springStiffness?: number;  // raideur du ressort (défaut 120)
+  springDamping?: number;    // amortissement du ressort (défaut 10)
+  springMaxDistance?: number; // distance max d'élongation en px (0 = libre)
   flipOnMove?: boolean;
   flipInvert?: boolean;
 }
@@ -390,7 +395,28 @@ export type EntityBehavior =
   | KeyboardControlBehaviorConfig
   | BoundaryBehaviorConfig
   | ParticleEmitterBehaviorConfig
-  | HealthBehaviorConfig;
+  | HealthBehaviorConfig
+  | JiggleBehaviorConfig;
+
+export interface EntityPivot {
+  x: number; // normalisé 0..1 (0.5 = centre horizontal)
+  y: number; // normalisé 0..1 (0.5 = centre vertical)
+}
+
+export interface JiggleBehaviorConfig extends BaseBehaviorConfig {
+  type: 'jiggle';
+  stiffness: number;       // Raideur angulaire (défaut 180)
+  damping: number;         // Amortissement (défaut 9)
+  inertia: number;         // Sensibilité à l'accélération du parent/mouvement (défaut 1.0)
+  maxAngle: number;        // Débattement max ±degrés (défaut 35)
+  gravityPull: number;     // Attraction gravitationnelle sur le centre de masse (défaut 40)
+  restAngleOffset?: number;    // Angle de repos en degrés (défaut 0)
+  initialAngleOffset?: number; // Angle de départ au lancement Play en degrés (défaut 0 = égal au repos)
+  squashIntensity?: number;    // Déformation élastique MudBun 0..1.5 (défaut 0.25)
+  collideWithWorld?: boolean; // Réagir aux impacts contre murs/sols/objets (défaut true)
+  useCustomPivot?: boolean; // Surcharger le pivot de l'entité pour ce jiggle
+  pivotOverride?: EntityPivot;
+}
 
 export type BehaviorOverride = {
   enabled?: boolean;
@@ -418,6 +444,7 @@ export interface EntityState {
   color: string;
   scale: number;
   rotation: number;
+  pivot?: EntityPivot; // Surcharge optionnelle du pivot pour cet état
   folderId?: string;
   colliderType?: ColliderType;
   colliderBounds?: ColliderBounds;
@@ -438,12 +465,20 @@ export interface EntityState {
   flowerPetals?: number;
 }
 
+export type ParentAttachmentMode = 'rigid' | 'spring' | 'physics_joint';
+
 export interface ParentOffset {
   x: number;
   y: number;
   rotationOffset?: number;
   inheritRotation?: boolean;
   inheritFlip?: boolean;
+  attachmentMode?: ParentAttachmentMode; // défaut 'rigid'
+  springStiffness?: number;   // Raideur du ressort (défaut 160)
+  springDamping?: number;     // Amortissement (défaut 12)
+  springMaxDistance?: number; // Laisse max en px (0 = libre, >0 = contraint)
+  springGravity?: number;     // Chute/pesanteur locale sur l'enfant en px/s² (défaut 0)
+  collideWithWorld?: boolean; // Collisionner avec murs, sols et objets externes
 }
 
 export type EntityColliderMode = 'default' | 'trigger_only' | 'disabled';
@@ -471,6 +506,7 @@ export interface Entity {
   behaviors?: EntityBehavior[];
   zIndex?: number;
   flipX?: boolean;
+  pivot?: EntityPivot; // Pivot de base de l'entité (défaut { x: 0.5, y: 0.5 })
   parentId?: EntityId;
   parentOffset?: ParentOffset;
   sharedCollider?: boolean;          // Conserver le même collider physique même si l'état/dessin change
@@ -478,7 +514,11 @@ export interface Entity {
   sharedColliderType?: ColliderType;
   sharedColliderBounds?: ColliderBounds;
   stateFolders?: StateFolder[];
-  runtimeTilt?: number; // Inclinaison pendulaire transitoire en mode Play (non sauvegardée en Édition)
+  runtimeTilt?: number;        // Inclinaison pendulaire transitoire en mode Play (non sauvegardée en Édition)
+  runtimeJiggleAngle?: number; // Oscillation rotative Jiggle en mode Play
+  runtimeScaleX?: number;      // Squash & stretch horizontal transitoire en mode Play
+  runtimeScaleY?: number;      // Squash & stretch vertical transitoire en mode Play
+  runtimePivot?: EntityPivot;  // Pivot effectif temporaire (ex: jiggle pivotOverride) en mode Play
 }
 
 export type TriggerType =
@@ -756,7 +796,8 @@ export type GizmoCategoryId =
   | 'lookAt'
   | 'puppetZones'
   | 'aiZones'
-  | 'physicsVectors';
+  | 'physicsVectors'
+  | 'springsAndJiggle';
 
 export interface GizmoSettings {
   masterEnabled: boolean;

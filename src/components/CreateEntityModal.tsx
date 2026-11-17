@@ -45,7 +45,8 @@ export function CreateEntityModal({ isOpen, onClose }: CreateEntityModalProps) {
         layers,
         colliderBounds,
         _overrideCollider,
-        animationData
+        animationData,
+        pivotData
       ) => {
         const cleanName = name.trim() || 'Mon Dessin';
         const slug = cleanName.toLowerCase().replace(/[^a-z0-9]/gi, '_') || 'dessin';
@@ -64,6 +65,7 @@ export function CreateEntityModal({ isOpen, onClose }: CreateEntityModalProps) {
           drawingLayers: layers,
           colliderType: colliderType || 'box',
           colliderBounds,
+          pivot: pivotData?.pivot,
           color: 'transparent',
           tags: tags.length > 0 ? tags : [slug, 'custom'],
           frames: animationData?.frames,

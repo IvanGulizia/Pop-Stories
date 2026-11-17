@@ -1,4 +1,9 @@
 import { Entity, EntityId, EntityType, ParentOffset, Position, SpawnReferenceMode } from '../types';
+import {
+  getParentAnchorWorldPosition,
+  getPivotWorldPosition,
+  resolveEffectivePivot,
+} from '../utils/physics/pivotHelpers';
 
 export function wouldCreateParentCycle(
   entities: Record<EntityId, Entity>,
@@ -37,29 +42,34 @@ export function computeRelativeParentOffset(
   parent: Entity,
   prevOffset?: ParentOffset
 ): ParentOffset {
-  const pCenterX = parent.position.x + parent.size.width / 2;
-  const pCenterY = parent.position.y + parent.size.height / 2;
-  const cCenterX = child.position.x + child.size.width / 2;
-  const cCenterY = child.position.y + child.size.height / 2;
+  const parentEffPivot = resolveEffectivePivot(parent);
+  const pPivotWorld = getPivotWorldPosition(parent.position, parent.size, parentEffPivot);
+  const childEffPivot = resolveEffectivePivot(child);
+  const cAnchorX = child.position.x + childEffPivot.x * child.size.width;
+  const cAnchorY = child.position.y + childEffPivot.y * child.size.height;
 
   const parentRotDeg = parent.states[parent.currentStateId]?.rotation ?? 0;
   const childRotDeg = child.states[child.currentStateId]?.rotation ?? 0;
   const inheritRotation = prevOffset?.inheritRotation ?? true;
   const inheritFlip = prevOffset?.inheritFlip ?? true;
 
-  const angleRad = (-parentRotDeg * Math.PI) / 180;
-  const dx = cCenterX - pCenterX;
-  const dy = cCenterY - pCenterY;
+  const angleRad = inheritRotation ? (-parentRotDeg * Math.PI) / 180 : 0;
+  const dx = cAnchorX - pPivotWorld.x;
+  const dy = cAnchorY - pPivotWorld.y;
   const cos = Math.cos(angleRad);
   const sin = Math.sin(angleRad);
-  let localX = dx * cos - dy * sin;
-  const localY = dx * sin + dy * cos;
+  const unrotFromPivotX = dx * cos - dy * sin;
+  const unrotFromPivotY = dx * sin + dy * cos;
+
+  let localX = unrotFromPivotX - (0.5 - parentEffPivot.x) * parent.size.width;
+  const localY = unrotFromPivotY - (0.5 - parentEffPivot.y) * parent.size.height;
 
   if (inheritFlip && parent.flipX) {
     localX = -localX;
   }
 
   return {
+    ...(prevOffset || {}),
     x: Math.round(localX * 10) / 10,
     y: Math.round(localY * 10) / 10,
     rotationOffset: Math.round((childRotDeg - parentRotDeg) * 10) / 10,
@@ -76,33 +86,30 @@ export function computeChildWorldFromParent(
   const inheritRotation = offset.inheritRotation !== false;
   const inheritFlip = offset.inheritFlip !== false;
 
-  const pCenterX = parent.position.x + parent.size.width / 2;
-  const pCenterY = parent.position.y + parent.size.height / 2;
+  const parentEffPivot = resolveEffectivePivot(parent);
   const parentRotDeg = parent.states[parent.currentStateId]?.rotation ?? 0;
-  const parentAngleRad = (parentRotDeg * Math.PI) / 180;
+  const anchorWorld = getParentAnchorWorldPosition({
+    parentPosition: parent.position,
+    parentSize: parent.size,
+    parentPivot: parentEffPivot,
+    parentRotDeg,
+    parentFlipX: Boolean(parent.flipX),
+    offsetX: offset.x || 0,
+    offsetY: offset.y || 0,
+    inheritRotation,
+    inheritFlip,
+  });
 
-  let lx = offset.x || 0;
-  const ly = offset.y || 0;
-  if (inheritFlip && parent.flipX) {
-    lx = -lx;
-  }
-
-  let worldOffsetX = lx;
-  let worldOffsetY = ly;
-  if (inheritRotation && parentAngleRad !== 0) {
-    const cos = Math.cos(parentAngleRad);
-    const sin = Math.sin(parentAngleRad);
-    worldOffsetX = lx * cos - ly * sin;
-    worldOffsetY = lx * sin + ly * cos;
-  }
+  const nextFlipX = inheritFlip ? Boolean(parent.flipX) : Boolean(child.flipX);
+  const childEffPivot = resolveEffectivePivot(child, undefined, undefined, nextFlipX);
 
   return {
     position: {
-      x: Math.round((pCenterX + worldOffsetX - child.size.width / 2) * 10) / 10,
-      y: Math.round((pCenterY + worldOffsetY - child.size.height / 2) * 10) / 10,
+      x: Math.round((anchorWorld.x - childEffPivot.x * child.size.width) * 10) / 10,
+      y: Math.round((anchorWorld.y - childEffPivot.y * child.size.height) * 10) / 10,
     },
     rotation: inheritRotation ? parentRotDeg + (offset.rotationOffset || 0) : (child.states[child.currentStateId]?.rotation ?? 0),
-    flipX: inheritFlip ? Boolean(parent.flipX) : Boolean(child.flipX),
+    flipX: nextFlipX,
   };
 }
 

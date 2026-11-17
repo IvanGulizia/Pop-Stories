@@ -19,6 +19,8 @@ import {
   AutoDestroyBehaviorConfig,
   ParticleEmitterBehaviorConfig,
   HealthBehaviorConfig,
+  JiggleBehaviorConfig,
+  EntityPivot,
   SceneLayer,
 } from '../types';
 import { getEntityColliderBounds, getEntityWorldColliderBounds, resolveColliderState } from './collider';
@@ -41,10 +43,24 @@ import {
   checkEntityAgainstColliderLayerGeometry,
   buildColliderLayerBodies,
 } from './physics/colliderLayerPhysics';
+import {
+  resolveEffectivePivot,
+  getPivotWorldPosition,
+  getBodyWorldCenterFromPivot,
+  getEntityTopLeftFromBodyWorldCenter,
+  getParentAnchorWorldPosition,
+  rotateVector,
+} from './physics/pivotHelpers';
+import {
+  Spring2DState,
+  JiggleRuntimeState,
+  stepSpring2D,
+  stepJiggleRotational,
+} from './physics/springJiggleSolver';
 
 export { getEffectiveBehaviors, isEntityDraggable };
 
-const { Engine, World, Bodies, Body } = Matter;
+const { Engine, World, Bodies, Body, Constraint } = Matter;
 
 // État mémoire de la simulation Matter.js
 let engine: Matter.Engine | null = null;
@@ -246,11 +262,24 @@ interface LookAtOrbitRuntime {
 const lookAtOrbitStates = new Map<string, LookAtOrbitRuntime>();
 const lookAtFlipStates = new Map<string, boolean>();
 const debugLookAtTargets = new Map<string, Position>();
+const springLinkStates = new Map<string, Spring2DState>();
+const followSpringStates = new Map<string, Spring2DState>();
+const jiggleStates = new Map<string, JiggleRuntimeState>();
+const prevAnchorKinematics = new Map<string, { x: number; y: number; vx: number; vy: number }>();
+const prevCollidingJiggle = new Set<string>();
+const parentJointConstraints = new Map<string, Matter.Constraint>();
+const debugSpringAnchors = new Map<string, Position>();
+const debugJiggleInfos = new Map<
+  string,
+  { world: Position; angleDeg: number; restDeg: number; squashX: number; squashY: number }
+>();
 
 export function getGizmoRuntimeDebugData(): {
   wanderOrigins: Record<string, { origin: Position; targetPoint: Position | null }>;
   patrolOrigins: Record<string, Position>;
   lookAtTargets: Record<string, Position>;
+  springAnchors: Record<string, Position>;
+  jigglePivots: Record<string, { world: Position; angleDeg: number; restDeg: number; squashX: number; squashY: number }>;
 } {
   const wanderOrigins: Record<string, { origin: Position; targetPoint: Position | null }> = {};
   wanderingStates.forEach((v, k) => {
@@ -264,7 +293,18 @@ export function getGizmoRuntimeDebugData(): {
   debugLookAtTargets.forEach((v, k) => {
     lookAtTargets[k] = v;
   });
-  return { wanderOrigins, patrolOrigins, lookAtTargets };
+  const springAnchors: Record<string, Position> = {};
+  debugSpringAnchors.forEach((v, k) => {
+    springAnchors[k] = v;
+  });
+  const jigglePivots: Record<
+    string,
+    { world: Position; angleDeg: number; restDeg: number; squashX: number; squashY: number }
+  > = {};
+  debugJiggleInfos.forEach((v, k) => {
+    jigglePivots[k] = v;
+  });
+  return { wanderOrigins, patrolOrigins, lookAtTargets, springAnchors, jigglePivots };
 }
 
 function resolveTargetWorldPoint(
@@ -372,6 +412,14 @@ export function resetMatterPhysicsRuntime() {
   lookAtOrbitStates.clear();
   lookAtFlipStates.clear();
   debugLookAtTargets.clear();
+  springLinkStates.clear();
+  followSpringStates.clear();
+  jiggleStates.clear();
+  prevAnchorKinematics.clear();
+  prevCollidingJiggle.clear();
+  parentJointConstraints.clear();
+  debugSpringAnchors.clear();
+  debugJiggleInfos.clear();
   nextNegativeGroupId = -100;
 }
 
@@ -472,7 +520,19 @@ export function syncEntityDragPosition(
 }
 
 export interface PhysicsTickResult {
-  updatedTransforms: Record<string, { position?: Position; rotation?: number; flipX?: boolean; runtimeTilt?: number }>;
+  updatedTransforms: Record<
+    string,
+    {
+      position?: Position;
+      rotation?: number;
+      flipX?: boolean;
+      runtimeTilt?: number;
+      runtimeJiggleAngle?: number;
+      runtimeScaleX?: number;
+      runtimeScaleY?: number;
+      runtimePivot?: EntityPivot | null;
+    }
+  >;
   entitiesToDestroy?: string[];
   stateChanges?: Record<string, string>;
 }
@@ -671,6 +731,11 @@ function ensurePhysicsWorld(
   // Retirer les corps des entités détruites
   for (const [id, body] of bodyMap.entries()) {
     if (!currentEntityIds.has(id)) {
+      const jc = parentJointConstraints.get(id);
+      if (jc) {
+        World.remove(engine.world, jc);
+        parentJointConstraints.delete(id);
+      }
       World.remove(engine.world, body);
       bodyMap.delete(id);
       colliderOffsets.delete(id);
@@ -679,6 +744,11 @@ function ensurePhysicsWorld(
       wanderingStates.delete(id);
       puppetRuntimeStates.delete(id);
       lookAtOrbitStates.delete(id);
+      springLinkStates.delete(id);
+      followSpringStates.delete(id);
+      jiggleStates.delete(id);
+      prevAnchorKinematics.delete(id);
+      prevCollidingJiggle.delete(id);
     }
   }
 
@@ -686,6 +756,11 @@ function ensurePhysicsWorld(
   for (const entity of entityList) {
     const colliderMode = entity.colliderMode || 'default';
     if (colliderMode === 'disabled') {
+      const existingConstraint = parentJointConstraints.get(entity.id);
+      if (existingConstraint) {
+        World.remove(engine.world, existingConstraint);
+        parentJointConstraints.delete(entity.id);
+      }
       const existing = bodyMap.get(entity.id);
       if (existing) {
         rebuildingBodyIds.add(entity.id);
@@ -707,22 +782,30 @@ function ensurePhysicsWorld(
       ['keyboard_control', 'constant_velocity', 'patrol', 'wandering', 'move_to', 'follow', 'flee'].includes(b.type)
     );
     const isAttachedChild = !!(entity.parentId && entities[entity.parentId]);
+    const attachMode = entity.parentOffset?.attachmentMode || 'rigid';
+    const isCollisionAttachedChild =
+      isAttachedChild &&
+      (attachMode === 'physics_joint' || (attachMode === 'spring' && entity.parentOffset?.collideWithWorld === true));
 
-    // RÈGLE D'OR : Sans composant physics explicite, l'objet n'a PAS de physique dynamique.
-    // - Si enfant attaché à un parent : suivi cinématique pur (pas de chute autonome sous gravité).
-    // - S'il n'a ni physics ni mouvement : isStatic = true (obstacle inamovible, zéro gravité).
-    // - S'il n'a pas physics mais a un comportement de mouvement (ex: patrouille, clavier) : isStatic = false, mais gravité annulée.
-    // - S'il a le composant physics : isStatic = physics.isStatic === true.
+    // RÈGLE D'OR : Sans composant physics explicite, l'objet n'a PAS de physique dynamique,
+    // SAUF si l'enfant attaché demande explicitement un Joint Physique ou des collisions avec le monde.
     let isStatic = true;
     if (isAttachedChild) {
-      isStatic = true;
+      isStatic = !isCollisionAttachedChild;
     } else if (physics) {
       isStatic = physics.isStatic === true;
     } else if (hasMovement) {
       isStatic = false;
     }
 
-    const isSensor = colliderMode === 'trigger_only' ? true : physics ? physics.isTrigger === true : true;
+    const isSensor =
+      colliderMode === 'trigger_only'
+        ? true
+        : physics
+        ? physics.isTrigger === true
+        : isCollisionAttachedChild
+        ? false
+        : true;
     const collisionGroup = getHierarchyCollisionGroup(entity, entities);
 
     // Calcul précis du collider issu du mode dessin (supporte sharedCollider entre états)
@@ -736,8 +819,17 @@ function ensurePhysicsWorld(
 
     const relCenterX = originOffsetX + geom.centerX * scaleX;
     const relCenterY = originOffsetY + geom.centerY * scaleY;
-    const worldCenterX = entity.position.x + relCenterX;
-    const worldCenterY = entity.position.y + relCenterY;
+    const effPivot = resolveEffectivePivot(entity, currentState);
+    const bodyWorldInit = getBodyWorldCenterFromPivot(
+      entity.position,
+      entity.size,
+      relCenterX,
+      relCenterY,
+      effPivot,
+      currentState?.rotation || 0
+    );
+    const worldCenterX = bodyWorldInit.x;
+    const worldCenterY = bodyWorldInit.y;
     const colliderType = geom.colliderType;
 
     const colliderWidth = Math.max(12, Math.round(geom.width * scaleX));
@@ -745,7 +837,7 @@ function ensurePhysicsWorld(
     const colliderRadius = Math.max(6, Math.round(geom.radius * Math.max(scaleX, scaleY)));
 
     const freezeRotation = physics?.freezeRotation === true;
-    const signature = `${colliderMode}_${colliderType}_${colliderWidth}_${colliderHeight}_${colliderRadius}_${isStatic}_${isSensor}_${freezeRotation}`;
+    const signature = `${colliderMode}_${colliderType}_${colliderWidth}_${colliderHeight}_${colliderRadius}_${isStatic}_${isSensor}_${freezeRotation}_${attachMode}_${Boolean(entity.parentOffset?.collideWithWorld)}`;
     let body = bodyMap.get(entity.id);
 
     // Si le corps n'existe pas ou si la forme du collider a été modifiée dans le mode dessin, le recréer
@@ -898,16 +990,148 @@ export function stepMatterPhysics(params: {
   const { entities, deltaTime, canvasBounds, mousePos, colliderLayers = [] } = params;
   const dt = Math.min(deltaTime, 0.05);
 
-  ensurePhysicsWorld(canvasBounds, entities, colliderLayers);
+  const activeDragEntries = Object.entries(activeDragPositions);
+  const liveEntities: Record<string, Entity> =
+    activeDragEntries.length > 0 ? { ...entities } : entities;
+  if (activeDragEntries.length > 0) {
+    for (const [dragId, dragPos] of activeDragEntries) {
+      const orig = liveEntities[dragId];
+      if (orig) {
+        liveEntities[dragId] = { ...orig, position: { x: dragPos.x, y: dragPos.y } };
+      }
+    }
+  }
+
+  ensurePhysicsWorld(canvasBounds, liveEntities, colliderLayers);
   if (!engine) return { updatedTransforms: {} };
 
-  const updatedTransforms: Record<string, { position?: Position; rotation?: number; flipX?: boolean; runtimeTilt?: number }> = {};
+  const updatedTransforms: PhysicsTickResult['updatedTransforms'] = {};
   const flipUpdates = new Map<string, boolean>();
   const entitiesToDestroy: string[] = [];
   const stateChanges: Record<string, string> = {};
-  const entityList = Object.values(entities);
+  const entityList = Object.values(liveEntities);
   keyboardMoveInput.clear();
   debugLookAtTargets.clear();
+  debugSpringAnchors.clear();
+  debugJiggleInfos.clear();
+
+  // Pré-passe : synchroniser / nettoyer les Matter.Constraints des enfants attachés avec collisions monde
+  for (const entity of entityList) {
+    const parent = entity.parentId ? liveEntities[entity.parentId] : undefined;
+    const offset = entity.parentOffset;
+    const attachMode = offset?.attachmentMode || 'rigid';
+    const isCollisionAttached = Boolean(
+      parent &&
+        (attachMode === 'physics_joint' || (attachMode === 'spring' && offset?.collideWithWorld === true))
+    );
+    const body = bodyMap.get(entity.id);
+    const existingConstraint = parentJointConstraints.get(entity.id);
+
+    if (!isCollisionAttached || !body || body.isStatic) {
+      if (existingConstraint) {
+        World.remove(engine.world, existingConstraint);
+        parentJointConstraints.delete(entity.id);
+      }
+      continue;
+    }
+
+    const parentState = parent!.states[parent!.currentStateId];
+    const pJiggleBeh = getEffectiveBehaviors(parent!, parentState).find((b) => b.type === 'jiggle') as
+      | JiggleBehaviorConfig
+      | undefined;
+    const pRawPivotOverride =
+      pJiggleBeh && pJiggleBeh.enabled !== false && pJiggleBeh.useCustomPivot && pJiggleBeh.pivotOverride
+        ? pJiggleBeh.pivotOverride
+        : undefined;
+    const parentEffPivot = resolveEffectivePivot(parent!, parentState, pRawPivotOverride, Boolean(parent!.flipX));
+    const parentRotDeg =
+      (parentState?.rotation || 0) + (parent!.runtimeTilt || 0) + (parent!.runtimeJiggleAngle || 0);
+    const inheritFlip = offset?.inheritFlip !== false;
+    const inheritRot = offset?.inheritRotation !== false;
+    const anchorPt = getParentAnchorWorldPosition({
+      parentPosition: parent!.position,
+      parentSize: parent!.size,
+      parentPivot: parentEffPivot,
+      parentRotDeg,
+      parentFlipX: Boolean(parent!.flipX),
+      offsetX: offset?.x || 0,
+      offsetY: offset?.y || 0,
+      inheritRotation: inheritRot,
+      inheritFlip,
+    });
+    const anchorX = anchorPt.x;
+    const anchorY = anchorPt.y;
+    debugSpringAnchors.set(entity.id, { x: anchorX, y: anchorY });
+
+    const currentState = entity.states[entity.currentStateId];
+    const effBehs = getEffectiveBehaviors(entity, currentState);
+    const physics = effBehs.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
+    const jiggleBeh = effBehs.find((b) => b.type === 'jiggle') as JiggleBehaviorConfig | undefined;
+    const rawPivotOverride =
+      jiggleBeh && jiggleBeh.enabled !== false && jiggleBeh.useCustomPivot && jiggleBeh.pivotOverride
+        ? jiggleBeh.pivotOverride
+        : undefined;
+    const childFlip = inheritFlip ? Boolean(parent!.flipX) : Boolean(entity.flipX);
+    const effPivot = resolveEffectivePivot(entity, currentState, rawPivotOverride, childFlip);
+    const cOffset = colliderOffsets.get(entity.id) || {
+      relCenterX: entity.size.width / 2,
+      relCenterY: entity.size.height / 2,
+    };
+    const localPointB = {
+      x: effPivot.x * entity.size.width - cOffset.relCenterX,
+      y: effPivot.y * entity.size.height - cOffset.relCenterY,
+    };
+
+    const stiffness =
+      attachMode === 'physics_joint'
+        ? offset?.springStiffness !== undefined
+          ? Math.max(0.06, Math.min(0.98, offset.springStiffness / 520))
+          : 0.85
+        : Math.max(0.015, Math.min(0.65, (offset?.springStiffness ?? 160) / 620));
+    const damping =
+      attachMode === 'physics_joint'
+        ? offset?.springDamping !== undefined
+          ? Math.max(0.02, Math.min(0.65, offset.springDamping / 45))
+          : 0.18
+        : Math.max(0.02, Math.min(0.45, (offset?.springDamping ?? 12) / 42));
+
+    if (!existingConstraint || existingConstraint.bodyB !== body) {
+      if (existingConstraint) World.remove(engine.world, existingConstraint);
+      const nextConstraint = Constraint.create({
+        pointA: { x: anchorX, y: anchorY },
+        bodyB: body,
+        pointB: localPointB,
+        length: 0,
+        stiffness,
+        damping,
+      });
+      parentJointConstraints.set(entity.id, nextConstraint);
+      World.add(engine.world, nextConstraint);
+    } else {
+      existingConstraint.pointA.x = anchorX;
+      existingConstraint.pointA.y = anchorY;
+      existingConstraint.pointB.x = localPointB.x;
+      existingConstraint.pointB.y = localPointB.y;
+      existingConstraint.stiffness = stiffness;
+      existingConstraint.damping = damping;
+    }
+
+    // Gravité locale / annulation gravité monde si pas de composant physics explicite
+    if (!physics) {
+      const defaultLocalG = attachMode === 'physics_joint' ? 400 : 0;
+      const localG = offset?.springGravity ?? defaultLocalG;
+      const netGRatio = localG / 400 - 1;
+      Body.applyForce(body, body.position, {
+        x: 0,
+        y: netGRatio * 0.001 * (engine.world.gravity.y || 1) * body.mass,
+      });
+    } else if (offset?.springGravity) {
+      Body.applyForce(body, body.position, {
+        x: 0,
+        y: (offset.springGravity / 400) * 0.001 * (engine.world.gravity.y || 1) * body.mass,
+      });
+    }
+  }
 
   for (const entity of entityList) {
     const currentState = entity.states[entity.currentStateId];
@@ -925,8 +1149,8 @@ export function stepMatterPhysics(params: {
       }
     }
 
-    // Si l'entité est attachée à un parent, sa position/rotation sera calculée cinématiquement après Engine.update
-    if (entity.parentId && entities[entity.parentId]) {
+    // Si l'entité est attachée à un parent, sa position/rotation est gérée par contrainte ou cinématique
+    if (entity.parentId && liveEntities[entity.parentId]) {
       continue;
     }
 
@@ -1301,7 +1525,7 @@ export function stepMatterPhysics(params: {
       let nearest: Entity | undefined;
       let minDistSq = Infinity;
 
-      for (const candidate of Object.values(entities)) {
+      for (const candidate of Object.values(liveEntities)) {
         if (candidate.id === entity.id) continue; // Ne pas se cibler soi-même
         if (mode === 'nearest_type') {
           if (!targetType || candidate.type !== targetType) continue;
@@ -1338,7 +1562,7 @@ export function stepMatterPhysics(params: {
         targetY = moveTo.targetPosition.y;
         hasValidTarget = true;
       } else if (moveTo.targetType === 'entity' && moveTo.targetEntityId) {
-        const targetEntity = entities[moveTo.targetEntityId];
+        const targetEntity = liveEntities[moveTo.targetEntityId];
         if (targetEntity) {
           targetX = targetEntity.position.x;
           targetY = targetEntity.position.y;
@@ -1388,7 +1612,7 @@ export function stepMatterPhysics(params: {
         targetY = mousePos.y;
         hasValidTarget = true;
       } else if (follow.targetType === 'entity' && follow.targetEntityId) {
-        const targetEntity = entities[follow.targetEntityId];
+        const targetEntity = liveEntities[follow.targetEntityId];
         if (targetEntity) {
           const targetOffset = colliderOffsets.get(targetEntity.id) || { relCenterX: targetEntity.size.width / 2, relCenterY: targetEntity.size.height / 2 };
           targetX = targetEntity.position.x + targetOffset.relCenterX;
@@ -1414,18 +1638,57 @@ export function stepMatterPhysics(params: {
         const dy = targetY - body.position.y;
         const dist = Math.hypot(dx, dy);
         const minDistance = follow.minDistance ?? 40;
-        const followAccel = follow.acceleration ?? (follow.smoothing !== undefined ? Math.max(0.04, Math.min(1, follow.smoothing)) : undefined);
-        const followDamp = follow.damping ?? 0.8;
 
-        if (dist > minDistance) {
-          const speed = (follow.speed ?? 150) / 60; // px/s -> px/frame
-          const nextVx = approachAxisVelocity(body.velocity.x, (dx / dist) * speed, followAccel, followDamp, 0.8);
-          const nextVy = approachAxisVelocity(body.velocity.y, (dy / dist) * speed, followAccel, followDamp, 0.8);
-          Body.setVelocity(body, { x: nextVx, y: nextVy });
+        if (follow.followMode === 'spring') {
+          let fSpring = followSpringStates.get(entity.id);
+          if (!fSpring) {
+            fSpring = {
+              x: body.position.x,
+              y: body.position.y,
+              vx: body.velocity.x * 60,
+              vy: body.velocity.y * 60,
+            };
+            followSpringStates.set(entity.id, fSpring);
+          } else {
+            fSpring.x = body.position.x;
+            fSpring.y = body.position.y;
+          }
+
+          let goalX = body.position.x;
+          let goalY = body.position.y;
+          if (dist > minDistance && dist > 0.001) {
+            goalX = targetX - (dx / dist) * minDistance;
+            goalY = targetY - (dy / dist) * minDistance;
+          }
+          debugSpringAnchors.set(entity.id, { x: targetX, y: targetY });
+
+          const res = stepSpring2D({
+            state: fSpring,
+            targetX: goalX,
+            targetY: goalY,
+            stiffness: follow.springStiffness ?? 120,
+            damping: follow.springDamping ?? 10,
+            maxDistance: follow.springMaxDistance ?? 0,
+            dt,
+          });
+          Body.setVelocity(body, { x: res.vx / 60, y: res.vy / 60 });
         } else {
-          Body.setVelocity(body, { x: body.velocity.x * followDamp, y: body.velocity.y * followDamp });
+          if (followSpringStates.has(entity.id)) followSpringStates.delete(entity.id);
+          const followAccel = follow.acceleration ?? (follow.smoothing !== undefined ? Math.max(0.04, Math.min(1, follow.smoothing)) : undefined);
+          const followDamp = follow.damping ?? 0.8;
+
+          if (dist > minDistance) {
+            const speed = (follow.speed ?? 150) / 60; // px/s -> px/frame
+            const nextVx = approachAxisVelocity(body.velocity.x, (dx / dist) * speed, followAccel, followDamp, 0.8);
+            const nextVy = approachAxisVelocity(body.velocity.y, (dy / dist) * speed, followAccel, followDamp, 0.8);
+            Body.setVelocity(body, { x: nextVx, y: nextVy });
+          } else {
+            Body.setVelocity(body, { x: body.velocity.x * followDamp, y: body.velocity.y * followDamp });
+          }
         }
       }
+    } else if (followSpringStates.has(entity.id)) {
+      followSpringStates.delete(entity.id);
     }
 
     // 6b. Flee (Fuir une menace)
@@ -1438,7 +1701,7 @@ export function stepMatterPhysics(params: {
         flee.targetEntityId,
         flee.targetEntityType,
         flee.targetTag,
-        entities,
+        liveEntities,
         mousePos
       );
 
@@ -1495,7 +1758,7 @@ export function stepMatterPhysics(params: {
         lookAt.targetEntityId,
         lookAt.targetEntityType,
         lookAt.targetTag,
-        entities,
+        liveEntities,
         mousePos
       );
 
@@ -1612,7 +1875,7 @@ export function stepMatterPhysics(params: {
   }
 
   // Résolution des transformations dans l'ordre topologique (parents avant enfants)
-  const orderedEntities = sortEntitiesTopologically(entities);
+  const orderedEntities = sortEntitiesTopologically(liveEntities);
   const resolvedTransforms = new Map<string, { position: Position; rotation: number; flipX: boolean }>();
 
   for (const entity of orderedEntities) {
@@ -1621,6 +1884,11 @@ export function stepMatterPhysics(params: {
     const effectiveBehaviors = getEffectiveBehaviors(entity, currentState);
     const physics = effectiveBehaviors.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
     const emitter = effectiveBehaviors.find((b) => b.type === 'particle_emitter') as ParticleEmitterBehaviorConfig | undefined;
+    const jiggle = effectiveBehaviors.find((b) => b.type === 'jiggle') as JiggleBehaviorConfig | undefined;
+    const rawPivotOverride =
+      jiggle && jiggle.enabled !== false && jiggle.useCustomPivot && jiggle.pivotOverride
+        ? jiggle.pivotOverride
+        : undefined;
     const isRotFrozen = physics?.freezeRotation === true;
 
     let newX = entity.position.x;
@@ -1633,117 +1901,248 @@ export function stepMatterPhysics(params: {
     let pendingRotUpdate: number | undefined;
     let pendingFlipUpdate: boolean | undefined;
 
-    // Cas 1 : Entité enfant attachée à un parent (suivi cinématique exact)
-    if (entity.parentId && entities[entity.parentId]) {
-      const parent = entities[entity.parentId];
+    // Cas 1 : Entité enfant attachée à un parent (rigide, ressort élastique ou joint physique avec collisions)
+    if (entity.parentId && liveEntities[entity.parentId]) {
+      const parent = liveEntities[entity.parentId];
+      const parentState = parent.states[parent.currentStateId];
       const parentTransform = resolvedTransforms.get(parent.id) || {
         position: parent.position,
-        rotation: (parent.states[parent.currentStateId]?.rotation || 0) + (parent.runtimeTilt || 0),
+        rotation: (parentState?.rotation || 0) + (parent.runtimeTilt || 0) + (parent.runtimeJiggleAngle || 0),
         flipX: parent.flipX ?? false,
       };
+      const parentJiggle = getEffectiveBehaviors(parent, parentState).find((b) => b.type === 'jiggle') as
+        | JiggleBehaviorConfig
+        | undefined;
+      const parentRawPivotOverride =
+        parentJiggle && parentJiggle.enabled !== false && parentJiggle.useCustomPivot && parentJiggle.pivotOverride
+          ? parentJiggle.pivotOverride
+          : undefined;
+      const parentEffPivot = resolveEffectivePivot(
+        parent,
+        parentState,
+        parentRawPivotOverride,
+        parentTransform.flipX
+      );
 
       const offset = entity.parentOffset || { x: 0, y: 0, rotationOffset: 0, inheritRotation: true, inheritFlip: true };
       const inheritRot = offset.inheritRotation !== false;
       const inheritFlip = offset.inheritFlip !== false;
 
-      const parentCenterX = parentTransform.position.x + parent.size.width / 2;
-      const parentCenterY = parentTransform.position.y + parent.size.height / 2;
-
-      const localX = inheritFlip && parentTransform.flipX ? -offset.x : offset.x;
-      const localY = offset.y;
-
-      const parentRotRad = inheritRot ? (parentTransform.rotation * Math.PI) / 180 : 0;
-      const cosA = Math.cos(parentRotRad);
-      const sinA = Math.sin(parentRotRad);
-      const rotatedX = localX * cosA - localY * sinA;
-      const rotatedY = localX * sinA + localY * cosA;
-
-      let childCenterX = parentCenterX + rotatedX;
-      let childCenterY = parentCenterY + rotatedY;
+      const anchorWorld = getParentAnchorWorldPosition({
+        parentPosition: parentTransform.position,
+        parentSize: parent.size,
+        parentPivot: parentEffPivot,
+        parentRotDeg: parentTransform.rotation,
+        parentFlipX: parentTransform.flipX,
+        offsetX: offset.x,
+        offsetY: offset.y,
+        inheritRotation: inheritRot,
+        inheritFlip,
+      });
+      const targetAnchorX = anchorWorld.x;
+      const targetAnchorY = anchorWorld.y;
 
       const rotOffset = (offset.rotationOffset || 0) * (inheritFlip && parentTransform.flipX ? -1 : 1);
       const baseRot = (inheritRot ? parentTransform.rotation : 0) + rotOffset;
-      newRot = Math.round(baseRot * 10) / 10;
       nextFlipX = inheritFlip ? parentTransform.flipX : (entity.flipX ?? false);
+      const effPivot = resolveEffectivePivot(entity, currentState, rawPivotOverride, nextFlipX);
 
-      // LookAt sur entité enfant attachée (ex: Tête avec cône maxAngle ou Pupille en Orbite)
-      const childLookAt = effectiveBehaviors.find((b) => b.type === 'look_at') as LookAtBehaviorConfig | undefined;
-      if (childLookAt && childLookAt.enabled !== false) {
-        const targetPt = resolveTargetWorldPoint(
-          entity.id,
-          childCenterX,
-          childCenterY,
-          childLookAt.targetType,
-          childLookAt.targetEntityId,
-          childLookAt.targetEntityType,
-          childLookAt.targetTag,
-          entities,
-          mousePos
-        );
+      const attachMode = offset.attachmentMode || 'rigid';
+      const isCollisionAttached =
+        attachMode === 'physics_joint' || (attachMode === 'spring' && offset.collideWithWorld === true);
 
-        if (targetPt) {
-          debugLookAtTargets.set(entity.id, targetPt);
-        }
+      if (isCollisionAttached && body && !body.isStatic) {
+        springLinkStates.delete(entity.id);
+        debugSpringAnchors.set(entity.id, { x: targetAnchorX, y: targetAnchorY });
 
-        if ((childLookAt.lookMode || 'rotate') === 'pupil_orbit') {
-          let orbitRt = lookAtOrbitStates.get(entity.id);
-          if (!orbitRt) {
-            orbitRt = { ox: 0, oy: 0 };
-            lookAtOrbitStates.set(entity.id, orbitRt);
-          }
-          const rx = Math.max(1, childLookAt.orbitRadius ?? 8);
-          const ry = Math.max(1, childLookAt.orbitRadiusY ?? rx);
-          let tx = 0;
-          let ty = 0;
-          if (targetPt) {
-            const dx = targetPt.x - childCenterX;
-            const dy = targetPt.y - childCenterY;
-            const dist = Math.hypot(dx, dy);
-            if (dist > 0.5) {
-              const mag = Math.min(1, dist / Math.max(18, Math.max(rx, ry) * 2.5));
-              tx = (dx / dist) * rx * mag;
-              ty = (dy / dist) * ry * mag;
-            }
-          }
-          const smooth = childLookAt.smoothSpeed ?? 0;
-          const alpha = smooth > 0 ? Math.min(1, dt * Math.max(3, smooth / 22)) : 1;
-          orbitRt.ox += (tx - orbitRt.ox) * alpha;
-          orbitRt.oy += (ty - orbitRt.oy) * alpha;
-          childCenterX += orbitRt.ox;
-          childCenterY += orbitRt.oy;
-        } else if (targetPt) {
-          const res = computeLookAtRotationAndFlip({
-            entityId: entity.id,
-            originX: childCenterX,
-            originY: childCenterY,
-            targetPt,
-            lookAt: childLookAt,
-            currentAngleDeg: currentState?.rotation || 0,
-            baseRestRotDeg: baseRot,
-            currentFlipX: nextFlipX,
-            dt,
-          });
-          newRot = res.nextRotDeg;
-          if (res.flipUpdated) {
-            nextFlipX = res.nextFlipX;
-          }
-        }
-      }
-
-      newX = Math.round((childCenterX - entity.size.width / 2) * 10) / 10;
-      newY = Math.round((childCenterY - entity.size.height / 2) * 10) / 10;
-
-      // Synchroniser le corps Matter.js du capteur/collider de l'enfant avec sa position monde réelle
-      if (body) {
         const cOffset = colliderOffsets.get(entity.id) || {
           relCenterX: entity.size.width / 2,
           relCenterY: entity.size.height / 2,
         };
-        Body.setPosition(body, {
-          x: newX + cOffset.relCenterX,
-          y: newY + cOffset.relCenterY,
-        });
-        Body.setAngle(body, (newRot * Math.PI) / 180);
+        const currentRotDeg = isRotFrozen ? 0 : Math.round(((body.angle * 180) / Math.PI) * 10) / 10;
+        newRot = currentRotDeg;
+
+        // Contrainte de laisse max éventuelle autour de l'ancre parent
+        const maxDist = offset.springMaxDistance ?? 0;
+        const pivotOffsetLocal = {
+          x: effPivot.x * entity.size.width - cOffset.relCenterX,
+          y: effPivot.y * entity.size.height - cOffset.relCenterY,
+        };
+        const pivotRotOffset = rotateVector(pivotOffsetLocal.x, pivotOffsetLocal.y, (newRot * Math.PI) / 180);
+        const curPivotWorldX = body.position.x + pivotRotOffset.x;
+        const curPivotWorldY = body.position.y + pivotRotOffset.y;
+
+        if (maxDist > 0) {
+          const dpx = curPivotWorldX - targetAnchorX;
+          const dpy = curPivotWorldY - targetAnchorY;
+          const dist = Math.hypot(dpx, dpy);
+          if (dist > maxDist && dist > 0.001) {
+            const clampedPivotX = targetAnchorX + (dpx / dist) * maxDist;
+            const clampedPivotY = targetAnchorY + (dpy / dist) * maxDist;
+            Body.setPosition(body, {
+              x: clampedPivotX - pivotRotOffset.x,
+              y: clampedPivotY - pivotRotOffset.y,
+            });
+          }
+        }
+
+        const childLookAt = effectiveBehaviors.find((b) => b.type === 'look_at') as LookAtBehaviorConfig | undefined;
+        if (childLookAt && childLookAt.enabled !== false && (childLookAt.lookMode || 'rotate') === 'rotate') {
+          const targetPt = resolveTargetWorldPoint(
+            entity.id,
+            curPivotWorldX,
+            curPivotWorldY,
+            childLookAt.targetType,
+            childLookAt.targetEntityId,
+            childLookAt.targetEntityType,
+            childLookAt.targetTag,
+            liveEntities,
+            mousePos
+          );
+          if (targetPt) {
+            debugLookAtTargets.set(entity.id, targetPt);
+            const res = computeLookAtRotationAndFlip({
+              entityId: entity.id,
+              originX: curPivotWorldX,
+              originY: curPivotWorldY,
+              targetPt,
+              lookAt: childLookAt,
+              currentAngleDeg: newRot,
+              baseRestRotDeg: baseRot,
+              currentFlipX: nextFlipX,
+              dt,
+            });
+            newRot = res.nextRotDeg;
+            Body.setAngle(body, (newRot * Math.PI) / 180);
+            if (res.flipUpdated) nextFlipX = res.nextFlipX;
+          }
+        }
+
+        const topLeft = getEntityTopLeftFromBodyWorldCenter(
+          body.position,
+          entity.size,
+          cOffset.relCenterX,
+          cOffset.relCenterY,
+          effPivot,
+          newRot
+        );
+        newX = Math.round(topLeft.x * 10) / 10;
+        newY = Math.round(topLeft.y * 10) / 10;
+      } else {
+        let childAnchorX = targetAnchorX;
+        let childAnchorY = targetAnchorY;
+
+        if (attachMode === 'spring') {
+          let spState = springLinkStates.get(entity.id);
+          if (!spState) {
+            const curPivot = getPivotWorldPosition(entity.position, entity.size, effPivot);
+            spState = { x: curPivot.x, y: curPivot.y, vx: 0, vy: 0 };
+            springLinkStates.set(entity.id, spState);
+          }
+          const spRes = stepSpring2D({
+            state: spState,
+            targetX: targetAnchorX,
+            targetY: targetAnchorY,
+            stiffness: offset.springStiffness ?? 160,
+            damping: offset.springDamping ?? 12,
+            gravity: offset.springGravity ?? 0,
+            maxDistance: offset.springMaxDistance ?? 0,
+            dt,
+          });
+          childAnchorX = spRes.x;
+          childAnchorY = spRes.y;
+          debugSpringAnchors.set(entity.id, { x: targetAnchorX, y: targetAnchorY });
+        } else {
+          if (springLinkStates.has(entity.id)) springLinkStates.delete(entity.id);
+        }
+
+        newRot = Math.round(baseRot * 10) / 10;
+
+        // LookAt sur entité enfant attachée (ex: Tête avec cône maxAngle ou Pupille en Orbite)
+        const childLookAt = effectiveBehaviors.find((b) => b.type === 'look_at') as LookAtBehaviorConfig | undefined;
+        if (childLookAt && childLookAt.enabled !== false) {
+          const targetPt = resolveTargetWorldPoint(
+            entity.id,
+            childAnchorX,
+            childAnchorY,
+            childLookAt.targetType,
+            childLookAt.targetEntityId,
+            childLookAt.targetEntityType,
+            childLookAt.targetTag,
+            liveEntities,
+            mousePos
+          );
+
+          if (targetPt) {
+            debugLookAtTargets.set(entity.id, targetPt);
+          }
+
+          if ((childLookAt.lookMode || 'rotate') === 'pupil_orbit') {
+            let orbitRt = lookAtOrbitStates.get(entity.id);
+            if (!orbitRt) {
+              orbitRt = { ox: 0, oy: 0 };
+              lookAtOrbitStates.set(entity.id, orbitRt);
+            }
+            const rx = Math.max(1, childLookAt.orbitRadius ?? 8);
+            const ry = Math.max(1, childLookAt.orbitRadiusY ?? rx);
+            let tx = 0;
+            let ty = 0;
+            if (targetPt) {
+              const dx = targetPt.x - childAnchorX;
+              const dy = targetPt.y - childAnchorY;
+              const dist = Math.hypot(dx, dy);
+              if (dist > 0.5) {
+                const mag = Math.min(1, dist / Math.max(18, Math.max(rx, ry) * 2.5));
+                tx = (dx / dist) * rx * mag;
+                ty = (dy / dist) * ry * mag;
+              }
+            }
+            const smooth = childLookAt.smoothSpeed ?? 0;
+            const alpha = smooth > 0 ? Math.min(1, dt * Math.max(3, smooth / 22)) : 1;
+            orbitRt.ox += (tx - orbitRt.ox) * alpha;
+            orbitRt.oy += (ty - orbitRt.oy) * alpha;
+            childAnchorX += orbitRt.ox;
+            childAnchorY += orbitRt.oy;
+          } else if (targetPt) {
+            const res = computeLookAtRotationAndFlip({
+              entityId: entity.id,
+              originX: childAnchorX,
+              originY: childAnchorY,
+              targetPt,
+              lookAt: childLookAt,
+              currentAngleDeg: currentState?.rotation || 0,
+              baseRestRotDeg: baseRot,
+              currentFlipX: nextFlipX,
+              dt,
+            });
+            newRot = res.nextRotDeg;
+            if (res.flipUpdated) {
+              nextFlipX = res.nextFlipX;
+            }
+          }
+        }
+
+        const effPivotAfterFlip = resolveEffectivePivot(entity, currentState, rawPivotOverride, nextFlipX);
+        newX = Math.round((childAnchorX - effPivotAfterFlip.x * entity.size.width) * 10) / 10;
+        newY = Math.round((childAnchorY - effPivotAfterFlip.y * entity.size.height) * 10) / 10;
+
+        // Synchroniser le corps Matter.js du capteur/collider de l'enfant avec sa position monde réelle
+        if (body) {
+          const cOffset = colliderOffsets.get(entity.id) || {
+            relCenterX: entity.size.width / 2,
+            relCenterY: entity.size.height / 2,
+          };
+          const bodyWorldPos = getBodyWorldCenterFromPivot(
+            { x: newX, y: newY },
+            entity.size,
+            cOffset.relCenterX,
+            cOffset.relCenterY,
+            effPivotAfterFlip,
+            newRot
+          );
+          Body.setPosition(body, bodyWorldPos);
+          Body.setAngle(body, (newRot * Math.PI) / 180);
+        }
       }
 
       const posChanged = Math.abs(newX - entity.position.x) > 0.05 || Math.abs(newY - entity.position.y) > 0.05;
@@ -1755,6 +2154,7 @@ export function stepMatterPhysics(params: {
       if (flipChanged) pendingFlipUpdate = nextFlipX;
     } else {
       // Cas 2 : Entité indépendante (ou parent racine, avec ou sans corps physique)
+      if (springLinkStates.has(entity.id)) springLinkStates.delete(entity.id);
       const rootLookAt = effectiveBehaviors.find((b) => b.type === 'look_at') as LookAtBehaviorConfig | undefined;
       const hasRotationBehavior = effectiveBehaviors.some(
         (b) =>
@@ -1789,7 +2189,7 @@ export function stepMatterPhysics(params: {
           rootLookAt.targetEntityId,
           rootLookAt.targetEntityType,
           rootLookAt.targetTag,
-          entities,
+          liveEntities,
           mousePos
         );
         if (targetPt) {
@@ -1821,25 +2221,25 @@ export function stepMatterPhysics(params: {
       } else if (!body) {
         // Entité racine sans collider (colliderMode === 'disabled') : supporter LookAt rotate
         if (rootLookAt && rootLookAt.enabled !== false && (rootLookAt.lookMode || 'rotate') === 'rotate') {
-          const cx = entity.position.x + entity.size.width / 2;
-          const cy = entity.position.y + entity.size.height / 2;
+          const effPivot = resolveEffectivePivot(entity, currentState, rawPivotOverride, nextFlipX);
+          const originPt = getPivotWorldPosition(entity.position, entity.size, effPivot);
           const targetPt = resolveTargetWorldPoint(
             entity.id,
-            cx,
-            cy,
+            originPt.x,
+            originPt.y,
             rootLookAt.targetType,
             rootLookAt.targetEntityId,
             rootLookAt.targetEntityType,
             rootLookAt.targetTag,
-            entities,
+            liveEntities,
             mousePos
           );
           if (targetPt) {
             debugLookAtTargets.set(entity.id, targetPt);
             const res = computeLookAtRotationAndFlip({
               entityId: entity.id,
-              originX: cx,
-              originY: cy,
+              originX: originPt.x,
+              originY: originPt.y,
               targetPt,
               lookAt: rootLookAt,
               currentAngleDeg: currentState?.rotation || 0,
@@ -1862,10 +2262,19 @@ export function stepMatterPhysics(params: {
           relCenterX: entity.size.width / 2,
           relCenterY: entity.size.height / 2,
         };
+        const effPivot = resolveEffectivePivot(entity, currentState, rawPivotOverride, nextFlipX);
 
-        newX = Math.round((body.position.x - offset.relCenterX) * 10) / 10;
-        newY = Math.round((body.position.y - offset.relCenterY) * 10) / 10;
         newRot = isRotFrozen ? 0 : Math.round(((body.angle * 180) / Math.PI) * 10) / 10;
+        const topLeft = getEntityTopLeftFromBodyWorldCenter(
+          body.position,
+          entity.size,
+          offset.relCenterX,
+          offset.relCenterY,
+          effPivot,
+          newRot
+        );
+        newX = Math.round(topLeft.x * 10) / 10;
+        newY = Math.round(topLeft.y * 10) / 10;
 
         const posChanged = Math.abs(newX - entity.position.x) > 0.05 || Math.abs(newY - entity.position.y) > 0.05;
         const rotChanged = !isRotFrozen && Math.abs(newRot - (currentState?.rotation || 0)) > 0.1;
@@ -2264,19 +2673,146 @@ export function stepMatterPhysics(params: {
       nextRuntimeTilt = 0;
     }
 
-    const tiltChanged = Math.abs(nextRuntimeTilt - (entity.runtimeTilt ?? 0)) > 0.1 || (nextRuntimeTilt === 0 && (entity.runtimeTilt ?? 0) !== 0);
-    if (pendingPosUpdate || pendingRotUpdate !== undefined || pendingFlipUpdate !== undefined || tiltChanged) {
+    // Cas 6a-bis : Composant Jiggle (Oscillation rotative autour du pivot + Squash & Stretch MudBun)
+    let nextRuntimeJiggleAngle = 0;
+    let nextRuntimeScaleX = 1;
+    let nextRuntimeScaleY = 1;
+    let pendingRuntimePivot: EntityPivot | null | undefined;
+
+    if (jiggle && jiggle.enabled !== false) {
+      const effPivotForJiggle = resolveEffectivePivot(entity, currentState, rawPivotOverride, nextFlipX);
+      const pivotWorld = getPivotWorldPosition({ x: newX, y: newY }, entity.size, effPivotForJiggle);
+
+      const prevKin = prevAnchorKinematics.get(entity.id);
+      let accelX = 0;
+      let accelY = 0;
+      let vx = 0;
+      let vy = 0;
+      if (prevKin) {
+        vx = (pivotWorld.x - prevKin.x) / Math.max(0.001, dt);
+        vy = (pivotWorld.y - prevKin.y) / Math.max(0.001, dt);
+        accelX = (vx - prevKin.vx) / Math.max(0.001, dt);
+        accelY = (vy - prevKin.vy) / Math.max(0.001, dt);
+      }
+      prevAnchorKinematics.set(entity.id, { x: pivotWorld.x, y: pivotWorld.y, vx, vy });
+
+      let impactImpulseDeg = 0;
+      const reactToCollisions = jiggle.collideWithWorld !== false;
+      if (reactToCollisions) {
+        const prefix = `${entity.id}:::`;
+        let isCollidingNow = false;
+        let contactPt: Position | undefined;
+        for (const pairKey of activePhysicsCollisionPairs) {
+          if (pairKey.startsWith(prefix)) {
+            isCollidingNow = true;
+            contactPt = activePhysicsCollisionContacts.get(pairKey);
+            break;
+          }
+        }
+        const wasColliding = prevCollidingJiggle.has(entity.id);
+        if (isCollidingNow && !wasColliding) {
+          const relX = contactPt ? contactPt.x - pivotWorld.x : 0;
+          const dirSign = Math.abs(relX) > 2 ? Math.sign(-relX) : vx !== 0 ? Math.sign(-vx) : 1;
+          const speedMag = Math.hypot(vx, vy);
+          impactImpulseDeg = dirSign * Math.min(460, Math.max(110, speedMag * 0.55));
+        }
+        if (isCollidingNow) prevCollidingJiggle.add(entity.id);
+        else prevCollidingJiggle.delete(entity.id);
+      } else {
+        prevCollidingJiggle.delete(entity.id);
+      }
+
+      const restOffset = jiggle.restAngleOffset ?? 0;
+      let jState = jiggleStates.get(entity.id);
+      if (!jState) {
+        const initialOffset = jiggle.initialAngleOffset ?? restOffset;
+        jState = {
+          angleDeg: initialOffset - restOffset,
+          angularVelDeg: 0,
+          squashX: 1,
+          squashY: 1,
+        };
+        jiggleStates.set(entity.id, jState);
+      }
+      const jRes = stepJiggleRotational({
+        state: jState,
+        accelX,
+        accelY,
+        baseWorldRotDeg: newRot + nextRuntimeTilt + restOffset,
+        effPivot: effPivotForJiggle,
+        stiffness: jiggle.stiffness ?? 180,
+        damping: jiggle.damping ?? 9,
+        inertia: jiggle.inertia ?? 1.0,
+        maxAngle: jiggle.maxAngle ?? 35,
+        gravityPull: jiggle.gravityPull ?? 40,
+        squashIntensity: jiggle.squashIntensity ?? 0.25,
+        impactImpulseDeg,
+        dt,
+      });
+
+      nextRuntimeJiggleAngle = Math.round((jRes.angleDeg + restOffset) * 10) / 10;
+      nextRuntimeScaleX = jRes.squashX;
+      nextRuntimeScaleY = jRes.squashY;
+
+      if (rawPivotOverride) {
+        if (
+          entity.runtimePivot?.x !== rawPivotOverride.x ||
+          entity.runtimePivot?.y !== rawPivotOverride.y
+        ) {
+          pendingRuntimePivot = rawPivotOverride;
+        }
+      } else if (entity.runtimePivot !== undefined) {
+        pendingRuntimePivot = null;
+      }
+
+      debugJiggleInfos.set(entity.id, {
+        world: pivotWorld,
+        angleDeg: nextRuntimeJiggleAngle,
+        restDeg: newRot + nextRuntimeTilt + restOffset,
+        squashX: nextRuntimeScaleX,
+        squashY: nextRuntimeScaleY,
+      });
+    } else {
+      if (jiggleStates.has(entity.id)) jiggleStates.delete(entity.id);
+      if (prevAnchorKinematics.has(entity.id)) prevAnchorKinematics.delete(entity.id);
+      prevCollidingJiggle.delete(entity.id);
+      if (entity.runtimePivot !== undefined) pendingRuntimePivot = null;
+    }
+
+    const tiltChanged =
+      Math.abs(nextRuntimeTilt - (entity.runtimeTilt ?? 0)) > 0.1 ||
+      (nextRuntimeTilt === 0 && (entity.runtimeTilt ?? 0) !== 0);
+    const jiggleAngleChanged =
+      Math.abs(nextRuntimeJiggleAngle - (entity.runtimeJiggleAngle ?? 0)) > 0.08 ||
+      (nextRuntimeJiggleAngle === 0 && (entity.runtimeJiggleAngle ?? 0) !== 0);
+    const scaleXChanged = Math.abs(nextRuntimeScaleX - (entity.runtimeScaleX ?? 1)) > 0.002;
+    const scaleYChanged = Math.abs(nextRuntimeScaleY - (entity.runtimeScaleY ?? 1)) > 0.002;
+
+    if (
+      pendingPosUpdate ||
+      pendingRotUpdate !== undefined ||
+      pendingFlipUpdate !== undefined ||
+      tiltChanged ||
+      jiggleAngleChanged ||
+      scaleXChanged ||
+      scaleYChanged ||
+      pendingRuntimePivot !== undefined
+    ) {
       updatedTransforms[entity.id] = {
         ...(pendingPosUpdate ? { position: pendingPosUpdate } : {}),
         ...(pendingRotUpdate !== undefined ? { rotation: pendingRotUpdate } : {}),
         ...(pendingFlipUpdate !== undefined ? { flipX: pendingFlipUpdate } : {}),
         ...(tiltChanged ? { runtimeTilt: nextRuntimeTilt } : {}),
+        ...(jiggleAngleChanged ? { runtimeJiggleAngle: nextRuntimeJiggleAngle } : {}),
+        ...(scaleXChanged ? { runtimeScaleX: nextRuntimeScaleX } : {}),
+        ...(scaleYChanged ? { runtimeScaleY: nextRuntimeScaleY } : {}),
+        ...(pendingRuntimePivot !== undefined ? { runtimePivot: pendingRuntimePivot } : {}),
       };
     }
 
     resolvedTransforms.set(entity.id, {
       position: { x: newX, y: newY },
-      rotation: newRot + nextRuntimeTilt,
+      rotation: newRot + nextRuntimeTilt + nextRuntimeJiggleAngle,
       flipX: nextFlipX,
     });
 
@@ -2580,12 +3116,12 @@ export function stepMatterPhysics(params: {
         let isSelfOrAncestorDragged = Boolean(activeDragPositions[entity.id]);
         let ancId = entity.parentId;
         let depthGuard = 0;
-        while (!isSelfOrAncestorDragged && ancId && entities[ancId] && depthGuard < 16) {
+        while (!isSelfOrAncestorDragged && ancId && liveEntities[ancId] && depthGuard < 16) {
           if (activeDragPositions[ancId]) {
             isSelfOrAncestorDragged = true;
             break;
           }
-          ancId = entities[ancId].parentId;
+          ancId = liveEntities[ancId].parentId;
           depthGuard += 1;
         }
         const pausedByDrag = fleeBeh.pauseWhileDragged !== false && isSelfOrAncestorDragged;
@@ -2599,7 +3135,7 @@ export function stepMatterPhysics(params: {
           fleeBeh.targetEntityId,
           fleeBeh.targetEntityType,
           fleeBeh.targetTag,
-          entities,
+          liveEntities,
           mousePos
         );
         const radius = fleeBeh.fleeRadius ?? 220;

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   Entity,
   EntityId,
+  EntityPivot,
   EntityState,
   Position,
   Size,
@@ -102,6 +103,7 @@ import {
   executeRuleActions,
   registerRuleEngineStoreBridge,
 } from './ruleExecutionEngine';
+import { buildPhysicsTestScene, PhysicsTestSceneId } from './physicsTestScenes';
 
 export {
   EMPTY_RECORD,
@@ -253,7 +255,21 @@ interface SceneState {
   updateEntityBehaviors: (entityId: EntityId, behaviors: EntityBehavior[]) => void;
   updateStateBehaviorOverride: (entityId: EntityId, stateId: StateId, behaviorId: string, override: BehaviorOverride) => void;
   removeStateBehaviorOverride: (entityId: EntityId, stateId: StateId, behaviorId: string) => void;
-  batchUpdateEntityTransforms: (updates: Record<EntityId, { position?: Position; rotation?: number; flipX?: boolean; runtimeTilt?: number }>) => void;
+  batchUpdateEntityTransforms: (
+    updates: Record<
+      EntityId,
+      {
+        position?: Position;
+        rotation?: number;
+        flipX?: boolean;
+        runtimeTilt?: number;
+        runtimeJiggleAngle?: number;
+        runtimeScaleX?: number;
+        runtimeScaleY?: number;
+        runtimePivot?: EntityPivot | null;
+      }
+    >
+  ) => void;
   setEntityParent: (childId: EntityId, parentId: EntityId | null, customOffset?: ParentOffset) => void;
   updateEntityParentOffset: (childId: EntityId, partial: Partial<ParentOffset>) => void;
   detachEntity: (childId: EntityId) => void;
@@ -280,6 +296,7 @@ interface SceneState {
     tags?: string[];
     colliderType?: ColliderType;
     colliderBounds?: ColliderBounds;
+    pivot?: EntityPivot;
     frames?: AnimationFrame[];
     frameRate?: number;
     animationLoop?: AnimationLoopMode;
@@ -296,6 +313,7 @@ interface SceneState {
   clearAllEntities: () => void;
   clearProject: () => void;
   restoreDefaultScene: () => void;
+  loadTestScenePreset: (presetId: PhysicsTestSceneId) => void;
 
   // Project Import / Export
   exportProject: () => ProjectExportData;
@@ -1383,6 +1401,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const targetType = targetEntity.type;
 
       const updatedEntities = { ...state.entities };
+      const rotatedParentsInCurrentState: EntityId[] = [];
       Object.values(updatedEntities).forEach((e) => {
         if (e.type === targetType) {
           const existingState = e.states[stateId] || { id: stateId, name: stateId, color: '#3b82f6', scale: 1, rotation: 0 };
@@ -1410,8 +1429,43 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
               [stateId]: updatedState,
             },
           };
+
+          if (state.appMode === 'edit' && partial.rotation !== undefined && isCurrentState) {
+            rotatedParentsInCurrentState.push(e.id);
+          }
         }
       });
+
+      if (state.appMode === 'edit' && rotatedParentsInCurrentState.length > 0) {
+        const synced = new Set<EntityId>();
+        rotatedParentsInCurrentState.forEach((parentRootId) => {
+          const descendants = collectDescendantIds(updatedEntities, parentRootId);
+          descendants.forEach((childId) => {
+            if (synced.has(childId)) return;
+            synced.add(childId);
+            const child = updatedEntities[childId];
+            if (!child || !child.parentId) return;
+            const parent = updatedEntities[child.parentId];
+            if (!parent) return;
+            const nextChildWorld = computeChildWorldFromParent(child, parent);
+            const childState = child.states[child.currentStateId];
+            updatedEntities[childId] = {
+              ...child,
+              position: nextChildWorld.position,
+              flipX: nextChildWorld.flipX,
+              states: childState
+                ? {
+                    ...child.states,
+                    [child.currentStateId]: {
+                      ...childState,
+                      rotation: nextChildWorld.rotation,
+                    },
+                  }
+                : child.states,
+            };
+          });
+        });
+      }
 
       const updatedArchetypes = { ...state.customArchetypes };
       if (updatedArchetypes[targetType]) {
@@ -1634,15 +1688,59 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           modified = true;
         }
 
+        if (
+          transform.runtimeJiggleAngle !== undefined &&
+          (entity.runtimeJiggleAngle ?? 0) !== transform.runtimeJiggleAngle
+        ) {
+          modified = true;
+        }
+
+        if (
+          transform.runtimeScaleX !== undefined &&
+          (entity.runtimeScaleX ?? 1) !== transform.runtimeScaleX
+        ) {
+          modified = true;
+        }
+
+        if (
+          transform.runtimeScaleY !== undefined &&
+          (entity.runtimeScaleY ?? 1) !== transform.runtimeScaleY
+        ) {
+          modified = true;
+        }
+
+        const hasRuntimePivotChange =
+          transform.runtimePivot !== undefined &&
+          ((transform.runtimePivot === null && entity.runtimePivot !== undefined) ||
+            (transform.runtimePivot !== null &&
+              (entity.runtimePivot?.x !== transform.runtimePivot.x ||
+                entity.runtimePivot?.y !== transform.runtimePivot.y)));
+
+        if (hasRuntimePivotChange) {
+          modified = true;
+        }
+
         if (modified) {
           hasChanges = true;
-          nextEntities[id] = {
+          const updatedEnt: Entity = {
             ...entity,
             position: newPos,
             states: newStates,
             ...(transform.flipX !== undefined ? { flipX: transform.flipX } : {}),
             ...(transform.runtimeTilt !== undefined ? { runtimeTilt: transform.runtimeTilt } : {}),
+            ...(transform.runtimeJiggleAngle !== undefined
+              ? { runtimeJiggleAngle: transform.runtimeJiggleAngle }
+              : {}),
+            ...(transform.runtimeScaleX !== undefined ? { runtimeScaleX: transform.runtimeScaleX } : {}),
+            ...(transform.runtimeScaleY !== undefined ? { runtimeScaleY: transform.runtimeScaleY } : {}),
+            ...(transform.runtimePivot && transform.runtimePivot !== null
+              ? { runtimePivot: transform.runtimePivot }
+              : {}),
           };
+          if (transform.runtimePivot === null) {
+            delete updatedEnt.runtimePivot;
+          }
+          nextEntities[id] = updatedEnt;
         }
       });
 
@@ -1670,8 +1768,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         return state;
       }
 
-      const nextOffset = customOffset
+      const nextOffset: ParentOffset = customOffset
         ? {
+            ...(child.parentOffset || {}),
+            ...customOffset,
             x: customOffset.x,
             y: customOffset.y,
             rotationOffset: customOffset.rotationOffset ?? 0,
@@ -1705,12 +1805,15 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     set((state) => {
       const child = state.entities[childId];
       if (!child || !child.parentId) return state;
+      const prev = child.parentOffset;
       const nextOffset: ParentOffset = {
-        x: partial.x ?? child.parentOffset?.x ?? 0,
-        y: partial.y ?? child.parentOffset?.y ?? 0,
-        rotationOffset: partial.rotationOffset ?? child.parentOffset?.rotationOffset ?? 0,
-        inheritRotation: partial.inheritRotation ?? child.parentOffset?.inheritRotation ?? true,
-        inheritFlip: partial.inheritFlip ?? child.parentOffset?.inheritFlip ?? true,
+        ...(prev || {}),
+        ...partial,
+        x: partial.x ?? prev?.x ?? 0,
+        y: partial.y ?? prev?.y ?? 0,
+        rotationOffset: partial.rotationOffset ?? prev?.rotationOffset ?? 0,
+        inheritRotation: partial.inheritRotation ?? prev?.inheritRotation ?? true,
+        inheritFlip: partial.inheritFlip ?? prev?.inheritFlip ?? true,
       };
       const updatedChild: Entity = {
         ...child,
@@ -2195,6 +2298,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     tags,
     colliderType,
     colliderBounds,
+    pivot,
     frames,
     frameRate,
     animationLoop,
@@ -2226,6 +2330,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       ...(clonedLayers ? { drawingLayers: clonedLayers } : {}),
       ...(colliderType ? { colliderType } : {}),
       ...(clonedColliderBounds ? { colliderBounds: clonedColliderBounds } : {}),
+      ...(pivot ? { pivot: { x: pivot.x, y: pivot.y } } : {}),
       tags: tags && tags.length > 0 ? tags : [slug, 'custom'],
       position: { x: 180 + ((count * 35) % 220), y: 140 + ((count * 30) % 180) },
       size: { width: 256, height: 256 },
@@ -2507,6 +2612,47 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       appMode: 'edit',
       hasRecoveryDraftOnBoot: false,
     });
+    get().evaluateRules();
+  },
+
+  loadTestScenePreset: (presetId) => {
+    get().pushSceneHistory();
+    clearPlayRuntimeState();
+    const built = buildPhysicsTestScene(presetId);
+    const curGizmos = resolveGizmoSettings(get().settings);
+    set((state) => ({
+      entities: built.entities,
+      entityOrder: built.entityOrder,
+      customArchetypes: JSON.parse(JSON.stringify(defaultCustomArchetypes)),
+      entityGroups: [],
+      rules: built.rules,
+      folders: built.folders,
+      customSounds: [],
+      customParticles: [],
+      layerGroups: built.layerGroups,
+      projectPalette: built.projectPalette,
+      snapshotEntities: null,
+      snapshotEntityOrder: null,
+      snapshotRules: null,
+      selectedEntityId: built.selectedEntityId,
+      selectedLayerId: null,
+      activeCollisions: {},
+      appMode: 'edit',
+      hasRecoveryDraftOnBoot: false,
+      settings: {
+        ...state.settings,
+        gizmos: {
+          ...curGizmos,
+          masterEnabled: true,
+          categories: {
+            ...curGizmos.categories,
+            springsAndJiggle: 'both',
+            colliderLayers: 'both',
+            lookAt: 'both',
+          },
+        },
+      },
+    }));
     get().evaluateRules();
   },
 

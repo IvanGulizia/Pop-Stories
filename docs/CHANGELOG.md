@@ -1,3 +1,29 @@
+## [Phase 10.27] - 2026-11-17
+### Ajouté & Corrigé
+- **Mode Dessin (`DrawingCanvas.tsx`, `DrawingColliderSection.tsx`, `DrawingPivotSection.tsx`, `DrawingCanvasColliderOverlay.tsx`, `DrawingCanvasPivotOverlay.tsx`)** :
+  - Déplacement des panneaux *Collider* et *Pivot* sous *Palette du Projet & Épaisseur du Trait*.
+  - Pivot masqué par défaut à l'ouverture de l'atelier (`showPivotPreview = false`).
+  - Ajout du verrouillage indépendant (`isColliderLocked`, `isPivotLocked`) pour figer les manipulations canvas et saisies du collider/pivot pendant le dessin.
+- **Gizmos (`SceneGizmoOverlay.tsx`)** : Retrait du texte `'box'`/`'circle'` sur les badges de hitboxes (conservation uniquement pour `Capteur`, `✕ OFF`, délégation parent et `👻`), synchro temps réel des positions draguées (`getActiveDragPositions()`) et ancrage exact des chaînes sur pivot parent décentré.
+- **Rotation directe sur le canvas (`EntitySelectionOverlay.tsx`, `useEntityPointerInteraction.ts`, `CustomShape.tsx`, `Apple.tsx`, `Plant.tsx`, `useSceneStore.ts`)** : Poignée rotative supérieure avec cran `Shift` 15°, Undo snapshot et mise à jour WYSIWYG des enfants en orbite dans `updateStateProperties`.
+- **Suivi continu en Drag 60 FPS (`matterPhysicsEngine.ts`, `useEntityPointerInteraction.ts`)** : Injection de `liveEntities` (`activeDragPositions`) dans `stepMatterPhysics` (`follow`, `look_at`, `move_to`, `flee`, `dragOverTargets`, `physics_joint`, `parentId`) et mise à jour continue parent→enfant en Édition pendant le glissement avant relâchement.
+- **Chaînes Jiggle, `initialAngleOffset` & Calibration `physics_joint` (`types/index.ts`, `behaviorMetadata.tsx`, `JiggleBehaviorControls.tsx`, `springJiggleSolver.ts`, `matterPhysicsEngine.ts`, `Inspector.tsx`)** : Ancrage exact `getParentAnchorWorldPosition` sur pivot parent en Jiggle (`A→B→C`), paramètre *Angle de départ (hors repos)* permettant une oscillation dès le lancement Play, et application des réglages `springStiffness`, `springDamping` et `springGravity` (défaut `400 px/s²`) sur `physics_joint`.
+- **Scènes de Test Jouables (`src/store/physicsTestScenes.ts`, `useSceneStore.ts`, `SettingsPanel.tsx`, `src/__tests__/springAndJiggle.test.ts`)** : 3 scènes chargeables en 1 clic dans les Paramètres (*Chaîne Jiggle 3 maillons*, *Joint Physique + Collisions Décor*, *Suivi Temps Réel Drag + Follow + LookAt*) avec tests unitaires associés.
+
+## [Phase 10.26] - 2026-11-17
+### Ajouté
+- **Système Multi-Niveaux de Pivot WYSIWYG (`types/index.ts`, `utils/physics/pivotHelpers.ts`, `DrawingCanvasPivotOverlay.tsx`, `DrawingPivotSection.tsx`, `DrawingCanvas.tsx`, `FullScreenDrawingModal.tsx`, `CreateEntityModal.tsx`, `Inspector.tsx`, `CustomShape.tsx`, `parentingHelpers.ts`, `matterPhysicsEngine.ts`)** :
+  - Placement visuel du point de pivot directement sur le canvas de l'Atelier de dessin (glisser-déposer du réticule ou clic direct, grille 3×3, X%/Y%, reset) et dans une carte dédiée de l'Inspecteur.
+  - Résolution hiérarchique (`Jiggle pivotOverride > state.pivot > entity.pivot > { 0.5, 0.5 }`), support complet de `flipX` (`1 - x`), `transformOrigin` fidèle et recalage automatique des corps physiques Matter.js en rotation autour d'un pivot décentré.
+- **Parenting & Follow Élastiques + Collisions Monde optionnelles (`ParentOffset`, `FollowBehaviorConfig`, `springJiggleSolver.ts`, `matterPhysicsEngine.ts`, `Inspector.tsx`, `MovementAndAIBehaviorControls.tsx`)** :
+  - Modes d'attache `Rigide`, `Ressort / Damping élastique` (raideur, amortissement, laisse max, pesanteur locale) et `Joint Physique Matter.js` (`Matter.Constraint` à pivot pendulaire).
+  - Option **« Collisions avec murs, sols & objets »** (`collideWithWorld`) permettant aux membres/objets attachés de réagir au décor et aux objets tiers tout en conservant le groupe négatif anti-auto-collision parent.
+  - Option `Type de suivi : Ressort / Damping élastique` ajoutée sur le comportement `Follow`.
+- **Nouveau Composant `Jiggle & Ressort Rotatif` (`JiggleBehaviorConfig`, `JiggleBehaviorControls.tsx`, `behaviorMetadata.tsx`, `AddBehaviorModal.tsx`, `BehaviorManager.tsx`)** :
+  - Oscillation angulaire additive autour du pivot effectif réagissant à l'accélération (`inertia`), la gravité (`gravityPull`) et aux impacts (`collideWithWorld`), bornée à `±maxAngle`, avec déformation volumique optionnelle *MudBun* (`squashIntensity`) et surcharge locale de pivot (`pivotOverride`).
+- **Gizmos `Ressorts, Pivots & Jiggle` & Tests Vitest (`SceneGizmoOverlay.tsx`, `gizmoHelpers.ts`, `src/__tests__/springAndJiggle.test.ts`)** :
+  - Nouvelle catégorie de gizmo `springsAndJiggle` (ressorts zigzag, cercles de laisse, cônes `±maxAngle`, tiges pendulaires, flèches de pesanteur, réticules de pivot et badges Play) + tests unitaires dédiés.
+
 ## [Phase 10.25] - 2026-11-16
 ### Refactorisé
 - **Lot E — Modularisation complète de `RuleBook.tsx` (`src/components/rulebook/*`)** :

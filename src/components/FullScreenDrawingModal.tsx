@@ -27,6 +27,7 @@ import {
   DrawingLayer,
   AnimationFrame,
   AnimationLoopMode,
+  EntityPivot,
 } from '../types';
 
 interface FullScreenDrawingModalProps {
@@ -56,6 +57,11 @@ interface FullScreenDrawingModalProps {
   availableReferenceGuides?: ReferenceGuideOption[];
   initialHotspot?: { x: number; y: number };
   isCursorMode?: boolean;
+  initialPivot?: EntityPivot;
+  enablePivotEditing?: boolean;
+  isStatePivotContext?: boolean;
+  initialHasStatePivotOverride?: boolean;
+  baseEntityPivot?: EntityPivot;
   onSave: (
     paths: VectorPath[],
     dataUrl?: string,
@@ -69,6 +75,10 @@ interface FullScreenDrawingModalProps {
       frames?: AnimationFrame[];
       frameRate?: number;
       animationLoop?: AnimationLoopMode;
+    },
+    pivotData?: {
+      pivot: EntityPivot;
+      isStateOverride?: boolean;
     }
   ) => void;
   onClose: () => void;
@@ -109,6 +119,11 @@ export function FullScreenDrawingModal({
   availableReferenceGuides,
   initialHotspot,
   isCursorMode = false,
+  initialPivot,
+  enablePivotEditing = true,
+  isStatePivotContext = false,
+  initialHasStatePivotOverride = false,
+  baseEntityPivot,
   onSave,
   onClose,
 }: FullScreenDrawingModalProps) {
@@ -142,6 +157,12 @@ export function FullScreenDrawingModal({
   );
   const [currentHotspot, setCurrentHotspot] = useState<{ x: number; y: number }>(
     initialHotspot || referenceGuide?.hotspot || { x: 75, y: 25 }
+  );
+  const [currentPivot, setCurrentPivot] = useState<EntityPivot>(
+    initialPivot || baseEntityPivot || { x: 0.5, y: 0.5 }
+  );
+  const [currentHasStatePivotOverride, setCurrentHasStatePivotOverride] = useState<boolean>(
+    initialHasStatePivotOverride
   );
   const [stateName, setStateName] = useState<string>(currentEditingStateName || 'Normal');
   const [isEditingName, setIsEditingName] = useState(false);
@@ -340,6 +361,12 @@ export function FullScreenDrawingModal({
             frameRate,
             animationLoop,
           }
+        : undefined,
+      enablePivotEditing && !isCursorMode
+        ? {
+            pivot: currentPivot,
+            isStateOverride: isStatePivotContext ? currentHasStatePivotOverride : undefined,
+          }
         : undefined
     );
   };
@@ -530,6 +557,15 @@ export function FullScreenDrawingModal({
             initialHotspot={currentHotspot}
             onHotspotChange={(pos) => setCurrentHotspot(pos)}
             isCursorMode={isCursorMode}
+            initialPivot={currentPivot}
+            enablePivotEditing={enablePivotEditing}
+            isStatePivotContext={isStatePivotContext}
+            initialHasStatePivotOverride={currentHasStatePivotOverride}
+            baseEntityPivot={baseEntityPivot}
+            onPivotChange={(p, isOvr) => {
+              setCurrentPivot(p);
+              if (isOvr !== undefined) setCurrentHasStatePivotOverride(isOvr);
+            }}
             actionsRef={canvasActionsRef}
             onHistoryStateChange={handleHistoryStateChange}
             hideTopHistoryButtons={true}

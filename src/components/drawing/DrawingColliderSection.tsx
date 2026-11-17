@@ -1,4 +1,4 @@
-import { Shield, Eye, EyeOff, Sparkles, Square, Circle, Shapes } from 'lucide-react';
+import { Shield, Eye, EyeOff, Sparkles, Square, Circle, Shapes, Lock, Unlock } from 'lucide-react';
 import { ColliderType } from '../../types';
 import { ManualColliderRect } from './DrawingCanvasColliderOverlay';
 
@@ -16,6 +16,8 @@ interface DrawingColliderSectionProps {
   onSelectColliderType: (type: ColliderType) => void;
   isColliderBodyDraggable: boolean;
   onToggleColliderBodyDraggable: () => void;
+  isColliderLocked: boolean;
+  onToggleColliderLocked: () => void;
   onInitManualFromDrawing: () => void;
   manualCollider: ManualColliderRect;
   onUpdateManualCollider: (shape: ColliderType, next: ManualColliderRect) => void;
@@ -35,6 +37,8 @@ export function DrawingColliderSection({
   onSelectColliderType,
   isColliderBodyDraggable,
   onToggleColliderBodyDraggable,
+  isColliderLocked,
+  onToggleColliderLocked,
   onInitManualFromDrawing,
   manualCollider,
   onUpdateManualCollider,
@@ -46,6 +50,22 @@ export function DrawingColliderSection({
           <Shield className="w-3.5 h-3.5 text-emerald-600" /> Collider
         </span>
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onToggleColliderLocked}
+            className={`p-1 rounded-lg border text-[10px] cursor-pointer transition-colors ${
+              isColliderLocked
+                ? 'bg-amber-100 text-amber-800 border-amber-300 shadow-2xs'
+                : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+            }`}
+            title={
+              isColliderLocked
+                ? 'Collider verrouillé sur le canvas (cliquer pour déverrouiller)'
+                : 'Verrouiller le déplacement du collider sur le canvas'
+            }
+          >
+            {isColliderLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+          </button>
           <button
             type="button"
             onClick={onToggleShowColliderPreview}
@@ -60,8 +80,9 @@ export function DrawingColliderSection({
           </button>
           <button
             type="button"
+            disabled={isColliderLocked}
             onClick={onAutoDetectCollider}
-            className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200 flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+            className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-45 disabled:cursor-not-allowed px-2 py-0.5 rounded-lg border border-emerald-200 flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
             title="Calculer/détecter automatiquement d'après le dessin"
           >
             <Sparkles className="w-3 h-3 text-emerald-600" /> Auto-dessin
@@ -171,13 +192,20 @@ export function DrawingColliderSection({
 
           {/* Réglages précis en mode Manuel */}
           {colliderMode === 'manual' && (
-            <div className="p-2 bg-emerald-50/50 rounded-xl border border-emerald-200/80 space-y-2">
+            <div className={`p-2 bg-emerald-50/50 rounded-xl border border-emerald-200/80 space-y-2 ${isColliderLocked ? 'opacity-65' : ''}`}>
+              {isColliderLocked && (
+                <div className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 flex items-center gap-1">
+                  <Lock className="w-3 h-3 shrink-0" />
+                  <span>Zone verrouillée — ne gêne pas le dessin</span>
+                </div>
+              )}
               <div className="flex items-center justify-between gap-1.5">
                 <button
                   type="button"
+                  disabled={isColliderLocked}
                   onClick={onToggleColliderBodyDraggable}
-                  className={`flex-1 py-1 px-2 rounded-lg text-[10px] font-bold border cursor-pointer transition-all ${
-                    isColliderBodyDraggable
+                  className={`flex-1 py-1 px-2 rounded-lg text-[10px] font-bold border cursor-pointer disabled:cursor-not-allowed transition-all ${
+                    isColliderBodyDraggable && !isColliderLocked
                       ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
                       : 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-100'
                   }`}
@@ -187,8 +215,9 @@ export function DrawingColliderSection({
                 </button>
                 <button
                   type="button"
+                  disabled={isColliderLocked}
                   onClick={onInitManualFromDrawing}
-                  className="py-1 px-2 rounded-lg text-[10px] font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 cursor-pointer"
+                  className="py-1 px-2 rounded-lg text-[10px] font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 disabled:cursor-not-allowed cursor-pointer"
                   title="Recaler sur les bords exacts du dessin"
                 >
                   Caler
@@ -203,6 +232,7 @@ export function DrawingColliderSection({
                       type="number"
                       min={0}
                       max={200}
+                      disabled={isColliderLocked}
                       value={Math.round(manualCollider.centerX)}
                       onChange={(e) => {
                         const cx = Math.max(0, Math.min(200, Number(e.target.value) || 0));
@@ -212,7 +242,7 @@ export function DrawingColliderSection({
                           x: cx - manualCollider.radius,
                         });
                       }}
-                      className="w-full px-1.5 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
+                      className="w-full px-1.5 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800 disabled:cursor-not-allowed"
                     />
                   </label>
                   <label className="space-y-0.5">
@@ -221,6 +251,7 @@ export function DrawingColliderSection({
                       type="number"
                       min={0}
                       max={200}
+                      disabled={isColliderLocked}
                       value={Math.round(manualCollider.centerY)}
                       onChange={(e) => {
                         const cy = Math.max(0, Math.min(200, Number(e.target.value) || 0));
@@ -230,7 +261,7 @@ export function DrawingColliderSection({
                           y: cy - manualCollider.radius,
                         });
                       }}
-                      className="w-full px-1.5 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
+                      className="w-full px-1.5 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800 disabled:cursor-not-allowed"
                     />
                   </label>
                   <label className="space-y-0.5">
@@ -239,6 +270,7 @@ export function DrawingColliderSection({
                       type="number"
                       min={6}
                       max={130}
+                      disabled={isColliderLocked}
                       value={Math.round(manualCollider.radius)}
                       onChange={(e) => {
                         const r = Math.max(6, Math.min(130, Number(e.target.value) || 10));
@@ -251,7 +283,7 @@ export function DrawingColliderSection({
                           y: manualCollider.centerY - r,
                         });
                       }}
-                      className="w-full px-1.5 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
+                      className="w-full px-1.5 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800 disabled:cursor-not-allowed"
                     />
                   </label>
                 </div>
@@ -263,6 +295,7 @@ export function DrawingColliderSection({
                       type="number"
                       min={0}
                       max={190}
+                      disabled={isColliderLocked}
                       value={Math.round(manualCollider.x)}
                       onChange={(e) => {
                         const nx = Math.max(0, Math.min(190, Number(e.target.value) || 0));
@@ -272,7 +305,7 @@ export function DrawingColliderSection({
                           centerX: nx + manualCollider.width / 2,
                         });
                       }}
-                      className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
+                      className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800 disabled:cursor-not-allowed"
                     />
                   </label>
                   <label className="space-y-0.5">
@@ -281,6 +314,7 @@ export function DrawingColliderSection({
                       type="number"
                       min={0}
                       max={190}
+                      disabled={isColliderLocked}
                       value={Math.round(manualCollider.y)}
                       onChange={(e) => {
                         const ny = Math.max(0, Math.min(190, Number(e.target.value) || 0));
@@ -290,7 +324,7 @@ export function DrawingColliderSection({
                           centerY: ny + manualCollider.height / 2,
                         });
                       }}
-                      className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
+                      className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800 disabled:cursor-not-allowed"
                     />
                   </label>
                   <label className="space-y-0.5">
@@ -299,6 +333,7 @@ export function DrawingColliderSection({
                       type="number"
                       min={10}
                       max={200}
+                      disabled={isColliderLocked}
                       value={Math.round(manualCollider.width)}
                       onChange={(e) => {
                         const nw = Math.max(10, Math.min(200, Number(e.target.value) || 10));
@@ -308,7 +343,7 @@ export function DrawingColliderSection({
                           centerX: manualCollider.x + nw / 2,
                         });
                       }}
-                      className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
+                      className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800 disabled:cursor-not-allowed"
                     />
                   </label>
                   <label className="space-y-0.5">
@@ -317,6 +352,7 @@ export function DrawingColliderSection({
                       type="number"
                       min={10}
                       max={200}
+                      disabled={isColliderLocked}
                       value={Math.round(manualCollider.height)}
                       onChange={(e) => {
                         const nh = Math.max(10, Math.min(200, Number(e.target.value) || 10));
@@ -326,7 +362,7 @@ export function DrawingColliderSection({
                           centerY: manualCollider.y + nh / 2,
                         });
                       }}
-                      className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800"
+                      className="w-full px-1 py-1 bg-white border border-emerald-200 rounded-md font-mono font-bold text-slate-800 disabled:cursor-not-allowed"
                     />
                   </label>
                 </div>

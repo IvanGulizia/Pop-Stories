@@ -6,6 +6,7 @@ import { CursorState, cursorMetadata, renderCursorSvg, getHugeIconGuidePaths, ge
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { ReferenceGuideOption } from './DrawingCanvas';
 import { useSceneStore } from '../store/useSceneStore';
+import { PHYSICS_TEST_SCENE_DESCRIPTORS, PhysicsTestSceneId } from '../store/physicsTestScenes';
 import { GizmoCategoryId, GizmoVisibilityMode, SceneAspectRatio } from '../types';
 import { GIZMO_CATEGORY_LIST, resolveGizmoSettings } from '../utils/gizmoHelpers';
 
@@ -18,6 +19,7 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
   const settings = useSceneStore((state) => state.settings);
   const updateSettings = useSceneStore((state) => state.updateSettings);
   const restoreDefaultScene = useSceneStore((state) => state.restoreDefaultScene);
+  const loadTestScenePreset = useSceneStore((state) => state.loadTestScenePreset);
   const exportProject = useSceneStore((state) => state.exportProject);
   const importProject = useSceneStore((state) => state.importProject);
 
@@ -31,12 +33,19 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
   // Accordion Sections Open/Closed state (Closed by default)
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     files: false,
+    testScenes: false,
     canvas: false,
     gizmos: false,
     rules: false,
     cursors: false,
     play: false,
   });
+
+  const handleLoadTestScene = (presetId: PhysicsTestSceneId, label: string) => {
+    loadTestScenePreset(presetId);
+    setImportStatus({ type: 'success', message: `Scène test chargée : ${label}` });
+    setTimeout(() => setImportStatus(null), 3500);
+  };
 
   const gizmos = resolveGizmoSettings(settings);
 
@@ -445,6 +454,61 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
                 </button>
               )}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* ========================================================================= */}
+      {/* ACCORDION : SCÈNES DE TEST (JIGGLE, JOINT PHYSIQUE & SUIVI CONTINU) */}
+      {/* ========================================================================= */}
+      <div className="rounded-2xl border border-fuchsia-200/80 bg-fuchsia-50/40 overflow-hidden transition-all shadow-2xs">
+        <button
+          type="button"
+          onClick={() => toggleSection('testScenes')}
+          className="w-full p-3 flex items-center justify-between bg-fuchsia-100/50 hover:bg-fuchsia-100/80 transition-colors cursor-pointer text-left"
+        >
+          <div className="flex items-center gap-2 text-xs font-black text-fuchsia-950 uppercase tracking-wider">
+            <Sparkles className="w-4 h-4 text-fuchsia-600" />
+            <span>Scènes de Test (Jiggle, Joint &amp; Drag)</span>
+          </div>
+          {openSections.testScenes ? (
+            <ChevronDown className="w-4 h-4 text-fuchsia-700" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-fuchsia-700" />
+          )}
+        </button>
+
+        {openSections.testScenes && (
+          <div className="p-3 space-y-2.5 animate-in fade-in duration-150">
+            <p className="text-[10px] text-slate-600 leading-snug">
+              Chargez un bac à sable pré-configuré (avec gizmos actifs) puis passez en mode{' '}
+              <span className="font-bold text-slate-800">Play</span> pour tester en direct.
+            </p>
+            {PHYSICS_TEST_SCENE_DESCRIPTORS.map((preset) => (
+              <div
+                key={preset.id}
+                className="p-2.5 bg-white rounded-xl border border-fuchsia-200/80 space-y-1.5 shadow-2xs"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-bold text-slate-900">{preset.title}</div>
+                    <div className="text-[10px] text-slate-500 leading-snug">{preset.subtitle}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleLoadTestScene(preset.id, preset.title)}
+                    className="px-2.5 py-1 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer shrink-0 shadow-2xs"
+                  >
+                    Charger
+                  </button>
+                </div>
+                <ul className="space-y-0.5 text-[9.5px] text-slate-600 pl-2 border-l-2 border-fuchsia-200">
+                  {preset.keyParams.map((kp, idx) => (
+                    <li key={idx}>• {kp}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
         )}
       </div>

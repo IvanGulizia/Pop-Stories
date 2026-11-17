@@ -6,6 +6,7 @@ import {
   FleeBehaviorConfig,
   FollowBehaviorConfig,
   InteractivePuppetBehaviorConfig,
+  JiggleBehaviorConfig,
   LookAtBehaviorConfig,
   MoveToBehaviorConfig,
   ParticleEmitterBehaviorConfig,
@@ -16,7 +17,16 @@ import {
 } from '../types';
 import { getEntityWorldColliderBounds } from '../utils/collider';
 import { isGizmoCategoryVisible, resolveGizmoSettings } from '../utils/gizmoHelpers';
-import { getEffectiveBehaviors, getGizmoRuntimeDebugData } from '../utils/matterPhysicsEngine';
+import {
+  getActiveDragPositions,
+  getEffectiveBehaviors,
+  getGizmoRuntimeDebugData,
+} from '../utils/matterPhysicsEngine';
+import {
+  getParentAnchorWorldPosition,
+  getPivotWorldPosition,
+  resolveEffectivePivot,
+} from '../utils/physics/pivotHelpers';
 
 interface SceneGizmoOverlayProps {
   mousePosRef: React.MutableRefObject<{ x: number; y: number } | null>;
@@ -31,6 +41,48 @@ function getEntityCenter(entity: Entity): Position {
     x: entity.position.x + entity.size.width / 2,
     y: entity.position.y + entity.size.height / 2,
   };
+}
+
+function buildSpringZigzagPoints(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  coils = 7,
+  amplitude = 5.5
+): string {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 10) {
+    return `${x1},${y1} ${x2},${y2}`;
+  }
+  const ux = dx / dist;
+  const uy = dy / dist;
+  const nx = -uy;
+  const ny = ux;
+  const lead = Math.min(10, dist * 0.16);
+  const pts: string[] = [`${x1},${y1}`];
+  const pStartX = x1 + ux * lead;
+  const pStartY = y1 + uy * lead;
+  pts.push(`${pStartX.toFixed(1)},${pStartY.toFixed(1)}`);
+
+  const usable = dist - lead * 2;
+  if (usable > 6) {
+    for (let i = 1; i <= coils; i++) {
+      const t = (i - 0.5) / coils;
+      const side = i % 2 === 0 ? 1 : -1;
+      const px = pStartX + ux * (usable * t) + nx * (amplitude * side);
+      const py = pStartY + uy * (usable * t) + ny * (amplitude * side);
+      pts.push(`${px.toFixed(1)},${py.toFixed(1)}`);
+    }
+  }
+
+  const pEndX = x2 - ux * lead;
+  const pEndY = y2 - uy * lead;
+  pts.push(`${pEndX.toFixed(1)},${pEndY.toFixed(1)}`);
+  pts.push(`${x2},${y2}`);
+  return pts.join(' ');
 }
 
 function computeResolvedParentRotation(
@@ -98,7 +150,7 @@ function buildArcSectorPath(
 }
 
 export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
-  const entities = useSceneStore((state) => state.entities);
+  const rawEntities = useSceneStore((state) => state.entities);
   const entityOrder = useSceneStore((state) => state.entityOrder || EMPTY_LIST);
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
   const appMode = useSceneStore((state) => state.appMode);
@@ -115,6 +167,7 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
   const showPuppetZones = isGizmoCategoryVisible(settings, 'puppetZones', isPlayMode);
   const showAiZones = isGizmoCategoryVisible(settings, 'aiZones', isPlayMode);
   const showPhysicsVectors = isGizmoCategoryVisible(settings, 'physicsVectors', isPlayMode);
+  const showSpringsAndJiggle = isGizmoCategoryVisible(settings, 'springsAndJiggle', isPlayMode);
 
   const anyVisible =
     showHitboxes ||
@@ -123,12 +176,17 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
     showLookAt ||
     showPuppetZones ||
     showAiZones ||
-    showPhysicsVectors;
+    showPhysicsVectors ||
+    showSpringsAndJiggle;
 
-  // Rafraîchissement fluide en Mode Play pour cibles souris / orbites / zones IA dynamiques
+  // Rafraîchissement fluide en Mode Play pour cibles souris / orbites / zones IA / ressorts & jiggle
   const [, setTick] = useState(0);
   useEffect(() => {
-    if (!isPlayMode || !anyVisible || (!showLookAt && !showAiZones && !showPuppetZones)) {
+    if (
+      !isPlayMode ||
+      !anyVisible ||
+      (!showLookAt && !showAiZones && !showPuppetZones && !showSpringsAndJiggle)
+    ) {
       return;
     }
     let rafId = 0;
@@ -138,9 +196,19 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
     };
     rafId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafId);
-  }, [isPlayMode, anyVisible, showLookAt, showAiZones, showPuppetZones]);
+  }, [isPlayMode, anyVisible, showLookAt, showAiZones, showPuppetZones, showSpringsAndJiggle]);
 
   if (!anyVisible) return null;
+
+  const activeDrags = isPlayMode ? getActiveDragPositions() : null;
+  const entities: Record<string, Entity> =
+    activeDrags && Object.keys(activeDrags).length > 0
+      ? Object.fromEntries(
+          Object.entries(rawEntities).map(([id, ent]) =>
+            activeDrags[id] ? [id, { ...ent, position: activeDrags[id] }] : [id, ent]
+          )
+        )
+      : rawEntities;
 
   const order = entityOrder.length > 0 ? entityOrder : Object.keys(entities);
   const allIds = Array.from(new Set([...order, ...Object.keys(entities)]));
@@ -201,6 +269,16 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
           orient="auto"
         >
           <path d="M 0 0.5 L 6 3.5 L 0 6.5 z" fill="#f59e0b" />
+        </marker>
+        <marker
+          id="gizmo-arrow-fuchsia"
+          markerWidth="7"
+          markerHeight="7"
+          refX="5.5"
+          refY="3.5"
+          orient="auto"
+        >
+          <path d="M 0 0.5 L 6 3.5 L 0 6.5 z" fill="#d946ef" />
         </marker>
       </defs>
 
@@ -277,82 +355,123 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
         )}
 
       {/* 2. HIÉRARCHIE & PIVOTS (PARENT -> ENFANT) */}
-      {showHierarchy &&
-        allEntities.map((child) => {
-          if (!child.parentId || !entities[child.parentId]) return null;
-          if (
-            filterOnlySelected &&
-            selectedEntityId !== child.id &&
-            selectedEntityId !== child.parentId
-          ) {
-            return null;
-          }
-          const parent = entities[child.parentId];
-          const pCenter = getEntityCenter(parent);
-          const cCenter = getEntityCenter(child);
-          const midX = (pCenter.x + cCenter.x) / 2;
-          const midY = (pCenter.y + cCenter.y) / 2;
-          const showDelta =
-            selectedEntityId === child.id || selectedEntityId === parent.id;
-          const dx = Math.round(child.parentOffset?.x ?? cCenter.x - pCenter.x);
-          const dy = Math.round(child.parentOffset?.y ?? cCenter.y - pCenter.y);
+      {showHierarchy && (
+        <>
+          {allEntities.map((child) => {
+            if (!child.parentId || !entities[child.parentId]) return null;
+            if (
+              filterOnlySelected &&
+              selectedEntityId !== child.id &&
+              selectedEntityId !== child.parentId
+            ) {
+              return null;
+            }
+            const parent = entities[child.parentId];
+            const pState = parent.states[parent.currentStateId];
+            const cState = child.states[child.currentStateId];
+            const pPivot = getPivotWorldPosition(
+              parent.position,
+              parent.size,
+              resolveEffectivePivot(parent, pState)
+            );
+            const cPivot = getPivotWorldPosition(
+              child.position,
+              child.size,
+              resolveEffectivePivot(child, cState)
+            );
+            const midX = (pPivot.x + cPivot.x) / 2;
+            const midY = (pPivot.y + cPivot.y) / 2;
+            const showDelta =
+              selectedEntityId === child.id || selectedEntityId === parent.id;
+            const dx = Math.round(child.parentOffset?.x ?? cPivot.x - pPivot.x);
+            const dy = Math.round(child.parentOffset?.y ?? cPivot.y - pPivot.y);
 
-          return (
-            <g key={`gizmo-hier-${child.id}`}>
-              <line
-                x1={pCenter.x}
-                y1={pCenter.y}
-                x2={cCenter.x}
-                y2={cCenter.y}
-                stroke="#6366f1"
-                strokeWidth="1.75"
-                strokeDasharray="5 4"
-                strokeOpacity={0.85}
-                markerEnd="url(#gizmo-arrow-indigo)"
-              />
-              <circle
-                cx={pCenter.x}
-                cy={pCenter.y}
-                r={4.5}
-                fill="#ffffff"
-                stroke="#6366f1"
-                strokeWidth="2"
-              />
-              <circle
-                cx={cCenter.x}
-                cy={cCenter.y}
-                r={3.5}
-                fill="#6366f1"
-                stroke="#ffffff"
-                strokeWidth="1.5"
-              />
-              {showDelta && (
-                <g transform={`translate(${midX}, ${midY - 8})`}>
-                  <rect
-                    x={-34}
-                    y={-10}
-                    width={68}
-                    height={14}
-                    rx={4}
-                    fill="#4338ca"
-                    fillOpacity={0.9}
-                  />
-                  <text
-                    x={0}
-                    y={0}
-                    textAnchor="middle"
-                    fill="#ffffff"
-                    fontSize="8.5"
-                    fontFamily="monospace"
-                    fontWeight="700"
-                  >
-                    Δ({dx},{dy})
-                  </text>
-                </g>
-              )}
-            </g>
-          );
-        })}
+            return (
+              <g key={`gizmo-hier-${child.id}`}>
+                <line
+                  x1={pPivot.x}
+                  y1={pPivot.y}
+                  x2={cPivot.x}
+                  y2={cPivot.y}
+                  stroke="#6366f1"
+                  strokeWidth="1.75"
+                  strokeDasharray="5 4"
+                  strokeOpacity={0.85}
+                  markerEnd="url(#gizmo-arrow-indigo)"
+                />
+                <circle
+                  cx={pPivot.x}
+                  cy={pPivot.y}
+                  r={4.5}
+                  fill="#ffffff"
+                  stroke="#6366f1"
+                  strokeWidth="2"
+                />
+                <circle
+                  cx={cPivot.x}
+                  cy={cPivot.y}
+                  r={3.5}
+                  fill="#6366f1"
+                  stroke="#ffffff"
+                  strokeWidth="1.5"
+                />
+                {showDelta && (
+                  <g transform={`translate(${midX}, ${midY - 8})`}>
+                    <rect
+                      x={-34}
+                      y={-10}
+                      width={68}
+                      height={14}
+                      rx={4}
+                      fill="#4338ca"
+                      fillOpacity={0.9}
+                    />
+                    <text
+                      x={0}
+                      y={0}
+                      textAnchor="middle"
+                      fill="#ffffff"
+                      fontSize="8.5"
+                      fontFamily="monospace"
+                      fontWeight="700"
+                    >
+                      Δ({dx},{dy})
+                    </text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
+
+          {/* Réticules de pivot sur entités sélectionnées, attachées ou à pivot décentré */}
+          {targetEntities.map((entity) => {
+            const st = entity.states[entity.currentStateId];
+            const effPivot = resolveEffectivePivot(entity, st);
+            const isOffCenter =
+              Math.abs(effPivot.x - 0.5) > 0.015 || Math.abs(effPivot.y - 0.5) > 0.015;
+            if (!isOffCenter && selectedEntityId !== entity.id && !entity.parentId) {
+              return null;
+            }
+            const pw = getPivotWorldPosition(entity.position, entity.size, effPivot);
+            return (
+              <g key={`gizmo-pivot-${entity.id}`}>
+                <circle
+                  cx={pw.x}
+                  cy={pw.y}
+                  r={5.5}
+                  fill="none"
+                  stroke="#d946ef"
+                  strokeWidth="1.5"
+                  strokeOpacity={0.9}
+                />
+                <line x1={pw.x - 8} y1={pw.y} x2={pw.x + 8} y2={pw.y} stroke="#d946ef" strokeWidth="1.3" />
+                <line x1={pw.x} y1={pw.y - 8} x2={pw.x} y2={pw.y + 8} stroke="#d946ef" strokeWidth="1.3" />
+                <circle cx={pw.x} cy={pw.y} r={2} fill="#d946ef" />
+              </g>
+            );
+          })}
+        </>
+      )}
 
       {/* 3. ZONES MARIONNETTE (INTERACTIVE PUPPET) */}
       {showPuppetZones &&
@@ -1049,7 +1168,7 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
           let stroke = '#10b981';
           let fill = 'rgba(16, 185, 129, 0.12)';
           let badgeFill = '#047857';
-          let statusLabel = `${wb.colliderType}`;
+          let statusLabel = '';
 
           if (mode === 'disabled') {
             stroke = '#64748b';
@@ -1064,13 +1183,14 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
           }
 
           if (delegation !== 'self') {
-            statusLabel += delegation === 'root_parent' ? ' →Racine' : ' →Parent';
+            statusLabel += (statusLabel ? ' ' : '') + (delegation === 'root_parent' ? '→Racine' : '→Parent');
           }
           if (entity.ignorePointer) {
-            statusLabel += ' 👻';
+            statusLabel += (statusLabel ? ' ' : '') + '👻';
           }
 
-          const badgeWidth = Math.max(54, statusLabel.length * 6.2 + 12);
+          const trimmedLabel = statusLabel.trim();
+          const badgeWidth = Math.max(46, trimmedLabel.length * 6.2 + 12);
 
           return (
             <g
@@ -1120,30 +1240,340 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
                 stroke={stroke}
                 strokeWidth="1.2"
               />
-              <g transform={`translate(${wb.x - 2}, ${wb.y - 4})`}>
-                <rect
-                  x={0}
-                  y={-12}
-                  width={badgeWidth}
-                  height={14}
-                  rx={4}
-                  fill={badgeFill}
-                  fillOpacity={0.92}
-                />
-                <text
-                  x={6}
-                  y={-2}
-                  fill="#ffffff"
-                  fontSize="8.5"
-                  fontFamily="monospace"
-                  fontWeight="700"
-                >
-                  {statusLabel}
-                </text>
-              </g>
+              {trimmedLabel.length > 0 && (
+                <g transform={`translate(${wb.x - 2}, ${wb.y - 4})`}>
+                  <rect
+                    x={0}
+                    y={-12}
+                    width={badgeWidth}
+                    height={14}
+                    rx={4}
+                    fill={badgeFill}
+                    fillOpacity={0.92}
+                  />
+                  <text
+                    x={6}
+                    y={-2}
+                    fill="#ffffff"
+                    fontSize="8.5"
+                    fontFamily="monospace"
+                    fontWeight="700"
+                  >
+                    {trimmedLabel}
+                  </text>
+                </g>
+              )}
             </g>
           );
         })}
+
+      {/* 8. RESSORTS D'ATTACHEMENT, FOLLOW ÉLASTIQUE & JIGGLE */}
+      {showSpringsAndJiggle && (
+        <>
+          {/* A. Liens Parents -> Enfants en mode Ressort ou Joint Physique */}
+          {allEntities.map((child) => {
+            if (!child.parentId || !entities[child.parentId]) return null;
+            if (
+              filterOnlySelected &&
+              selectedEntityId !== child.id &&
+              selectedEntityId !== child.parentId
+            ) {
+              return null;
+            }
+            const mode = child.parentOffset?.attachmentMode || 'rigid';
+            if (mode !== 'spring' && mode !== 'physics_joint') return null;
+
+            const parent = entities[child.parentId];
+            const pState = parent.states[parent.currentStateId];
+            const cState = child.states[child.currentStateId];
+            const offset = child.parentOffset || { x: 0, y: 0 };
+
+            let targetAnchor = isPlayMode ? runtimeDebug?.springAnchors[child.id] : undefined;
+            if (!targetAnchor) {
+              const pEffPivot = resolveEffectivePivot(parent, pState);
+              const pRot =
+                (pState?.rotation ?? 0) +
+                (isPlayMode ? (parent.runtimeTilt || 0) + (parent.runtimeJiggleAngle || 0) : 0);
+              const pFlip = Boolean(parent.flipX);
+              targetAnchor = getParentAnchorWorldPosition({
+                parentPosition: parent.position,
+                parentSize: parent.size,
+                parentPivot: pEffPivot,
+                parentRotDeg: pRot,
+                parentFlipX: pFlip,
+                offsetX: offset.x,
+                offsetY: offset.y,
+                inheritRotation: offset.inheritRotation !== false,
+                inheritFlip: offset.inheritFlip !== false,
+              });
+            }
+
+            const childPivotWorld = getPivotWorldPosition(
+              child.position,
+              child.size,
+              resolveEffectivePivot(child, cState)
+            );
+            const maxDist = Math.max(0, offset.springMaxDistance ?? 0);
+            const isJoint = mode === 'physics_joint';
+            const strokeColor = isJoint ? '#0ea5e9' : '#8b5cf6';
+            const hasWorldCol = isJoint
+              ? offset.collideWithWorld !== false
+              : Boolean(offset.collideWithWorld);
+            const midX = (targetAnchor.x + childPivotWorld.x) / 2;
+            const midY = (targetAnchor.y + childPivotWorld.y) / 2;
+
+            return (
+              <g key={`gizmo-spring-link-${child.id}`}>
+                {maxDist > 0 && (
+                  <circle
+                    cx={targetAnchor.x}
+                    cy={targetAnchor.y}
+                    r={maxDist}
+                    fill={isJoint ? 'rgba(14, 165, 233, 0.04)' : 'rgba(139, 92, 246, 0.04)'}
+                    stroke={strokeColor}
+                    strokeWidth="1.25"
+                    strokeDasharray="4 4"
+                    strokeOpacity={0.65}
+                  />
+                )}
+                <polyline
+                  points={buildSpringZigzagPoints(
+                    targetAnchor.x,
+                    targetAnchor.y,
+                    childPivotWorld.x,
+                    childPivotWorld.y,
+                    7,
+                    5.5
+                  )}
+                  fill="none"
+                  stroke={strokeColor}
+                  strokeWidth="1.9"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+                <circle
+                  cx={targetAnchor.x}
+                  cy={targetAnchor.y}
+                  r={4}
+                  fill="#ffffff"
+                  stroke={strokeColor}
+                  strokeWidth="2"
+                />
+                <circle
+                  cx={childPivotWorld.x}
+                  cy={childPivotWorld.y}
+                  r={4}
+                  fill={strokeColor}
+                  stroke="#ffffff"
+                  strokeWidth="1.5"
+                />
+                {(selectedEntityId === child.id || selectedEntityId === parent.id) && (
+                  <g transform={`translate(${midX}, ${midY - 11})`}>
+                    <rect
+                      x={-44}
+                      y={-10}
+                      width={88}
+                      height={14}
+                      rx={4}
+                      fill={isJoint ? '#0369a1' : '#6d28d9'}
+                      fillOpacity={0.92}
+                    />
+                    <text
+                      x={0}
+                      y={0}
+                      textAnchor="middle"
+                      fill="#ffffff"
+                      fontSize="8.5"
+                      fontFamily="monospace"
+                      fontWeight="700"
+                    >
+                      {isJoint ? 'Joint' : 'Ressort'}
+                      {hasWorldCol ? ' +Col' : ''}
+                    </text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
+
+          {/* B. Follow en mode Ressort / Damping */}
+          {targetEntities.map((entity) => {
+            const currentState = entity.states[entity.currentStateId];
+            const effective = getEffectiveBehaviors(entity, currentState);
+            const follow = effective.find((b) => b.type === 'follow') as
+              | FollowBehaviorConfig
+              | undefined;
+            if (!follow || follow.followMode !== 'spring') return null;
+
+            const center = getEntityCenter(entity);
+            let targetPt: Position | null = null;
+            if (follow.targetType === 'entity' && follow.targetEntityId && entities[follow.targetEntityId]) {
+              targetPt = getEntityCenter(entities[follow.targetEntityId]);
+            } else if (follow.targetType === 'mouse' && liveMousePos) {
+              targetPt = liveMousePos;
+            }
+            if (!targetPt) return null;
+
+            const maxDist = Math.max(0, follow.springMaxDistance ?? 0);
+            return (
+              <g key={`gizmo-follow-spring-${entity.id}`}>
+                {maxDist > 0 && (
+                  <circle
+                    cx={targetPt.x}
+                    cy={targetPt.y}
+                    r={maxDist}
+                    fill="none"
+                    stroke="#ec4899"
+                    strokeWidth="1.25"
+                    strokeDasharray="4 4"
+                    strokeOpacity={0.6}
+                  />
+                )}
+                <polyline
+                  points={buildSpringZigzagPoints(targetPt.x, targetPt.y, center.x, center.y, 8, 5)}
+                  fill="none"
+                  stroke="#ec4899"
+                  strokeWidth="1.75"
+                  strokeLinejoin="round"
+                />
+                <circle cx={targetPt.x} cy={targetPt.y} r={4} fill="none" stroke="#ec4899" strokeWidth="1.6" />
+              </g>
+            );
+          })}
+
+          {/* C. Composants Jiggle (Cônes ±maxAngle, Tiges pendulaires, Gravité, Pivots & Squash) */}
+          {targetEntities.map((entity) => {
+            const currentState = entity.states[entity.currentStateId];
+            const effective = getEffectiveBehaviors(entity, currentState);
+            const jiggle = effective.find((b) => b.type === 'jiggle') as
+              | JiggleBehaviorConfig
+              | undefined;
+            if (!jiggle) return null;
+
+            const effPivot = resolveEffectivePivot(
+              entity,
+              currentState,
+              jiggle.useCustomPivot ? jiggle.pivotOverride : undefined
+            );
+            const jDebug = isPlayMode ? runtimeDebug?.jigglePivots[entity.id] : undefined;
+            const pivotWorld =
+              jDebug?.world || getPivotWorldPosition(entity.position, entity.size, effPivot);
+            const comWorld = getEntityCenter(entity);
+            const dx = comWorld.x - pivotWorld.x;
+            const dy = comWorld.y - pivotWorld.y;
+            const leverLen = Math.hypot(dx, dy);
+            const rodLen = Math.max(26, leverLen, Math.min(entity.size.width, entity.size.height) * 0.45);
+            const baseRodDeg = leverLen >= 4 ? (Math.atan2(dy, dx) * 180) / Math.PI : 90;
+            const maxAng = Math.max(5, jiggle.maxAngle ?? 35);
+            const restOffset = (jiggle.restAngleOffset ?? 0) * (entity.flipX ? -1 : 1);
+            const centerRodDeg = baseRodDeg + (isPlayMode ? 0 : restOffset);
+            const currentJiggleDeg = jDebug ? jDebug.angleDeg : isPlayMode ? entity.runtimeJiggleAngle || 0 : 0;
+            const tipAngleRad = degToRad(baseRodDeg + currentJiggleDeg);
+            const tipX = pivotWorld.x + Math.cos(tipAngleRad) * rodLen;
+            const tipY = pivotWorld.y + Math.sin(tipAngleRad) * rodLen;
+            const gravPull = jiggle.gravityPull ?? 40;
+
+            return (
+              <g key={`gizmo-jiggle-${entity.id}`}>
+                {/* Cône d'amplitude ±maxAngle */}
+                <path
+                  d={buildArcSectorPath(
+                    pivotWorld.x,
+                    pivotWorld.y,
+                    rodLen,
+                    centerRodDeg - maxAng,
+                    centerRodDeg + maxAng
+                  )}
+                  fill="rgba(217, 70, 239, 0.10)"
+                  stroke="#d946ef"
+                  strokeWidth="1.35"
+                  strokeDasharray="4 3"
+                />
+
+                {/* Tige pendulaire Pivot -> Centre de masse */}
+                <line
+                  x1={pivotWorld.x}
+                  y1={pivotWorld.y}
+                  x2={tipX}
+                  y2={tipY}
+                  stroke="#c026d3"
+                  strokeWidth="2"
+                />
+                <circle cx={tipX} cy={tipY} r={3.5} fill="#c026d3" stroke="#ffffff" strokeWidth="1.2" />
+
+                {/* Réticule du pivot effectif Jiggle */}
+                <circle
+                  cx={pivotWorld.x}
+                  cy={pivotWorld.y}
+                  r={6}
+                  fill="rgba(217, 70, 239, 0.14)"
+                  stroke="#a21caf"
+                  strokeWidth="1.6"
+                />
+                <line
+                  x1={pivotWorld.x - 8}
+                  y1={pivotWorld.y}
+                  x2={pivotWorld.x + 8}
+                  y2={pivotWorld.y}
+                  stroke="#a21caf"
+                  strokeWidth="1.4"
+                />
+                <line
+                  x1={pivotWorld.x}
+                  y1={pivotWorld.y - 8}
+                  x2={pivotWorld.x}
+                  y2={pivotWorld.y + 8}
+                  stroke="#a21caf"
+                  strokeWidth="1.4"
+                />
+
+                {/* Flèche de pesanteur locale */}
+                {Math.abs(gravPull) > 1 && (
+                  <line
+                    x1={comWorld.x}
+                    y1={comWorld.y}
+                    x2={comWorld.x}
+                    y2={comWorld.y + Math.sign(gravPull) * Math.min(34, Math.max(14, Math.abs(gravPull) * 0.22))}
+                    stroke="#f59e0b"
+                    strokeWidth="1.8"
+                    markerEnd="url(#gizmo-arrow-amber)"
+                  />
+                )}
+
+                {/* Badge Angle & Squash en Mode Play ou si sélectionné */}
+                {(isPlayMode || selectedEntityId === entity.id) && (
+                  <g transform={`translate(${pivotWorld.x}, ${pivotWorld.y - 16})`}>
+                    <rect
+                      x={-48}
+                      y={-10}
+                      width={96}
+                      height={14}
+                      rx={4}
+                      fill="#86198f"
+                      fillOpacity={0.92}
+                    />
+                    <text
+                      x={0}
+                      y={0}
+                      textAnchor="middle"
+                      fill="#ffffff"
+                      fontSize="8.5"
+                      fontFamily="monospace"
+                      fontWeight="700"
+                    >
+                      Jiggle {currentJiggleDeg >= 0 ? '+' : ''}
+                      {Math.round(currentJiggleDeg)}°
+                      {jDebug && (Math.abs(jDebug.squashX - 1) > 0.02 || Math.abs(jDebug.squashY - 1) > 0.02)
+                        ? ` S:${jDebug.squashX.toFixed(2)}`
+                        : ''}
+                    </text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
+        </>
+      )}
     </svg>
   );
 }

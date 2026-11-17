@@ -24,6 +24,7 @@ import {
   FollowBehaviorConfig,
   HealthBehaviorConfig,
   InteractivePuppetBehaviorConfig,
+  JiggleBehaviorConfig,
   KeyboardControlBehaviorConfig,
   LookAtBehaviorConfig,
   MoveToBehaviorConfig,
@@ -59,6 +60,7 @@ import {
   PatrolBehaviorControls,
   WanderingBehaviorControls,
 } from './behaviors/MovementAndAIBehaviorControls';
+import { JiggleBehaviorControls } from './behaviors/JiggleBehaviorControls';
 import {
   HealthBehaviorControls,
   LookAtBehaviorControls,
@@ -731,5 +733,7 @@ function renderBehaviorControls({
           stateList={stateList}
         />
       );
+    case 'jiggle':
+      return <JiggleBehaviorControls b={{ ...behavior, ...(override || {}) } as JiggleBehaviorConfig} update={update} />;
   }
 }

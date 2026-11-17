@@ -13,6 +13,7 @@ import {
   Shield,
   Shuffle,
   Sparkles,
+  Waves,
   Wind,
   X,
 } from 'lucide-react';
@@ -162,6 +163,22 @@ export function AddBehaviorModal({ isOpen, onClose, onAddBehavior }: AddBehavior
                 <div>
                   <div className="font-bold text-slate-800 text-xs">Vitesse Continue (Projectile & Rotation)</div>
                   <div className="text-[11px] text-slate-500">Propulsion vectorielle et rotation angulaire constante.</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onAddBehavior('jiggle')}
+                className="w-full p-2.5 rounded-2xl border border-fuchsia-200 bg-fuchsia-50/20 hover:border-fuchsia-400 hover:bg-fuchsia-50/60 flex items-center gap-3 transition-all text-left cursor-pointer group"
+              >
+                <div className="w-8 h-8 rounded-xl bg-fuchsia-100 text-fuchsia-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                  <Waves className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-bold text-slate-800 text-xs">Jiggle & Ressort Rotatif (Élastique)</div>
+                  <div className="text-[11px] text-slate-500">
+                    Oscillation angulaire autour du pivot, pesanteur locale et déformation squash & stretch.
+                  </div>
                 </div>
               </button>
             </div>

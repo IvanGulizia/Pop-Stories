@@ -25,6 +25,8 @@ import {
   resolvePointerTargetEntity,
   unregisterEntityDragControls,
 } from '../utils/dragDelegationRegistry';
+import { getPivotWorldPosition, resolveEffectivePivot } from '../utils/physics/pivotHelpers';
+import { shortestAngleDiffRad } from '../utils/physics/lookAtSolver';
 
 export interface UseEntityPointerInteractionOptions {
   entity: Entity;
@@ -54,7 +56,9 @@ export function useEntityPointerInteraction({
   const rules = useSceneStore((state) => state.rules);
 
   const [isResizing, setIsResizing] = useState(false);
+  const [isRotating, setIsRotating] = useState(false);
   const isDraggingRef = useRef(false);
+  const pushedDragHistoryRef = useRef(false);
   const lastDragEndTimeRef = useRef<number>(0);
   const lastDragEvalTimeRef = useRef<number>(0);
   const hasMovedBeyondDragThresholdRef = useRef(false);
@@ -74,7 +78,7 @@ export function useEntityPointerInteraction({
   const currentState: EntityState = entity.states[entity.currentStateId] || fallbackState;
 
   const { canDrag: canDragFromBehavior, throwable, maxThrowSpeed } = isEntityDraggable(entity, currentState);
-  const canDrag = !isResizing && (appMode !== 'play' || canDragFromBehavior);
+  const canDrag = !isResizing && !isRotating && (appMode !== 'play' || canDragFromBehavior);
 
   // Santé & invincibilité runtime
   const healthConfig =
@@ -174,6 +178,7 @@ export function useEntityPointerInteraction({
 
   const handleDragStart = () => {
     isDraggingRef.current = true;
+    pushedDragHistoryRef.current = false;
     lastDragEvalTimeRef.current = 0;
     setActiveDragPosition(entity.id, { x: entity.position.x, y: entity.position.y });
     if (appMode === 'play') {
@@ -226,6 +231,13 @@ export function useEntityPointerInteraction({
       }
       if (now - lastDragEvalTimeRef.current >= 16) {
         lastDragEvalTimeRef.current = now;
+        if (appMode !== 'play') {
+          if (!pushedDragHistoryRef.current && hasMovedBeyondDragThresholdRef.current) {
+            pushedDragHistoryRef.current = true;
+            useSceneStore.getState().pushSceneHistory();
+          }
+          updateEntityPosition(entity.id, { x: numX, y: numY });
+        }
         evaluateRulesWithTemp({
           [entity.id]: { x: numX, y: numY },
         });
@@ -237,6 +249,7 @@ export function useEntityPointerInteraction({
     const now = performance.now();
     // Libérer immédiatement le verrou de synchro visuelle pour que la physique poursuive sans aucun freeze
     isDraggingRef.current = false;
+    pushedDragHistoryRef.current = false;
     lastDragEndTimeRef.current = now;
     setActiveDragPosition(entity.id, null);
     if (appMode === 'play') {
@@ -338,6 +351,57 @@ export function useEntityPointerInteraction({
 
     const handlePointerUp = () => {
       setIsResizing(false);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+  };
+
+  const handleRotatePointerDown = (e: React.PointerEvent) => {
+    if (appMode === 'play') return;
+    e.stopPropagation();
+    e.preventDefault();
+    const container = document.getElementById('scene-canvas-container');
+    if (!container) return;
+
+    useSceneStore.getState().pushSceneHistory();
+    setIsRotating(true);
+
+    const effPivot = resolveEffectivePivot(entity, currentState);
+    const pivotWorld = getPivotWorldPosition(entity.position, entity.size, effPivot);
+    const rect = container.getBoundingClientRect();
+    const startAngleRad = Math.atan2(
+      e.clientY - rect.top - pivotWorld.y,
+      e.clientX - rect.left - pivotWorld.x
+    );
+    const startRotationDeg = currentState.rotation ?? 0;
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const liveRect = container.getBoundingClientRect();
+      const curAngleRad = Math.atan2(
+        moveEvent.clientY - liveRect.top - pivotWorld.y,
+        moveEvent.clientX - liveRect.left - pivotWorld.x
+      );
+      const deltaDeg = (shortestAngleDiffRad(startAngleRad, curAngleRad) * 180) / Math.PI;
+      let nextRot = startRotationDeg + deltaDeg;
+      while (nextRot > 180) nextRot -= 360;
+      while (nextRot < -180) nextRot += 360;
+      if (moveEvent.shiftKey) {
+        nextRot = Math.round(nextRot / 15) * 15;
+      } else {
+        nextRot = Math.round(nextRot * 10) / 10;
+      }
+      useSceneStore
+        .getState()
+        .updateStateProperties(entity.id, currentState.id, { rotation: nextRot });
+    };
+
+    const handlePointerUp = () => {
+      setIsRotating(false);
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerUp);
@@ -574,6 +638,8 @@ export function useEntityPointerInteraction({
     handleDrag,
     handleDragEnd,
     handleResizePointerDown,
+    handleRotatePointerDown,
+    isRotating,
     colliderType,
     colliderClipPath,
     healthConfig,

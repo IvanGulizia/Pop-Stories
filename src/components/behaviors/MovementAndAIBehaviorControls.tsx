@@ -491,26 +491,100 @@ export function FollowBehaviorControls({
         />
       </div>
 
-      {/* Ligne 4: Vitesse de suivi */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200">
-        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-          <span className="font-bold">Vitesse de poursuite</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.speed} px/s
-          </span>
-        </div>
-        <input
-          type="range"
-          min="30"
-          max="400"
-          step="10"
-          value={b.speed}
-          onChange={(e) => update({ speed: parseFloat(e.target.value) })}
-          className="w-full accent-indigo-600"
-        />
+      {/* Ligne 4: Mode de poursuite (Vitesse constante vs Ressort élastique) */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+        <span className="font-bold text-slate-700 text-xs">Type de suivi</span>
+        <select
+          value={b.followMode || 'constant_speed'}
+          onChange={(e) => update({ followMode: e.target.value as 'constant_speed' | 'spring' })}
+          className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[190px]"
+        >
+          <option value="constant_speed">Vitesse constante</option>
+          <option value="spring">Ressort / Damping élastique</option>
+        </select>
       </div>
 
-      <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0.8} update={update} />
+      {(b.followMode || 'constant_speed') === 'spring' ? (
+        <div className="p-2 bg-violet-50/40 rounded-xl border border-violet-200 space-y-2">
+          <div>
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Raideur du ressort</span>
+              <span className="font-mono font-bold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded text-[11px]">
+                {Math.round(b.springStiffness ?? 120)}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="20"
+              max="450"
+              step="10"
+              value={b.springStiffness ?? 120}
+              onChange={(e) => update({ springStiffness: parseFloat(e.target.value) })}
+              className="w-full accent-violet-600"
+            />
+          </div>
+
+          <div>
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Amortissement (Damping)</span>
+              <span className="font-mono font-bold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded text-[11px]">
+                {(b.springDamping ?? 10).toFixed(1)}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="1"
+              max="35"
+              step="0.5"
+              value={b.springDamping ?? 10}
+              onChange={(e) => update({ springDamping: parseFloat(e.target.value) })}
+              className="w-full accent-violet-600"
+            />
+          </div>
+
+          <div>
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Éloignement max (Laisse)</span>
+              <span className="font-mono font-bold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded text-[11px]">
+                {(b.springMaxDistance ?? 0) > 0 ? `${Math.round(b.springMaxDistance!)} px` : 'Libre'}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="400"
+              step="10"
+              value={b.springMaxDistance ?? 0}
+              onChange={(e) => update({ springMaxDistance: parseFloat(e.target.value) })}
+              className="w-full accent-violet-600"
+            />
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Vitesse de suivi classique */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Vitesse de poursuite</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.speed} px/s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="30"
+              max="400"
+              step="10"
+              value={b.speed}
+              onChange={(e) => update({ speed: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+
+          <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0.8} update={update} />
+        </>
+      )}
+
       <FlipControls flipOnMove={b.flipOnMove} flipInvert={b.flipInvert} update={update} />
     </div>
   );
