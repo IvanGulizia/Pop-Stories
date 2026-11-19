@@ -223,7 +223,11 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
     const spawnLabel = spawnEntObj?.name || spawnType;
     const tagsBadge = act.spawnTags && act.spawnTags.length > 0 ? ` #${act.spawnTags[0]}` : '';
     const refBadge =
-      act.spawnLocationMode === 'at_event_point' || act.spawnLocationMode === 'offset_event_point'
+      act.spawnLocationMode === 'random'
+        ? act.spawnRandomScope === 'zone' && act.spawnRandomZone
+          ? ` @Zone (${act.spawnRandomZone.width}×${act.spawnRandomZone.height})`
+          : ' @Aléatoire'
+        : act.spawnLocationMode === 'at_event_point' || act.spawnLocationMode === 'offset_event_point'
         ? ' @Point exact'
         : act.spawnReferenceMode === 'last_spawned'
         ? ' @Dernier'
@@ -233,6 +237,10 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         ? ` @${entities[act.spawnReferenceEntityId]?.name || 'Entité'}`
         : act.spawnReferenceMode === 'type' && act.spawnReferenceEntityType
         ? ` @${getEntityObj(act.spawnReferenceEntityType)?.name || act.spawnReferenceEntityType}`
+        : '';
+    const impulseBadge =
+      (act.spawnImpulseSpeed || 0) > 0
+        ? ` 🚀 ${Math.round(act.spawnImpulseSpeed!)}px/s @ ${Math.round(act.spawnImpulseAngle ?? 0)}°`
         : '';
     return (
       <div
@@ -258,9 +266,9 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
           type="button"
           onClick={(e) => jumpSub(e, 'choose_spawn_location')}
           className="text-[10px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.2 rounded font-medium truncate cursor-pointer"
-          title="Régler l'état, l'emplacement et la taille"
+          title="Régler l'état, l'emplacement, l'impulsion et la taille"
         >
-          (Créer - {humanStateName}{tagsBadge}{refBadge})
+          (Créer - {humanStateName}{tagsBadge}{refBadge}{impulseBadge})
         </button>
       </div>
     );

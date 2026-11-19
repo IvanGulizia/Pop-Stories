@@ -1267,6 +1267,12 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                   initialAbsoluteCoords={
                     isEditingSameSpawn ? existingSpawnAct?.spawnAbsoluteCoords : undefined
                   }
+                  initialRandomScope={
+                    isEditingSameSpawn ? existingSpawnAct?.spawnRandomScope : undefined
+                  }
+                  initialRandomZone={
+                    isEditingSameSpawn ? existingSpawnAct?.spawnRandomZone : undefined
+                  }
                   initialSizeMode={isEditingSameSpawn ? existingSpawnAct?.spawnSizeMode : undefined}
                   initialScaleMultiplier={
                     isEditingSameSpawn ? existingSpawnAct?.spawnScaleMultiplier : undefined
@@ -1287,6 +1293,12 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                   initialReferenceTag={
                     isEditingSameSpawn ? existingSpawnAct?.spawnReferenceTag : undefined
                   }
+                  initialImpulseSpeed={
+                    isEditingSameSpawn ? existingSpawnAct?.spawnImpulseSpeed : undefined
+                  }
+                  initialImpulseAngle={
+                    isEditingSameSpawn ? existingSpawnAct?.spawnImpulseAngle : undefined
+                  }
                   onConfirm={(data) => {
                     applyAction({
                       type: 'spawn_entity',
@@ -1301,10 +1313,14 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                       spawnOffset: data.spawnOffset,
                       spawnPosition: data.spawnPosition,
                       spawnAbsoluteCoords: data.spawnAbsoluteCoords,
+                      spawnRandomScope: data.spawnRandomScope,
+                      spawnRandomZone: data.spawnRandomZone,
                       spawnSizeMode: data.spawnSizeMode,
                       spawnScaleMultiplier: data.spawnScaleMultiplier,
                       spawnCustomSize: data.spawnCustomSize,
                       spawnTags: data.spawnTags,
+                      spawnImpulseSpeed: data.spawnImpulseSpeed,
+                      spawnImpulseAngle: data.spawnImpulseAngle,
                     });
                   }}
                   onCancel={() => {

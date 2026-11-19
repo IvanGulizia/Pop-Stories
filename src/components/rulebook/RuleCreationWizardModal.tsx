@@ -10,6 +10,7 @@ import { EntityOption, ParticleDrawingTarget, WizardData } from './ruleBookTypes
 import { WizardStep1Condition } from './WizardStep1Condition';
 import { WizardStep2Objects } from './WizardStep2Objects';
 import { WizardStep3Actions } from './WizardStep3Actions';
+import { useSceneStore } from '../../store/useSceneStore';
 
 interface RuleCreationWizardModalProps {
   activeWizard: WizardData;
@@ -49,10 +50,14 @@ export function RuleCreationWizardModal({
   const wizardObjectPhase = activeWizard.objectPhase || 'subject';
   const hasWizardParams = ['timer', 'keyboard', 'proximity', 'boundary', 'variable', 'collision'].includes(activeWizard.triggerType);
 
+  const isPickingSpawnOnCanvas = useSceneStore((s) => Boolean(s.spawnCanvasPick));
+
   return (
     <div
-      data-modal-open="true"
-      className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      data-modal-open={isPickingSpawnOnCanvas ? undefined : 'true'}
+      className={`fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 ${
+        isPickingSpawnOnCanvas ? 'hidden' : ''
+      }`}
     >
       <div
         className={`bg-white rounded-3xl border border-slate-200 p-6 w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] flex flex-col overflow-hidden ${

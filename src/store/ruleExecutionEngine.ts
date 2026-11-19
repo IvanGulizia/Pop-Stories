@@ -15,12 +15,14 @@ import {
 import {
   applyEntityMoveAction,
   getActiveDragPositions,
+  queueEntityInitialVelocity,
   setActiveDragPosition,
 } from '../utils/matterPhysicsEngine';
 import { emitParticlesBurst } from '../utils/particleSystem';
 import { soundSynth } from '../utils/sound';
 import { getCollisionContactPoint } from './collisionHelpers';
 import { resolveEntityReference } from './parentingHelpers';
+import { computeRandomSpawnPosition } from '../utils/spawnHelpers';
 
 export interface RuleEngineStoreSnapshot {
   appMode: AppMode;
@@ -464,10 +466,14 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
     let spawnY = 200;
 
     if (locMode === 'random') {
-      const availW = Math.max(40, sceneBounds.width - spawnSize.width - 40);
-      const availH = Math.max(40, sceneBounds.height - spawnSize.height - 40);
-      spawnX = Math.floor(Math.random() * availW + 20);
-      spawnY = Math.floor(Math.random() * availH + 20);
+      const rndPos = computeRandomSpawnPosition({
+        sceneBounds,
+        spawnSize,
+        scope: act.spawnRandomScope || 'canvas',
+        zone: act.spawnRandomZone,
+      });
+      spawnX = rndPos.x;
+      spawnY = rndPos.y;
     } else if (locMode === 'absolute') {
       const targetCoord =
         act.spawnPosition ||
@@ -518,15 +524,23 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
       }
     }
 
+    const minClamp = locMode === 'random' && act.spawnRandomScope === 'zone' ? 0 : 10;
     const spawnedId = helpers.spawnEntity({
       type: spawnType,
-      position: { x: Math.max(10, spawnX), y: Math.max(10, spawnY) },
+      position: { x: Math.max(minClamp, spawnX), y: Math.max(minClamp, spawnY) },
       initialStateId: act.spawnInitialStateId,
       size: spawnSize,
       tags: act.spawnTags,
     });
     if (spawnedId) {
       lastSpawnedEntityId = spawnedId;
+      const impulseSpeed = act.spawnImpulseSpeed ?? 0;
+      if (impulseSpeed > 0) {
+        const angleRad = ((act.spawnImpulseAngle ?? 0) * Math.PI) / 180;
+        const vx = Math.cos(angleRad) * impulseSpeed;
+        const vy = Math.sin(angleRad) * impulseSpeed;
+        queueEntityInitialVelocity(spawnedId, vx, vy);
+      }
     }
     return;
   }

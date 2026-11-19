@@ -1,4 +1,5 @@
-import { ColliderBounds, ColliderType, Entity, EntityState, VectorPath } from '../types';
+import { ColliderBounds, ColliderType, Entity, EntityPivot, EntityState, Position, VectorPath } from '../types';
+import { getPivotWorldPosition, resolveEffectivePivot, rotateVector } from './physics/pivotHelpers';
 
 export interface EntityColliderGeometry {
   x: number;
@@ -289,34 +290,99 @@ export function getEntityWorldColliderBounds(
   };
 }
 
+export interface EntityHitTestContext {
+  position?: Position;
+  totalRotationDeg?: number;
+  scaleX?: number;
+  scaleY?: number;
+  effPivot?: EntityPivot;
+  containerRect?: { left: number; top: number; width: number; height: number } | null;
+}
+
 /**
  * Verifies if a screen click or pointer event (clientX, clientY) falls strictly
- * within the green collider shape defined in the drawing workshop / entity definition.
+ * within the green collider shape defined in the drawing workshop / entity definition,
+ * accurately compensating for rotation, scale, and off-center effective pivot.
  */
 export function isPointInsideEntityCollider(
   clientX: number,
   clientY: number,
   element: HTMLElement | null,
   entity: Entity,
-  currentState?: EntityState
+  currentState?: EntityState,
+  transformContext?: EntityHitTestContext
 ): boolean {
+  const geometry = getEntityColliderBounds(entity, currentState, Boolean(entity.flipX));
+  const margin = 3;
+
+  const containerEl =
+    transformContext?.containerRect !== undefined
+      ? null
+      : typeof document !== 'undefined'
+      ? document.getElementById('scene-canvas-container')
+      : null;
+  const resolvedContainerRect =
+    transformContext?.containerRect !== undefined
+      ? transformContext.containerRect
+      : containerEl && (!element || containerEl.contains(element))
+      ? containerEl.getBoundingClientRect()
+      : null;
+
+  if (resolvedContainerRect && resolvedContainerRect.width > 0 && resolvedContainerRect.height > 0) {
+    const canvasX = clientX - resolvedContainerRect.left;
+    const canvasY = clientY - resolvedContainerRect.top;
+    const pos = transformContext?.position ?? entity.position;
+    const effPivot = transformContext?.effPivot ?? resolveEffectivePivot(entity, currentState);
+    const rotDeg = transformContext?.totalRotationDeg ?? (currentState?.rotation ?? 0);
+    const sBase = currentState?.scale ?? 1;
+    const rawSx = transformContext?.scaleX ?? sBase * (entity.runtimeScaleX ?? 1);
+    const rawSy = transformContext?.scaleY ?? sBase * (entity.runtimeScaleY ?? 1);
+    const sx = Math.abs(rawSx) > 0.05 ? rawSx : 1;
+    const sy = Math.abs(rawSy) > 0.05 ? rawSy : 1;
+
+    const pivotWorld = getPivotWorldPosition(pos, entity.size, effPivot);
+    const dx = (canvasX - pivotWorld.x) / sx;
+    const dy = (canvasY - pivotWorld.y) / sy;
+    const unrotated =
+      Math.abs(rotDeg) > 0.01 ? rotateVector(dx, dy, (-rotDeg * Math.PI) / 180) : { x: dx, y: dy };
+
+    const safeW = Math.max(1, entity.size.width);
+    const safeH = Math.max(1, entity.size.height);
+    const localX = effPivot.x * safeW + unrotated.x;
+    const localY = effPivot.y * safeH + unrotated.y;
+
+    const scaleX = safeW / 200;
+    const scaleY = safeH / 200;
+    const mX = margin / Math.abs(sx);
+    const mY = margin / Math.abs(sy);
+
+    if (geometry.colliderType === 'circle') {
+      const cx = geometry.centerX * scaleX;
+      const cy = geometry.centerY * scaleY;
+      const r = geometry.radius * Math.max(scaleX, scaleY) + Math.max(mX, mY);
+      const cdx = localX - cx;
+      const cdy = localY - cy;
+      return cdx * cdx + cdy * cdy <= r * r;
+    }
+
+    const x0 = geometry.x * scaleX - mX;
+    const y0 = geometry.y * scaleY - mY;
+    const w = geometry.width * scaleX + mX * 2;
+    const h = geometry.height * scaleY + mY * 2;
+    return localX >= x0 && localX <= x0 + w && localY >= y0 && localY <= y0 + h;
+  }
+
   if (!element) return true;
 
   const rect = element.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return true;
 
-  // Local coordinates relative to entity bounding box container
+  // Fallback si hors conteneur scène : coordonnées locales par rapport à la boîte DOM
   const localX = clientX - rect.left;
   const localY = clientY - rect.top;
 
-  const geometry = getEntityColliderBounds(entity, currentState, Boolean(entity.flipX));
-
-  // Scale from 200x200 canvas coordinate space to actual DOM rendered pixel dimensions
   const scaleX = rect.width / 200;
   const scaleY = rect.height / 200;
-
-  // Tolerance margin (3px) for smooth cursor interaction
-  const margin = 3;
 
   if (geometry.colliderType === 'circle') {
     const cx = geometry.centerX * scaleX;
@@ -327,7 +393,6 @@ export function isPointInsideEntityCollider(
     return dx * dx + dy * dy <= r * r;
   }
 
-  // Box / Polygon bounding collider
   const x0 = geometry.x * scaleX - margin;
   const y0 = geometry.y * scaleY - margin;
   const w = geometry.width * scaleX + margin * 2;

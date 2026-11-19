@@ -72,6 +72,13 @@ describe('behaviorResolution', () => {
       throwable: false,
       maxThrowSpeed: 1500,
       hasDynamicPhysics: false,
+      precisePhysicsGrab: false,
+      swingAroundGrabPoint: false,
+      grabRotationMode: 'free',
+      grabMaxAngle: 45,
+      grabBrakeAngle: 15,
+      grabAngularStiffness: 140,
+      grabAngularDamping: 8,
     });
 
     const puppetDynamic = makeEntity({
@@ -86,6 +93,13 @@ describe('behaviorResolution', () => {
       throwable: true,
       maxThrowSpeed: 900,
       hasDynamicPhysics: true,
+      precisePhysicsGrab: false,
+      swingAroundGrabPoint: false,
+      grabRotationMode: 'free',
+      grabMaxAngle: 45,
+      grabBrakeAngle: 15,
+      grabAngularStiffness: 140,
+      grabAngularDamping: 8,
     });
   });
 });

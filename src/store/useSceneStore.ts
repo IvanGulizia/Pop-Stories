@@ -39,6 +39,7 @@ import {
   AutoSaveDraft,
   StateFolder,
   EntityGroup,
+  SpawnRandomZone,
 } from '../types';
 import { getEntityWorldColliderBounds } from '../utils/collider';
 import {
@@ -84,6 +85,7 @@ import {
   collectDescendantIds,
   computeRelativeParentOffset,
   computeChildWorldFromParent,
+  computeParentOffsetFromWorldPin,
 } from './parentingHelpers';
 import {
   matchesEntityFilter,
@@ -219,6 +221,46 @@ interface SceneState {
   setDrawingStrokeWidth: (width: number) => void;
   setDrawingShowGrid: (show: boolean) => void;
   setDrawingSnapToGrid: (snap: boolean) => void;
+
+  // Interactive live canvas coordinate picker for Rule SpawnLocationPicker
+  spawnCanvasPick: {
+    requestId: string;
+    mode: 'absolute' | 'offset' | 'random_zone';
+    snapToGrid: boolean;
+    gridStep: number;
+    refCenter?: { x: number; y: number };
+    spawnSize?: { width: number; height: number };
+    initialZone?: SpawnRandomZone;
+  } | null;
+  spawnCanvasPickResult: {
+    requestId: string;
+    x: number;
+    y: number;
+    zone?: SpawnRandomZone;
+  } | null;
+  startSpawnCanvasPick: (req: {
+    requestId: string;
+    mode: 'absolute' | 'offset' | 'random_zone';
+    snapToGrid: boolean;
+    gridStep: number;
+    refCenter?: { x: number; y: number };
+    spawnSize?: { width: number; height: number };
+    initialZone?: SpawnRandomZone;
+  }) => void;
+  updateSpawnCanvasPickSnap: (snapToGrid: boolean, gridStep?: number) => void;
+  completeSpawnCanvasPick: (x: number, y: number, zone?: SpawnRandomZone) => void;
+  cancelSpawnCanvasPick: () => void;
+  clearSpawnCanvasPickResult: (requestId?: string) => void;
+
+  // Interactive live canvas joint attachment pin picker & direct pin drag
+  jointCanvasPick: {
+    childId: EntityId;
+    parentId: EntityId;
+  } | null;
+  startJointCanvasPick: (childId: EntityId) => void;
+  cancelJointCanvasPick: () => void;
+  completeJointCanvasPick: (worldX: number, worldY: number) => void;
+  moveJointAttachmentPin: (childId: EntityId, worldX: number, worldY: number, skipHistory?: boolean) => void;
 
   updateSettings: (partial: Partial<AppSettings>) => void;
   setAspectRatio: (ratio: SceneAspectRatio) => void;
@@ -390,6 +432,7 @@ interface SceneState {
   triggerClickEvent: (entityId: EntityId) => void;
   triggerPointerEvent: (entityId: EntityId, phase: TriggerPhase, eventPosition?: Position) => void;
   triggerDragRelease: (subjectId: EntityId, eventPosition?: Position) => void;
+  triggerJointBreak: (childId: EntityId, parentId: EntityId, breakPoint?: Position) => void;
   evaluateRules: () => void;
   evaluateRulesWithTemp: (tempPositions?: Record<EntityId, Position>) => void;
 }
@@ -759,6 +802,131 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   setDrawingStrokeWidth: (width) => set({ drawingStrokeWidth: width }),
   setDrawingShowGrid: (show) => set({ drawingShowGrid: show }),
   setDrawingSnapToGrid: (snap) => set({ drawingSnapToGrid: snap }),
+
+  spawnCanvasPick: null,
+  spawnCanvasPickResult: null,
+  startSpawnCanvasPick: (req) =>
+    set({
+      spawnCanvasPick: req,
+      spawnCanvasPickResult: null,
+    }),
+  updateSpawnCanvasPickSnap: (snapToGrid, gridStep) =>
+    set((state) =>
+      state.spawnCanvasPick
+        ? {
+            spawnCanvasPick: {
+              ...state.spawnCanvasPick,
+              snapToGrid,
+              ...(gridStep !== undefined ? { gridStep } : {}),
+            },
+          }
+        : state
+    ),
+  completeSpawnCanvasPick: (x, y, zone) =>
+    set((state) =>
+      state.spawnCanvasPick
+        ? {
+            spawnCanvasPick: null,
+            spawnCanvasPickResult: {
+              requestId: state.spawnCanvasPick.requestId,
+              x: Math.round(x),
+              y: Math.round(y),
+              ...(zone
+                ? {
+                    zone: {
+                      x: Math.round(zone.x),
+                      y: Math.round(zone.y),
+                      width: Math.max(20, Math.round(zone.width)),
+                      height: Math.max(20, Math.round(zone.height)),
+                    },
+                  }
+                : {}),
+            },
+          }
+        : state
+    ),
+  cancelSpawnCanvasPick: () => set({ spawnCanvasPick: null }),
+  clearSpawnCanvasPickResult: (requestId) =>
+    set((state) => {
+      if (!state.spawnCanvasPickResult) return state;
+      if (requestId && state.spawnCanvasPickResult.requestId !== requestId) return state;
+      return { spawnCanvasPickResult: null };
+    }),
+
+  jointCanvasPick: null,
+  startJointCanvasPick: (childId) =>
+    set((state) => {
+      const child = state.entities[childId];
+      if (!child || !child.parentId || !state.entities[child.parentId]) return state;
+      return {
+        spawnCanvasPick: null,
+        jointCanvasPick: { childId, parentId: child.parentId },
+      };
+    }),
+  cancelJointCanvasPick: () => set({ jointCanvasPick: null }),
+  completeJointCanvasPick: (worldX, worldY) => {
+    const state = get();
+    const pick = state.jointCanvasPick;
+    if (!pick) return;
+    const child = state.entities[pick.childId];
+    const parent = state.entities[pick.parentId];
+    if (!child || !parent || child.parentId !== parent.id) {
+      set({ jointCanvasPick: null });
+      return;
+    }
+    state.pushSceneHistory();
+    const res = computeParentOffsetFromWorldPin(
+      child,
+      parent,
+      { x: worldX, y: worldY },
+      child.parentOffset
+    );
+    set((cur) => {
+      const liveChild = cur.entities[pick.childId];
+      if (!liveChild) return { jointCanvasPick: null };
+      return {
+        jointCanvasPick: null,
+        entities: {
+          ...cur.entities,
+          [pick.childId]: {
+            ...liveChild,
+            position: res.childPosition,
+            parentOffset: res.parentOffset,
+          },
+        },
+      };
+    });
+  },
+  moveJointAttachmentPin: (childId, worldX, worldY, skipHistory = false) => {
+    const state = get();
+    const child = state.entities[childId];
+    if (!child || !child.parentId) return;
+    const parent = state.entities[child.parentId];
+    if (!parent) return;
+    if (!skipHistory) {
+      state.pushSceneHistory();
+    }
+    const res = computeParentOffsetFromWorldPin(
+      child,
+      parent,
+      { x: worldX, y: worldY },
+      child.parentOffset
+    );
+    set((cur) => {
+      const liveChild = cur.entities[childId];
+      if (!liveChild) return cur;
+      return {
+        entities: {
+          ...cur.entities,
+          [childId]: {
+            ...liveChild,
+            position: res.childPosition,
+            parentOffset: res.parentOffset,
+          },
+        },
+      };
+    });
+  },
 
   projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
 
@@ -1143,6 +1311,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const orderSnapshot = [...(get().entityOrder || Object.keys(get().entities))];
       set({
         appMode: 'play',
+        spawnCanvasPick: null,
+        jointCanvasPick: null,
         snapshotEntities: snapshot,
         snapshotEntityOrder: orderSnapshot,
         snapshotRules: null,
@@ -1437,6 +1607,29 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       });
 
       if (state.appMode === 'edit' && rotatedParentsInCurrentState.length > 0) {
+        // Si l'entité tournée est elle-même un enfant attaché (et son parent n'a pas tourné dans ce lot),
+        // maintenir parentOffset.rotationOffset synchronisé avec la nouvelle rotation manuelle.
+        rotatedParentsInCurrentState.forEach((entId) => {
+          const ent = updatedEntities[entId];
+          if (!ent || !ent.parentId || rotatedParentsInCurrentState.includes(ent.parentId)) return;
+          const parent = updatedEntities[ent.parentId];
+          if (!parent) return;
+          const off = ent.parentOffset || { x: 0, y: 0, inheritRotation: true, inheritFlip: true };
+          const inheritRot = off.inheritRotation !== false;
+          const inheritFlip = off.inheritFlip !== false;
+          const parentRot = parent.states[parent.currentStateId]?.rotation ?? 0;
+          const childRot = ent.states[ent.currentStateId]?.rotation ?? 0;
+          const rawDiff = childRot - (inheritRot ? parentRot : 0);
+          const rotOffset = Math.round(rawDiff * (inheritFlip && parent.flipX ? -1 : 1) * 10) / 10;
+          updatedEntities[entId] = {
+            ...ent,
+            parentOffset: {
+              ...off,
+              rotationOffset: rotOffset,
+            },
+          };
+        });
+
         const synced = new Set<EntityId>();
         rotatedParentsInCurrentState.forEach((parentRootId) => {
           const descendants = collectDescendantIds(updatedEntities, parentRootId);
@@ -3466,6 +3659,67 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
             }
           }
         }
+      });
+    });
+  },
+
+  triggerJointBreak: (childId, parentId, breakPoint) => {
+    // Les règles ne s'exécutent QU'EN mode PLAY
+    if (get().appMode !== 'play') return;
+
+    const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
+    const subject = entities[childId];
+    if (!subject) return;
+
+    const parent = entities[parentId];
+    const resolvedPoint = breakPoint || {
+      x: subject.position.x + subject.size.width / 2,
+      y: subject.position.y + subject.size.height / 2,
+    };
+    const now = Date.now();
+
+    const breakRules = rules.filter(
+      (r) =>
+        r.enabled &&
+        (r.trigger.type === 'joint_break' || r.trigger.phase === 'joint_break')
+    );
+
+    breakRules.forEach((rule) => {
+      if (
+        !matchesEntityFilter(
+          subject,
+          rule.trigger.subjectMode,
+          rule.trigger.subjectId,
+          rule.trigger.subjectType,
+          rule.trigger.subjectTag
+        )
+      ) {
+        return;
+      }
+
+      if (
+        rule.trigger.subjectStateId &&
+        rule.trigger.subjectStateId !== '' &&
+        subject.currentStateId !== rule.trigger.subjectStateId
+      ) {
+        return;
+      }
+
+      const cooldownKey = `joint_break_${rule.id}_${subject.id}`;
+      if (now - (ruleCooldowns[cooldownKey] || 0) < RULE_COOLDOWN_MS) {
+        return;
+      }
+      ruleCooldowns[cooldownKey] = now;
+
+      executeRuleActions(rule.actions, {
+        subject,
+        target: parent,
+        eventPosition: resolvedPoint,
+        allEntities: entities,
+        updateEntityState,
+        updateEntityDetails,
+        deleteEntity,
+        spawnEntity,
       });
     });
   },

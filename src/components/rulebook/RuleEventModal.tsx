@@ -807,6 +807,21 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                   </div>
                 </button>
               </div>
+
+              <div className="bg-red-50/50 p-3 rounded-2xl border border-red-200 space-y-1.5 sm:col-span-2 lg:col-span-4">
+                <div className="text-[11px] font-black uppercase text-red-800">⛓️‍💥 Rupture de Joint</div>
+                <button
+                  type="button"
+                  onClick={() => applyEventTrigger({ type: 'joint_break', phase: 'joint_break' })}
+                  className="w-full p-2 bg-white hover:bg-red-100/70 border border-red-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs"
+                >
+                  <span className="text-lg">⛓️‍💥</span>
+                  <div>
+                    <div className="text-xs font-black text-slate-900">Quand le joint casse</div>
+                    <div className="text-[9px] text-slate-500">Traction excessive ou secousses (Break Joint)</div>
+                  </div>
+                </button>
+              </div>
             </div>
           </>
         )}

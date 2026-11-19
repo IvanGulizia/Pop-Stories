@@ -4,25 +4,28 @@ export const DEFAULT_PIVOT: EntityPivot = { x: 0.5, y: 0.5 };
 
 export function sanitizePivot(pivot?: Partial<EntityPivot> | null): EntityPivot {
   const x = typeof pivot?.x === 'number' && Number.isFinite(pivot.x)
-    ? Math.max(-0.5, Math.min(1.5, pivot.x))
+    ? Math.max(-4, Math.min(5, pivot.x))
     : DEFAULT_PIVOT.x;
   const y = typeof pivot?.y === 'number' && Number.isFinite(pivot.y)
-    ? Math.max(-0.5, Math.min(1.5, pivot.y))
+    ? Math.max(-4, Math.min(5, pivot.y))
     : DEFAULT_PIVOT.y;
   return { x, y };
 }
 
 /**
  * Résout le pivot brut (avant flipX) selon la hiérarchie de priorité :
- * override explicit > runtimePivot > state.pivot > entity.pivot > { x: 0.5, y: 0.5 }
+ * override explicit > runtimePivot > parentOffset.jointChildPivot > state.pivot > entity.pivot > { x: 0.5, y: 0.5 }
  */
 export function resolveRawPivot(
-  entity: Pick<Entity, 'pivot' | 'runtimePivot' | 'states' | 'currentStateId'>,
+  entity: Pick<Entity, 'pivot' | 'runtimePivot' | 'states' | 'currentStateId' | 'parentId' | 'parentOffset'>,
   stateOverride?: EntityState | null,
   explicitOverride?: EntityPivot | null
 ): EntityPivot {
   if (explicitOverride) return sanitizePivot(explicitOverride);
   if (entity.runtimePivot) return sanitizePivot(entity.runtimePivot);
+  if (entity.parentId && entity.parentOffset?.jointChildPivot) {
+    return sanitizePivot(entity.parentOffset.jointChildPivot);
+  }
   const state = stateOverride ?? entity.states?.[entity.currentStateId];
   if (state?.pivot) return sanitizePivot(state.pivot);
   if (entity.pivot) return sanitizePivot(entity.pivot);
@@ -35,7 +38,7 @@ export function resolveRawPivot(
  * côté écran doit être inversé horizontalement : effPivot.x = 1 - raw.x.
  */
 export function resolveEffectivePivot(
-  entity: Pick<Entity, 'pivot' | 'runtimePivot' | 'states' | 'currentStateId' | 'flipX'>,
+  entity: Pick<Entity, 'pivot' | 'runtimePivot' | 'states' | 'currentStateId' | 'flipX' | 'parentId' | 'parentOffset'>,
   stateOverride?: EntityState | null,
   explicitOverride?: EntityPivot | null,
   flipXOverride?: boolean
@@ -179,6 +182,76 @@ export function getParentAnchorWorldPosition(params: {
   return {
     x: parentPivotWorld.x + relFromPivotX,
     y: parentPivotWorld.y + relFromPivotY,
+  };
+}
+
+/**
+ * Convertit un pointeur dans le repère canvas (px) en pivot local normalisé brut (avant flipX)
+ * sur l'entité, en compensant exactement la rotation, l'échelle et le flip courants.
+ */
+export function computeLocalGrabPivotFromClientPoint(params: {
+  canvasPoint: Position;
+  entityPosition: Position;
+  entitySize: Size;
+  currentEffPivot: EntityPivot;
+  totalRotationDeg: number;
+  scaleX?: number;
+  scaleY?: number;
+  flipX?: boolean;
+}): EntityPivot {
+  const {
+    canvasPoint,
+    entityPosition,
+    entitySize,
+    currentEffPivot,
+    totalRotationDeg,
+    scaleX = 1,
+    scaleY = 1,
+    flipX = false,
+  } = params;
+
+  const pivotWorld = getPivotWorldPosition(entityPosition, entitySize, currentEffPivot);
+  const dx = canvasPoint.x - pivotWorld.x;
+  const dy = canvasPoint.y - pivotWorld.y;
+  const unrotated = rotateVector(dx, dy, (-totalRotationDeg * Math.PI) / 180);
+
+  const safeW = Math.max(1, entitySize.width) * (Math.abs(scaleX) > 0.05 ? scaleX : 1);
+  const safeH = Math.max(1, entitySize.height) * (Math.abs(scaleY) > 0.05 ? scaleY : 1);
+
+  const rawEffX = currentEffPivot.x + unrotated.x / safeW;
+  const rawEffY = currentEffPivot.y + unrotated.y / safeH;
+
+  const clampedEffX = Math.max(-0.5, Math.min(1.5, rawEffX));
+  const clampedEffY = Math.max(-0.5, Math.min(1.5, rawEffY));
+
+  return {
+    x: Math.round((flipX ? 1 - clampedEffX : clampedEffX) * 1000) / 1000,
+    y: Math.round(clampedEffY * 1000) / 1000,
+  };
+}
+
+/**
+ * Ajuste la position top-left d'une entité lors d'un changement dynamique de `transformOrigin`
+ * (ex: passage au pivot de saisie puis retour au pivot normal) afin d'éviter tout saut visuel
+ * lorsque la rotation courante est non nulle.
+ */
+export function reanchorPositionForPivotChange(params: {
+  position: Position;
+  size: Size;
+  oldEffPivot: EntityPivot;
+  newEffPivot: EntityPivot;
+  rotationDeg: number;
+}): Position {
+  const { position, size, oldEffPivot, newEffPivot, rotationDeg } = params;
+  if (Math.abs(rotationDeg) < 0.01) {
+    return { x: position.x, y: position.y };
+  }
+  const dxPx = (oldEffPivot.x - newEffPivot.x) * size.width;
+  const dyPx = (oldEffPivot.y - newEffPivot.y) * size.height;
+  const rotDelta = rotateVector(dxPx, dyPx, (rotationDeg * Math.PI) / 180);
+  return {
+    x: position.x + (dxPx - rotDelta.x),
+    y: position.y + (dyPx - rotDelta.y),
   };
 }
 

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useSceneStore } from '../store/useSceneStore';
 import { CursorState, renderCursorSvg, calculateCursorOffsetPx } from '../utils/cursorIcons';
 
@@ -26,8 +26,10 @@ export function CursorProvider({ children }: { children: React.ReactNode }) {
   const [cursorState, setCursorState] = useState<CursorState>('idle');
   const [isDragging, setIsDragging] = useState(false);
   const [hoveredEntityId, setHoveredEntityId] = useState<string | null>(null);
-  const [pointerPos, setPointerPos] = useState({ x: -100, y: -100 });
   const [isPointerOverScene, setIsPointerOverScene] = useState(false);
+
+  const pointerPosRef = useRef({ x: -100, y: -100 });
+  const cursorElRef = useRef<HTMLDivElement>(null);
 
   const appMode = useSceneStore((state) => state.appMode);
   const settings = useSceneStore((state) => state.settings);
@@ -36,16 +38,58 @@ export function CursorProvider({ children }: { children: React.ReactNode }) {
   const useCustomCursors = settings.useCustomCursors !== false;
   const isCursorActive = isPlayMode && useCustomCursors;
 
+  const customPaths = settings.customCursorVectorPaths?.[cursorState];
+  const sourceMode = settings.cursorSourceMode || 'hugeicons';
+  const offset = calculateCursorOffsetPx(cursorState, settings);
+  const hasShadow = settings.cursorShadow !== false;
+  const offsetRef = useRef(offset);
+  offsetRef.current = offset;
+
+  const showFloatingCursor = isCursorActive && (isPointerOverScene || isDragging);
+
+  // Sync root document class so native Chrome cursor stays hidden even during drag capture / fast movement
   useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (showFloatingCursor) {
+      document.documentElement.classList.add('atelier-cursor-hidden');
+    } else {
+      document.documentElement.classList.remove('atelier-cursor-hidden');
+    }
+    return () => {
+      document.documentElement.classList.remove('atelier-cursor-hidden');
+    };
+  }, [showFloatingCursor]);
+
+  // Apply updated offset transform immediately when cursorState changes
+  useEffect(() => {
+    const el = cursorElRef.current;
+    if (!el || !showFloatingCursor) return;
+    const { x, y } = pointerPosRef.current;
+    el.style.transform = `translate3d(${x - offset.x}px, ${y - offset.y}px, 0)`;
+  }, [offset.x, offset.y, showFloatingCursor]);
+
+  useEffect(() => {
+    const updatePosition = (clientX: number, clientY: number) => {
+      pointerPosRef.current.x = clientX;
+      pointerPosRef.current.y = clientY;
+      const el = cursorElRef.current;
+      if (el) {
+        const off = offsetRef.current;
+        el.style.transform = `translate3d(${clientX - off.x}px, ${clientY - off.y}px, 0)`;
+      }
+    };
+
     const handleWindowPointerMove = (e: PointerEvent) => {
-      setPointerPos({ x: e.clientX, y: e.clientY });
+      updatePosition(e.clientX, e.clientY);
 
       if (!isCursorActive) {
-        setIsPointerOverScene(false);
+        setIsPointerOverScene((prev) => (prev ? false : prev));
         return;
       }
 
-      const sceneEl = document.getElementById('scene-canvas-container') || document.getElementById('canvas-drawing-container');
+      const sceneEl =
+        document.getElementById('scene-canvas-container') ||
+        document.getElementById('canvas-drawing-container');
       if (sceneEl) {
         const rect = sceneEl.getBoundingClientRect();
         const isInsideScene =
@@ -53,11 +97,11 @@ export function CursorProvider({ children }: { children: React.ReactNode }) {
           e.clientX <= rect.right &&
           e.clientY >= rect.top &&
           e.clientY <= rect.bottom;
-        setIsPointerOverScene(isInsideScene);
+        setIsPointerOverScene((prev) => (prev === isInsideScene ? prev : isInsideScene));
       } else {
         const target = e.target as HTMLElement | null;
         const isInsideScene = !!target?.closest?.('#scene-canvas-container, #canvas-drawing-container');
-        setIsPointerOverScene(isInsideScene);
+        setIsPointerOverScene((prev) => (prev === isInsideScene ? prev : isInsideScene));
       }
     };
 
@@ -71,7 +115,7 @@ export function CursorProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    window.addEventListener('pointermove', handleWindowPointerMove);
+    window.addEventListener('pointermove', handleWindowPointerMove, { passive: true });
     window.addEventListener('pointerup', handleWindowPointerUp);
 
     return () => {
@@ -79,11 +123,6 @@ export function CursorProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener('pointerup', handleWindowPointerUp);
     };
   }, [isDragging, isCursorActive]);
-
-  const customPaths = settings.customCursorVectorPaths?.[cursorState];
-  const sourceMode = settings.cursorSourceMode || 'hugeicons';
-  const offset = calculateCursorOffsetPx(cursorState, settings);
-  const hasShadow = settings.cursorShadow !== false;
 
   return (
     <CursorContext.Provider
@@ -98,18 +137,17 @@ export function CursorProvider({ children }: { children: React.ReactNode }) {
     >
       {children}
 
-      {/* Floating Animated Hugeicons Cursor - Play Mode Only */}
-      {isCursorActive && isPointerOverScene && (
+      {/* Floating Animated Custom Cursor - Play Mode Only (Direct GPU translate3d without transition lag) */}
+      {showFloatingCursor && (
         <div
           id="custom-scene-cursor"
-          className="fixed pointer-events-none z-[99999] transition-transform duration-75 ease-out select-none will-change-transform"
+          ref={cursorElRef}
+          className="fixed top-0 left-0 pointer-events-none z-[99999] select-none will-change-transform"
           style={{
-            left: `${pointerPos.x}px`,
-            top: `${pointerPos.y}px`,
-            transform: `translate(-${offset.x}px, -${offset.y}px)`,
+            transform: `translate3d(${pointerPosRef.current.x - offset.x}px, ${pointerPosRef.current.y - offset.y}px, 0)`,
           }}
         >
-          <div className={`w-9 h-9 transition-all ${hasShadow ? 'drop-shadow-md' : ''}`}>
+          <div className={`w-9 h-9 ${hasShadow ? 'drop-shadow-md' : ''}`}>
             {renderCursorSvg(cursorState, {
               customVectorPaths: customPaths,
               sourceMode,
@@ -120,3 +158,4 @@ export function CursorProvider({ children }: { children: React.ReactNode }) {
     </CursorContext.Provider>
   );
 }
+

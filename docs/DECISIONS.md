@@ -51,3 +51,21 @@
   - **Ressort translationnel sur les liens existants** : Extension de `ParentOffset` (`attachmentMode: 'rigid' | 'spring' | 'physics_joint'`, `collideWithWorld`) et `FollowBehaviorConfig` (`followMode: 'constant_speed' | 'spring'`) afin de couvrir à la fois les attaches parents élastiques, les joints physiques contre murs/sols/objets (sans auto-collision parent via groupe négatif) et les objets suiveurs autonomes.
   - **Composant dédié `jiggle`** : Calcul rotationnel additif (`runtimeJiggleAngle`, `runtimeScaleX`, `runtimeScaleY`) indépendant de la rotation de base (`LookAt` / état), garantissant zéro conflit lors de la composition.
 
+## ADR-008 : Curseur Chrome Sans Scintillement, Pick Spawn sur Scène & `Matter.Constraint` Rotatif
+- **Date :** 2026-11-17
+- **Décisions :**
+  - **Curseur Custom 60/120 FPS (`CursorContext.tsx`)** : Ne jamais stocker les coordonnées `pointermove` dans un `useState` React ni laisser coexister des classes `cursor-pointer` / `cursor-grab` sur les entités lorsque le curseur custom est actif ; appliquer directement `transform: translate3d(...)` sur la ref DOM et masquer le curseur natif via une règle globale PNG 1×1 transparent (`.atelier-cursor-hidden`).
+  - **Pick Spawn Direct sur Canvas (`useSceneStore.ts` + `App.tsx`)** : Conserver `<RuleBook />` monté (masqué en CSS `hidden` pendant `spawnCanvasPick !== null`) afin que la sélection de coordonnées sur le canvas réel préserve intégralement l'état local des modales et de l'assistant.
+  - **`physics_joint` (`matterPhysicsEngine.ts`)** : `Matter.Constraint.solve` conserve `pointB` en repère monde tourné et ne le réoriente que via `bodyB.angle - constraint.angleB`. Tout recalcul de l'attache doit donc appliquer `rotateVector(localPointB, body.angle)` et synchroniser `angleB = body.angle` pour éviter que le corps ne reste figé sous l'ancre.
+
+## ADR-009 : Joint Physique Angulaire (Butées, 2e Angle de Freinage, Ressort) & Point d'Attache Unifié (`jointChildPivot`)
+- **Date :** 2026-11-18
+- **Décisions :**
+  - **Pivot d'attache local sans déplacement visuel (`parentingHelpers.ts` + `pivotHelpers.ts`)** : Introduire `ParentOffset.jointChildPivot` au plus haut niveau de priorité de `resolveRawPivot` (juste sous l'override runtime/Jiggle) avec plage `[-4, 5]` pour permettre des pivots même hors boîte (orbitaux). Placer ou glisser le pin sur la scène met à jour simultanément `(parentOffset.x, parentOffset.y, jointChildPivot)` via `computeParentOffsetFromWorldPin`, préservant la position visuelle des entités déjà disposées (même tournées).
+  - **Résolution angulaire par sous-pas (`jointAngularSolver.ts` + `matterPhysicsEngine.ts`)** : Appliquer le ressort angulaire, l'amortissement et le 2e angle de freinage doux (`jointBrakeAngle` / `jointBrakeStrength`) en pré-pas sur la vélocité angulaire Verlet, puis imposer la butée dure `[minAngle, maxAngle]` en post-pas en faisant pivoter le corps rigide exactement autour du pin monde afin d'éviter toute dérive linéaire aux butées, tout en couplant `bodyA` pour les chaînes multi-maillons dynamiques `A → B → C`.
+
+## ADR-010 : Saisie Physique Précise, Pivot de Balancement & Rupture Sans Recréation de Corps
+- **Date :** 2026-11-18
+- **Décisions :**
+  - **Contrainte ressort Matter.js (`mouseGrabConstraints`) plutôt que déplacement cinématique** : Lorsque `precisePhysicsGrab` est actif sur une entité à physique dynamique (`physics`, `physics_joint`, ou `spring+collideWithWorld`), le drag contourne Framer Motion et pilote un `Matter.Constraint` de longueur nulle au point local cliqué, préservant la rotation sous gravité, les collisions décor et la traction réelle sur les joints.
+  - **Réancrage visuel & signature corps stable à la rupture (`brokenJointDynamicIds`)** : Enlever `attachMode` et `collideWithWorld` de `bodySignatures` (déjà reflétés par `isStatic`/`isSensor`) et conserver les entités détachées par rupture dans `brokenJointDynamicIds` garantit que `detachEntity` ne détruit ni ne recrée le `Matter.Body`, préservant ainsi l'élan angulaire, la prise en main active et la chute gravitaire immédiate.

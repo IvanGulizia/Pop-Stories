@@ -129,10 +129,18 @@ export interface AutoDestroyBehaviorConfig extends BaseBehaviorConfig {
   delay: number; // Durée de vie en secondes avant destruction automatique (ex: 3s)
 }
 
+export type GrabRotationMode = 'free' | 'damped_limited';
+
 export interface DraggableBehaviorConfig extends BaseBehaviorConfig {
   type: 'draggable';
   throwable: boolean;    // Inertie / élan au lâcher de la souris
   maxThrowSpeed?: number; // Plafond de vitesse (défaut 1500 px/s)
+  precisePhysicsGrab?: boolean; // Saisie physique au point cliqué (pivote/penche sous gravité via contrainte Matter.js)
+  grabRotationMode?: GrabRotationMode; // 'free' (libre 360°) ou 'damped_limited' (angle max + frein amorti)
+  grabMaxAngle?: number;         // Débattement max ±° en mode limité (défaut 45)
+  grabBrakeAngle?: number;       // Zone de freinage doux aux extrémités en ° (défaut 15)
+  grabAngularStiffness?: number; // Raideur du rappel vers la verticale (défaut 140)
+  grabAngularDamping?: number;   // Amortissement du balancement (défaut 8)
 }
 
 export interface ConstantVelocityBehaviorConfig extends BaseBehaviorConfig {
@@ -333,8 +341,15 @@ export interface InteractivePuppetBehaviorConfig extends BaseBehaviorConfig {
   // Drag & Lancer
   throwable?: boolean;
   maxThrowSpeed?: number;
+  precisePhysicsGrab?: boolean;   // Saisie physique au point cliqué si composant Physique ou Joint actif
+  grabRotationMode?: GrabRotationMode; // 'free' (libre 360°) ou 'damped_limited' (angle max + frein amorti)
+  grabMaxAngle?: number;          // Débattement max ±° en mode limité (défaut 45)
+  grabBrakeAngle?: number;        // Zone de freinage doux aux extrémités en ° (défaut 15)
+  grabAngularStiffness?: number;  // Raideur du rappel vers la verticale (défaut 140)
+  grabAngularDamping?: number;    // Amortissement du balancement (défaut 8)
   // Balancement & Pendule (les deux pistes : auto-tilt physique et/ou états visuels)
   swingMode?: 'pendulum' | 'states' | 'both';
+  swingAroundGrabPoint?: boolean; // Pivoter/balancer autour du point exact saisi sur l'objet
   pendulumIntensity?: number;   // 0.2..2.5, défaut 1.0
   pendulumMaxAngle?: number;    // degrés max 5..75, défaut 32
   pendulumSmoothing?: number;   // 0.05..0.5, défaut 0.18
@@ -479,6 +494,22 @@ export interface ParentOffset {
   springMaxDistance?: number; // Laisse max en px (0 = libre, >0 = contraint)
   springGravity?: number;     // Chute/pesanteur locale sur l'enfant en px/s² (défaut 0)
   collideWithWorld?: boolean; // Collisionner avec murs, sols et objets externes
+  // Point d'attache personnalisé côté enfant (posé directement sur le canvas)
+  jointChildPivot?: EntityPivot;
+  // Contraintes angulaires, zone de freinage & ressort angulaire pour Joint Physique
+  jointEnableAngleLimits?: boolean;
+  jointMinAngle?: number;
+  jointMaxAngle?: number;
+  jointBrakeAngle?: number;         // 2e angle : zone de freinage doux avant les extrémités
+  jointBrakeStrength?: number;      // Intensité du freinage 0..100
+  jointInitialAngleOffset?: number; // Angle de départ au lancement Play (degrés)
+  jointAngularStiffness?: number;   // Ressort angulaire vers l'angle de repos (0 = libre)
+  jointAngularDamping?: number;     // Amortissement angulaire du pivot
+  // Rupture du Joint (Breakable Joint)
+  jointBreakable?: boolean;         // Active la rupture sous tension ou secousses
+  jointBreakForce?: number;         // Seuil de traction/étirement pour casser (défaut 240)
+  jointBreakShakeThreshold?: number; // Tolérance aux secousses/inversions rapides (défaut 100 ; 0 = désactivé)
+  jointBreakFallWithGravity?: boolean; // Après rupture, tombe librement avec gravité (défaut true)
 }
 
 export type EntityColliderMode = 'default' | 'trigger_only' | 'disabled';
@@ -498,6 +529,7 @@ export interface Entity {
   colliderMode?: EntityColliderMode;         // 'default' | 'trigger_only' | 'disabled' (désactive le collider physique/règles)
   pointerDelegation?: PointerDelegationMode; // 'self' | 'parent' | 'root_parent' (transmet clic/survol/drag en Play)
   ignorePointer?: boolean;                   // En Mode Play, rend la hitbox transparente à la souris (pointer-events: none)
+  visible?: boolean;                         // false = objet masqué sur le canvas de la scène (défaut true)
   states: Record<StateId, EntityState>;
   icon?: string;
   drawingDataUrl?: string;
@@ -531,7 +563,8 @@ export type TriggerType =
   | 'state_change'
   | 'proximity'
   | 'boundary'
-  | 'variable';
+  | 'variable'
+  | 'joint_break';
 
 export type TriggerPhase =
   | 'click'             // Clic complet (sans drag)
@@ -553,7 +586,8 @@ export type TriggerPhase =
   | 'key_up'            // Touche relâchée
   | 'state_enter'       // Passage à un état
   | 'proximity_enter'   // Approche / Proximité
-  | 'boundary_hit';     // Contact bord de scène
+  | 'boundary_hit'      // Contact bord de scène
+  | 'joint_break';      // Rupture d'un joint d'attachement
 
 export type SelectionMode = 'type' | 'tag' | 'instance' | 'any';
 
@@ -627,6 +661,13 @@ export type SpawnLocationMode =
   | 'absolute';
 
 export type SpawnReferenceMode = 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned';
+
+export interface SpawnRandomZone {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 export type SoundType = 'pop' | 'bell' | 'laser' | 'bounce' | 'magic' | 'win';
 
@@ -702,10 +743,14 @@ export interface RuleAction {
   spawnReferenceTag?: string;
   spawnPosition?: Position;
   spawnAbsoluteCoords?: Position;
+  spawnRandomScope?: 'canvas' | 'zone'; // 'canvas' = tout le canvas (défaut), 'zone' = zone rectangulaire
+  spawnRandomZone?: SpawnRandomZone;    // Zone en px sur le canvas si spawnRandomScope === 'zone'
   spawnOffset?: Position;
   spawnSizeMode?: 'default' | 'match_target' | 'match_subject' | 'match_reference' | 'custom';
   spawnScaleMultiplier?: number;
   spawnCustomSize?: Size;
+  spawnImpulseSpeed?: number;  // Vitesse d'impulsion initiale en px/s au spawn (0 ou undefined = immobile)
+  spawnImpulseAngle?: number;  // Angle de lancement en degrés (0 = droite, -90 = haut, 90 = bas, 180 = gauche)
 
   // Champs pour 'attach_to_parent'
   parentTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned';

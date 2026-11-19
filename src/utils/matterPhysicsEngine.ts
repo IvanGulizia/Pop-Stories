@@ -21,6 +21,7 @@ import {
   HealthBehaviorConfig,
   JiggleBehaviorConfig,
   EntityPivot,
+  GrabRotationMode,
   SceneLayer,
 } from '../types';
 import { getEntityColliderBounds, getEntityWorldColliderBounds, resolveColliderState } from './collider';
@@ -43,12 +44,14 @@ import {
   checkEntityAgainstColliderLayerGeometry,
   buildColliderLayerBodies,
 } from './physics/colliderLayerPhysics';
+import { computeMovementFlipX, HorizontalIntent } from './physics/flipHelpers';
 import {
   resolveEffectivePivot,
   getPivotWorldPosition,
   getBodyWorldCenterFromPivot,
   getEntityTopLeftFromBodyWorldCenter,
   getParentAnchorWorldPosition,
+  reanchorPositionForPivotChange,
   rotateVector,
 } from './physics/pivotHelpers';
 import {
@@ -57,6 +60,16 @@ import {
   stepSpring2D,
   stepJiggleRotational,
 } from './physics/springJiggleSolver';
+import {
+  clampJointBodyAngle,
+  computeJointRestWorldDeg,
+  stepJointAngularForces,
+} from './physics/jointAngularSolver';
+import {
+  JointBreakRuntimeState,
+  createJointBreakRuntimeState,
+  evaluateJointBreakState,
+} from './physics/jointBreakSolver';
 
 export { getEffectiveBehaviors, isEntityDraggable };
 
@@ -66,6 +79,7 @@ const { Engine, World, Bodies, Body, Constraint } = Matter;
 let engine: Matter.Engine | null = null;
 const bodyMap = new Map<string, Matter.Body>();
 const colliderOffsets = new Map<string, { relCenterX: number; relCenterY: number }>();
+const bodyPivotMeta = new Map<string, { width: number; height: number; effPivot: EntityPivot }>();
 const bodySignatures = new Map<string, string>();
 const colliderLayerBodyMap = new Map<string, Matter.Body[]>();
 const colliderLayerSignatures = new Map<string, string>();
@@ -116,6 +130,7 @@ const activePhysicsCollisionContacts = new Map<string, Position>();
 const groundedEntityIds = new Set<string>();
 const jumpTrackers = new Map<string, { jumpsUsed: number; wasJumpPressed: boolean }>();
 const keyboardMoveInput = new Map<string, boolean>();
+const keyboardHorizIntent = new Map<string, HorizontalIntent>();
 const controllerAirStates = new Map<
   string,
   {
@@ -130,6 +145,8 @@ const controllerAirStates = new Map<
 >();
 const rebuildingBodyIds = new Set<string>();
 const activeDragPositions: Record<string, Position> = {};
+const pendingInitialVelocities = new Map<string, { vx: number; vy: number }>();
+const impulseDrivenEntityIds = new Set<string>();
 const autoDestroyTimers = new Map<string, number>();
 const particleEmitterAccumulators = new Map<string, number>();
 const hierarchyGroupIds = new Map<string, number>();
@@ -151,6 +168,9 @@ interface PuppetRuntimeState {
   lastDragX: number;
   lastDragY: number;
   smoothDragVx: number;
+  smoothDragVy: number;
+  grabPivot?: EntityPivot | null;
+  grabHoldActive: boolean;
   swingHoldTimer: number;
   swingLastStateId?: string;
   dragOverHoldTimer: number;
@@ -189,6 +209,9 @@ function getOrCreatePuppetRuntime(entityId: string, x = 0, y = 0): PuppetRuntime
       lastDragX: x,
       lastDragY: y,
       smoothDragVx: 0,
+      smoothDragVy: 0,
+      grabPivot: null,
+      grabHoldActive: false,
       swingHoldTimer: 0,
       swingLastStateId: undefined,
       dragOverHoldTimer: 0,
@@ -209,6 +232,39 @@ function getOrCreatePuppetRuntime(entityId: string, x = 0, y = 0): PuppetRuntime
     puppetRuntimeStates.set(entityId, rt);
   }
   return rt;
+}
+
+export function setPuppetGrabPivot(
+  entityId: string,
+  pivot: EntityPivot | null,
+  holdActive = false
+) {
+  const rt = getOrCreatePuppetRuntime(entityId);
+  rt.grabPivot = pivot ? { x: pivot.x, y: pivot.y } : null;
+  rt.grabHoldActive = Boolean(pivot && holdActive);
+}
+
+export function releasePuppetGrabHold(entityId: string) {
+  const rt = puppetRuntimeStates.get(entityId);
+  if (rt) {
+    rt.grabHoldActive = false;
+  }
+}
+
+function getActivePuppetGrabRawPivot(
+  entityId: string,
+  effectiveBehaviors: EntityBehavior[]
+): EntityPivot | null {
+  const puppet = effectiveBehaviors.find((b) => b.type === 'interactive_puppet') as
+    | InteractivePuppetBehaviorConfig
+    | undefined;
+  if (!puppet || puppet.enabled === false || !puppet.swingAroundGrabPoint) {
+    return null;
+  }
+  if (mouseGrabConstraints.has(entityId)) {
+    return null;
+  }
+  return puppetRuntimeStates.get(entityId)?.grabPivot ?? null;
 }
 
 export function notifyEntityHoverState(entityId: string, isHovered: boolean) {
@@ -237,6 +293,7 @@ export function notifyEntityDragLifecycle(
     }
   } else {
     rt.dragPhaseActive = false;
+    rt.grabHoldActive = false;
     if (hadMovement !== undefined) {
       rt.hadDragMovement = hadMovement;
     }
@@ -268,17 +325,159 @@ const jiggleStates = new Map<string, JiggleRuntimeState>();
 const prevAnchorKinematics = new Map<string, { x: number; y: number; vx: number; vy: number }>();
 const prevCollidingJiggle = new Set<string>();
 const parentJointConstraints = new Map<string, Matter.Constraint>();
+const jointBreakStates = new Map<string, JointBreakRuntimeState>();
+const brokenJointDynamicIds = new Set<string>();
+
+export interface PhysicsGrabOptions {
+  rotationMode?: GrabRotationMode;
+  maxAngle?: number;
+  brakeAngle?: number;
+  angularStiffness?: number;
+  angularDamping?: number;
+}
+
+interface MouseGrabRuntime {
+  localPointFromBodyCenter: Position; // repère local non tourné autour de body.position
+  targetWorld: Position;
+  constraint: Matter.Constraint;
+  rotationMode: GrabRotationMode;
+  maxAngle: number;
+  brakeAngle: number;
+  angularStiffness: number;
+  angularDamping: number;
+  restAngleDeg: number;
+  engagedLimit: boolean;
+}
+const mouseGrabConstraints = new Map<string, MouseGrabRuntime>();
+
 const debugSpringAnchors = new Map<string, Position>();
+const debugJointStressRatios = new Map<string, number>();
+const debugGrabPins = new Map<string, { target: Position; grabWorld: Position }>();
 const debugJiggleInfos = new Map<
   string,
   { world: Position; angleDeg: number; restDeg: number; squashX: number; squashY: number }
 >();
+
+export function isEntityPhysicsGrabbed(entityId: string): boolean {
+  return mouseGrabConstraints.has(entityId);
+}
+
+/**
+ * Saisit un corps Matter.js dynamique exactement au point monde cliqué (contrainte ressort 0-longueur),
+ * permettant au corps de pencher/pivoter naturellement sous gravité et collisions ou de tirer un joint.
+ */
+export function startPhysicsGrab(
+  entityId: string,
+  worldGrabX: number,
+  worldGrabY: number,
+  grabOptions?: PhysicsGrabOptions
+): boolean {
+  if (!engine) return false;
+  const body = bodyMap.get(entityId);
+  if (!body || body.isStatic) return false;
+
+  const existing = mouseGrabConstraints.get(entityId);
+  if (existing) {
+    World.remove(engine.world, existing.constraint);
+    mouseGrabConstraints.delete(entityId);
+  }
+
+  delete activeDragPositions[entityId];
+  Matter.Sleeping.set(body, false);
+
+  const localPt = rotateVector(
+    worldGrabX - body.position.x,
+    worldGrabY - body.position.y,
+    -body.angle
+  );
+  const rotatedPtB = rotateVector(localPt.x, localPt.y, body.angle);
+  const constraintDef: Record<string, unknown> = {
+    pointA: { x: worldGrabX, y: worldGrabY },
+    bodyB: body,
+    pointB: rotatedPtB,
+    angleB: body.angle,
+    length: 0,
+    stiffness: 0.24,
+    damping: 0.14,
+  };
+  const constraint = Constraint.create(constraintDef as unknown as Matter.IConstraintDefinition);
+  (constraint as unknown as { angleB: number }).angleB = body.angle;
+
+  const rotationMode: GrabRotationMode = grabOptions?.rotationMode || 'free';
+  const maxAngle = Math.max(5, Math.min(170, grabOptions?.maxAngle ?? 35));
+  const brakeAngle = Math.max(0, Math.min(maxAngle - 1, grabOptions?.brakeAngle ?? 15));
+  const angularStiffness = Math.max(0, Math.min(500, grabOptions?.angularStiffness ?? 120));
+  const angularDamping = Math.max(0, Math.min(30, grabOptions?.angularDamping ?? 6));
+  const curDeg = (body.angle * 180) / Math.PI;
+  const wrappedCur = ((curDeg % 360) + 540) % 360 - 180;
+
+  mouseGrabConstraints.set(entityId, {
+    localPointFromBodyCenter: localPt,
+    targetWorld: { x: worldGrabX, y: worldGrabY },
+    constraint,
+    rotationMode,
+    maxAngle,
+    brakeAngle,
+    angularStiffness,
+    angularDamping,
+    restAngleDeg: 0,
+    engagedLimit: rotationMode !== 'damped_limited' || Math.abs(wrappedCur) <= maxAngle,
+  });
+  World.add(engine.world, constraint);
+  return true;
+}
+
+export function updatePhysicsGrabTarget(entityId: string, worldX: number, worldY: number) {
+  const grab = mouseGrabConstraints.get(entityId);
+  if (!grab) return;
+  grab.targetWorld.x = worldX;
+  grab.targetWorld.y = worldY;
+  grab.constraint.pointA.x = worldX;
+  grab.constraint.pointA.y = worldY;
+}
+
+export function endPhysicsGrab(
+  entityId: string,
+  throwable: boolean = true,
+  maxThrowSpeed: number = 1500
+) {
+  const grab = mouseGrabConstraints.get(entityId);
+  if (grab) {
+    if (engine) {
+      World.remove(engine.world, grab.constraint);
+    }
+    mouseGrabConstraints.delete(entityId);
+  }
+  const body = bodyMap.get(entityId);
+  if (!body || body.isStatic) return;
+
+  Matter.Sleeping.set(body, false);
+  if (!throwable) {
+    Body.setVelocity(body, { x: 0, y: 0 });
+    Body.setAngularVelocity(body, 0);
+    return;
+  }
+
+  const vxPxPerSec = body.velocity.x * 60;
+  const vyPxPerSec = body.velocity.y * 60;
+  const speed = Math.hypot(vxPxPerSec, vyPxPerSec);
+  const maxAllowed = Math.max(50, maxThrowSpeed || 1500);
+  if (speed > maxAllowed) {
+    const scale = maxAllowed / speed / 60;
+    Body.setVelocity(body, {
+      x: vxPxPerSec * scale,
+      y: vyPxPerSec * scale,
+    });
+  }
+}
 
 export function getGizmoRuntimeDebugData(): {
   wanderOrigins: Record<string, { origin: Position; targetPoint: Position | null }>;
   patrolOrigins: Record<string, Position>;
   lookAtTargets: Record<string, Position>;
   springAnchors: Record<string, Position>;
+  jointStressRatios: Record<string, number>;
+  grabPins: Record<string, { target: Position; grabWorld: Position }>;
   jigglePivots: Record<string, { world: Position; angleDeg: number; restDeg: number; squashX: number; squashY: number }>;
 } {
   const wanderOrigins: Record<string, { origin: Position; targetPoint: Position | null }> = {};
@@ -297,6 +496,14 @@ export function getGizmoRuntimeDebugData(): {
   debugSpringAnchors.forEach((v, k) => {
     springAnchors[k] = v;
   });
+  const jointStressRatios: Record<string, number> = {};
+  debugJointStressRatios.forEach((v, k) => {
+    jointStressRatios[k] = v;
+  });
+  const grabPins: Record<string, { target: Position; grabWorld: Position }> = {};
+  debugGrabPins.forEach((v, k) => {
+    grabPins[k] = v;
+  });
   const jigglePivots: Record<
     string,
     { world: Position; angleDeg: number; restDeg: number; squashX: number; squashY: number }
@@ -304,7 +511,15 @@ export function getGizmoRuntimeDebugData(): {
   debugJiggleInfos.forEach((v, k) => {
     jigglePivots[k] = v;
   });
-  return { wanderOrigins, patrolOrigins, lookAtTargets, springAnchors, jigglePivots };
+  return {
+    wanderOrigins,
+    patrolOrigins,
+    lookAtTargets,
+    springAnchors,
+    jointStressRatios,
+    grabPins,
+    jigglePivots,
+  };
 }
 
 function resolveTargetWorldPoint(
@@ -389,6 +604,7 @@ export function resetMatterPhysicsRuntime() {
   }
   bodyMap.clear();
   colliderOffsets.clear();
+  bodyPivotMeta.clear();
   bodySignatures.clear();
   colliderLayerBodyMap.clear();
   colliderLayerSignatures.clear();
@@ -401,9 +617,12 @@ export function resetMatterPhysicsRuntime() {
   groundedEntityIds.clear();
   jumpTrackers.clear();
   keyboardMoveInput.clear();
+  keyboardHorizIntent.clear();
   controllerAirStates.clear();
   rebuildingBodyIds.clear();
   Object.keys(activeDragPositions).forEach((k) => delete activeDragPositions[k]);
+  pendingInitialVelocities.clear();
+  impulseDrivenEntityIds.clear();
   autoDestroyTimers.clear();
   particleEmitterAccumulators.clear();
   hierarchyGroupIds.clear();
@@ -418,7 +637,12 @@ export function resetMatterPhysicsRuntime() {
   prevAnchorKinematics.clear();
   prevCollidingJiggle.clear();
   parentJointConstraints.clear();
+  jointBreakStates.clear();
+  brokenJointDynamicIds.clear();
+  mouseGrabConstraints.clear();
   debugSpringAnchors.clear();
+  debugJointStressRatios.clear();
+  debugGrabPins.clear();
   debugJiggleInfos.clear();
   nextNegativeGroupId = -100;
 }
@@ -481,6 +705,21 @@ export function setEntityRuntimeVelocity(entityId: string, vx: number, vy: numbe
   }
 }
 
+/**
+ * Programme une vitesse initiale (px/s) pour une entité nouvellement créée (spawn_entity),
+ * appliquée dès la création de son corps Matter.js au prochain tick (ou immédiatement s'il existe déjà).
+ */
+export function queueEntityInitialVelocity(entityId: string, vx: number, vy: number) {
+  if (!Number.isFinite(vx) || !Number.isFinite(vy)) return;
+  impulseDrivenEntityIds.add(entityId);
+  const existingBody = bodyMap.get(entityId);
+  if (existingBody && !existingBody.isStatic) {
+    setEntityRuntimeVelocity(entityId, vx, vy);
+    return;
+  }
+  pendingInitialVelocities.set(entityId, { vx, vy });
+}
+
 export function setActiveDragPosition(entityId: string, position: Position | null) {
   if (position && !Number.isNaN(position.x) && !Number.isNaN(position.y)) {
     activeDragPositions[entityId] = { x: position.x, y: position.y };
@@ -502,7 +741,8 @@ export function syncEntityDragPosition(
   left: number,
   top: number,
   width?: number,
-  height?: number
+  height?: number,
+  effPivotOverride?: EntityPivot
 ) {
   setActiveDragPosition(entityId, { x: left, y: top });
   const body = bodyMap.get(entityId);
@@ -511,11 +751,25 @@ export function syncEntityDragPosition(
       relCenterX: (width ?? 100) / 2,
       relCenterY: (height ?? 100) / 2,
     };
-    const cx = left + offset.relCenterX;
-    const cy = top + offset.relCenterY;
+    const meta = bodyPivotMeta.get(entityId);
+    const entSize = {
+      width: width ?? meta?.width ?? offset.relCenterX * 2,
+      height: height ?? meta?.height ?? offset.relCenterY * 2,
+    };
+    const effPivot = effPivotOverride ?? meta?.effPivot ?? { x: 0.5, y: 0.5 };
+    const rotDeg = (body.angle * 180) / Math.PI;
+    const worldCenter = getBodyWorldCenterFromPivot(
+      { x: left, y: top },
+      entSize,
+      offset.relCenterX,
+      offset.relCenterY,
+      effPivot,
+      rotDeg
+    );
     Matter.Sleeping.set(body, false);
-    Body.setPosition(body, { x: cx, y: cy });
+    Body.setPosition(body, worldCenter);
     Body.setVelocity(body, { x: 0, y: 0 });
+    Body.setAngularVelocity(body, 0);
   }
 }
 
@@ -535,6 +789,12 @@ export interface PhysicsTickResult {
   >;
   entitiesToDestroy?: string[];
   stateChanges?: Record<string, string>;
+  brokenJointEvents?: {
+    childId: string;
+    parentId: string;
+    breakPoint: Position;
+    reason: 'force' | 'shake';
+  }[];
 }
 
 function computeLookAtRotationAndFlip(params: {
@@ -724,8 +984,8 @@ function ensurePhysicsWorld(
     Body.setPosition(boundaryBodies[3], { x: w + wallThickness / 2, y: h / 2 });
   }
 
-  // Synchronisation des corps d'entités dans Matter.World
-  const entityList = Object.values(entities);
+  // Synchronisation des corps d'entités dans Matter.World (parents initialisés avant enfants pour les chaînes)
+  const entityList = sortEntitiesTopologically(entities);
   const currentEntityIds = new Set(entityList.map((e) => e.id));
 
   // Retirer les corps des entités détruites
@@ -739,6 +999,7 @@ function ensurePhysicsWorld(
       World.remove(engine.world, body);
       bodyMap.delete(id);
       colliderOffsets.delete(id);
+      bodyPivotMeta.delete(id);
       bodySignatures.delete(id);
       patrolStates.delete(id);
       wanderingStates.delete(id);
@@ -749,6 +1010,8 @@ function ensurePhysicsWorld(
       jiggleStates.delete(id);
       prevAnchorKinematics.delete(id);
       prevCollidingJiggle.delete(id);
+      impulseDrivenEntityIds.delete(id);
+      pendingInitialVelocities.delete(id);
     }
   }
 
@@ -769,6 +1032,7 @@ function ensurePhysicsWorld(
         bodyMap.delete(entity.id);
         bodySignatures.delete(entity.id);
         colliderOffsets.delete(entity.id);
+        bodyPivotMeta.delete(entity.id);
       }
       continue;
     }
@@ -788,13 +1052,17 @@ function ensurePhysicsWorld(
       (attachMode === 'physics_joint' || (attachMode === 'spring' && entity.parentOffset?.collideWithWorld === true));
 
     // RÈGLE D'OR : Sans composant physics explicite, l'objet n'a PAS de physique dynamique,
-    // SAUF si l'enfant attaché demande explicitement un Joint Physique ou des collisions avec le monde.
+    // SAUF si l'enfant attaché demande explicitement un Joint Physique / collision monde,
+    // ou s'il vient de rompre son joint cassable avec chute libre active.
+    const isBrokenDynamic = brokenJointDynamicIds.has(entity.id);
     let isStatic = true;
     if (isAttachedChild) {
       isStatic = !isCollisionAttachedChild;
+    } else if (isBrokenDynamic) {
+      isStatic = false;
     } else if (physics) {
       isStatic = physics.isStatic === true;
-    } else if (hasMovement) {
+    } else if (hasMovement || impulseDrivenEntityIds.has(entity.id) || pendingInitialVelocities.has(entity.id)) {
       isStatic = false;
     }
 
@@ -803,7 +1071,7 @@ function ensurePhysicsWorld(
         ? true
         : physics
         ? physics.isTrigger === true
-        : isCollisionAttachedChild
+        : isCollisionAttachedChild || isBrokenDynamic
         ? false
         : true;
     const collisionGroup = getHierarchyCollisionGroup(entity, entities);
@@ -820,13 +1088,39 @@ function ensurePhysicsWorld(
     const relCenterX = originOffsetX + geom.centerX * scaleX;
     const relCenterY = originOffsetY + geom.centerY * scaleY;
     const effPivot = resolveEffectivePivot(entity, currentState);
+
+    // Angle initial au démarrage (prend en compte jointInitialAngleOffset pour physics_joint)
+    let initAngleDeg = currentState?.rotation || 0;
+    if (
+      isAttachedChild &&
+      attachMode === 'physics_joint' &&
+      entity.parentOffset?.jointInitialAngleOffset !== undefined &&
+      Math.abs(entity.parentOffset.jointInitialAngleOffset) > 0.01
+    ) {
+      const parentEnt = entities[entity.parentId!];
+      const pState = parentEnt?.states[parentEnt.currentStateId];
+      const pBody = parentEnt ? bodyMap.get(parentEnt.id) : undefined;
+      const pRotDeg =
+        pBody && !pBody.isStatic
+          ? (pBody.angle * 180) / Math.PI
+          : (pState?.rotation || 0) + (parentEnt?.runtimeTilt || 0) + (parentEnt?.runtimeJiggleAngle || 0);
+      const restDeg = computeJointRestWorldDeg({
+        offset: entity.parentOffset,
+        parentRotDeg: pRotDeg,
+        parentFlipX: Boolean(parentEnt?.flipX),
+      });
+      const inheritFlip = entity.parentOffset?.inheritFlip !== false;
+      const flipSign = inheritFlip && parentEnt?.flipX ? -1 : 1;
+      initAngleDeg = restDeg + entity.parentOffset.jointInitialAngleOffset * flipSign;
+    }
+
     const bodyWorldInit = getBodyWorldCenterFromPivot(
       entity.position,
       entity.size,
       relCenterX,
       relCenterY,
       effPivot,
-      currentState?.rotation || 0
+      initAngleDeg
     );
     const worldCenterX = bodyWorldInit.x;
     const worldCenterY = bodyWorldInit.y;
@@ -837,7 +1131,7 @@ function ensurePhysicsWorld(
     const colliderRadius = Math.max(6, Math.round(geom.radius * Math.max(scaleX, scaleY)));
 
     const freezeRotation = physics?.freezeRotation === true;
-    const signature = `${colliderMode}_${colliderType}_${colliderWidth}_${colliderHeight}_${colliderRadius}_${isStatic}_${isSensor}_${freezeRotation}_${attachMode}_${Boolean(entity.parentOffset?.collideWithWorld)}`;
+    const signature = `${colliderMode}_${colliderType}_${colliderWidth}_${colliderHeight}_${colliderRadius}_${isStatic}_${isSensor}_${freezeRotation}`;
     let body = bodyMap.get(entity.id);
 
     // Si le corps n'existe pas ou si la forme du collider a été modifiée dans le mode dessin, le recréer
@@ -878,16 +1172,32 @@ function ensurePhysicsWorld(
         Body.setInertia(body, Infinity);
         Body.setAngle(body, 0);
         Body.setAngularVelocity(body, 0);
-      } else if (currentState?.rotation) {
-        Body.setAngle(body, (currentState.rotation * Math.PI) / 180);
+      } else if (Math.abs(initAngleDeg) > 0.001) {
+        Body.setAngle(body, (initAngleDeg * Math.PI) / 180);
       }
 
       if (prevVel && !isStatic) {
         Body.setVelocity(body, prevVel);
       }
 
+      const queuedVel = pendingInitialVelocities.get(entity.id);
+      if (queuedVel) {
+        pendingInitialVelocities.delete(entity.id);
+        if (!isStatic) {
+          const maxStepSpeed = 25;
+          const mvx = queuedVel.vx / 60;
+          const mvy = queuedVel.vy / 60;
+          const spd = Math.hypot(mvx, mvy);
+          const fx = spd > maxStepSpeed ? (mvx / spd) * maxStepSpeed : mvx;
+          const fy = spd > maxStepSpeed ? (mvy / spd) * maxStepSpeed : mvy;
+          Matter.Sleeping.set(body, false);
+          Body.setVelocity(body, { x: fx, y: fy });
+        }
+      }
+
       bodyMap.set(entity.id, body);
       colliderOffsets.set(entity.id, { relCenterX, relCenterY });
+      bodyPivotMeta.set(entity.id, { width: entity.size.width, height: entity.size.height, effPivot });
       bodySignatures.set(entity.id, signature);
       World.add(engine.world, body);
     } else {
@@ -903,6 +1213,7 @@ function ensurePhysicsWorld(
         });
       }
       colliderOffsets.set(entity.id, { relCenterX, relCenterY });
+      bodyPivotMeta.set(entity.id, { width: entity.size.width, height: entity.size.height, effPivot });
       body.isSensor = isSensor;
       body.collisionFilter.group = collisionGroup;
       if (physics) {
@@ -1009,14 +1320,35 @@ export function stepMatterPhysics(params: {
   const flipUpdates = new Map<string, boolean>();
   const entitiesToDestroy: string[] = [];
   const stateChanges: Record<string, string> = {};
+  const brokenJointEvents: NonNullable<PhysicsTickResult['brokenJointEvents']> = [];
+  const brokenJointIdSet = new Set<string>();
   const entityList = Object.values(liveEntities);
   keyboardMoveInput.clear();
+  keyboardHorizIntent.clear();
   debugLookAtTargets.clear();
   debugSpringAnchors.clear();
+  debugJointStressRatios.clear();
+  debugGrabPins.clear();
   debugJiggleInfos.clear();
 
   // Pré-passe : synchroniser / nettoyer les Matter.Constraints des enfants attachés avec collisions monde
-  for (const entity of entityList) {
+  const topoPrepassEntities = sortEntitiesTopologically(liveEntities);
+  interface ActiveJointEntry {
+    entity: Entity;
+    parent: Entity;
+    body: Matter.Body;
+    parentBody?: Matter.Body;
+    useBodyA: boolean;
+    localPointA?: Position;
+    localPointB: Position;
+    anchorPt: Position;
+    offset: Entity['parentOffset'];
+    isJoint: boolean;
+    freezeRotation: boolean;
+  }
+  const activeJointEntries: ActiveJointEntry[] = [];
+
+  for (const entity of topoPrepassEntities) {
     const parent = entity.parentId ? liveEntities[entity.parentId] : undefined;
     const offset = entity.parentOffset;
     const attachMode = offset?.attachmentMode || 'rigid';
@@ -1044,8 +1376,11 @@ export function stepMatterPhysics(params: {
         ? pJiggleBeh.pivotOverride
         : undefined;
     const parentEffPivot = resolveEffectivePivot(parent!, parentState, pRawPivotOverride, Boolean(parent!.flipX));
-    const parentRotDeg =
-      (parentState?.rotation || 0) + (parent!.runtimeTilt || 0) + (parent!.runtimeJiggleAngle || 0);
+    const parentBody = bodyMap.get(parent!.id);
+    const useBodyA = Boolean(parentBody && !parentBody.isStatic && !activeDragPositions[parent!.id]);
+    const parentRotDeg = useBodyA && parentBody
+      ? (parentBody.angle * 180) / Math.PI
+      : (parentState?.rotation || 0) + (parent!.runtimeTilt || 0) + (parent!.runtimeJiggleAngle || 0);
     const inheritFlip = offset?.inheritFlip !== false;
     const inheritRot = offset?.inheritRotation !== false;
     const anchorPt = getParentAnchorWorldPosition({
@@ -1081,6 +1416,26 @@ export function stepMatterPhysics(params: {
       x: effPivot.x * entity.size.width - cOffset.relCenterX,
       y: effPivot.y * entity.size.height - cOffset.relCenterY,
     };
+    // Matter.Constraint.solve maintient pointB dans le repère monde courant et le fait tourner
+    // selon (body.angle - constraint.angleB) : il faut donc toujours fournir le vecteur déjà tourné
+    // par body.angle et aligner angleB = body.angle pour éviter tout blocage/rotation sur place.
+    const rotatedPointB = rotateVector(localPointB.x, localPointB.y, body.angle);
+
+    let localPointA: Position | undefined;
+    let rotatedPointA: Position = { x: anchorX, y: anchorY };
+    if (useBodyA && parentBody) {
+      const pCOffset = colliderOffsets.get(parent!.id) || {
+        relCenterX: parent!.size.width / 2,
+        relCenterY: parent!.size.height / 2,
+      };
+      const lx = inheritFlip && parent!.flipX ? -(offset?.x || 0) : (offset?.x || 0);
+      const ly = offset?.y || 0;
+      localPointA = {
+        x: 0.5 * parent!.size.width + lx - pCOffset.relCenterX,
+        y: 0.5 * parent!.size.height + ly - pCOffset.relCenterY,
+      };
+      rotatedPointA = rotateVector(localPointA.x, localPointA.y, parentBody.angle);
+    }
 
     const stiffness =
       attachMode === 'physics_joint'
@@ -1091,46 +1446,80 @@ export function stepMatterPhysics(params: {
     const damping =
       attachMode === 'physics_joint'
         ? offset?.springDamping !== undefined
-          ? Math.max(0.02, Math.min(0.65, offset.springDamping / 45))
-          : 0.18
+          ? Math.max(0.005, Math.min(0.45, offset.springDamping / 140))
+          : 0.05
         : Math.max(0.02, Math.min(0.45, (offset?.springDamping ?? 12) / 42));
 
-    if (!existingConstraint || existingConstraint.bodyB !== body) {
+    const desiredBodyA = useBodyA && parentBody ? parentBody : undefined;
+    const prevBodyA = existingConstraint?.bodyA || undefined;
+    const needsRecreate =
+      !existingConstraint ||
+      existingConstraint.bodyB !== body ||
+      prevBodyA !== desiredBodyA;
+
+    if (needsRecreate) {
       if (existingConstraint) World.remove(engine.world, existingConstraint);
-      const nextConstraint = Constraint.create({
-        pointA: { x: anchorX, y: anchorY },
+      const constraintDef: Record<string, unknown> = {
+        pointA: rotatedPointA,
         bodyB: body,
-        pointB: localPointB,
+        pointB: rotatedPointB,
+        angleB: body.angle,
         length: 0,
         stiffness,
         damping,
-      });
+      };
+      if (desiredBodyA) {
+        constraintDef.bodyA = desiredBodyA;
+        constraintDef.angleA = desiredBodyA.angle;
+      }
+      const nextConstraint = Constraint.create(constraintDef as unknown as Matter.IConstraintDefinition);
+      (nextConstraint as unknown as { angleB: number }).angleB = body.angle;
+      if (desiredBodyA) {
+        (nextConstraint as unknown as { angleA: number }).angleA = desiredBodyA.angle;
+      }
       parentJointConstraints.set(entity.id, nextConstraint);
       World.add(engine.world, nextConstraint);
     } else {
-      existingConstraint.pointA.x = anchorX;
-      existingConstraint.pointA.y = anchorY;
-      existingConstraint.pointB.x = localPointB.x;
-      existingConstraint.pointB.y = localPointB.y;
+      existingConstraint.pointA.x = rotatedPointA.x;
+      existingConstraint.pointA.y = rotatedPointA.y;
+      if (desiredBodyA) {
+        (existingConstraint as unknown as { angleA: number }).angleA = desiredBodyA.angle;
+      }
+      existingConstraint.pointB.x = rotatedPointB.x;
+      existingConstraint.pointB.y = rotatedPointB.y;
+      (existingConstraint as unknown as { angleB: number }).angleB = body.angle;
       existingConstraint.stiffness = stiffness;
       existingConstraint.damping = damping;
     }
 
-    // Gravité locale / annulation gravité monde si pas de composant physics explicite
-    if (!physics) {
-      const defaultLocalG = attachMode === 'physics_joint' ? 400 : 0;
-      const localG = offset?.springGravity ?? defaultLocalG;
-      const netGRatio = localG / 400 - 1;
+    // Gravité locale unifiée (évite tout doublon entre gravité monde, physics.gravity et springGravity)
+    const defaultLocalG = physics
+      ? (physics.gravity ?? 400)
+      : attachMode === 'physics_joint'
+      ? 400
+      : 0;
+    const effectiveG = offset?.springGravity !== undefined ? offset.springGravity : defaultLocalG;
+    const netGRatio = effectiveG / 400 - 1;
+    if (Math.abs(netGRatio) > 0.001) {
       Body.applyForce(body, body.position, {
         x: 0,
         y: netGRatio * 0.001 * (engine.world.gravity.y || 1) * body.mass,
       });
-    } else if (offset?.springGravity) {
-      Body.applyForce(body, body.position, {
-        x: 0,
-        y: (offset.springGravity / 400) * 0.001 * (engine.world.gravity.y || 1) * body.mass,
-      });
     }
+
+    activeJointEntries.push({
+      entity,
+      parent: parent!,
+      body,
+      parentBody,
+      useBodyA,
+      localPointA,
+      localPointB,
+      anchorPt,
+      offset,
+      isJoint: attachMode === 'physics_joint',
+      freezeRotation: physics?.freezeRotation === true,
+    });
   }
 
   for (const entity of entityList) {
@@ -1161,15 +1550,38 @@ export function stepMatterPhysics(params: {
         relCenterX: entity.size.width / 2,
         relCenterY: entity.size.height / 2,
       };
-      Body.setPosition(body, {
-        x: activeDragPos.x + dragOffset.relCenterX,
-        y: activeDragPos.y + dragOffset.relCenterY,
-      });
+      const jiggleCfg = effectiveBehaviors.find((b) => b.type === 'jiggle') as JiggleBehaviorConfig | undefined;
+      const activeGrabRawPivot = getActivePuppetGrabRawPivot(entity.id, effectiveBehaviors);
+      const rawPivotOverride =
+        activeGrabRawPivot ??
+        (jiggleCfg && jiggleCfg.enabled !== false && jiggleCfg.useCustomPivot && jiggleCfg.pivotOverride
+          ? jiggleCfg.pivotOverride
+          : undefined);
+      const effPivot = resolveEffectivePivot(entity, currentState, rawPivotOverride, entity.flipX ?? false);
+      bodyPivotMeta.set(entity.id, { width: entity.size.width, height: entity.size.height, effPivot });
+      const worldCenter = getBodyWorldCenterFromPivot(
+        activeDragPos,
+        entity.size,
+        dragOffset.relCenterX,
+        dragOffset.relCenterY,
+        effPivot,
+        (body.angle * 180) / Math.PI
+      );
+      Body.setPosition(body, worldCenter);
       Body.setVelocity(body, { x: 0, y: 0 });
+      Body.setAngularVelocity(body, 0);
       continue;
     }
 
-    if (!body || effectiveBehaviors.length === 0) continue;
+    if (
+      !body ||
+      (effectiveBehaviors.length === 0 &&
+        !impulseDrivenEntityIds.has(entity.id) &&
+        !brokenJointDynamicIds.has(entity.id) &&
+        !mouseGrabConstraints.has(entity.id))
+    ) {
+      continue;
+    }
 
     // Récupérer les comportements configurés
     const physics = effectiveBehaviors.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
@@ -1195,8 +1607,17 @@ export function stepMatterPhysics(params: {
         x: 0,
         y: -0.001 * body.mass * (engine.world.gravity.y || 1),
       });
-      // S'il n'y a pas d'action verticale commandée, amortir vy résiduel
-      if (!keyboard && !constVel?.vy && !patrol && !wandering && !moveTo && !follow && !flee) {
+      // S'il n'y a pas d'action verticale commandée, amortir vy résiduel (sauf projectile sous impulsion)
+      if (
+        !keyboard &&
+        !constVel?.vy &&
+        !patrol &&
+        !wandering &&
+        !moveTo &&
+        !follow &&
+        !flee &&
+        !impulseDrivenEntityIds.has(entity.id)
+      ) {
         Body.setVelocity(body, { x: body.velocity.x, y: body.velocity.y * 0.8 });
       }
     }
@@ -1274,6 +1695,7 @@ export function stepMatterPhysics(params: {
         if (down) my += 1;
 
         keyboardMoveInput.set(entity.id, mx !== 0 || my !== 0);
+        keyboardHorizIntent.set(entity.id, left && !right ? -1 : right && !left ? 1 : 0);
 
         if (mx !== 0 && my !== 0) {
           mx *= 0.7071;
@@ -1290,6 +1712,7 @@ export function stepMatterPhysics(params: {
       } else {
         // Mode Plateforme
         keyboardMoveInput.set(entity.id, Boolean(left || right));
+        keyboardHorizIntent.set(entity.id, left && !right ? -1 : right && !left ? 1 : 0);
         let vx = body.velocity.x;
         if (allowHorizontal) {
           const targetVx = left ? -speed : right ? speed : null;
@@ -1783,17 +2206,29 @@ export function stepMatterPhysics(params: {
     }
 
     // 7b. Flip horizontal automatique selon le sens du mouvement
-    const flipBehavior = [keyboard, patrol, wandering, moveTo, follow, flee, constVel].find(
-      (b) => b && (b as any).flipOnMove === true
-    ) as { flipOnMove?: boolean; flipInvert?: boolean } | undefined;
+    const otherFlipSource = [patrol, wandering, moveTo, follow, flee, constVel].find(
+      (b) => b && (b as { flipOnMove?: boolean }).flipOnMove === true
+    ) as { type?: string; flipOnMove?: boolean; flipInvert?: boolean } | undefined;
 
-    if (flipBehavior) {
-      const vx = body.velocity.x;
-      if (Math.abs(vx) > 0.12) {
-        const movingLeft = vx < 0;
-        const nextFlipX = flipBehavior.flipInvert ? !movingLeft : movingLeft;
-        flipUpdates.set(entity.id, nextFlipX);
-      }
+    const isOtherFlipPaused =
+      (otherFlipSource?.type === 'patrol' && (patrolStates.get(entity.id)?.timer ?? 0) > 0) ||
+      (otherFlipSource?.type === 'wandering' && (wanderingStates.get(entity.id)?.pauseTimer ?? 0) > 0);
+
+    const nextMoveFlip = computeMovementFlipX({
+      keyboard: keyboard?.flipOnMove ? keyboard : undefined,
+      keyboardHorizIntent: keyboardHorizIntent.get(entity.id) ?? 0,
+      otherFlipBehavior: otherFlipSource
+        ? {
+            flipOnMove: otherFlipSource.flipOnMove,
+            flipInvert: otherFlipSource.flipInvert,
+            isActivelyPaused: isOtherFlipPaused,
+          }
+        : undefined,
+      velocityX: body.velocity.x,
+    });
+
+    if (nextMoveFlip !== null) {
+      flipUpdates.set(entity.id, nextMoveFlip);
     }
 
     // 8. Gestion des bords de scène spéciaux (Bounce pour sensors, Wrap, Clamp)
@@ -1869,9 +2304,296 @@ export function stepMatterPhysics(params: {
   const maxStepMs = 16.666;
   const subSteps = Math.max(1, Math.ceil(totalMs / maxStepMs));
   const stepMs = totalMs / subSteps;
+  const subDt = stepMs / 1000;
   groundedEntityIds.clear();
+
   for (let s = 0; s < subSteps; s++) {
+    // Synchronisation des contraintes de saisie physique précise à la souris (MouseGrab)
+    for (const [grabEntId, grab] of mouseGrabConstraints.entries()) {
+      const gBody = bodyMap.get(grabEntId);
+      if (!gBody || gBody.isStatic) continue;
+      if (grab.constraint.bodyB !== gBody) {
+        grab.constraint.bodyB = gBody;
+      }
+      Matter.Sleeping.set(gBody, false);
+      grab.constraint.pointA.x = grab.targetWorld.x;
+      grab.constraint.pointA.y = grab.targetWorld.y;
+      const rotB = rotateVector(
+        grab.localPointFromBodyCenter.x,
+        grab.localPointFromBodyCenter.y,
+        gBody.angle
+      );
+      grab.constraint.pointB.x = rotB.x;
+      grab.constraint.pointB.y = rotB.y;
+      (grab.constraint as unknown as { angleB: number }).angleB = gBody.angle;
+      debugGrabPins.set(grabEntId, {
+        target: { x: grab.targetWorld.x, y: grab.targetWorld.y },
+        grabWorld: { x: gBody.position.x + rotB.x, y: gBody.position.y + rotB.y },
+      });
+
+      if (grab.rotationMode === 'damped_limited') {
+        const curDeg = (gBody.angle * 180) / Math.PI;
+        const wrappedRel = ((curDeg - grab.restAngleDeg + 540) % 360) - 180;
+        const normalizedCur = grab.restAngleDeg + wrappedRel;
+        const curAngVelDegPerSec = (Body.getAngularVelocity(gBody) * 60 * 180) / Math.PI;
+        const grabOffsetCfg = {
+          x: 0,
+          y: 0,
+          jointEnableAngleLimits: true,
+          jointMinAngle: -grab.maxAngle,
+          jointMaxAngle: grab.maxAngle,
+          jointBrakeAngle: grab.brakeAngle,
+          jointBrakeStrength: 85,
+          jointAngularStiffness: grab.angularStiffness,
+          jointAngularDamping: grab.angularDamping,
+        };
+        const angStep = stepJointAngularForces({
+          currentAngleDeg: normalizedCur,
+          angularVelDegPerSec: curAngVelDegPerSec,
+          restWorldDeg: grab.restAngleDeg,
+          offset: grabOffsetCfg,
+          dt: subDt,
+        });
+        Body.setAngularVelocity(gBody, ((angStep.nextAngularVelDegPerSec * Math.PI) / 180) / 60);
+      }
+    }
+
+    // Pré-pas angulaire des Joints Physiques (ressort vers repos, damping, 2e angle de freinage)
+    for (const entry of activeJointEntries) {
+      if (brokenJointIdSet.has(entry.entity.id)) continue;
+      if (!entry.isJoint || entry.freezeRotation) continue;
+      const pState = entry.parent.states[entry.parent.currentStateId];
+      const pRotDeg =
+        entry.parentBody && !entry.parentBody.isStatic && !activeDragPositions[entry.parent.id]
+          ? (entry.parentBody.angle * 180) / Math.PI
+          : (pState?.rotation || 0) + (entry.parent.runtimeTilt || 0) + (entry.parent.runtimeJiggleAngle || 0);
+      const restWorldDeg = computeJointRestWorldDeg({
+        offset: entry.offset,
+        parentRotDeg: pRotDeg,
+        parentFlipX: Boolean(entry.parent.flipX),
+      });
+      const curAngleDeg = (entry.body.angle * 180) / Math.PI;
+      const curAngVelDegPerSec = (Body.getAngularVelocity(entry.body) * 60 * 180) / Math.PI;
+      const angStep = stepJointAngularForces({
+        currentAngleDeg: curAngleDeg,
+        angularVelDegPerSec: curAngVelDegPerSec,
+        restWorldDeg,
+        offset: entry.offset,
+        dt: subDt,
+      });
+      Body.setAngularVelocity(entry.body, ((angStep.nextAngularVelDegPerSec * Math.PI) / 180) / 60);
+    }
+
     Engine.update(engine, stepMs);
+
+    // Post-pas angulaire pour la saisie physique limitée & amortie (MouseGrab)
+    for (const [grabEntId, grab] of mouseGrabConstraints.entries()) {
+      if (grab.rotationMode !== 'damped_limited') continue;
+      const gBody = bodyMap.get(grabEntId);
+      if (!gBody || gBody.isStatic) continue;
+
+      const curDeg = (gBody.angle * 180) / Math.PI;
+      const wrappedRel = ((curDeg - grab.restAngleDeg + 540) % 360) - 180;
+      const normalizedCur = grab.restAngleDeg + wrappedRel;
+      if (!grab.engagedLimit && Math.abs(wrappedRel) <= grab.maxAngle + 0.5) {
+        grab.engagedLimit = true;
+      }
+      if (grab.engagedLimit) {
+        const curAngVelDegPerSec = (Body.getAngularVelocity(gBody) * 60 * 180) / Math.PI;
+        const clampRes = clampJointBodyAngle({
+          currentAngleDeg: normalizedCur,
+          angularVelDegPerSec: curAngVelDegPerSec,
+          restWorldDeg: grab.restAngleDeg,
+          offset: {
+            x: 0,
+            y: 0,
+            jointEnableAngleLimits: true,
+            jointMinAngle: -grab.maxAngle,
+            jointMaxAngle: grab.maxAngle,
+          },
+        });
+        if (clampRes.clamped) {
+          const oldRotB = rotateVector(
+            grab.localPointFromBodyCenter.x,
+            grab.localPointFromBodyCenter.y,
+            gBody.angle
+          );
+          const pinWorld = {
+            x: gBody.position.x + oldRotB.x,
+            y: gBody.position.y + oldRotB.y,
+          };
+          const targetRad = (clampRes.nextAngleDeg * Math.PI) / 180;
+          const newRotB = rotateVector(
+            grab.localPointFromBodyCenter.x,
+            grab.localPointFromBodyCenter.y,
+            targetRad
+          );
+          Body.setPosition(gBody, {
+            x: pinWorld.x - newRotB.x,
+            y: pinWorld.y - newRotB.y,
+          });
+          Body.setAngle(gBody, targetRad);
+          Body.setAngularVelocity(gBody, ((clampRes.nextAngularVelDegPerSec * Math.PI) / 180) / 60);
+          grab.constraint.pointB.x = newRotB.x;
+          grab.constraint.pointB.y = newRotB.y;
+          (grab.constraint as unknown as { angleB: number }).angleB = targetRad;
+        }
+      }
+    }
+
+    // Post-pas angulaire : butées dures [minAngle, maxAngle] + évaluation rupture (Break Joint)
+    for (const entry of activeJointEntries) {
+      if (brokenJointIdSet.has(entry.entity.id)) continue;
+
+      let pinWorldA = entry.anchorPt;
+      if (entry.useBodyA && entry.parentBody && entry.localPointA) {
+        const rotA = rotateVector(entry.localPointA.x, entry.localPointA.y, entry.parentBody.angle);
+        pinWorldA = {
+          x: entry.parentBody.position.x + rotA.x,
+          y: entry.parentBody.position.y + rotA.y,
+        };
+      }
+
+      if (entry.isJoint && !entry.freezeRotation && entry.offset?.jointEnableAngleLimits) {
+        const pState = entry.parent.states[entry.parent.currentStateId];
+        const pRotDeg =
+          entry.parentBody && !entry.parentBody.isStatic && !activeDragPositions[entry.parent.id]
+            ? (entry.parentBody.angle * 180) / Math.PI
+            : (pState?.rotation || 0) + (entry.parent.runtimeTilt || 0) + (entry.parent.runtimeJiggleAngle || 0);
+        const restWorldDeg = computeJointRestWorldDeg({
+          offset: entry.offset,
+          parentRotDeg: pRotDeg,
+          parentFlipX: Boolean(entry.parent.flipX),
+        });
+        const curAngleDeg = (entry.body.angle * 180) / Math.PI;
+        const curAngVelDegPerSec = (Body.getAngularVelocity(entry.body) * 60 * 180) / Math.PI;
+        const clampRes = clampJointBodyAngle({
+          currentAngleDeg: curAngleDeg,
+          angularVelDegPerSec: curAngVelDegPerSec,
+          restWorldDeg,
+          offset: entry.offset,
+        });
+        if (clampRes.clamped) {
+          const targetRad = (clampRes.nextAngleDeg * Math.PI) / 180;
+          const rotB = rotateVector(entry.localPointB.x, entry.localPointB.y, targetRad);
+          Body.setPosition(entry.body, {
+            x: pinWorldA.x - rotB.x,
+            y: pinWorldA.y - rotB.y,
+          });
+          Body.setAngle(entry.body, targetRad);
+          Body.setAngularVelocity(entry.body, ((clampRes.nextAngularVelDegPerSec * Math.PI) / 180) / 60);
+          const jc = parentJointConstraints.get(entry.entity.id);
+          if (jc) {
+            jc.pointB.x = rotB.x;
+            jc.pointB.y = rotB.y;
+            (jc as unknown as { angleB: number }).angleB = targetRad;
+          }
+        }
+      }
+
+      // Évaluation de la rupture du joint (traction / secousses)
+      if (entry.offset?.jointBreakable) {
+        const rotBNow = rotateVector(entry.localPointB.x, entry.localPointB.y, entry.body.angle);
+        const pinWorldB = {
+          x: entry.body.position.x + rotBNow.x,
+          y: entry.body.position.y + rotBNow.y,
+        };
+        const curAngVelDegPerSec = (Body.getAngularVelocity(entry.body) * 60 * 180) / Math.PI;
+        const curLinSpeedPxPerSec = Math.hypot(entry.body.velocity.x * 60, entry.body.velocity.y * 60);
+
+        let cursorStretchPx = 0;
+        const activeGrab = mouseGrabConstraints.get(entry.entity.id);
+        if (activeGrab) {
+          const gRotB = rotateVector(
+            activeGrab.localPointFromBodyCenter.x,
+            activeGrab.localPointFromBodyCenter.y,
+            entry.body.angle
+          );
+          const grabWorldB = {
+            x: entry.body.position.x + gRotB.x,
+            y: entry.body.position.y + gRotB.y,
+          };
+          cursorStretchPx = Math.hypot(
+            activeGrab.targetWorld.x - grabWorldB.x,
+            activeGrab.targetWorld.y - grabWorldB.y
+          );
+        }
+
+        const prevBreakState =
+          jointBreakStates.get(entry.entity.id) || createJointBreakRuntimeState();
+        const breakEval = evaluateJointBreakState({
+          state: prevBreakState,
+          offset: entry.offset,
+          pinAWorld: pinWorldA,
+          pinBWorld: pinWorldB,
+          angVelDegPerSec: curAngVelDegPerSec,
+          linearSpeedPxPerSec: curLinSpeedPxPerSec,
+          cursorStretchPx,
+          dt: subDt,
+        });
+        jointBreakStates.set(entry.entity.id, breakEval.nextState);
+        debugJointStressRatios.set(entry.entity.id, breakEval.stressRatio);
+
+        if (breakEval.broken && breakEval.reason) {
+          brokenJointIdSet.add(entry.entity.id);
+          const jc = parentJointConstraints.get(entry.entity.id);
+          if (jc) {
+            World.remove(engine.world, jc);
+            parentJointConstraints.delete(entry.entity.id);
+          }
+          jointBreakStates.delete(entry.entity.id);
+          debugJointStressRatios.delete(entry.entity.id);
+
+          if (entry.offset.jointBreakFallWithGravity !== false) {
+            brokenJointDynamicIds.add(entry.entity.id);
+            entry.body.isStatic = false;
+            const cState = entry.entity.states[entry.entity.currentStateId];
+            const cPhysics = getEffectiveBehaviors(entry.entity, cState).find(
+              (b) => b.type === 'physics'
+            ) as PhysicsBehaviorConfig | undefined;
+            entry.body.isSensor = cPhysics ? cPhysics.isTrigger === true : false;
+          }
+
+          brokenJointEvents.push({
+            childId: entry.entity.id,
+            parentId: entry.parent.id,
+            breakPoint: {
+              x: Math.round(pinWorldB.x * 10) / 10,
+              y: Math.round(pinWorldB.y * 10) / 10,
+            },
+            reason: breakEval.reason,
+          });
+        }
+      } else {
+        jointBreakStates.delete(entry.entity.id);
+      }
+    }
+  }
+
+  // Re-verrouiller les corps tenus en drag manuel après Engine.update pour empêcher toute dérive gravitaire avant lâcher
+  for (const [dragId, dragPos] of Object.entries(activeDragPositions)) {
+    if (mouseGrabConstraints.has(dragId)) continue;
+    const ent = liveEntities[dragId];
+    if (!ent || (ent.parentId && liveEntities[ent.parentId] && !brokenJointIdSet.has(ent.id))) continue;
+    const body = bodyMap.get(dragId);
+    if (!body) continue;
+    const dragOffset = colliderOffsets.get(dragId) || {
+      relCenterX: ent.size.width / 2,
+      relCenterY: ent.size.height / 2,
+    };
+    const meta = bodyPivotMeta.get(dragId);
+    const effPivot = meta?.effPivot ?? resolveEffectivePivot(ent, ent.states[ent.currentStateId]);
+    const lockedCenter = getBodyWorldCenterFromPivot(
+      dragPos,
+      ent.size,
+      dragOffset.relCenterX,
+      dragOffset.relCenterY,
+      effPivot,
+      (body.angle * 180) / Math.PI
+    );
+    Body.setPosition(body, lockedCenter);
+    Body.setVelocity(body, { x: 0, y: 0 });
+    Body.setAngularVelocity(body, 0);
   }
 
   // Résolution des transformations dans l'ordre topologique (parents avant enfants)
@@ -1885,10 +2607,12 @@ export function stepMatterPhysics(params: {
     const physics = effectiveBehaviors.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
     const emitter = effectiveBehaviors.find((b) => b.type === 'particle_emitter') as ParticleEmitterBehaviorConfig | undefined;
     const jiggle = effectiveBehaviors.find((b) => b.type === 'jiggle') as JiggleBehaviorConfig | undefined;
-    const rawPivotOverride =
+    const jiggleRawPivotOverride =
       jiggle && jiggle.enabled !== false && jiggle.useCustomPivot && jiggle.pivotOverride
         ? jiggle.pivotOverride
         : undefined;
+    const activePuppetGrabRawPivot = getActivePuppetGrabRawPivot(entity.id, effectiveBehaviors);
+    const rawPivotOverride = activePuppetGrabRawPivot ?? jiggleRawPivotOverride;
     const isRotFrozen = physics?.freezeRotation === true;
 
     let newX = entity.position.x;
@@ -1902,7 +2626,8 @@ export function stepMatterPhysics(params: {
     let pendingFlipUpdate: boolean | undefined;
 
     // Cas 1 : Entité enfant attachée à un parent (rigide, ressort élastique ou joint physique avec collisions)
-    if (entity.parentId && liveEntities[entity.parentId]) {
+    // Si son joint vient tout juste de rompre sur ce tick, passer immédiatement en entité indépendante
+    if (entity.parentId && liveEntities[entity.parentId] && !brokenJointIdSet.has(entity.id)) {
       const parent = liveEntities[entity.parentId];
       const parentState = parent.states[parent.currentStateId];
       const parentTransform = resolvedTransforms.get(parent.id) || {
@@ -1910,13 +2635,16 @@ export function stepMatterPhysics(params: {
         rotation: (parentState?.rotation || 0) + (parent.runtimeTilt || 0) + (parent.runtimeJiggleAngle || 0),
         flipX: parent.flipX ?? false,
       };
-      const parentJiggle = getEffectiveBehaviors(parent, parentState).find((b) => b.type === 'jiggle') as
+      const parentBehaviors = getEffectiveBehaviors(parent, parentState);
+      const parentJiggle = parentBehaviors.find((b) => b.type === 'jiggle') as
         | JiggleBehaviorConfig
         | undefined;
+      const parentGrabRawPivot = getActivePuppetGrabRawPivot(parent.id, parentBehaviors);
       const parentRawPivotOverride =
-        parentJiggle && parentJiggle.enabled !== false && parentJiggle.useCustomPivot && parentJiggle.pivotOverride
+        parentGrabRawPivot ??
+        (parentJiggle && parentJiggle.enabled !== false && parentJiggle.useCustomPivot && parentJiggle.pivotOverride
           ? parentJiggle.pivotOverride
-          : undefined;
+          : undefined);
       const parentEffPivot = resolveEffectivePivot(
         parent,
         parentState,
@@ -2039,21 +2767,84 @@ export function stepMatterPhysics(params: {
             spState = { x: curPivot.x, y: curPivot.y, vx: 0, vy: 0 };
             springLinkStates.set(entity.id, spState);
           }
-          const spRes = stepSpring2D({
-            state: spState,
-            targetX: targetAnchorX,
-            targetY: targetAnchorY,
-            stiffness: offset.springStiffness ?? 160,
-            damping: offset.springDamping ?? 12,
-            gravity: offset.springGravity ?? 0,
-            maxDistance: offset.springMaxDistance ?? 0,
-            dt,
-          });
-          childAnchorX = spRes.x;
-          childAnchorY = spRes.y;
+          const activeChildDrag = activeDragPositions[entity.id];
+          if (activeChildDrag) {
+            let dragPivot = getPivotWorldPosition(activeChildDrag, entity.size, effPivot);
+            const maxDist = offset.springMaxDistance ?? 0;
+            if (maxDist > 0) {
+              const ddx = dragPivot.x - targetAnchorX;
+              const ddy = dragPivot.y - targetAnchorY;
+              const dist = Math.hypot(ddx, ddy);
+              if (dist > maxDist && dist > 0.001) {
+                dragPivot = {
+                  x: targetAnchorX + (ddx / dist) * maxDist,
+                  y: targetAnchorY + (ddy / dist) * maxDist,
+                };
+              }
+            }
+            spState.x = dragPivot.x;
+            spState.y = dragPivot.y;
+            spState.vx = 0;
+            spState.vy = 0;
+            childAnchorX = dragPivot.x;
+            childAnchorY = dragPivot.y;
+          } else {
+            const spRes = stepSpring2D({
+              state: spState,
+              targetX: targetAnchorX,
+              targetY: targetAnchorY,
+              stiffness: offset.springStiffness ?? 160,
+              damping: offset.springDamping ?? 12,
+              gravity: offset.springGravity ?? 0,
+              maxDistance: offset.springMaxDistance ?? 0,
+              dt,
+            });
+            childAnchorX = spRes.x;
+            childAnchorY = spRes.y;
+          }
           debugSpringAnchors.set(entity.id, { x: targetAnchorX, y: targetAnchorY });
+
+          if (offset.jointBreakable) {
+            const linSpeed = Math.hypot(spState.vx, spState.vy);
+            const prevBreakState = jointBreakStates.get(entity.id) || createJointBreakRuntimeState();
+            const breakEval = evaluateJointBreakState({
+              state: prevBreakState,
+              offset,
+              pinAWorld: { x: targetAnchorX, y: targetAnchorY },
+              pinBWorld: { x: childAnchorX, y: childAnchorY },
+              angVelDegPerSec: 0,
+              linearSpeedPxPerSec: linSpeed,
+              dt,
+            });
+            jointBreakStates.set(entity.id, breakEval.nextState);
+            debugJointStressRatios.set(entity.id, breakEval.stressRatio);
+
+            if (breakEval.broken && breakEval.reason) {
+              brokenJointIdSet.add(entity.id);
+              springLinkStates.delete(entity.id);
+              jointBreakStates.delete(entity.id);
+              debugJointStressRatios.delete(entity.id);
+              if (offset.jointBreakFallWithGravity !== false) {
+                brokenJointDynamicIds.add(entity.id);
+                if (body) {
+                  body.isStatic = false;
+                  body.isSensor = physics ? physics.isTrigger === true : false;
+                }
+              }
+              brokenJointEvents.push({
+                childId: entity.id,
+                parentId: parent.id,
+                breakPoint: {
+                  x: Math.round(childAnchorX * 10) / 10,
+                  y: Math.round(childAnchorY * 10) / 10,
+                },
+                reason: breakEval.reason,
+              });
+            }
+          }
         } else {
           if (springLinkStates.has(entity.id)) springLinkStates.delete(entity.id);
+          if (jointBreakStates.has(entity.id)) jointBreakStates.delete(entity.id);
         }
 
         newRot = Math.round(baseRot * 10) / 10;
@@ -2292,6 +3083,7 @@ export function stepMatterPhysics(params: {
       | InteractivePuppetBehaviorConfig
       | undefined;
     let puppetDesiredStateId: string | undefined;
+    let puppetGrabRuntimePivot: EntityPivot | null | undefined;
 
     if (puppet && puppet.enabled !== false) {
       const rt = getOrCreatePuppetRuntime(entity.id, newX, newY);
@@ -2366,6 +3158,7 @@ export function stepMatterPhysics(params: {
         rt.lastDragX = newX;
         rt.lastDragY = newY;
         rt.smoothDragVx = 0;
+        rt.smoothDragVy = 0;
         rt.swingHoldTimer = 0;
         rt.swingLastStateId = undefined;
         rt.dragOverHoldTimer = 0;
@@ -2378,9 +3171,11 @@ export function stepMatterPhysics(params: {
         rt.dragTime += dt;
         rt.dragStartTimer = Math.max(0, rt.dragStartTimer - dt);
         const instVx = Math.max(-3000, Math.min(3000, (newX - rt.lastDragX) / dt));
+        const instVy = Math.max(-3000, Math.min(3000, (newY - rt.lastDragY) / dt));
         rt.lastDragX = newX;
         rt.lastDragY = newY;
         rt.smoothDragVx += (instVx - rt.smoothDragVx) * Math.min(1, dt * 14);
+        rt.smoothDragVy += (instVy - rt.smoothDragVy) * Math.min(1, dt * 14);
 
         if (rt.shakeWindowTimer > 0) {
           rt.shakeWindowTimer = Math.max(0, rt.shakeWindowTimer - dt);
@@ -2408,6 +3203,7 @@ export function stepMatterPhysics(params: {
         rt.dragTime = 0;
         rt.dragStartTimer = 0;
         rt.smoothDragVx = 0;
+        rt.smoothDragVy = 0;
         rt.swingHoldTimer = 0;
         rt.swingLastStateId = undefined;
         rt.dragOverHoldTimer = 0;
@@ -2419,25 +3215,44 @@ export function stepMatterPhysics(params: {
       } else {
         rt.dragReleaseTimer = Math.max(0, rt.dragReleaseTimer - dt);
         rt.smoothDragVx *= Math.max(0, 1 - dt * 10);
+        rt.smoothDragVy *= Math.max(0, 1 - dt * 10);
       }
       rt.wasDragging = isActivelyDragged;
 
-      // Pendule physique (ressort amorti sur vitesse horizontale)
+      // Pendule physique (ressort amorti sur vitesse / bras de levier autour du point saisi)
+      const isPhysicsGrabActive = mouseGrabConstraints.has(entity.id);
+      const isPendulumHeld =
+        isActivelyDragged ||
+        Boolean(puppet.swingAroundGrabPoint && !isPhysicsGrabActive && rt.grabHoldActive);
       const swingMode = puppet.swingMode || 'both';
-      const usePendulum = swingMode === 'pendulum' || swingMode === 'both';
+      const usePendulum = (swingMode === 'pendulum' || swingMode === 'both') && !isPhysicsGrabActive;
       if (usePendulum) {
         const intensity = Math.max(0.1, puppet.pendulumIntensity ?? 1.0);
         const maxAngle = Math.max(5, Math.min(75, puppet.pendulumMaxAngle ?? 32));
         const smoothing = Math.max(0.05, Math.min(0.5, puppet.pendulumSmoothing ?? 0.18));
-        const targetAngle = isActivelyDragged
-          ? Math.max(-maxAngle, Math.min(maxAngle, (rt.smoothDragVx / 850) * maxAngle * intensity))
+
+        let driveSpeed = rt.smoothDragVx;
+        let gravityLeanDeg = 0;
+        if (puppet.swingAroundGrabPoint && rt.grabPivot) {
+          const effGrabX = nextFlipX ? 1 - rt.grabPivot.x : rt.grabPivot.x;
+          const effGrabY = rt.grabPivot.y;
+          const rx = 0.5 - effGrabX;
+          const ry = 0.5 - effGrabY;
+          if (Math.hypot(rx, ry) >= 0.05) {
+            gravityLeanDeg = Math.max(-maxAngle * 0.65, Math.min(maxAngle * 0.65, rx * 2 * maxAngle * 0.65));
+            driveSpeed = (ry * rt.smoothDragVx - rx * rt.smoothDragVy) / 0.35;
+          }
+        }
+
+        const targetAngle = isPendulumHeld
+          ? Math.max(-maxAngle, Math.min(maxAngle, gravityLeanDeg + (driveSpeed / 850) * maxAngle * intensity))
           : 0;
         const springK = 140 + (1 - smoothing) * 160;
         const dampingC = 11 + smoothing * 14;
         const accel = springK * (targetAngle - rt.pendulumAngle) - dampingC * rt.pendulumVel;
         rt.pendulumVel += accel * dt;
         rt.pendulumAngle += rt.pendulumVel * dt;
-        if (!isActivelyDragged && Math.abs(rt.pendulumAngle) < 0.15 && Math.abs(rt.pendulumVel) < 0.8) {
+        if (!isPendulumHeld && Math.abs(rt.pendulumAngle) < 0.15 && Math.abs(rt.pendulumVel) < 0.8) {
           rt.pendulumAngle = 0;
           rt.pendulumVel = 0;
         }
@@ -2446,6 +3261,45 @@ export function stepMatterPhysics(params: {
         rt.pendulumVel = 0;
       }
       nextRuntimeTilt = Math.round(rt.pendulumAngle * 10) / 10;
+
+      // Maintien propre du pivot temporaire de saisie pendant le drag + retour au repos du pendule
+      if (
+        puppet.swingAroundGrabPoint &&
+        !isPhysicsGrabActive &&
+        rt.grabPivot &&
+        (isPendulumHeld || Math.abs(rt.pendulumAngle) >= 0.15)
+      ) {
+        if (
+          entity.runtimePivot?.x !== rt.grabPivot.x ||
+          entity.runtimePivot?.y !== rt.grabPivot.y
+        ) {
+          puppetGrabRuntimePivot = { x: rt.grabPivot.x, y: rt.grabPivot.y };
+        }
+      } else if (rt.grabPivot) {
+        const oldGrabEff = {
+          x: nextFlipX ? 1 - rt.grabPivot.x : rt.grabPivot.x,
+          y: rt.grabPivot.y,
+        };
+        const restEff = resolveEffectivePivot(entity, currentState, jiggleRawPivotOverride, nextFlipX);
+        const curNonTiltRot = newRot + (entity.runtimeJiggleAngle || 0);
+        if (Math.abs(curNonTiltRot) > 0.1) {
+          const reanchored = reanchorPositionForPivotChange({
+            position: { x: newX, y: newY },
+            size: entity.size,
+            oldEffPivot: oldGrabEff,
+            newEffPivot: restEff,
+            rotationDeg: curNonTiltRot,
+          });
+          newX = Math.round(reanchored.x * 10) / 10;
+          newY = Math.round(reanchored.y * 10) / 10;
+          pendingPosUpdate = { x: newX, y: newY };
+        }
+        rt.grabPivot = null;
+        rt.grabHoldActive = false;
+        if (entity.runtimePivot !== undefined) {
+          puppetGrabRuntimePivot = null;
+        }
+      }
 
       // Gravité / Chute / Atterrissage (si physique dynamique présente)
       const hasDynamicBody = Boolean(body && !body.isStatic);
@@ -2679,6 +3533,11 @@ export function stepMatterPhysics(params: {
     let nextRuntimeScaleY = 1;
     let pendingRuntimePivot: EntityPivot | null | undefined;
 
+    const puppetOwnsGrabPivot = Boolean(
+      puppetGrabRuntimePivot !== undefined ||
+        getActivePuppetGrabRawPivot(entity.id, effectiveBehaviors)
+    );
+
     if (jiggle && jiggle.enabled !== false) {
       const effPivotForJiggle = resolveEffectivePivot(entity, currentState, rawPivotOverride, nextFlipX);
       const pivotWorld = getPivotWorldPosition({ x: newX, y: newY }, entity.size, effPivotForJiggle);
@@ -2754,15 +3613,17 @@ export function stepMatterPhysics(params: {
       nextRuntimeScaleX = jRes.squashX;
       nextRuntimeScaleY = jRes.squashY;
 
-      if (rawPivotOverride) {
-        if (
-          entity.runtimePivot?.x !== rawPivotOverride.x ||
-          entity.runtimePivot?.y !== rawPivotOverride.y
-        ) {
-          pendingRuntimePivot = rawPivotOverride;
+      if (!puppetOwnsGrabPivot) {
+        if (jiggleRawPivotOverride) {
+          if (
+            entity.runtimePivot?.x !== jiggleRawPivotOverride.x ||
+            entity.runtimePivot?.y !== jiggleRawPivotOverride.y
+          ) {
+            pendingRuntimePivot = jiggleRawPivotOverride;
+          }
+        } else if (entity.runtimePivot !== undefined) {
+          pendingRuntimePivot = null;
         }
-      } else if (entity.runtimePivot !== undefined) {
-        pendingRuntimePivot = null;
       }
 
       debugJiggleInfos.set(entity.id, {
@@ -2776,7 +3637,15 @@ export function stepMatterPhysics(params: {
       if (jiggleStates.has(entity.id)) jiggleStates.delete(entity.id);
       if (prevAnchorKinematics.has(entity.id)) prevAnchorKinematics.delete(entity.id);
       prevCollidingJiggle.delete(entity.id);
-      if (entity.runtimePivot !== undefined) pendingRuntimePivot = null;
+      if (puppetGrabRuntimePivot !== undefined) {
+        pendingRuntimePivot = puppetGrabRuntimePivot;
+      } else if (entity.runtimePivot !== undefined && !puppetOwnsGrabPivot) {
+        pendingRuntimePivot = null;
+      }
+    }
+
+    if (puppetGrabRuntimePivot !== undefined) {
+      pendingRuntimePivot = puppetGrabRuntimePivot;
     }
 
     const tiltChanged =
@@ -3158,5 +4027,6 @@ export function stepMatterPhysics(params: {
     updatedTransforms,
     ...(entitiesToDestroy.length > 0 ? { entitiesToDestroy } : {}),
     ...(Object.keys(stateChanges).length > 0 ? { stateChanges } : {}),
+    ...(brokenJointEvents.length > 0 ? { brokenJointEvents } : {}),
   };
 }

@@ -959,6 +959,33 @@ export function WizardStep1Condition({
             </div>
           </button>
         </div>
+
+        <div className="bg-red-50/50 p-3.5 rounded-2xl border border-red-200 space-y-2 sm:col-span-2 lg:col-span-4">
+          <div className="text-xs font-black uppercase text-red-800">⛓️‍💥 Rupture de Joint (Break Joint)</div>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveWizard({
+                ...activeWizard,
+                triggerType: 'joint_break',
+                triggerPhase: 'joint_break',
+                step: 2,
+                objectPhase: 'subject',
+                subjectSubStep: 'choose_object',
+                actionSubStep: 'main',
+              });
+            }}
+            className="w-full p-2.5 bg-white hover:bg-red-100/70 border border-red-200 rounded-xl flex items-center gap-2.5 text-left cursor-pointer transition-all shadow-2xs group"
+          >
+            <span className="text-xl">⛓️‍💥</span>
+            <div>
+              <div className="text-xs font-black text-slate-900">Quand le joint casse (traction ou secousse)</div>
+              <div className="text-[10px] text-slate-500">
+                Ex: feuille arrachée d'une branche, membre détaché — choisissez l'enfant concerné
+              </div>
+            </div>
+          </button>
+        </div>
       </div>
     </div>
   );

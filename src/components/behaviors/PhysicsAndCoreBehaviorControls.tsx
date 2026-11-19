@@ -10,6 +10,7 @@ import {
   PhysicsBehaviorConfig,
 } from '../../types';
 import { FlipControls, InertiaControls } from './BehaviorSharedControls';
+import { GrabPhysicsControls } from './GrabPhysicsControls';
 
 export function DraggableBehaviorControls({
   b,
@@ -18,44 +19,7 @@ export function DraggableBehaviorControls({
   b: DraggableBehaviorConfig;
   update: (partial: any) => void;
 }) {
-  return (
-    <div className="space-y-1.5">
-      {/* Ligne 1: Inertie au lancer */}
-      <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
-        <div>
-          <div className="font-bold text-slate-700 text-xs">Inertie au lancer (Throw)</div>
-          <div className="text-[10px] text-slate-400">Projette l'objet selon la vitesse du geste au lâcher</div>
-        </div>
-        <input
-          type="checkbox"
-          checked={b.throwable !== false}
-          onChange={(e) => update({ throwable: e.target.checked })}
-          className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
-        />
-      </div>
-
-      {/* Ligne 2: Plafond de vitesse */}
-      {b.throwable !== false && (
-        <div className="p-2 bg-white rounded-xl border border-slate-200">
-          <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-            <span className="font-bold">Plafond de projection</span>
-            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-              {b.maxThrowSpeed || 1500} px/s
-            </span>
-          </div>
-          <input
-            type="range"
-            min="300"
-            max="3000"
-            step="100"
-            value={b.maxThrowSpeed || 1500}
-            onChange={(e) => update({ maxThrowSpeed: parseFloat(e.target.value) })}
-            className="w-full accent-indigo-600"
-          />
-        </div>
-      )}
-    </div>
-  );
+  return <GrabPhysicsControls config={b} update={update} accent="indigo" />;
 }
 
 export function PhysicsBehaviorControls({

@@ -1262,10 +1262,14 @@ export function WizardStep3Actions({
                 spawnOffset: data.spawnOffset,
                 spawnPosition: data.spawnPosition,
                 spawnAbsoluteCoords: data.spawnAbsoluteCoords,
+                spawnRandomScope: data.spawnRandomScope,
+                spawnRandomZone: data.spawnRandomZone,
                 spawnSizeMode: data.spawnSizeMode,
                 spawnScaleMultiplier: data.spawnScaleMultiplier,
                 spawnCustomSize: data.spawnCustomSize,
                 spawnTags: data.spawnTags,
+                spawnImpulseSpeed: data.spawnImpulseSpeed,
+                spawnImpulseAngle: data.spawnImpulseAngle,
               });
             }}
             onCancel={() => {

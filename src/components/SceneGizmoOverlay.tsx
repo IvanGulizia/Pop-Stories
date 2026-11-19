@@ -27,6 +27,10 @@ import {
   getPivotWorldPosition,
   resolveEffectivePivot,
 } from '../utils/physics/pivotHelpers';
+import {
+  computeJointRestWorldDeg,
+  resolveJointLimits,
+} from '../utils/physics/jointAngularSolver';
 
 interface SceneGizmoOverlayProps {
   mousePosRef: React.MutableRefObject<{ x: number; y: number } | null>;
@@ -212,11 +216,13 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
 
   const order = entityOrder.length > 0 ? entityOrder : Object.keys(entities);
   const allIds = Array.from(new Set([...order, ...Object.keys(entities)]));
-  const allEntities = allIds.map((id) => entities[id]).filter((e): e is Entity => Boolean(e));
+  const allEntities = allIds
+    .map((id) => entities[id])
+    .filter((e): e is Entity => Boolean(e) && e.visible !== false);
 
   const filterOnlySelected = resolvedSettings.onlySelected;
   const targetEntities = filterOnlySelected
-    ? selectedEntityId && entities[selectedEntityId]
+    ? selectedEntityId && entities[selectedEntityId] && entities[selectedEntityId].visible !== false
       ? [entities[selectedEntityId]]
       : []
     : allEntities;
@@ -358,7 +364,7 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
       {showHierarchy && (
         <>
           {allEntities.map((child) => {
-            if (!child.parentId || !entities[child.parentId]) return null;
+            if (!child.parentId || !entities[child.parentId] || entities[child.parentId].visible === false) return null;
             if (
               filterOnlySelected &&
               selectedEntityId !== child.id &&
@@ -597,6 +603,40 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
                   />
                 </g>
               )}
+
+              {isPlayMode && puppet.swingAroundGrabPoint && entity.runtimePivot && (() => {
+                const grabEffPivot = resolveEffectivePivot(entity, currentState);
+                const grabWorld = getPivotWorldPosition(entity.position, entity.size, grabEffPivot);
+                return (
+                  <g>
+                    <circle
+                      cx={grabWorld.x}
+                      cy={grabWorld.y}
+                      r={7}
+                      fill="rgba(139, 92, 246, 0.16)"
+                      stroke="#7c3aed"
+                      strokeWidth="1.6"
+                    />
+                    <line
+                      x1={grabWorld.x - 9}
+                      y1={grabWorld.y}
+                      x2={grabWorld.x + 9}
+                      y2={grabWorld.y}
+                      stroke="#7c3aed"
+                      strokeWidth="1.4"
+                    />
+                    <line
+                      x1={grabWorld.x}
+                      y1={grabWorld.y - 9}
+                      x2={grabWorld.x}
+                      y2={grabWorld.y + 9}
+                      stroke="#7c3aed"
+                      strokeWidth="1.4"
+                    />
+                    <circle cx={grabWorld.x} cy={grabWorld.y} r={2.5} fill="#06b6d4" />
+                  </g>
+                );
+              })()}
 
               {Math.abs(tilt) > 0.5 && (
                 <g transform={`translate(${wb.centerX}, ${wb.y - 16})`}>
@@ -1159,9 +1199,11 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
         targetEntities.map((entity) => {
           const currentState = entity.states[entity.currentStateId];
           const wb = getEntityWorldColliderBounds(entity, currentState);
-          const center = getEntityCenter(entity);
+          const effPivot = resolveEffectivePivot(entity, currentState);
+          const pivotWorld = getPivotWorldPosition(entity.position, entity.size, effPivot);
           const totalRot =
-            (currentState?.rotation ?? 0) + (isPlayMode ? entity.runtimeTilt || 0 : 0);
+            (currentState?.rotation ?? 0) +
+            (isPlayMode ? (entity.runtimeTilt || 0) + (entity.runtimeJiggleAngle || 0) : 0);
           const mode = entity.colliderMode || 'default';
           const delegation = entity.pointerDelegation || 'self';
 
@@ -1197,7 +1239,7 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
               key={`gizmo-hitbox-${entity.id}`}
               transform={
                 Math.abs(totalRot) > 0.05
-                  ? `rotate(${totalRot} ${center.x} ${center.y})`
+                  ? `rotate(${totalRot} ${pivotWorld.x} ${pivotWorld.y})`
                   : undefined
               }
             >
@@ -1287,14 +1329,14 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
             const pState = parent.states[parent.currentStateId];
             const cState = child.states[child.currentStateId];
             const offset = child.parentOffset || { x: 0, y: 0 };
+            const pEffPivot = resolveEffectivePivot(parent, pState);
+            const pRot =
+              (pState?.rotation ?? 0) +
+              (isPlayMode ? (parent.runtimeTilt || 0) + (parent.runtimeJiggleAngle || 0) : 0);
+            const pFlip = Boolean(parent.flipX);
 
             let targetAnchor = isPlayMode ? runtimeDebug?.springAnchors[child.id] : undefined;
             if (!targetAnchor) {
-              const pEffPivot = resolveEffectivePivot(parent, pState);
-              const pRot =
-                (pState?.rotation ?? 0) +
-                (isPlayMode ? (parent.runtimeTilt || 0) + (parent.runtimeJiggleAngle || 0) : 0);
-              const pFlip = Boolean(parent.flipX);
               targetAnchor = getParentAnchorWorldPosition({
                 parentPosition: parent.position,
                 parentSize: parent.size,
@@ -1308,10 +1350,11 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
               });
             }
 
+            const childEffPivot = resolveEffectivePivot(child, cState);
             const childPivotWorld = getPivotWorldPosition(
               child.position,
               child.size,
-              resolveEffectivePivot(child, cState)
+              childEffPivot
             );
             const maxDist = Math.max(0, offset.springMaxDistance ?? 0);
             const isJoint = mode === 'physics_joint';
@@ -1322,8 +1365,118 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
             const midX = (targetAnchor.x + childPivotWorld.x) / 2;
             const midY = (targetAnchor.y + childPivotWorld.y) / 2;
 
+            // Calcul des cônes de butée et de freinage (7-1) pour physics_joint
+            const showJointArcs =
+              isJoint && (selectedEntityId === child.id || selectedEntityId === parent.id || isPlayMode);
+            const restWorldDeg = isJoint
+              ? computeJointRestWorldDeg({
+                  offset: child.parentOffset,
+                  parentRotDeg: pRot,
+                  parentFlipX: pFlip,
+                })
+              : 0;
+            const limits = isJoint ? resolveJointLimits(child.parentOffset) : null;
+            const leverDx = (0.5 - childEffPivot.x) * child.size.width;
+            const leverDy = (0.5 - childEffPivot.y) * child.size.height;
+            const leverDist = Math.hypot(leverDx, leverDy);
+            const unrotatedLeverDeg =
+              leverDist >= 4 ? (Math.atan2(leverDy, leverDx) * 180) / Math.PI : 90;
+            const centerRestDeg = unrotatedLeverDeg + restWorldDeg;
+            const coneRadius = Math.max(
+              40,
+              Math.min(86, leverDist > 6 ? leverDist + 14 : Math.max(child.size.width, child.size.height) * 0.55)
+            );
+            const initAngleOffset = child.parentOffset?.jointInitialAngleOffset ?? 0;
+            const showStartRay = isJoint && !isPlayMode && Math.abs(initAngleOffset) > 0.5;
+            const startWorldDeg = centerRestDeg + initAngleOffset;
+
             return (
               <g key={`gizmo-spring-link-${child.id}`}>
+                {showJointArcs && limits?.enabled && (
+                  <>
+                    {/* Cône principal autorisé [minAngle, maxAngle] */}
+                    <path
+                      d={buildArcSectorPath(
+                        targetAnchor.x,
+                        targetAnchor.y,
+                        coneRadius,
+                        centerRestDeg + limits.minAngle,
+                        centerRestDeg + limits.maxAngle
+                      )}
+                      fill="rgba(14, 165, 233, 0.08)"
+                      stroke="#0284c7"
+                      strokeOpacity={0.65}
+                      strokeWidth="1.25"
+                      strokeDasharray="4 3"
+                    />
+                    {/* 2e angle : Zones de freinage progressif en ambre aux deux extrémités */}
+                    {limits.brakeAngle > 0.5 && (
+                      <>
+                        <path
+                          d={buildArcSectorPath(
+                            targetAnchor.x,
+                            targetAnchor.y,
+                            coneRadius,
+                            centerRestDeg + limits.minAngle,
+                            centerRestDeg + limits.minAngle + limits.brakeAngle
+                          )}
+                          fill="rgba(245, 158, 11, 0.22)"
+                          stroke="#f59e0b"
+                          strokeOpacity={0.85}
+                          strokeWidth="1.25"
+                        />
+                        <path
+                          d={buildArcSectorPath(
+                            targetAnchor.x,
+                            targetAnchor.y,
+                            coneRadius,
+                            centerRestDeg + limits.maxAngle - limits.brakeAngle,
+                            centerRestDeg + limits.maxAngle
+                          )}
+                          fill="rgba(245, 158, 11, 0.22)"
+                          stroke="#f59e0b"
+                          strokeOpacity={0.85}
+                          strokeWidth="1.25"
+                        />
+                      </>
+                    )}
+                  </>
+                )}
+
+                {showJointArcs && (limits?.enabled || (child.parentOffset?.jointAngularStiffness ?? 0) > 0 || showStartRay) && (
+                  <line
+                    x1={targetAnchor.x}
+                    y1={targetAnchor.y}
+                    x2={targetAnchor.x + coneRadius * Math.cos(degToRad(centerRestDeg))}
+                    y2={targetAnchor.y + coneRadius * Math.sin(degToRad(centerRestDeg))}
+                    stroke="#0284c7"
+                    strokeWidth="1.4"
+                    strokeDasharray="3 3"
+                    strokeOpacity={0.8}
+                  />
+                )}
+
+                {showStartRay && (
+                  <>
+                    <line
+                      x1={targetAnchor.x}
+                      y1={targetAnchor.y}
+                      x2={targetAnchor.x + coneRadius * 0.9 * Math.cos(degToRad(startWorldDeg))}
+                      y2={targetAnchor.y + coneRadius * 0.9 * Math.sin(degToRad(startWorldDeg))}
+                      stroke="#10b981"
+                      strokeWidth="2"
+                    />
+                    <circle
+                      cx={targetAnchor.x + coneRadius * 0.9 * Math.cos(degToRad(startWorldDeg))}
+                      cy={targetAnchor.y + coneRadius * 0.9 * Math.sin(degToRad(startWorldDeg))}
+                      r={3.5}
+                      fill="#10b981"
+                      stroke="#ffffff"
+                      strokeWidth="1.5"
+                    />
+                  </>
+                )}
+
                 {maxDist > 0 && (
                   <circle
                     cx={targetAnchor.x}
@@ -1336,43 +1489,56 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
                     strokeOpacity={0.65}
                   />
                 )}
-                <polyline
-                  points={buildSpringZigzagPoints(
-                    targetAnchor.x,
-                    targetAnchor.y,
-                    childPivotWorld.x,
-                    childPivotWorld.y,
-                    7,
-                    5.5
-                  )}
-                  fill="none"
-                  stroke={strokeColor}
-                  strokeWidth="1.9"
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                />
-                <circle
-                  cx={targetAnchor.x}
-                  cy={targetAnchor.y}
-                  r={4}
-                  fill="#ffffff"
-                  stroke={strokeColor}
-                  strokeWidth="2"
-                />
-                <circle
-                  cx={childPivotWorld.x}
-                  cy={childPivotWorld.y}
-                  r={4}
-                  fill={strokeColor}
-                  stroke="#ffffff"
-                  strokeWidth="1.5"
-                />
+                {(() => {
+                  const stress = isPlayMode ? (runtimeDebug?.jointStressRatios?.[child.id] ?? 0) : 0;
+                  const effectiveStroke =
+                    offset.jointBreakable && stress > 0.72
+                      ? '#ef4444'
+                      : offset.jointBreakable && stress > 0.42
+                      ? '#f59e0b'
+                      : strokeColor;
+                  return (
+                    <>
+                      <polyline
+                        points={buildSpringZigzagPoints(
+                          targetAnchor.x,
+                          targetAnchor.y,
+                          childPivotWorld.x,
+                          childPivotWorld.y,
+                          7,
+                          5.5
+                        )}
+                        fill="none"
+                        stroke={effectiveStroke}
+                        strokeWidth={stress > 0.42 ? '2.4' : '1.9'}
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                      />
+                      <circle
+                        cx={targetAnchor.x}
+                        cy={targetAnchor.y}
+                        r={isJoint ? 4.5 : 4}
+                        fill="#ffffff"
+                        stroke={effectiveStroke}
+                        strokeWidth="2"
+                      />
+                      <circle
+                        cx={childPivotWorld.x}
+                        cy={childPivotWorld.y}
+                        r={4}
+                        fill={effectiveStroke}
+                        stroke="#ffffff"
+                        strokeWidth="1.5"
+                      />
+                    </>
+                  );
+                })()}
                 {(selectedEntityId === child.id || selectedEntityId === parent.id) && (
                   <g transform={`translate(${midX}, ${midY - 11})`}>
                     <rect
-                      x={-44}
+                      x={-52}
                       y={-10}
-                      width={88}
+                      width={104}
                       height={14}
                       rx={4}
                       fill={isJoint ? '#0369a1' : '#6d28d9'}
@@ -1389,12 +1555,47 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
                     >
                       {isJoint ? 'Joint' : 'Ressort'}
                       {hasWorldCol ? ' +Col' : ''}
+                      {isJoint && limits?.enabled ? ' 🔒' : ''}
+                      {offset.jointBreakable ? ' ⛓️‍💥' : ''}
                     </text>
                   </g>
                 )}
               </g>
             );
           })}
+
+          {/* A-bis. Saisies physiques actives (precisePhysicsGrab) */}
+          {isPlayMode &&
+            runtimeDebug?.grabPins &&
+            Object.entries(runtimeDebug.grabPins).map(([entId, pin]) => (
+              <g key={`gizmo-grab-pin-${entId}`}>
+                <line
+                  x1={pin.grabWorld.x}
+                  y1={pin.grabWorld.y}
+                  x2={pin.target.x}
+                  y2={pin.target.y}
+                  stroke="#ec4899"
+                  strokeWidth="1.75"
+                  strokeDasharray="3 2"
+                />
+                <circle
+                  cx={pin.grabWorld.x}
+                  cy={pin.grabWorld.y}
+                  r={4.5}
+                  fill="#ec4899"
+                  stroke="#ffffff"
+                  strokeWidth="1.5"
+                />
+                <circle
+                  cx={pin.target.x}
+                  cy={pin.target.y}
+                  r={3.5}
+                  fill="#ffffff"
+                  stroke="#ec4899"
+                  strokeWidth="1.5"
+                />
+              </g>
+            ))}
 
           {/* B. Follow en mode Ressort / Damping */}
           {targetEntities.map((entity) => {
@@ -1450,11 +1651,13 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
               | undefined;
             if (!jiggle) return null;
 
-            const effPivot = resolveEffectivePivot(
-              entity,
-              currentState,
-              jiggle.useCustomPivot ? jiggle.pivotOverride : undefined
-            );
+            const effPivot = entity.runtimePivot
+              ? resolveEffectivePivot(entity, currentState)
+              : resolveEffectivePivot(
+                  entity,
+                  currentState,
+                  jiggle.useCustomPivot ? jiggle.pivotOverride : undefined
+                );
             const jDebug = isPlayMode ? runtimeDebug?.jigglePivots[entity.id] : undefined;
             const pivotWorld =
               jDebug?.world || getPivotWorldPosition(entity.position, entity.size, effPivot);

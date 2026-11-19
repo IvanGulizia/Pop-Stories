@@ -183,6 +183,10 @@ export function FullScreenDrawingModal({
 
   const safeActiveIdx = Math.max(0, Math.min(activeFrameIndex, frames.length - 1));
   const activeFrame = frames[safeActiveIdx] || frames[0];
+  const framesRef = useRef<AnimationFrame[]>(frames);
+  framesRef.current = frames;
+  const activeFrameIdRef = useRef<string>(activeFrame?.id || 'frame_1');
+  activeFrameIdRef.current = activeFrame?.id || 'frame_1';
 
   // Auto-scroll la carte active dans la timeline Easy
   useEffect(() => {
@@ -248,20 +252,22 @@ export function FullScreenDrawingModal({
     return () => window.clearInterval(timer);
   }, [isPlayingPreview, frames.length, frameRate, animationLoop, safeActiveIdx]);
 
-  const handleVectorChange = (paths: VectorPath[], dataUrl?: string) => {
+  const handleVectorChange = useCallback((paths: VectorPath[], dataUrl?: string) => {
+    const targetFrameId = activeFrameIdRef.current;
     setFrames((prev) =>
-      prev.map((f, idx) => (idx === safeActiveIdx ? { ...f, vectorPaths: paths } : f))
+      prev.map((f) => (f.id === targetFrameId ? { ...f, vectorPaths: paths } : f))
     );
-    if (dataUrl && safeActiveIdx === 0) {
+    if (dataUrl && framesRef.current[0]?.id === targetFrameId) {
       setCurrentDataUrl(dataUrl);
     }
-  };
+  }, []);
 
-  const handleLayersChange = (layers: DrawingLayer[]) => {
+  const handleLayersChange = useCallback((layers: DrawingLayer[]) => {
+    const targetFrameId = activeFrameIdRef.current;
     setFrames((prev) =>
-      prev.map((f, idx) => (idx === safeActiveIdx ? { ...f, drawingLayers: layers } : f))
+      prev.map((f) => (f.id === targetFrameId ? { ...f, drawingLayers: layers } : f))
     );
-  };
+  }, []);
 
   // Pelure d'oignon automatique de la frame précédente combinée avec les autres états
   const combinedOnionStates = useMemo<OnionStateOption[]>(() => {

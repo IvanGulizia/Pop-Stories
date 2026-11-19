@@ -299,6 +299,81 @@ export function isPointNearPath(p: VectorPath, pt: VectorPoint, radius: number):
 }
 
 /**
+ * Vérifie si un point se trouve spécifiquement sur la bordure / le contour d'un tracé
+ * (sans inclure l'intérieur rempli), afin de permettre au pot de peinture de recolorer un contour.
+ */
+export function isPointOnPathStroke(
+  p: VectorPath,
+  pt: VectorPoint,
+  extraTolerance = 3.5
+): boolean {
+  if (!p.stroke || p.stroke === 'none' || p.strokeWidth === 0) return false;
+  const hitPad = Math.max(3, (p.strokeWidth || 4) / 2 + extraTolerance);
+
+  if (p.rect) {
+    const b = getPathBounds(p);
+    const corners: VectorPoint[] = [
+      { x: b.x, y: b.y },
+      { x: b.x + b.width, y: b.y },
+      { x: b.x + b.width, y: b.y + b.height },
+      { x: b.x, y: b.y + b.height },
+    ];
+    for (let i = 0; i < 4; i++) {
+      if (distToSegment(pt, corners[i], corners[(i + 1) % 4]) <= hitPad) return true;
+    }
+    return false;
+  }
+
+  if (p.circle) {
+    const dist = Math.hypot(pt.x - p.circle.cx, pt.y - p.circle.cy);
+    return Math.abs(dist - p.circle.r) <= hitPad;
+  }
+
+  if (p.points && p.points.length > 0) {
+    if (p.points.length === 1) {
+      return Math.hypot(p.points[0].x - pt.x, p.points[0].y - pt.y) <= hitPad;
+    }
+    for (let i = 0; i < p.points.length - 1; i++) {
+      if (distToSegment(pt, p.points[i], p.points[i + 1]) <= hitPad) return true;
+    }
+    if (p.d.trim().endsWith('Z') && p.points.length >= 3) {
+      if (distToSegment(pt, p.points[p.points.length - 1], p.points[0]) <= hitPad) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const b = getPathBounds(p);
+  const corners: VectorPoint[] = [
+    { x: b.x, y: b.y },
+    { x: b.x + b.width, y: b.y },
+    { x: b.x + b.width, y: b.y + b.height },
+    { x: b.x, y: b.y + b.height },
+  ];
+  for (let i = 0; i < 4; i++) {
+    if (distToSegment(pt, corners[i], corners[(i + 1) % 4]) <= hitPad) return true;
+  }
+  return false;
+}
+
+/**
+ * Retourne le tracé le plus haut dans l'ordre de rendu dont le contour est touché par `pt`.
+ */
+export function findPathStrokeAtPoint(
+  pt: VectorPoint,
+  paths: VectorPath[],
+  extraTolerance = 3.5
+): VectorPath | null {
+  for (let i = paths.length - 1; i >= 0; i--) {
+    if (isPointOnPathStroke(paths[i], pt, extraTolerance)) {
+      return paths[i];
+    }
+  }
+  return null;
+}
+
+/**
  * Translate un tracé vectoriel de (dx, dy).
  */
 export function translatePath(p: VectorPath, dx: number, dy: number): VectorPath {

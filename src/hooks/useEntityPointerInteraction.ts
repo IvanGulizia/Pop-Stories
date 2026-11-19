@@ -3,6 +3,7 @@ import { useDragControls, useMotionValue } from 'motion/react';
 import { Entity, EntityState, HealthBehaviorConfig } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
 import {
+  EntityHitTestContext,
   getEntityColliderBounds,
   getEntityColliderClipPath,
   isPointInsideEntityCollider,
@@ -10,14 +11,25 @@ import {
 import { useAppCursor } from '../context/CursorContext';
 import { CursorState } from '../utils/cursorIcons';
 import {
+  hasEntityClickRules,
+  resolveEntityHoverCursorState,
+  resolveEntityPressCursorState,
+  resolveNativeHitboxCursorClass,
+} from '../utils/cursorResolution';
+import {
+  endPhysicsGrab,
   getEffectiveBehaviors,
   getEntityRuntimeHealth,
   isEntityDraggable,
   notifyEntityDragLifecycle,
   notifyEntityHoverState,
+  releasePuppetGrabHold,
   setActiveDragPosition,
   setEntityRuntimeVelocity,
+  setPuppetGrabPivot,
+  startPhysicsGrab,
   syncEntityDragPosition,
+  updatePhysicsGrabTarget,
 } from '../utils/matterPhysicsEngine';
 import {
   getEntityDragControls,
@@ -25,7 +37,12 @@ import {
   resolvePointerTargetEntity,
   unregisterEntityDragControls,
 } from '../utils/dragDelegationRegistry';
-import { getPivotWorldPosition, resolveEffectivePivot } from '../utils/physics/pivotHelpers';
+import {
+  computeLocalGrabPivotFromClientPoint,
+  getPivotWorldPosition,
+  reanchorPositionForPivotChange,
+  resolveEffectivePivot,
+} from '../utils/physics/pivotHelpers';
 import { shortestAngleDiffRad } from '../utils/physics/lookAtSolver';
 
 export interface UseEntityPointerInteractionOptions {
@@ -52,12 +69,15 @@ export function useEntityPointerInteraction({
   const evaluateRulesWithTemp = useSceneStore((state) => state.evaluateRulesWithTemp);
   const showCanvasLabels = useSceneStore((state) => state.settings.showCanvasLabels);
   const enableHoverScaleAnimation = useSceneStore((state) => state.settings.enableHoverScaleAnimation);
+  const useCustomCursors = useSceneStore((state) => state.settings.useCustomCursors !== false);
   const appMode = useSceneStore((state) => state.appMode);
   const rules = useSceneStore((state) => state.rules);
 
   const [isResizing, setIsResizing] = useState(false);
   const [isRotating, setIsRotating] = useState(false);
   const isDraggingRef = useRef(false);
+  const isPhysicsGrabbingRef = useRef(false);
+  const physicsGrabCleanupRef = useRef<(() => void) | null>(null);
   const pushedDragHistoryRef = useRef(false);
   const lastDragEndTimeRef = useRef<number>(0);
   const lastDragEvalTimeRef = useRef<number>(0);
@@ -77,7 +97,11 @@ export function useEntityPointerInteraction({
   const isSelected = selectedEntityId === entity.id;
   const currentState: EntityState = entity.states[entity.currentStateId] || fallbackState;
 
-  const { canDrag: canDragFromBehavior, throwable, maxThrowSpeed } = isEntityDraggable(entity, currentState);
+  const {
+    canDrag: canDragFromBehavior,
+    throwable,
+    maxThrowSpeed,
+  } = isEntityDraggable(entity, currentState);
   const canDrag = !isResizing && !isRotating && (appMode !== 'play' || canDragFromBehavior);
 
   // Santé & invincibilité runtime
@@ -89,28 +113,12 @@ export function useEntityPointerInteraction({
       : undefined;
   const runtimeHealth = appMode === 'play' && healthConfig ? getEntityRuntimeHealth(entity.id) : null;
 
-  const hasClickRules = rules.some(
-    (r) =>
-      r.enabled &&
-      r.trigger.type === 'click' &&
-      ((r.trigger.subjectMode === 'instance' && r.trigger.subjectId === entity.id) ||
-        (r.trigger.subjectMode === 'type' && r.trigger.subjectType === entity.type) ||
-        (r.trigger.subjectMode === 'tag' && r.trigger.subjectTag && entity.tags?.includes(r.trigger.subjectTag)) ||
-        (!r.trigger.subjectMode && (r.trigger.subjectId === entity.id || r.trigger.subjectType === entity.type)))
-  );
+  const hasClickRules = hasEntityClickRules(entity, rules);
 
   const getTargetInteractionFlags = (target: Entity) => {
     const tState = target.states[target.currentStateId];
     const tDrag = isEntityDraggable(target, tState);
-    const tHasClick = rules.some(
-      (r) =>
-        r.enabled &&
-        r.trigger.type === 'click' &&
-        ((r.trigger.subjectMode === 'instance' && r.trigger.subjectId === target.id) ||
-          (r.trigger.subjectMode === 'type' && r.trigger.subjectType === target.type) ||
-          (r.trigger.subjectMode === 'tag' && r.trigger.subjectTag && target.tags?.includes(r.trigger.subjectTag)) ||
-          (!r.trigger.subjectMode && (r.trigger.subjectId === target.id || r.trigger.subjectType === target.type)))
-    );
+    const tHasClick = hasEntityClickRules(target, rules);
     return { canDragTarget: tDrag.canDrag, hasClickRulesTarget: tHasClick };
   };
 
@@ -120,18 +128,11 @@ export function useEntityPointerInteraction({
         ? { canDragTarget: canDrag, hasClickRulesTarget: hasClickRules }
         : getTargetInteractionFlags(target);
     const effectiveDrag = appMode !== 'play' ? !isResizing : canDragTarget;
-    const effectiveClick = hasClickRulesTarget || appMode !== 'play';
-
-    if (effectiveDrag && hasClickRulesTarget) {
-      return 'hover_drag_click';
-    }
-    if (effectiveDrag) {
-      return 'hover_drag';
-    }
-    if (effectiveClick) {
-      return 'hover_click';
-    }
-    return 'idle';
+    return resolveEntityHoverCursorState({
+      appMode,
+      canDrag: effectiveDrag,
+      hasClickRules: hasClickRulesTarget,
+    });
   };
 
   const getHoverState = (): CursorState => getHoverStateFor(entity);
@@ -154,6 +155,33 @@ export function useEntityPointerInteraction({
   const x = useMotionValue(entity.position.x);
   const y = useMotionValue(entity.position.y);
 
+  const buildEntityHitContext = (
+    targetEnt: Entity,
+    targetSt: EntityState | undefined
+  ): EntityHitTestContext => {
+    const effPivot = resolveEffectivePivot(targetEnt, targetSt);
+    const totalRot =
+      (targetSt?.rotation ?? 0) +
+      (appMode === 'play' ? (targetEnt.runtimeTilt || 0) + (targetEnt.runtimeJiggleAngle || 0) : 0);
+    const sBase = targetSt?.scale ?? 1;
+    const rawX = targetEnt.id === entity.id ? Number(x.get()) : targetEnt.position.x;
+    const rawY = targetEnt.id === entity.id ? Number(y.get()) : targetEnt.position.y;
+    const livePos = {
+      x: Number.isFinite(rawX) ? rawX : targetEnt.position.x,
+      y: Number.isFinite(rawY) ? rawY : targetEnt.position.y,
+    };
+    const container =
+      typeof document !== 'undefined' ? document.getElementById('scene-canvas-container') : null;
+    return {
+      position: livePos,
+      totalRotationDeg: totalRot,
+      scaleX: sBase * (appMode === 'play' ? (targetEnt.runtimeScaleX ?? 1) : 1),
+      scaleY: sBase * (appMode === 'play' ? (targetEnt.runtimeScaleY ?? 1) : 1),
+      effPivot,
+      containerRect: container ? container.getBoundingClientRect() : null,
+    };
+  };
+
   useEffect(() => {
     registerEntityDragControls(entity.id, dragControls);
     return () => unregisterEntityDragControls(entity.id, dragControls);
@@ -167,6 +195,12 @@ export function useEntityPointerInteraction({
 
   useEffect(() => {
     return () => {
+      if (physicsGrabCleanupRef.current) {
+        physicsGrabCleanupRef.current();
+        physicsGrabCleanupRef.current = null;
+      }
+      endPhysicsGrab(entity.id, false);
+      releasePuppetGrabHold(entity.id);
       setActiveDragPosition(entity.id, null);
       if (hoveredTargetIdRef.current && hoveredTargetIdRef.current !== entity.id) {
         notifyEntityHoverState(hoveredTargetIdRef.current, false);
@@ -180,11 +214,18 @@ export function useEntityPointerInteraction({
     isDraggingRef.current = true;
     pushedDragHistoryRef.current = false;
     lastDragEvalTimeRef.current = 0;
-    setActiveDragPosition(entity.id, { x: entity.position.x, y: entity.position.y });
+    const rx = Number(x.get());
+    const ry = Number(y.get());
+    const liveEnt = useSceneStore.getState().entities[entity.id] || entity;
+    const startPos =
+      Number.isFinite(rx) && Number.isFinite(ry)
+        ? { x: rx, y: ry }
+        : { x: liveEnt.position.x, y: liveEnt.position.y };
+    setActiveDragPosition(entity.id, startPos);
     if (appMode === 'play') {
-      notifyEntityDragLifecycle(entity.id, 'start', { x: entity.position.x, y: entity.position.y });
+      notifyEntityDragLifecycle(entity.id, 'start', startPos);
     }
-    dragSamplesRef.current = [{ x: entity.position.x, y: entity.position.y, time: performance.now() }];
+    dragSamplesRef.current = [{ x: startPos.x, y: startPos.y, time: performance.now() }];
     setIsDragging(true);
     setCursorState('drag');
   };
@@ -221,7 +262,10 @@ export function useEntityPointerInteraction({
     if (!isNaN(numX) && !isNaN(numY)) {
       setActiveDragPosition(entity.id, { x: numX, y: numY });
       if (appMode === 'play') {
-        syncEntityDragPosition(entity.id, numX, numY, entity.size.width, entity.size.height);
+        const liveEnt = useSceneStore.getState().entities[entity.id] || entity;
+        const liveSt = liveEnt.states[liveEnt.currentStateId] || currentState;
+        const effPivot = resolveEffectivePivot(liveEnt, liveSt);
+        syncEntityDragPosition(entity.id, numX, numY, liveEnt.size.width, liveEnt.size.height, effPivot);
         notifyEntityDragLifecycle(
           entity.id,
           'move',
@@ -247,19 +291,28 @@ export function useEntityPointerInteraction({
 
   const handleDragEnd = () => {
     const now = performance.now();
+    const currentX = x.get();
+    const currentY = y.get();
+    const numX = typeof currentX === 'string' ? parseFloat(currentX) : currentX;
+    const numY = typeof currentY === 'string' ? parseFloat(currentY) : currentY;
+
+    // Verrouiller la position finale du corps Matter avant de relâcher le verrou pour éviter toute téléportation
+    if (appMode === 'play' && !isNaN(numX) && !isNaN(numY)) {
+      const liveEnt = useSceneStore.getState().entities[entity.id] || entity;
+      const liveSt = liveEnt.states[liveEnt.currentStateId] || currentState;
+      const effPivot = resolveEffectivePivot(liveEnt, liveSt);
+      syncEntityDragPosition(entity.id, numX, numY, liveEnt.size.width, liveEnt.size.height, effPivot);
+    }
+
     // Libérer immédiatement le verrou de synchro visuelle pour que la physique poursuive sans aucun freeze
     isDraggingRef.current = false;
     pushedDragHistoryRef.current = false;
     lastDragEndTimeRef.current = now;
     setActiveDragPosition(entity.id, null);
+    releasePuppetGrabHold(entity.id);
     if (appMode === 'play') {
       notifyEntityDragLifecycle(entity.id, 'end', undefined, hasMovedBeyondDragThresholdRef.current);
     }
-
-    const currentX = x.get();
-    const currentY = y.get();
-    const numX = typeof currentX === 'string' ? parseFloat(currentX) : currentX;
-    const numY = typeof currentY === 'string' ? parseFloat(currentY) : currentY;
 
     if (!isNaN(numX) && !isNaN(numY)) {
       x.set(numX);
@@ -420,7 +473,8 @@ export function useEntityPointerInteraction({
       e.clientY,
       e.currentTarget,
       entity,
-      currentState
+      currentState,
+      buildEntityHitContext(entity, currentState)
     );
     if (isInside) {
       const target = getPlayPointerTarget();
@@ -454,25 +508,42 @@ export function useEntityPointerInteraction({
     ? rawClipPath || (colliderType === 'circle' ? 'circle(50% at 50% 50%)' : 'inset(0% round 16px)')
     : rawClipPath;
 
+  const hideNativeCursor = appMode === 'play' && useCustomCursors;
+  const nativeTargetFlags =
+    !hideNativeCursor &&
+    appMode === 'play' &&
+    entity.pointerDelegation &&
+    entity.pointerDelegation !== 'self'
+      ? getTargetInteractionFlags(resolvePointerTargetEntity(entity, useSceneStore.getState().entities))
+      : { canDragTarget: canDrag, hasClickRulesTarget: hasClickRules };
+  const nativeCursorClass = resolveNativeHitboxCursorClass({
+    hideNativeCursor,
+    appMode,
+    canDrag: nativeTargetFlags.canDragTarget,
+    hasClickRules: nativeTargetFlags.hasClickRulesTarget,
+  });
+
   const hitboxProps: React.HTMLAttributes<HTMLDivElement> = {
     className: `absolute inset-0 ${
       appMode === 'play' && entity.ignorePointer ? 'pointer-events-none' : 'pointer-events-auto'
-    } flex items-center justify-center z-10 ${
-      canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
-    }`,
+    } flex items-center justify-center z-10 ${nativeCursorClass}`,
     style: {
       clipPath: colliderClipPath,
     },
     onPointerEnter: handlePointerHoverCheck,
     onPointerMove: handlePointerHoverCheck,
     onPointerLeave: (e) => {
-      if (appMode === 'play' && isHoveringRef.current) {
-        const exitId = hoveredTargetIdRef.current || entity.id;
-        isHoveringRef.current = false;
-        hoveredTargetIdRef.current = null;
-        notifyEntityHoverState(exitId, false);
-        setCursorState('idle');
-        triggerPointerEvent(exitId, 'exit', getSceneEventPosition(e.clientX, e.clientY));
+      if (appMode === 'play') {
+        if (!isDraggingRef.current && !isPhysicsGrabbingRef.current) {
+          setCursorState('idle');
+        }
+        if (isHoveringRef.current) {
+          const exitId = hoveredTargetIdRef.current || entity.id;
+          isHoveringRef.current = false;
+          hoveredTargetIdRef.current = null;
+          notifyEntityHoverState(exitId, false);
+          triggerPointerEvent(exitId, 'exit', getSceneEventPosition(e.clientX, e.clientY));
+        }
       }
     },
     onPointerDown: (e) => {
@@ -481,7 +552,8 @@ export function useEntityPointerInteraction({
         e.clientY,
         e.currentTarget,
         entity,
-        currentState
+        currentState,
+        buildEntityHitContext(entity, currentState)
       );
 
       if (!isInside) {
@@ -508,45 +580,238 @@ export function useEntityPointerInteraction({
 
       const target = getPlayPointerTarget();
       pointerDownTargetIdRef.current = target.id;
-      const { canDragTarget } =
-        target.id === entity.id
-          ? { canDragTarget: canDrag }
-          : getTargetInteractionFlags(target);
+      const liveEntitiesMap = useSceneStore.getState().entities;
+      const liveTarget = liveEntitiesMap[target.id] || target;
+      const liveTargetState = liveTarget.states[liveTarget.currentStateId];
+      const liveDragInfo = isEntityDraggable(liveTarget, liveTargetState);
+      const canDragTarget =
+        target.id === entity.id ? canDrag : !isResizing && !isRotating && liveDragInfo.canDrag;
+
+      const pt = getSceneEventPosition(e.clientX, e.clientY);
+      upHandledForPointerRef.current = false;
+      triggerPointerEvent(target.id, 'mouse_down', pt);
+
+      const attachMode = liveTarget.parentOffset?.attachmentMode || 'rigid';
+      const isDynamicAttachedChild = Boolean(
+        liveTarget.parentId &&
+          liveEntitiesMap[liveTarget.parentId] &&
+          (attachMode === 'physics_joint' ||
+            (attachMode === 'spring' && liveTarget.parentOffset?.collideWithWorld === true))
+      );
+
+      // Mode 1 : Saisie physique (contrainte Matter.js au point cliqué si precisePhysicsGrab ou enfant articulé dynamique)
+      if (canDragTarget && (liveDragInfo.precisePhysicsGrab || isDynamicAttachedChild) && pt) {
+        const grabOptions = liveDragInfo.precisePhysicsGrab
+          ? {
+              rotationMode: liveDragInfo.grabRotationMode,
+              maxAngle: liveDragInfo.grabMaxAngle,
+              brakeAngle: liveDragInfo.grabBrakeAngle,
+              angularStiffness: liveDragInfo.grabAngularStiffness,
+              angularDamping: liveDragInfo.grabAngularDamping,
+            }
+          : { rotationMode: 'free' as const };
+        const started = startPhysicsGrab(liveTarget.id, pt.x, pt.y, grabOptions);
+        if (started) {
+          if (physicsGrabCleanupRef.current) {
+            physicsGrabCleanupRef.current();
+            physicsGrabCleanupRef.current = null;
+          }
+          isPhysicsGrabbingRef.current = true;
+          lastDragEvalTimeRef.current = 0;
+          notifyEntityDragLifecycle(liveTarget.id, 'start', liveTarget.position);
+          setIsDragging(true);
+          setCursorState('drag');
+
+          const downClientX = e.clientX;
+          const downClientY = e.clientY;
+
+          const handlePhysicsMove = (moveEv: PointerEvent) => {
+            if (Math.hypot(moveEv.clientX - downClientX, moveEv.clientY - downClientY) > 4) {
+              hasMovedBeyondDragThresholdRef.current = true;
+            }
+            const movePt = getSceneEventPosition(moveEv.clientX, moveEv.clientY);
+            if (movePt) {
+              updatePhysicsGrabTarget(liveTarget.id, movePt.x, movePt.y);
+            }
+            notifyEntityDragLifecycle(
+              liveTarget.id,
+              'move',
+              undefined,
+              hasMovedBeyondDragThresholdRef.current
+            );
+            setCursorState('drag');
+            const now = performance.now();
+            if (now - lastDragEvalTimeRef.current >= 16) {
+              lastDragEvalTimeRef.current = now;
+              evaluateRulesWithTemp();
+            }
+          };
+
+          const cleanupPhysicsListeners = () => {
+            window.removeEventListener('pointermove', handlePhysicsMove);
+            window.removeEventListener('pointerup', handlePhysicsUp);
+            window.removeEventListener('pointercancel', handlePhysicsUp);
+          };
+
+          const handlePhysicsUp = (upEv: PointerEvent) => {
+            cleanupPhysicsListeners();
+            physicsGrabCleanupRef.current = null;
+            isPhysicsGrabbingRef.current = false;
+            lastDragEndTimeRef.current = performance.now();
+            upHandledForPointerRef.current = true;
+
+            const latestTarget =
+              useSceneStore.getState().entities[liveTarget.id] || liveTarget;
+            const latestState = latestTarget.states[latestTarget.currentStateId];
+            const latestDrag = isEntityDraggable(latestTarget, latestState);
+
+            endPhysicsGrab(
+              liveTarget.id,
+              latestDrag.throwable,
+              latestDrag.maxThrowSpeed
+            );
+            notifyEntityDragLifecycle(
+              liveTarget.id,
+              'end',
+              undefined,
+              hasMovedBeyondDragThresholdRef.current
+            );
+            evaluateRulesWithTemp();
+
+            const upPt = getSceneEventPosition(upEv.clientX, upEv.clientY);
+            const duration = Date.now() - (pointerDownTimeRef.current || 0);
+            const dist = Math.hypot(upEv.clientX - downClientX, upEv.clientY - downClientY);
+            const isPureClick = !hasMovedBeyondDragThresholdRef.current && dist < 6 && duration < 700;
+
+            if (isPureClick) {
+              lastHandledClickTimeRef.current = Date.now();
+              selectEntity(liveTarget.id);
+              triggerPointerEvent(liveTarget.id, 'click', upPt);
+              triggerPointerEvent(liveTarget.id, 'mouse_up', upPt);
+            } else {
+              triggerPointerEvent(liveTarget.id, 'mouse_up', upPt);
+              if (hasMovedBeyondDragThresholdRef.current) {
+                triggerDragRelease(liveTarget.id, upPt);
+              }
+            }
+
+            setIsDragging(false);
+            setCursorState('release');
+            setTimeout(() => {
+              hasMovedBeyondDragThresholdRef.current = false;
+              if (!isDraggingRef.current && !isPhysicsGrabbingRef.current) {
+                setCursorState(getHoverStateFor(latestTarget));
+              }
+            }, 120);
+          };
+
+          physicsGrabCleanupRef.current = cleanupPhysicsListeners;
+          window.addEventListener('pointermove', handlePhysicsMove);
+          window.addEventListener('pointerup', handlePhysicsUp);
+          window.addEventListener('pointercancel', handlePhysicsUp);
+          return;
+        }
+      }
+
+      // Mode 2 : Balancement Marionnette depuis le point exact cliqué (cinématique Framer Motion)
+      if (canDragTarget && liveDragInfo.swingAroundGrabPoint && pt) {
+        const curEffPivot = resolveEffectivePivot(liveTarget, liveTargetState);
+        const totalRot =
+          (liveTargetState?.rotation ?? 0) +
+          (liveTarget.runtimeTilt || 0) +
+          (liveTarget.runtimeJiggleAngle || 0);
+        const sBase = liveTargetState?.scale ?? 1;
+        const sx = sBase * (liveTarget.runtimeScaleX ?? 1);
+        const sy = sBase * (liveTarget.runtimeScaleY ?? 1);
+        const grabRawPivot = computeLocalGrabPivotFromClientPoint({
+          canvasPoint: pt,
+          entityPosition: liveTarget.position,
+          entitySize: liveTarget.size,
+          currentEffPivot: curEffPivot,
+          totalRotationDeg: totalRot,
+          scaleX: sx,
+          scaleY: sy,
+          flipX: Boolean(liveTarget.flipX),
+        });
+        let reanchoredPos: { x: number; y: number } | undefined;
+        if (Math.abs(totalRot) > 0.1) {
+          const nextEffPivot = {
+            x: liveTarget.flipX ? 1 - grabRawPivot.x : grabRawPivot.x,
+            y: grabRawPivot.y,
+          };
+          reanchoredPos = reanchorPositionForPivotChange({
+            position: liveTarget.position,
+            size: liveTarget.size,
+            oldEffPivot: curEffPivot,
+            newEffPivot: nextEffPivot,
+            rotationDeg: totalRot,
+          });
+          if (liveTarget.id === entity.id) {
+            x.set(reanchoredPos.x);
+            y.set(reanchoredPos.y);
+          }
+        }
+        setPuppetGrabPivot(liveTarget.id, grabRawPivot, true);
+        useSceneStore.getState().batchUpdateEntityTransforms({
+          [liveTarget.id]: {
+            ...(reanchoredPos ? { position: reanchoredPos } : {}),
+            runtimePivot: grabRawPivot,
+          },
+        });
+      }
+
+      const targetHasClickRules =
+        target.id === entity.id ? hasClickRules : hasEntityClickRules(liveTarget, rules);
 
       if (target.id !== entity.id) {
         if (canDragTarget) {
           getEntityDragControls(target.id)?.start(e);
           setCursorState('drag');
         } else {
-          setCursorState('click');
+          setCursorState(
+            resolveEntityPressCursorState({
+              appMode,
+              canDrag: false,
+              hasClickRules: targetHasClickRules,
+            })
+          );
         }
       } else if (canDrag) {
         dragControls.start(e);
         setCursorState('drag');
       } else {
-        setCursorState('click');
+        setCursorState(
+          resolveEntityPressCursorState({
+            appMode,
+            canDrag: false,
+            hasClickRules: targetHasClickRules,
+          })
+        );
       }
-
-      upHandledForPointerRef.current = false;
-      const pt = getSceneEventPosition(e.clientX, e.clientY);
-      triggerPointerEvent(target.id, 'mouse_down', pt);
 
       const handleGlobalUp = (upEvent: PointerEvent) => {
         window.removeEventListener('pointerup', handleGlobalUp);
+        window.removeEventListener('pointercancel', handleGlobalUp);
+        releasePuppetGrabHold(liveTarget.id);
         if (upHandledForPointerRef.current) return;
         upHandledForPointerRef.current = true;
         const upPt = getSceneEventPosition(upEvent.clientX, upEvent.clientY);
         triggerPointerEvent(target.id, 'mouse_up', upPt);
       };
       window.addEventListener('pointerup', handleGlobalUp, { once: true });
+      window.addEventListener('pointercancel', handleGlobalUp, { once: true });
     },
     onPointerUp: (e) => {
+      if (isPhysicsGrabbingRef.current) {
+        return;
+      }
       const isInside = isPointInsideEntityCollider(
         e.clientX,
         e.clientY,
         e.currentTarget,
         entity,
-        currentState
+        currentState,
+        buildEntityHitContext(entity, currentState)
       );
 
       if (appMode !== 'play') {
@@ -561,6 +826,7 @@ export function useEntityPointerInteraction({
       const target =
         (pointerDownTargetIdRef.current && useSceneStore.getState().entities[pointerDownTargetIdRef.current]) ||
         getPlayPointerTarget();
+      releasePuppetGrabHold(target.id);
       upHandledForPointerRef.current = true;
       const pt = getSceneEventPosition(e.clientX, e.clientY);
       const duration = Date.now() - (pointerDownTimeRef.current || 0);
@@ -594,7 +860,8 @@ export function useEntityPointerInteraction({
         e.clientY,
         e.currentTarget,
         entity,
-        currentState
+        currentState,
+        buildEntityHitContext(entity, currentState)
       );
       if (!isInside) return;
 

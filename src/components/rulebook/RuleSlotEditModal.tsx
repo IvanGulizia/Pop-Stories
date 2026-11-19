@@ -15,6 +15,7 @@ import {
 import { RuleSubjectTargetModal } from './RuleSubjectTargetModal';
 import { RuleEventModal } from './RuleEventModal';
 import { RuleActionModal } from './RuleActionModal';
+import { useSceneStore } from '../../store/useSceneStore';
 
 interface RuleSlotEditModalProps {
   activeModal: NonNullable<ActiveModal>;
@@ -97,10 +98,14 @@ export const RuleSlotEditModal: React.FC<RuleSlotEditModalProps> = ({
       Object.keys(getEntityObj(modalTargetType)?.states || {}).length > 1
     : false;
 
+  const isPickingSpawnOnCanvas = useSceneStore((s) => Boolean(s.spawnCanvasPick));
+
   return (
     <div
-      data-modal-open="true"
-      className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      data-modal-open={isPickingSpawnOnCanvas ? undefined : 'true'}
+      className={`fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 ${
+        isPickingSpawnOnCanvas ? 'hidden' : ''
+      }`}
     >
       <div
         className={`bg-white rounded-3xl border border-slate-200 p-6 w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col overflow-hidden ${

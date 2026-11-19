@@ -55,6 +55,9 @@ export default function App() {
 
   // Main UI View States
   const [activeView, setActiveView] = useState<'canvas' | 'rules'>('canvas');
+  const [hasVisitedRules, setHasVisitedRules] = useState(false);
+  const spawnCanvasPick = useSceneStore((state) => state.spawnCanvasPick);
+  const prevSpawnPickRef = useRef(false);
   const [isEntitiesOpen, setIsEntitiesOpen] = useState(true);
   const [leftTab, setLeftTab] = useState<'entities' | 'scene'>('entities');
   const [rightPanel, setRightPanel] = useState<'none' | 'inspector' | 'settings'>('inspector');
@@ -66,6 +69,24 @@ export default function App() {
 
   // Drawing Layer State
   const [editingLayer, setEditingLayer] = useState<{ layer: SceneLayer; group: SceneLayerGroup } | null>(null);
+
+  useEffect(() => {
+    if (activeView === 'rules') {
+      setHasVisitedRules(true);
+    }
+  }, [activeView]);
+
+  // Basculer automatiquement sur Canvas lors du "Placer sur la scène", puis restaurer Rules une fois choisi/annulé
+  useEffect(() => {
+    const isPicking = Boolean(spawnCanvasPick);
+    if (isPicking && !prevSpawnPickRef.current) {
+      setHasVisitedRules(true);
+      setActiveView('canvas');
+    } else if (!isPicking && prevSpawnPickRef.current) {
+      setActiveView('rules');
+    }
+    prevSpawnPickRef.current = isPicking;
+  }, [spawnCanvasPick]);
 
   // Auto-Save Option A : écoute uniquement en mode Édition avec debounce 2,5 s (zéro impact en Play / drag)
   useEffect(() => {
@@ -233,10 +254,14 @@ export default function App() {
         return;
       }
 
-      // Échap : Quitter Play -> Quitter dessin calque -> Désélectionner entité
+      // Échap : Annuler visée spawn/joint -> Quitter Play -> Quitter dessin calque -> Désélectionner entité
       if (e.key === 'Escape') {
         const st = useSceneStore.getState();
-        if (st.appMode === 'play') {
+        if (st.spawnCanvasPick) {
+          st.cancelSpawnCanvasPick();
+        } else if (st.jointCanvasPick) {
+          st.cancelJointCanvasPick();
+        } else if (st.appMode === 'play') {
           st.setAppMode('edit');
         } else if (st.selectedLayerId) {
           st.selectLayer(null);
@@ -399,6 +424,11 @@ export default function App() {
             <button
               onClick={() => {
                 if (selectedLayerId) selectLayer(null);
+                if (spawnCanvasPick) useSceneStore.getState().cancelSpawnCanvasPick();
+                if (useSceneStore.getState().jointCanvasPick) {
+                  useSceneStore.getState().cancelJointCanvasPick();
+                }
+                setHasVisitedRules(true);
                 setActiveView('rules');
               }}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
@@ -635,18 +665,23 @@ export default function App() {
           </aside>
         )}
 
-        {/* 2. CENTER FRAME: CANVAS OR RULES */}
+        {/* 2. CENTER FRAME: CANVAS OR RULES (RuleBook stays mounted while hidden to preserve modal state) */}
         <main className={`flex-1 bg-white rounded-3xl border shadow-xs flex flex-col overflow-hidden min-w-0 transition-all duration-300 ${
           appMode === 'play'
             ? 'z-30 border-emerald-500/60 ring-4 ring-emerald-500/30 shadow-2xl'
             : 'border-slate-300/80 z-10'
         }`}>
-          {activeView === 'canvas' ? (
+          {activeView === 'canvas' && (
             <div className="flex-1 relative flex items-center justify-center min-h-0 overflow-hidden">
               <Scene onOpenCreateModal={() => setIsCreateModalOpen(true)} />
             </div>
-          ) : (
-            <div className="flex-1 p-4 sm:p-6 overflow-hidden flex flex-col min-h-0">
+          )}
+          {(hasVisitedRules || activeView === 'rules') && (
+            <div
+              className={`flex-1 p-4 sm:p-6 overflow-hidden flex flex-col min-h-0 ${
+                activeView === 'rules' ? '' : 'hidden'
+              }`}
+            >
               <RuleBook />
             </div>
           )}

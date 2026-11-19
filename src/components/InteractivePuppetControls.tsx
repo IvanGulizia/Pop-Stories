@@ -14,6 +14,7 @@ import {
   Sparkles,
   Trash2,
 } from 'lucide-react';
+import { GrabPhysicsControls } from './behaviors/GrabPhysicsControls';
 
 interface InteractivePuppetControlsProps {
   behavior: InteractivePuppetBehaviorConfig;
@@ -157,43 +158,14 @@ export function InteractivePuppetControls({
 
   return (
     <div className="space-y-2">
-      {/* 1. Drag & Inertie au lancer */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="font-bold text-slate-700 text-xs">Inertie au lancer (Throw)</div>
-            <div className="text-[10px] text-slate-400">
-              Projette la marionnette au lâcher (avec composant Physique)
-            </div>
-          </div>
-          <input
-            type="checkbox"
-            checked={b.throwable !== false}
-            onChange={(e) => update({ throwable: e.target.checked })}
-            className="w-4 h-4 accent-violet-600 rounded cursor-pointer"
-          />
-        </div>
-
-        {b.throwable !== false && (
-          <div className="pt-1.5 border-t border-slate-100">
-            <div className="flex justify-between items-center text-[11px] text-slate-700 mb-1">
-              <span className="font-semibold">Plafond de projection</span>
-              <span className="font-mono font-bold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded text-[10px]">
-                {b.maxThrowSpeed || 1500} px/s
-              </span>
-            </div>
-            <input
-              type="range"
-              min="300"
-              max="3000"
-              step="100"
-              value={b.maxThrowSpeed || 1500}
-              onChange={(e) => update({ maxThrowSpeed: parseFloat(e.target.value) })}
-              className="w-full accent-violet-600 h-1.5"
-            />
-          </div>
-        )}
-      </div>
+      {/* 1. Drag, Inertie au lancer & Saisie physique précise */}
+      <GrabPhysicsControls
+        config={b}
+        update={update}
+        accent="violet"
+        throwSubtitle="Projette la marionnette au lâcher (avec composant Physique)"
+        preciseSubtitle="Utilise la contrainte physique au coin/bord saisi (si Physique ou Joint actif)"
+      />
 
       {/* 2. Balancement & Pendule */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
@@ -229,10 +201,27 @@ export function InteractivePuppetControls({
 
         {showPendulum && (
           <div className="space-y-1.5 pt-1 border-t border-slate-100">
+            <div className="flex items-center justify-between gap-2 pb-1 border-b border-slate-100">
+              <div>
+                <div className="font-semibold text-slate-700 text-[11px]">Balancer depuis le point saisi</div>
+                <div className="text-[9.5px] text-slate-400">
+                  {b.precisePhysicsGrab
+                    ? 'Remplacé par la saisie physique précise ci-dessus (les états visuels restent actifs)'
+                    : "Pivote et penche naturellement autour du point attrapé (même sans Physique)"}
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={Boolean(b.swingAroundGrabPoint)}
+                onChange={(e) => update({ swingAroundGrabPoint: e.target.checked })}
+                className="w-4 h-4 accent-violet-600 rounded cursor-pointer shrink-0"
+              />
+            </div>
+
             <div>
               <div className="flex justify-between items-center text-[11px] text-slate-700">
                 <span className="font-semibold">Amplitude max du pendule</span>
-                <span className="font-mono font-bold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded text-[10px]">
+                <span className="font-mono tabular-nums font-bold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap shrink-0">
                   ±{b.pendulumMaxAngle ?? 32}°
                 </span>
               </div>

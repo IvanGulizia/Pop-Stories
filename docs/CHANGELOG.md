@@ -1,3 +1,59 @@
+## [Phase 10.33] - 2026-11-18
+### Corrigé & Ajouté
+- **Undo/Redo fiable en Mode Dessin avec Timeline (`utils/drawingHistory.ts`, `DrawingCanvas.tsx`, `FullScreenDrawingModal.tsx`)** :
+  - Conservation d'une pile Undo/Redo indépendante par frame via `switchFrameHistoryInStore` (`Map<frameSyncKey, FrameHistoryEntry>`) avec snapshots immuables `{ paths, layers }`.
+  - Élimination des closures périmées dans le listener clavier `keydown` et `FullScreenDrawingModal` (`activeFrameIdRef` / `framesRef`) et synchronisation stricte des refs pendant les tracés/gommages rapides et `pointerleave`.
+- **Flip horizontal du Character Controller (`utils/physics/flipHelpers.ts`, `matterPhysicsEngine.ts`)** :
+  - Ajout de `keyboardHorizIntent` et de `computeMovementFlipX` : le retournement suit l'intention directionnelle clavier active et reste figé à l'arrêt pour éviter tout flip inverse provoqué par un micro-rebond physique ou une collision mur/sol, avec deadzone et protection des pauses IA (`patrol`, `wandering`).
+- **Curseur sur objets sans événement Clic (`utils/cursorResolution.ts`, `useEntityPointerInteraction.ts`)** :
+  - Détection unifiée via `hasEntityClickRules` (`matchesEntityFilter`), maintien de `cursorState = 'idle'` sur `onPointerDown` et remplacement de `cursor-pointer` par `cursor-default` lorsque l'entité en Mode Play n'est ni déplaçable ni ciblée par une règle `'click'`.
+- **Zone personnalisable pour Spawn Aléatoire (`utils/spawnHelpers.ts`, `types/index.ts`, `SpawnLocationPicker.tsx`, `Scene.tsx`, `useSceneStore.ts`, `ruleExecutionEngine.ts`, `RuleActionModal.tsx`, `WizardStep3Actions.tsx`, `RuleActionSummaryBadge.tsx`, `RuleBook.tsx`)** :
+  - Ajout de `spawnRandomScope` (`'canvas' | 'zone'`) et `spawnRandomZone` (`{ x, y, width, height }`), éditeur interactif par glisser-déposer dans la miniature et sur le canvas de scène en direct (`random_zone`), presets et inputs numériques.
+- **Tests Vitest (`src/__tests__/drawingAndInteractionFixes.test.ts`)** : Couverture des piles multi-frames Undo/Redo, de `computeMovementFlipX`, de `cursorResolution` et de `computeRandomSpawnPosition`.
+
+## [Phase 10.32] - 2026-11-18
+### Corrigé
+- **Balancement Marionnette autour du point saisi (`swingAroundGrabPoint`) (`matterPhysicsEngine.ts`, `useEntityPointerInteraction.ts`, `SceneGizmoOverlay.tsx`, `springAndJiggle.test.ts`)** :
+  - Ajout de `grabHoldActive` (`setPuppetGrabPivot(..., true)` / `releasePuppetGrabHold`) afin que `rt.grabPivot` ne soit plus réinitialisé à `null` entre `onPointerDown` et le déclenchement de `onDragStart` après le seuil de 3 px de Framer Motion, et mise à jour atomique immédiate de `runtimePivot` dans le store dès le clic (sans saut de `transformOrigin`).
+  - Garde `getActivePuppetGrabRawPivot` / `puppetOwnsGrabPivot` empêchant `Jiggle` (`useCustomPivot` inclus) d'écraser ou effacer `entity.runtimePivot` une frame sur deux pendant la saisie, avec synchronisation des entités enfants, des corps Matter.js (`bodyPivotMeta` / `syncEntityDragPosition`) et affichage du réticule de point saisi dans `SceneGizmoOverlay.tsx` + 2 tests de non-régression Vitest.
+
+## [Phase 10.31] - 2026-11-18
+### Corrigé & Amélioré
+- **Alignement Gizmo Collider ↔ Visuel (`SceneGizmoOverlay.tsx`)** : Correction de l'origine de rotation des hitboxes vertes autour du pivot effectif réel (`getPivotWorldPosition`) avec prise en compte de `runtimeJiggleAngle`.
+- **Détection de Clic/Survol sur Objets Tournés (`collider.ts`, `useEntityPointerInteraction.ts`)** : Calcul inverse exact dans `isPointInsideEntityCollider` (`EntityHitTestContext` avec `position`, `totalRotationDeg`, `scaleX/Y`, `effPivot`) évitant l'effet AABB décalé sur les objets posés au sol ou inclinés.
+- **Suppression de la Téléportation au Relâcher sans `precisePhysicsGrab` (`matterPhysicsEngine.ts`, `useEntityPointerInteraction.ts`)** : Prise en compte du pivot effectif et de `body.angle` dans `syncEntityDragPosition`, re-verrouillage post-sous-pas contre la dérive gravitaire, synchro finale avant `setActiveDragPosition(null)`, gestion des enfants `spring` et prise en charge physique des enfants articulés.
+- **Pendule Cinématique au Point Saisi & Angles Limites Amortis en Saisie Précise (`types/index.ts`, `behaviorResolution.ts`, `matterPhysicsEngine.ts`, `GrabPhysicsControls.tsx`, `PhysicsAndCoreBehaviorControls.tsx`, `InteractivePuppetControls.tsx`)** :
+  - Ajout du composant UI partagé `GrabPhysicsControls.tsx` (zéro doublon) proposant `Libre 360°` et `Limitée & Amortie (±Angle, zone de frein, rappel ressort, amortissement)` en `precisePhysicsGrab`.
+  - Ajout de l'inclinaison gravitaire statique sur `swingAroundGrabPoint` (active même sans composant `Physics`) et réancrage propre à la restauration du pivot sur entités inclinées + 4 nouveaux tests Vitest.
+
+## [Phase 10.30] - 2026-11-18
+### Ajouté & Amélioré
+- **Saisie physique précise au point cliqué (`precisePhysicsGrab`) (`types/index.ts`, `behaviorResolution.ts`, `matterPhysicsEngine.ts`, `useEntityPointerInteraction.ts`, `PhysicsAndCoreBehaviorControls.tsx`, `InteractivePuppetControls.tsx`, `SceneGizmoOverlay.tsx`)** :
+  - Ajout de l'option sur `draggable` et `interactive_puppet` pour piloter les entités dynamiques (`physics`, `physics_joint`, `spring+collideWithWorld`) par contrainte ressort `Matter.Constraint` (`mouseGrabConstraints`) au point exact cliqué, avec couple gravitaire naturel, rotation libre et épingle de saisie gizmo.
+- **Swing autour du point saisi (`swingAroundGrabPoint`) (`pivotHelpers.ts`, `matterPhysicsEngine.ts`, `useEntityPointerInteraction.ts`, `InteractivePuppetControls.tsx`)** :
+  - Calcul exact du pivot normalisé sous le pointeur (`computeLocalGrabPivotFromClientPoint`) et réancrage anti-saut (`reanchorPositionForPivotChange`), avec couple pendulaire proportionnel au bras de levier `(r_y·v_x − r_x·v_y)` et réinitialisation douce du `runtimePivot` à l'arrêt.
+- **Joints cassables & Événement RuleBook `joint_break` (`jointBreakSolver.ts`, `matterPhysicsEngine.ts`, `useSceneStore.ts`, `Scene.tsx`, `Inspector.tsx`, `WizardStep1Condition.tsx`, `RuleEventModal.tsx`, `RuleBook.tsx`, `SceneGizmoOverlay.tsx`, `physicsTestScenes.ts`, `springAndJiggle.test.ts`)** :
+  - Ajout de `jointBreakable`, `jointBreakForce`, `jointBreakShakeThreshold` et `jointBreakFallWithGravity` sur `ParentOffset` (`spring` & `physics_joint`), grâce de 80 ms au lancement Play, maintien sans recréation de corps Matter.js (`brokenJointDynamicIds`), coloration de contrainte (`jointStressRatios`) et déclencheur `joint_break` avec `eventPosition` exact au point de rupture + 5 nouveaux tests Vitest.
+
+## [Phase 10.29] - 2026-11-18
+### Ajouté & Amélioré
+- **7-1 — Contraintes angulaires, 2e angle de freinage, angle de départ & ressort angulaire sur `physics_joint` (`types/index.ts`, `utils/physics/jointAngularSolver.ts`, `matterPhysicsEngine.ts`, `Inspector.tsx`, `SceneGizmoOverlay.tsx`)** :
+  - Ajout de `jointEnableAngleLimits`, `jointMinAngle`, `jointMaxAngle`, `jointBrakeAngle` (zone de freinage progressif aux extrémités), `jointBrakeStrength`, `jointInitialAngleOffset`, `jointAngularStiffness` et `jointAngularDamping`.
+  - Résolution pré-pas/post-pas par sous-pas dans `matterPhysicsEngine.ts` (rappel ressort, amortissement visqueux, décélération douce en zone ambre et clamp géométrique exact autour du pivot) avec gizmos dédiés (cône bleu, secteurs ambre, axe de repos et tige d'angle de départ).
+- **7-2 — Placement direct du point d'attache sur le canvas & chaînes `A → B → C` (`parentingHelpers.ts`, `pivotHelpers.ts`, `useSceneStore.ts`, `Scene.tsx`, `App.tsx`, `Inspector.tsx`, `matterPhysicsEngine.ts`)** :
+  - Ajout de `jointChildPivot` sur `ParentOffset` (prioritaire sur `state.pivot` et `entity.pivot`), élargissement de `sanitizePivot` à `[-4, 5]`, fonction `computeParentOffsetFromWorldPin` maintenant parent et enfant immobiles, bouton *« Placer le point d'attache sur la scène »* et poignée cyan glissable en direct en Mode Édition.
+  - Liaison dynamique deux-voies `bodyA` ↔ `bodyB` dans `Matter.Constraint` lorsque le parent est dynamique, assurant des chaînes multi-maillons fluides.
+- **Scène de test & Tests Vitest (`physicsTestScenes.ts`, `springAndJiggle.test.ts`)** : Enrichissement du preset `physics-joint-pendulum` et ajout des tests pour le solveur angulaire, le placement WYSIWYG du pin et la simulation de chaîne multi-maillons.
+
+## [Phase 10.28] - 2026-11-17
+### Ajouté & Corrigé
+- **Visibilité d'entités sur scène (`types/index.ts`, `Scene.tsx`, `SceneHierarchyList.tsx`, `Inspector.tsx`, `SceneGizmoOverlay.tsx`)** : Ajout de `Entity.visible?: boolean` avec bascule œil dans l'Inspecteur et la liste Scène (filtrage canvas et gizmos).
+- **Pot de peinture sur contours & Sélection discrète (`vectorDrawing.ts`, `DrawingCanvas.tsx`, `Scene.tsx`)** : Détection géométrique précise des bordures (`isPointOnPathStroke` / `findPathStrokeAtPoint`) pour recolorer les contours au clic du pot de peinture, et remplacement du contour bleu épais sur la sélection par un cadre englobant discret respectant la vraie couleur et épaisseur du tracé.
+- **Correction définitive du scintillement curseur Chrome (`index.css`, `CursorContext.tsx`, `useEntityPointerInteraction.ts`, `Scene.tsx`, `DrawingCanvas.tsx`)** : Positionnement 60/120 FPS par `translate3d` direct hors React state, classe CSS globale `.atelier-cursor-hidden` à curseur PNG transparent 1×1 matériel et suppression des classes `cursor-pointer`/`cursor-grab` conflictuelles quand le curseur custom est actif.
+- **Impulsion au Spawn (`RuleAction`, `matterPhysicsEngine.ts`, `ruleExecutionEngine.ts`, `SpawnLocationPicker.tsx`, `RuleActionModal.tsx`, `WizardStep3Actions.tsx`, `RuleActionSummaryBadge.tsx`)** : Paramètres `spawnImpulseSpeed` (`px/s`) et `spawnImpulseAngle` (`°`) avec boussole interactive et aperçu vectoriel au spawn.
+- **Refonte Visualiseur de Spawn (`SpawnLocationPicker.tsx`, `Scene.tsx`, `App.tsx`, `useSceneStore.ts`, `RuleSlotEditModal.tsx`, `RuleCreationWizardModal.tsx`)** : Aperçu proportionnel fidèle avec entités et calques de scène visibles, bouton explicite **Snap Grille (OFF par défaut)**, glisser-déposer fluide et visée directe **« Placer sur la scène »** sur le canvas sans fermer/perdre l'éditeur de règle.
+- **Correctif `physics_joint` pendulaire (`matterPhysicsEngine.ts`, `physicsTestScenes.ts`, `springAndJiggle.test.ts`)** : Rotation correcte du bras de levier local `pointB` et synchronisation `angleB` sur `Matter.Constraint`, suppression du double comptage de gravité (`netGRatio`) et calibration de l'amortissement pendulaire + tests de simulation associés.
+
 ## [Phase 10.27] - 2026-11-17
 ### Ajouté & Corrigé
 - **Mode Dessin (`DrawingCanvas.tsx`, `DrawingColliderSection.tsx`, `DrawingPivotSection.tsx`, `DrawingCanvasColliderOverlay.tsx`, `DrawingCanvasPivotOverlay.tsx`)** :

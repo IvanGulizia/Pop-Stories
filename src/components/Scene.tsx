@@ -18,6 +18,7 @@ import {
   Layers,
   X,
   Lock,
+  Crosshair,
 } from 'lucide-react';
 import { ParticleCanvasOverlay } from './ParticleCanvasOverlay';
 import { SceneGizmoOverlay } from './SceneGizmoOverlay';
@@ -41,7 +42,9 @@ import {
   resizeShapeToRect,
   erasePathsAtPoint,
   eraseWholeStrokesAtPoint,
+  findPathStrokeAtPoint,
 } from '../utils/vectorDrawing';
+import { getChildAttachmentPinWorld } from '../store/parentingHelpers';
 
 export const FINE_CROSSHAIR_CURSOR =
   'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABMAAAATCAYAAAByUDbMAAAAN0lEQVR4nGNgIAD+IwFCagkCkCH84lqjho08w/4TAWCGEQJwmynFcMOo5rLBGwGjhg0Bw4hNRwArM0of2vmpUwAAAABJRU5ErkJggg==") 9 9, crosshair';
@@ -111,14 +114,43 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
     };
   };
 
+  const spawnCanvasPick = useSceneStore((state) => state.spawnCanvasPick);
+  const updateSpawnCanvasPickSnap = useSceneStore((state) => state.updateSpawnCanvasPickSnap);
+  const completeSpawnCanvasPick = useSceneStore((state) => state.completeSpawnCanvasPick);
+  const cancelSpawnCanvasPick = useSceneStore((state) => state.cancelSpawnCanvasPick);
+  const jointCanvasPick = useSceneStore((state) => state.jointCanvasPick);
+  const completeJointCanvasPick = useSceneStore((state) => state.completeJointCanvasPick);
+  const cancelJointCanvasPick = useSceneStore((state) => state.cancelJointCanvasPick);
+  const moveJointAttachmentPin = useSceneStore((state) => state.moveJointAttachmentPin);
+
   const isPlayMode = appMode === 'play';
-  const isCustomCursorActive = isPlayMode && settings.useCustomCursors !== false;
+  const isCustomCursorActive =
+    isPlayMode && settings.useCustomCursors !== false && !spawnCanvasPick && !jointCanvasPick;
   const ratio = settings.aspectRatio || 'free';
   const batchUpdateEntityTransforms = useSceneStore((state) => state.batchUpdateEntityTransforms);
 
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const mousePosRef = useRef<{ x: number; y: number } | null>(null);
+  const [pickHoverPt, setPickHoverPt] = useState<{ x: number; y: number } | null>(null);
+  const [zoneDragStart, setZoneDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [zoneDragCurrent, setZoneDragCurrent] = useState<{ x: number; y: number } | null>(null);
+  const [jointPickHoverPt, setJointPickHoverPt] = useState<{ x: number; y: number } | null>(null);
+  const [isDraggingJointPin, setIsDraggingJointPin] = useState(false);
   const setSceneBounds = useSceneStore((state) => state.setSceneBounds);
+
+  useEffect(() => {
+    if (!spawnCanvasPick) {
+      setPickHoverPt(null);
+      setZoneDragStart(null);
+      setZoneDragCurrent(null);
+    }
+  }, [spawnCanvasPick]);
+
+  useEffect(() => {
+    if (!jointCanvasPick) {
+      setJointPickHoverPt(null);
+    }
+  }, [jointCanvasPick]);
 
   // Synchronisation dynamique des dimensions réelles du canvas vers le store (Boundary & Spawn aléatoire)
   useEffect(() => {
@@ -201,6 +233,15 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         if (result.entitiesToDestroy && result.entitiesToDestroy.length > 0) {
           const deleteEntity = useSceneStore.getState().deleteEntity;
           result.entitiesToDestroy.forEach((id) => deleteEntity(id));
+        }
+
+        // Rupture dynamique des joints cassables (détachement runtime Play + déclenchement événement joint_break)
+        if (result.brokenJointEvents && result.brokenJointEvents.length > 0) {
+          const { detachEntity, triggerJointBreak } = useSceneStore.getState();
+          result.brokenJointEvents.forEach((ev) => {
+            detachEntity(ev.childId);
+            triggerJointBreak(ev.childId, ev.parentId, ev.breakPoint);
+          });
         }
 
         // Évaluation systématique des règles de collision et capteurs à 60 FPS
@@ -295,19 +336,43 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
     );
   };
 
+  const computeSpawnPickPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      const el = canvasContainerRef.current;
+      if (!el) return { x: 0, y: 0 };
+      const rect = el.getBoundingClientRect();
+      const rawX = Math.max(0, Math.min(rect.width, clientX - rect.left));
+      const rawY = Math.max(0, Math.min(rect.height, clientY - rect.top));
+      if (spawnCanvasPick?.snapToGrid && spawnCanvasPick.gridStep > 0) {
+        const step = spawnCanvasPick.gridStep;
+        return {
+          x: Math.round(Math.max(0, Math.min(rect.width, Math.round(rawX / step) * step))),
+          y: Math.round(Math.max(0, Math.min(rect.height, Math.round(rawY / step) * step))),
+        };
+      }
+      return {
+        x: Math.round(rawX),
+        y: Math.round(rawY),
+      };
+    },
+    [spawnCanvasPick]
+  );
+
+  const computeCanvasPoint = useCallback((clientX: number, clientY: number) => {
+    const el = canvasContainerRef.current;
+    if (!el) return { x: 0, y: 0 };
+    const rect = el.getBoundingClientRect();
+    return {
+      x: Math.round(Math.max(0, Math.min(rect.width, clientX - rect.left))),
+      y: Math.round(Math.max(0, Math.min(rect.height, clientY - rect.top))),
+    };
+  }, []);
+
   return (
     <div
       className="relative w-full h-full min-h-0 bg-slate-100/70 overflow-hidden select-none flex flex-col items-center justify-start p-3 sm:p-4"
       onClick={() => selectEntity(null)}
     >
-      {isCustomCursorActive && (
-        <style>{`
-          #scene-canvas-container, #scene-canvas-container * {
-            cursor: none !important;
-          }
-        `}</style>
-      )}
-
       {/* CADRE DE SCÈNE AVEC RESPECT DU FORMAT / RATIO */}
       <div
         id="scene-canvas-container"
@@ -327,7 +392,11 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           mousePosRef.current = null;
         }}
         className={`relative bg-white overflow-hidden select-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-all duration-300 ${
-          !isPlayMode && !isCustomCursorActive ? 'atelier-fine-crosshair' : ''
+          isCustomCursorActive
+            ? 'atelier-cursor-hidden'
+            : !isPlayMode
+            ? 'atelier-fine-crosshair'
+            : ''
         }`}
         style={{
           ...getAspectRatioStyle(),
@@ -370,7 +439,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         </div>
 
         {/* Empty State Overlay when no entities and no archetypes exist */}
-        {isCompletelyEmptyProject && (
+        {isCompletelyEmptyProject && !spawnCanvasPick && (
           <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 pointer-events-auto bg-slate-50/60 backdrop-blur-2xs">
             <div className="w-16 h-16 bg-white border border-slate-200 rounded-3xl flex items-center justify-center text-3xl shadow-sm mb-4 animate-in zoom-in-95 duration-200">
               🎨
@@ -419,7 +488,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           const allKeys = Array.from(new Set([...order, ...Object.keys(entities)]));
           return allKeys
             .map((id) => entities[id])
-            .filter(Boolean)
+            .filter((entity): entity is NonNullable<typeof entity> => Boolean(entity) && entity.visible !== false)
             .map((entity, index) => {
               const isSelected = selectedEntityId === entity.id;
               const zIndexStyle = { zIndex: isSelected && appMode !== 'play' ? 35 : 10 + index };
@@ -475,6 +544,470 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
                 setLayerVectorPaths(selectedLayerId, paths, skipHistory)
               }
             />
+          );
+        })()}
+
+        {/* 5. OVERLAY INTERACTIF DE VISÉE SPAWN SUR SCÈNE (Règle -> Placer sur la scène / Tracer zone) */}
+        {spawnCanvasPick && !isPlayMode && (() => {
+          const isZonePick = spawnCanvasPick.mode === 'random_zone';
+          const draftZone =
+            isZonePick && zoneDragStart && zoneDragCurrent
+              ? {
+                  x: Math.min(zoneDragStart.x, zoneDragCurrent.x),
+                  y: Math.min(zoneDragStart.y, zoneDragCurrent.y),
+                  width: Math.abs(zoneDragCurrent.x - zoneDragStart.x),
+                  height: Math.abs(zoneDragCurrent.y - zoneDragStart.y),
+                }
+              : null;
+
+          return (
+            <div
+              className="absolute inset-0 z-50 atelier-fine-crosshair"
+              onPointerMove={(e) => {
+                const pt = computeSpawnPickPoint(e.clientX, e.clientY);
+                setPickHoverPt(pt);
+                if (isZonePick && zoneDragStart) {
+                  setZoneDragCurrent(pt);
+                }
+              }}
+              onPointerLeave={() => {
+                setPickHoverPt(null);
+              }}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                const pt = computeSpawnPickPoint(e.clientX, e.clientY);
+                if (isZonePick) {
+                  e.currentTarget.setPointerCapture?.(e.pointerId);
+                  setZoneDragStart(pt);
+                  setZoneDragCurrent(pt);
+                } else {
+                  completeSpawnCanvasPick(pt.x, pt.y);
+                }
+              }}
+              onPointerUp={(e) => {
+                if (!isZonePick || !zoneDragStart) return;
+                e.stopPropagation();
+                e.currentTarget.releasePointerCapture?.(e.pointerId);
+                const endPt = computeSpawnPickPoint(e.clientX, e.clientY);
+                const rectEl = canvasContainerRef.current?.getBoundingClientRect();
+                const maxW = Math.max(40, Math.round(rectEl?.width || 800));
+                const maxH = Math.max(40, Math.round(rectEl?.height || 500));
+
+                const rawW = Math.abs(endPt.x - zoneDragStart.x);
+                const rawH = Math.abs(endPt.y - zoneDragStart.y);
+                let finalZone: { x: number; y: number; width: number; height: number };
+
+                if (rawW < 16 && rawH < 16) {
+                  const defW = Math.min(maxW, spawnCanvasPick.initialZone?.width || 180);
+                  const defH = Math.min(maxH, spawnCanvasPick.initialZone?.height || 130);
+                  finalZone = {
+                    x: Math.max(0, Math.min(maxW - defW, Math.round(endPt.x - defW / 2))),
+                    y: Math.max(0, Math.min(maxH - defH, Math.round(endPt.y - defH / 2))),
+                    width: defW,
+                    height: defH,
+                  };
+                } else {
+                  const zx = Math.max(0, Math.min(zoneDragStart.x, endPt.x));
+                  const zy = Math.max(0, Math.min(zoneDragStart.y, endPt.y));
+                  const zw = Math.max(20, Math.min(maxW - zx, rawW));
+                  const zh = Math.max(20, Math.min(maxH - zy, rawH));
+                  finalZone = { x: zx, y: zy, width: zw, height: zh };
+                }
+
+                setZoneDragStart(null);
+                setZoneDragCurrent(null);
+                completeSpawnCanvasPick(finalZone.x, finalZone.y, finalZone);
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Grille active uniquement si Snap Grille activé */}
+              {spawnCanvasPick.snapToGrid && (
+                <svg className="absolute inset-0 w-full h-full pointer-events-none">
+                  <defs>
+                    <pattern
+                      id="spawn-pick-grid"
+                      width={spawnCanvasPick.gridStep || 16}
+                      height={spawnCanvasPick.gridStep || 16}
+                      patternUnits="userSpaceOnUse"
+                    >
+                      <path
+                        d={`M ${spawnCanvasPick.gridStep || 16} 0 L 0 0 0 ${spawnCanvasPick.gridStep || 16}`}
+                        fill="none"
+                        stroke={isZonePick ? '#9333ea' : '#10b981'}
+                        strokeOpacity="0.25"
+                        strokeWidth="1"
+                      />
+                    </pattern>
+                  </defs>
+                  <rect x="0" y="0" width="100%" height="100%" fill="url(#spawn-pick-grid)" />
+                </svg>
+              )}
+
+              {/* Visée vectorielle & boîte d'aperçu */}
+              <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
+                {isZonePick && spawnCanvasPick.initialZone && !draftZone && (
+                  <rect
+                    x={spawnCanvasPick.initialZone.x}
+                    y={spawnCanvasPick.initialZone.y}
+                    width={spawnCanvasPick.initialZone.width}
+                    height={spawnCanvasPick.initialZone.height}
+                    rx={8}
+                    fill="rgba(147, 51, 234, 0.08)"
+                    stroke="#9333ea"
+                    strokeOpacity={0.55}
+                    strokeWidth={1.5}
+                    strokeDasharray="6 4"
+                  />
+                )}
+
+                {isZonePick && draftZone && (
+                  <rect
+                    x={draftZone.x}
+                    y={draftZone.y}
+                    width={Math.max(4, draftZone.width)}
+                    height={Math.max(4, draftZone.height)}
+                    rx={8}
+                    fill="rgba(147, 51, 234, 0.16)"
+                    stroke="#9333ea"
+                    strokeWidth={2.25}
+                    strokeDasharray="6 4"
+                  />
+                )}
+
+                {spawnCanvasPick.mode === 'offset' && spawnCanvasPick.refCenter && (
+                  <>
+                    <circle
+                      cx={spawnCanvasPick.refCenter.x}
+                      cy={spawnCanvasPick.refCenter.y}
+                      r={5}
+                      fill="#6366f1"
+                      stroke="#ffffff"
+                      strokeWidth={2}
+                    />
+                    {pickHoverPt && (
+                      <line
+                        x1={spawnCanvasPick.refCenter.x}
+                        y1={spawnCanvasPick.refCenter.y}
+                        x2={pickHoverPt.x}
+                        y2={pickHoverPt.y}
+                        stroke="#6366f1"
+                        strokeWidth={2}
+                        strokeDasharray="6 4"
+                      />
+                    )}
+                  </>
+                )}
+
+                {pickHoverPt && (
+                  <>
+                    <line
+                      x1={pickHoverPt.x}
+                      y1={0}
+                      x2={pickHoverPt.x}
+                      y2="100%"
+                      stroke={isZonePick ? '#9333ea' : '#10b981'}
+                      strokeOpacity={0.45}
+                      strokeWidth={1}
+                      strokeDasharray="4 4"
+                    />
+                    <line
+                      x1={0}
+                      y1={pickHoverPt.y}
+                      x2="100%"
+                      y2={pickHoverPt.y}
+                      stroke={isZonePick ? '#9333ea' : '#10b981'}
+                      strokeOpacity={0.45}
+                      strokeWidth={1}
+                      strokeDasharray="4 4"
+                    />
+                    {!isZonePick && spawnCanvasPick.spawnSize && (
+                      <rect
+                        x={pickHoverPt.x - spawnCanvasPick.spawnSize.width / 2}
+                        y={pickHoverPt.y - spawnCanvasPick.spawnSize.height / 2}
+                        width={spawnCanvasPick.spawnSize.width}
+                        height={spawnCanvasPick.spawnSize.height}
+                        rx={8}
+                        fill="rgba(16, 185, 129, 0.12)"
+                        stroke="#10b981"
+                        strokeWidth={1.75}
+                        strokeDasharray="5 3"
+                      />
+                    )}
+                    <circle
+                      cx={pickHoverPt.x}
+                      cy={pickHoverPt.y}
+                      r={5}
+                      fill={isZonePick ? '#9333ea' : '#10b981'}
+                      stroke="#ffffff"
+                      strokeWidth={2}
+                    />
+                  </>
+                )}
+              </svg>
+
+              {/* Barre flottante de contrôle en haut du canvas */}
+              <div
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                className="absolute top-3 left-1/2 -translate-x-1/2 z-50 max-w-[96%] flex flex-wrap items-center justify-center gap-2 px-3 py-1.5 bg-slate-900/95 text-white border border-slate-700 rounded-2xl shadow-xl cursor-default"
+              >
+                <span
+                  className={`flex items-center gap-1.5 text-xs font-bold whitespace-nowrap ${
+                    isZonePick ? 'text-purple-300' : 'text-emerald-300'
+                  }`}
+                >
+                  <Crosshair className="w-3.5 h-3.5" />
+                  {isZonePick
+                    ? "Glissez sur la scène pour tracer la zone aléatoire"
+                    : 'Cliquez sur la scène pour placer le spawn'}
+                </span>
+
+                <div className="w-px h-4 bg-slate-700" />
+
+                <span className="text-[11px] font-mono tabular-nums font-bold text-slate-200 bg-slate-800 px-2 py-0.5 rounded-lg whitespace-nowrap">
+                  {isZonePick
+                    ? draftZone
+                      ? `X: ${draftZone.x} · Y: ${draftZone.y} · ${draftZone.width}×${draftZone.height}px`
+                      : pickHoverPt
+                      ? `Curseur : ${pickHoverPt.x}, ${pickHoverPt.y} (glisser pour tracer)`
+                      : 'Glissez un rectangle sur la scène…'
+                    : pickHoverPt
+                    ? spawnCanvasPick.mode === 'offset' && spawnCanvasPick.refCenter
+                      ? `ΔX: ${pickHoverPt.x - spawnCanvasPick.refCenter.x} · ΔY: ${pickHoverPt.y - spawnCanvasPick.refCenter.y} (${pickHoverPt.x}, ${pickHoverPt.y})`
+                      : `X: ${pickHoverPt.x} · Y: ${pickHoverPt.y}`
+                    : 'Survolez la scène…'}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => updateSpawnCanvasPickSnap(!spawnCanvasPick.snapToGrid)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                    spawnCanvasPick.snapToGrid
+                      ? isZonePick
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-emerald-500 text-white'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                  title="Activer / désactiver l'aimantation sur grille"
+                >
+                  <Magnet className="w-3.5 h-3.5" />
+                  <span>Snap : {spawnCanvasPick.snapToGrid ? 'ON' : 'OFF'}</span>
+                </button>
+
+                {spawnCanvasPick.snapToGrid && (
+                  <div className="flex items-center gap-1 bg-slate-800 p-0.5 rounded-lg">
+                    {[16, 24].map((step) => (
+                      <button
+                        key={step}
+                        type="button"
+                        onClick={() => updateSpawnCanvasPickSnap(true, step)}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold cursor-pointer ${
+                          spawnCanvasPick.gridStep === step
+                            ? isZonePick
+                              ? 'bg-purple-600 text-white'
+                              : 'bg-emerald-500 text-white'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {step}px
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => cancelSpawnCanvasPick()}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-slate-800 hover:bg-rose-600 text-slate-200 hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Annuler (Échap)</span>
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 6. OVERLAY INTERACTIF DE PLACEMENT DU POINT D'ATTACHE JOINT SUR SCÈNE (7-2) */}
+        {jointCanvasPick && !isPlayMode && (() => {
+          const pickChild = entities[jointCanvasPick.childId];
+          const pickParent = entities[jointCanvasPick.parentId];
+          if (!pickChild || !pickParent) return null;
+          const pCenter = {
+            x: pickParent.position.x + pickParent.size.width / 2,
+            y: pickParent.position.y + pickParent.size.height / 2,
+          };
+          const cCenter = {
+            x: pickChild.position.x + pickChild.size.width / 2,
+            y: pickChild.position.y + pickChild.size.height / 2,
+          };
+
+          return (
+            <div
+              className="absolute inset-0 z-50 atelier-fine-crosshair"
+              onPointerMove={(e) => {
+                setJointPickHoverPt(computeCanvasPoint(e.clientX, e.clientY));
+              }}
+              onPointerLeave={() => setJointPickHoverPt(null)}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                const pt = computeCanvasPoint(e.clientX, e.clientY);
+                completeJointCanvasPick(pt.x, pt.y);
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
+                <circle cx={pCenter.x} cy={pCenter.y} r={4.5} fill="#6366f1" stroke="#ffffff" strokeWidth={1.75} />
+                <circle cx={cCenter.x} cy={cCenter.y} r={4.5} fill="#0ea5e9" stroke="#ffffff" strokeWidth={1.75} />
+                {jointPickHoverPt && (
+                  <>
+                    <line
+                      x1={pCenter.x}
+                      y1={pCenter.y}
+                      x2={jointPickHoverPt.x}
+                      y2={jointPickHoverPt.y}
+                      stroke="#6366f1"
+                      strokeWidth={1.75}
+                      strokeDasharray="5 4"
+                    />
+                    <line
+                      x1={cCenter.x}
+                      y1={cCenter.y}
+                      x2={jointPickHoverPt.x}
+                      y2={jointPickHoverPt.y}
+                      stroke="#0ea5e9"
+                      strokeWidth={1.75}
+                      strokeDasharray="5 4"
+                    />
+                    <line
+                      x1={jointPickHoverPt.x}
+                      y1={0}
+                      x2={jointPickHoverPt.x}
+                      y2="100%"
+                      stroke="#0ea5e9"
+                      strokeOpacity={0.35}
+                      strokeWidth={1}
+                      strokeDasharray="4 4"
+                    />
+                    <line
+                      x1={0}
+                      y1={jointPickHoverPt.y}
+                      x2="100%"
+                      y2={jointPickHoverPt.y}
+                      stroke="#0ea5e9"
+                      strokeOpacity={0.35}
+                      strokeWidth={1}
+                      strokeDasharray="4 4"
+                    />
+                    <circle
+                      cx={jointPickHoverPt.x}
+                      cy={jointPickHoverPt.y}
+                      r={10}
+                      fill="rgba(14, 165, 233, 0.16)"
+                      stroke="#0ea5e9"
+                      strokeWidth={1.75}
+                    />
+                    <circle
+                      cx={jointPickHoverPt.x}
+                      cy={jointPickHoverPt.y}
+                      r={4}
+                      fill="#0ea5e9"
+                      stroke="#ffffff"
+                      strokeWidth={2}
+                    />
+                  </>
+                )}
+              </svg>
+
+              <div
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                className="absolute top-3 left-1/2 -translate-x-1/2 z-50 max-w-[96%] flex flex-wrap items-center justify-center gap-2 px-3 py-1.5 bg-slate-900/95 text-white border border-slate-700 rounded-2xl shadow-xl cursor-default"
+              >
+                <span className="flex items-center gap-1.5 text-xs font-bold text-sky-300 whitespace-nowrap">
+                  <Crosshair className="w-3.5 h-3.5" />
+                  Cliquez sur la scène pour fixer le point d'attache ({pickParent.name} → {pickChild.name})
+                </span>
+                <div className="w-px h-4 bg-slate-700" />
+                <span className="text-[11px] font-mono tabular-nums font-bold text-slate-200 bg-slate-800 px-2 py-0.5 rounded-lg whitespace-nowrap">
+                  {jointPickHoverPt
+                    ? `X: ${jointPickHoverPt.x} · Y: ${jointPickHoverPt.y}`
+                    : 'Survolez la scène…'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => cancelJointCanvasPick()}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-slate-800 hover:bg-rose-600 text-slate-200 hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Annuler (Échap)</span>
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 7. POIGNÉE INTERACTIVE DE GLISSER DU POINT D'ATTACHE JOINT SUR LE CANVAS (MODE ÉDITION) */}
+        {!isPlayMode && !spawnCanvasPick && !jointCanvasPick && !selectedLayerId && selectedEntityId && (() => {
+          const selChild = entities[selectedEntityId];
+          if (!selChild || !selChild.parentId) return null;
+          const selParent = entities[selChild.parentId];
+          if (!selParent || selChild.visible === false) return null;
+          const pinWorld = getChildAttachmentPinWorld(selChild, selParent);
+
+          return (
+            <div
+              role="button"
+              tabIndex={-1}
+              aria-label="Déplacer le point d'attache"
+              title="Glisser pour déplacer le point d'attache sur la scène (sans bouger les objets)"
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                useSceneStore.getState().pushSceneHistory();
+                setIsDraggingJointPin(true);
+                const startTarget = e.currentTarget;
+                try {
+                  startTarget.setPointerCapture(e.pointerId);
+                } catch {
+                  // Ignore if unsupported
+                }
+
+                const handleMove = (ev: PointerEvent) => {
+                  const pt = computeCanvasPoint(ev.clientX, ev.clientY);
+                  moveJointAttachmentPin(selChild.id, pt.x, pt.y, true);
+                };
+
+                const handleUp = (ev: PointerEvent) => {
+                  setIsDraggingJointPin(false);
+                  try {
+                    startTarget.releasePointerCapture(ev.pointerId);
+                  } catch {
+                    // Ignore
+                  }
+                  window.removeEventListener('pointermove', handleMove);
+                  window.removeEventListener('pointerup', handleUp);
+                  window.removeEventListener('pointercancel', handleUp);
+                };
+
+                window.addEventListener('pointermove', handleMove);
+                window.addEventListener('pointerup', handleUp);
+                window.addEventListener('pointercancel', handleUp);
+              }}
+              style={{
+                left: `${pinWorld.x}px`,
+                top: `${pinWorld.y}px`,
+                touchAction: 'none',
+              }}
+              className={`absolute -translate-x-1/2 -translate-y-1/2 z-[48] w-7 h-7 flex items-center justify-center pointer-events-auto ${
+                isDraggingJointPin ? 'cursor-grabbing scale-110' : 'cursor-grab hover:scale-110'
+              } transition-transform`}
+            >
+              <span className="w-4 h-4 rounded-full bg-sky-500/90 border-2 border-white shadow-md flex items-center justify-center">
+                <span className="w-1.5 h-1.5 rounded-full bg-white" />
+              </span>
+            </div>
           );
         })()}
       </div>
@@ -787,8 +1320,29 @@ function DirectCanvasDrawingOverlay({
       return;
     }
 
-    // 3. Pot de peinture hybride (Niveau 1 + Niveau 2 raster sur scène)
+    // 3. Pot de peinture hybride (bordure prioritaire + Niveau 1/2 raster sur scène)
     if (drawingTool === 'bucket') {
+      const strokeHit = findPathStrokeAtPoint(pt, existingPaths, isLegacy200 ? 4 : 6);
+      if (strokeHit) {
+        const nextStroke = strokeColor === 'none' ? fillColor : strokeColor;
+        const nextStrokeId = strokeColor === 'none' ? fillColorId : strokeColorId;
+        if (nextStroke && nextStroke !== 'none') {
+          const nextPaths = existingPaths.map((p) =>
+            p.id === strokeHit.id
+              ? {
+                  ...p,
+                  stroke: nextStroke,
+                  strokeColorId: nextStrokeId,
+                  strokeWidth: p.strokeWidth > 0 ? p.strokeWidth : strokeWidth,
+                }
+              : p
+          );
+          latestPathsRef.current = nextPaths;
+          onUpdatePaths(nextPaths);
+          return;
+        }
+      }
+
       if (fillColor === 'none') return;
       const rect = svgRef.current?.getBoundingClientRect();
       const bounds = isLegacy200
@@ -1161,7 +1715,7 @@ function DirectCanvasDrawingOverlay({
     drawingTool === 'select'
       ? 'cursor-default'
       : drawingTool === 'eraser_partial' || drawingTool === 'eraser_stroke'
-      ? 'cursor-crosshair'
+      ? 'atelier-cursor-hidden'
       : 'atelier-fine-crosshair';
 
   return (

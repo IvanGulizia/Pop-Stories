@@ -11,6 +11,8 @@ import {
   Unlink,
   ChevronDown,
   ChevronRight,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { Entity, SceneLayer, SceneLayerGroup } from '../types';
 import { isEntityDraggable } from '../utils/matterPhysicsEngine';
@@ -32,6 +34,7 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
   const reorderEntities = useSceneStore((state) => state.reorderEntities);
   const setEntityParent = useSceneStore((state) => state.setEntityParent);
   const detachEntity = useSceneStore((state) => state.detachEntity);
+  const updateEntityDetails = useSceneStore((state) => state.updateEntityDetails);
 
   const [draggedEntityId, setDraggedEntityId] = useState<string | null>(null);
   const [dragOverTarget, setDragOverTarget] = useState<{ id: string; position: DropPosition } | null>(null);
@@ -88,6 +91,7 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
     const showInside = isTargeted && dragOverTarget.position === 'inside';
     const showGapBelow = isTargeted && dragOverTarget.position === 'below';
     const hasValidParent = Boolean(entity.parentId && entities[entity.parentId]);
+    const isVisible = entity.visible !== false;
 
     return (
       <div key={entity.id} className="space-y-1.5">
@@ -170,6 +174,8 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
             }}
             onClick={() => selectEntity(entity.id)}
             className={`p-2.5 bg-white border rounded-2xl transition-all cursor-pointer flex flex-col gap-1.5 group ${
+              !isVisible ? 'opacity-65 bg-slate-50/70' : ''
+            } ${
               showInside
                 ? 'border-indigo-600 ring-2 ring-indigo-500/40 bg-indigo-50/80 shadow-md scale-[1.01]'
                 : showGapAbove
@@ -246,8 +252,23 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                 </div>
               </div>
 
-              {/* Actions primaires : détacher (si enfant), dupliquer et supprimer */}
-              <div className="flex items-center gap-0.5 shrink-0 opacity-70 group-hover:opacity-100 transition-opacity">
+              {/* Actions primaires : masquer/afficher, détacher (si enfant), dupliquer et supprimer */}
+              <div className={`flex items-center gap-0.5 shrink-0 transition-opacity ${!isVisible ? 'opacity-100' : 'opacity-70 group-hover:opacity-100'}`}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    updateEntityDetails(entity.id, { visible: !isVisible });
+                  }}
+                  className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                    !isVisible
+                      ? 'text-amber-700 bg-amber-100/80 hover:bg-amber-200/70'
+                      : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'
+                  }`}
+                  title={isVisible ? 'Masquer l’objet sur la scène' : 'Afficher l’objet sur la scène'}
+                >
+                  {isVisible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                </button>
                 {hasValidParent && (
                   <button
                     type="button"

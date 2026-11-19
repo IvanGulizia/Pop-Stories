@@ -12,6 +12,12 @@ import {
   checkCollision,
   getCollisionContactPoint,
 } from '../store/collisionHelpers';
+import { isPointOnPathStroke, findPathStrokeAtPoint } from '../utils/vectorDrawing';
+import { executeRuleActions } from '../store/ruleExecutionEngine';
+import {
+  resetMatterPhysicsRuntime,
+  stepMatterPhysics,
+} from '../utils/matterPhysicsEngine';
 
 function makeEntity(overrides: Partial<Entity> & { id: string }): Entity {
   const { id, ...rest } = overrides;
@@ -194,5 +200,120 @@ describe('collisionHelpers', () => {
     const contact = getCollisionContactPoint(c1, c2);
     expect(contact.x).toBeCloseTo(95, 1);
     expect(contact.y).toBeCloseTo(50, 1);
+  });
+});
+
+describe('vectorDrawing stroke border hit-testing', () => {
+  it('matches rect borders without matching interior fill center', () => {
+    const rectPath = {
+      id: 'r1',
+      d: 'M 20 20 h 100 v 100 h -100 Z',
+      stroke: '#000000',
+      strokeWidth: 4,
+      fill: '#ff0000',
+      rect: { x: 20, y: 20, width: 100, height: 100 },
+    };
+
+    expect(isPointOnPathStroke(rectPath, { x: 70, y: 21 })).toBe(true);
+    expect(isPointOnPathStroke(rectPath, { x: 20, y: 70 })).toBe(true);
+    expect(isPointOnPathStroke(rectPath, { x: 70, y: 70 })).toBe(false);
+  });
+
+  it('matches circle circumference without matching circle interior', () => {
+    const circlePath = {
+      id: 'c1',
+      d: 'M 50 100 a 50 50 0 1 0 100 0 a 50 50 0 1 0 -100 0 Z',
+      stroke: '#111111',
+      strokeWidth: 6,
+      fill: '#22c55e',
+      circle: { cx: 100, cy: 100, r: 50 },
+    };
+
+    expect(isPointOnPathStroke(circlePath, { x: 150, y: 100 })).toBe(true);
+    expect(isPointOnPathStroke(circlePath, { x: 100, y: 100 })).toBe(false);
+  });
+
+  it('returns the topmost path whose stroke was clicked', () => {
+    const bottom = {
+      id: 'bottom',
+      d: 'M 10 10 h 100 v 100 h -100 Z',
+      stroke: '#000000',
+      strokeWidth: 4,
+      fill: 'none',
+      rect: { x: 10, y: 10, width: 100, height: 100 },
+    };
+    const top = {
+      id: 'top',
+      d: 'M 10 10 L 110 10',
+      stroke: '#ef4444',
+      strokeWidth: 4,
+      fill: 'none',
+      points: [
+        { x: 10, y: 10 },
+        { x: 110, y: 10 },
+      ],
+    };
+
+    expect(findPathStrokeAtPoint({ x: 50, y: 10 }, [bottom, top])?.id).toBe('top');
+    expect(findPathStrokeAtPoint({ x: 10, y: 60 }, [bottom, top])?.id).toBe('bottom');
+    expect(findPathStrokeAtPoint({ x: 60, y: 60 }, [bottom, top])).toBeNull();
+  });
+});
+
+describe('ruleExecutionEngine spawn_entity impulse', () => {
+  it('queues initial velocity along configured speed and angle on spawn_entity', () => {
+    resetMatterPhysicsRuntime();
+    const subject = makeEntity({ id: 'hero', position: { x: 100, y: 100 }, size: { width: 40, height: 40 } });
+    const allEntities: Record<string, Entity> = { hero: subject };
+
+    executeRuleActions(
+      [
+        {
+          id: 'act-spawn-proj',
+          type: 'spawn_entity',
+          spawnEntityType: 'bullet',
+          spawnLocationMode: 'at_subject',
+          spawnImpulseSpeed: 600,
+          spawnImpulseAngle: 0,
+        },
+      ],
+      {
+        subject,
+        allEntities,
+        updateEntityState: () => {},
+        updateEntityDetails: () => {},
+        deleteEntity: () => {},
+        spawnEntity: ({ position }) => {
+          const spawned = makeEntity({
+            id: 'bullet-spawned',
+            type: 'bullet',
+            position,
+            size: { width: 20, height: 20 },
+          });
+          allEntities[spawned.id] = spawned;
+          return spawned.id;
+        },
+      }
+    );
+
+    const spawnedEnt = allEntities['bullet-spawned'];
+    expect(spawnedEnt).toBeDefined();
+
+    for (let i = 0; i < 10; i++) {
+      const res = stepMatterPhysics({
+        entities: allEntities,
+        deltaTime: 1 / 60,
+        canvasBounds: { width: 800, height: 500 },
+      });
+      if (res.updatedTransforms['bullet-spawned']?.position) {
+        allEntities['bullet-spawned'] = {
+          ...allEntities['bullet-spawned'],
+          position: res.updatedTransforms['bullet-spawned'].position!,
+        };
+      }
+    }
+
+    expect(allEntities['bullet-spawned'].position.x).toBeGreaterThan(spawnedEnt.position.x + 50);
+    resetMatterPhysicsRuntime();
   });
 });

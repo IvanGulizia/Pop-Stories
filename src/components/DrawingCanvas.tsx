@@ -17,7 +17,18 @@ import {
   resizeShapeToRect,
   erasePathsAtPoint,
   eraseWholeStrokesAtPoint,
+  findPathStrokeAtPoint,
 } from '../utils/vectorDrawing';
+import {
+  FrameHistoryEntry,
+  cloneDrawingLayers,
+  cloneVectorPaths,
+  createFrameHistoryEntry,
+  pushSnapshotToEntry,
+  stepRedoEntry,
+  stepUndoEntry,
+  switchFrameHistoryInStore,
+} from '../utils/drawingHistory';
 import { DrawingCanvasTopBar } from './drawing/DrawingCanvasTopBar';
 import {
   DrawingCanvasColliderOverlay,
@@ -132,19 +143,48 @@ export function DrawingCanvas({
   hideTopHistoryButtons = false,
 }: DrawingCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const [paths, setPaths] = useState<VectorPath[]>(initialPaths);
-  const historyRef = useRef<VectorPath[][]>([initialPaths]);
-  const historyIndexRef = useRef<number>(0);
+  const initialLayersResolved = useMemo<DrawingLayer[]>(
+    () =>
+      initialLayers && initialLayers.length > 0
+        ? cloneDrawingLayers(initialLayers)
+        : [{ id: 'layer-1', name: 'Calque 1', visible: true, locked: false, opacity: 1 }],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  const [paths, setPaths] = useState<VectorPath[]>(() => cloneVectorPaths(initialPaths));
+  const pathsRef = useRef<VectorPath[]>(paths);
+  const [layers, setLayers] = useState<DrawingLayer[]>(initialLayersResolved);
+  const layersRef = useRef<DrawingLayer[]>(layers);
+
+  const initialFrameKey = frameSyncKey || '__default__';
+  const historyEntryRef = useRef<FrameHistoryEntry>(
+    createFrameHistoryEntry(initialPaths, initialLayersResolved)
+  );
+  const frameHistoriesRef = useRef<Map<string, FrameHistoryEntry>>(
+    new Map([[initialFrameKey, historyEntryRef.current]])
+  );
   const [historyVersion, setHistoryVersion] = useState<number>(0);
   const hasErasedInCurrentStrokeRef = useRef<boolean>(false);
+  const hasMutatedDuringDragRef = useRef<boolean>(false);
+  const lastFrameSyncKeyRef = useRef<string | undefined>(initialFrameKey);
 
-  // --- SYSTÈME DE GESTION DE CALQUES DE DESSIN ---
-  const [layers, setLayers] = useState<DrawingLayer[]>(() => {
-    if (initialLayers && initialLayers.length > 0) return initialLayers;
-    return [{ id: 'layer-1', name: 'Calque 1', visible: true, locked: false, opacity: 1 }];
-  });
+  const onVectorChangeRef = useRef(onVectorChange);
+  onVectorChangeRef.current = onVectorChange;
+  const onLayersChangeRef = useRef(onLayersChange);
+  onLayersChangeRef.current = onLayersChange;
+
+  const commitPaths = (nextPaths: VectorPath[]) => {
+    pathsRef.current = nextPaths;
+    setPaths(nextPaths);
+  };
+
+  const commitLayers = (nextLayers: DrawingLayer[]) => {
+    layersRef.current = nextLayers;
+    setLayers(nextLayers);
+  };
+
   const [activeLayerId, setActiveLayerId] = useState<string>(() => {
-    return initialLayers?.[0]?.id || 'layer-1';
+    return initialLayersResolved[0]?.id || 'layer-1';
   });
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [editingLayerName, setEditingLayerName] = useState<string>('');
@@ -152,109 +192,133 @@ export function DrawingCanvas({
   const handleAddLayer = () => {
     const newLayer: DrawingLayer = {
       id: `layer-${Date.now().toString(36)}`,
-      name: `Calque ${layers.length + 1}`,
+      name: `Calque ${layersRef.current.length + 1}`,
       visible: true,
       locked: false,
       opacity: 1,
     };
-    const updated = [newLayer, ...layers];
-    setLayers(updated);
+    const updated = [newLayer, ...layersRef.current];
+    commitLayers(updated);
     setActiveLayerId(newLayer.id);
-    if (onLayersChange) onLayersChange(updated);
+    if (onLayersChangeRef.current) onLayersChangeRef.current(updated);
   };
 
   const handleToggleLayerVisibility = (layerId: string) => {
-    const updated = layers.map((l) => (l.id === layerId ? { ...l, visible: !l.visible } : l));
-    setLayers(updated);
-    if (onLayersChange) onLayersChange(updated);
+    const updated = layersRef.current.map((l) => (l.id === layerId ? { ...l, visible: !l.visible } : l));
+    commitLayers(updated);
+    if (onLayersChangeRef.current) onLayersChangeRef.current(updated);
   };
 
   const handleToggleLayerLock = (layerId: string) => {
-    const updated = layers.map((l) => (l.id === layerId ? { ...l, locked: !l.locked } : l));
-    setLayers(updated);
-    if (onLayersChange) onLayersChange(updated);
+    const updated = layersRef.current.map((l) => (l.id === layerId ? { ...l, locked: !l.locked } : l));
+    commitLayers(updated);
+    if (onLayersChangeRef.current) onLayersChangeRef.current(updated);
   };
 
   const handleMoveLayer = (layerId: string, direction: 'up' | 'down') => {
-    const idx = layers.findIndex((l) => l.id === layerId);
+    const idx = layersRef.current.findIndex((l) => l.id === layerId);
     if (idx === -1) return;
     const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
-    if (targetIdx < 0 || targetIdx >= layers.length) return;
-    const copy = [...layers];
+    if (targetIdx < 0 || targetIdx >= layersRef.current.length) return;
+    const copy = [...layersRef.current];
     const [item] = copy.splice(idx, 1);
     copy.splice(targetIdx, 0, item);
-    setLayers(copy);
-    if (onLayersChange) onLayersChange(copy);
+    commitLayers(copy);
+    if (onLayersChangeRef.current) onLayersChangeRef.current(copy);
   };
 
   const handleDeleteLayer = (layerId: string) => {
-    if (layers.length <= 1) return;
-    const remainingLayers = layers.filter((l) => l.id !== layerId);
-    const remainingPaths = paths.filter(
-      (p) => (p.layerId || layers[layers.length - 1]?.id || 'layer-1') !== layerId
+    if (layersRef.current.length <= 1) return;
+    const remainingLayers = layersRef.current.filter((l) => l.id !== layerId);
+    const fallbackId = layersRef.current[layersRef.current.length - 1]?.id || 'layer-1';
+    const remainingPaths = pathsRef.current.filter(
+      (p) => (p.layerId || fallbackId) !== layerId
     );
-    setLayers(remainingLayers);
+    commitLayers(remainingLayers);
     if (activeLayerId === layerId) {
       setActiveLayerId(remainingLayers[0].id);
     }
-    updatePathsWithHistory(remainingPaths);
-    if (onLayersChange) onLayersChange(remainingLayers);
+    updatePathsWithHistory(remainingPaths, remainingLayers);
+    if (onLayersChangeRef.current) onLayersChangeRef.current(remainingLayers);
   };
 
   const handleRenameLayer = (layerId: string, newName: string) => {
-    const updated = layers.map((l) => (l.id === layerId ? { ...l, name: newName } : l));
-    setLayers(updated);
-    if (onLayersChange) onLayersChange(updated);
+    const updated = layersRef.current.map((l) => (l.id === layerId ? { ...l, name: newName } : l));
+    commitLayers(updated);
+    if (onLayersChangeRef.current) onLayersChangeRef.current(updated);
   };
 
   const handleLayerOpacityChange = (layerId: string, opacity: number) => {
-    const updated = layers.map((l) => (l.id === layerId ? { ...l, opacity } : l));
-    setLayers(updated);
-    if (onLayersChange) onLayersChange(updated);
+    const updated = layersRef.current.map((l) => (l.id === layerId ? { ...l, opacity } : l));
+    commitLayers(updated);
+    if (onLayersChangeRef.current) onLayersChangeRef.current(updated);
   };
 
   const handleMoveSelectedToLayer = (targetLayerId: string) => {
     if (selectedPathIds.length === 0) return;
-    const updated = paths.map((p) =>
+    const updated = pathsRef.current.map((p) =>
       selectedPathIds.includes(p.id) ? { ...p, layerId: targetLayerId } : p
     );
     updatePathsWithHistory(updated);
   };
 
-  const pushHistoryState = (newPaths: VectorPath[]) => {
-    const curIndex = historyIndexRef.current;
-    const trimmed = historyRef.current.slice(0, curIndex + 1);
-    trimmed.push(newPaths);
-    if (trimmed.length > 60) trimmed.shift();
-    historyRef.current = trimmed;
-    historyIndexRef.current = trimmed.length - 1;
+  const pushHistoryState = (newPaths: VectorPath[], nextLayers: DrawingLayer[] = layersRef.current) => {
+    const nextEntry = pushSnapshotToEntry(historyEntryRef.current, newPaths, nextLayers, 60);
+    historyEntryRef.current = nextEntry;
+    const activeKey = lastFrameSyncKeyRef.current || '__default__';
+    frameHistoriesRef.current.set(activeKey, nextEntry);
     setHistoryVersion((v) => v + 1);
   };
 
-  const updatePathsWithHistory = (newPaths: VectorPath[]) => {
-    setPaths(newPaths);
-    pushHistoryState(newPaths);
+  const updatePathsWithHistory = (
+    newPaths: VectorPath[],
+    nextLayers: DrawingLayer[] = layersRef.current
+  ) => {
+    commitPaths(newPaths);
+    pushHistoryState(newPaths, nextLayers);
     notifyChange(newPaths);
   };
 
   const handleUndo = () => {
-    if (historyIndexRef.current <= 0) return;
-    const newIndex = historyIndexRef.current - 1;
-    historyIndexRef.current = newIndex;
+    const res = stepUndoEntry(historyEntryRef.current);
+    if (!res) return;
+    historyEntryRef.current = res.nextEntry;
+    const activeKey = lastFrameSyncKeyRef.current || '__default__';
+    frameHistoriesRef.current.set(activeKey, res.nextEntry);
     setHistoryVersion((v) => v + 1);
-    const targetPaths = historyRef.current[newIndex] || [];
-    setPaths(targetPaths);
+
+    const targetPaths = res.snapshot.paths;
+    const targetLayers = res.snapshot.layers;
+    if (targetLayers.length > 0 && JSON.stringify(targetLayers) !== JSON.stringify(layersRef.current)) {
+      commitLayers(targetLayers);
+      if (!targetLayers.some((l) => l.id === activeLayerId)) {
+        setActiveLayerId(targetLayers[0].id);
+      }
+      if (onLayersChangeRef.current) onLayersChangeRef.current(targetLayers);
+    }
+    commitPaths(targetPaths);
     setSelectedPathIds((prev) => prev.filter((id) => targetPaths.some((p) => p.id === id)));
     notifyChange(targetPaths);
   };
 
   const handleRedo = () => {
-    if (historyIndexRef.current >= historyRef.current.length - 1) return;
-    const newIndex = historyIndexRef.current + 1;
-    historyIndexRef.current = newIndex;
+    const res = stepRedoEntry(historyEntryRef.current);
+    if (!res) return;
+    historyEntryRef.current = res.nextEntry;
+    const activeKey = lastFrameSyncKeyRef.current || '__default__';
+    frameHistoriesRef.current.set(activeKey, res.nextEntry);
     setHistoryVersion((v) => v + 1);
-    const targetPaths = historyRef.current[newIndex] || [];
-    setPaths(targetPaths);
+
+    const targetPaths = res.snapshot.paths;
+    const targetLayers = res.snapshot.layers;
+    if (targetLayers.length > 0 && JSON.stringify(targetLayers) !== JSON.stringify(layersRef.current)) {
+      commitLayers(targetLayers);
+      if (!targetLayers.some((l) => l.id === activeLayerId)) {
+        setActiveLayerId(targetLayers[0].id);
+      }
+      if (onLayersChangeRef.current) onLayersChangeRef.current(targetLayers);
+    }
+    commitPaths(targetPaths);
     setSelectedPathIds((prev) => prev.filter((id) => targetPaths.some((p) => p.id === id)));
     notifyChange(targetPaths);
   };
@@ -357,6 +421,7 @@ export function DrawingCanvas({
   const [isErasingStroke, setIsErasingStroke] = useState(false);
   const [cursorPos, setCursorPos] = useState<VectorPoint | null>(null);
   const [currentPoints, setCurrentPoints] = useState<VectorPoint[]>([]);
+  const currentPointsRef = useRef<VectorPoint[]>([]);
   const [startPoint, setStartPoint] = useState<VectorPoint | null>(null);
   const [currentPoint, setCurrentPoint] = useState<VectorPoint | null>(null);
   const [currentRect, setCurrentRect] = useState<VectorRect | null>(null);
@@ -385,16 +450,23 @@ export function DrawingCanvas({
 
   const selectedIdsRef = useRef<string[]>(selectedPathIds);
   selectedIdsRef.current = selectedPathIds;
-  const pathsRef = useRef<VectorPath[]>(paths);
   pathsRef.current = paths;
+  layersRef.current = layers;
   const lastReportedHistoryRef = useRef<DrawingCanvasHistoryState | null>(null);
+
+  const handleUndoRef = useRef(handleUndo);
+  handleUndoRef.current = handleUndo;
+  const handleRedoRef = useRef(handleRedo);
+  handleRedoRef.current = handleRedo;
+  const updatePathsWithHistoryRef = useRef(updatePathsWithHistory);
+  updatePathsWithHistoryRef.current = updatePathsWithHistory;
 
   // Exposer Annuler / Rétablir / Effacer / Pelure au header parent (Mode Dessin Unifié)
   useEffect(() => {
     if (actionsRef) {
       actionsRef.current = {
-        undo: handleUndo,
-        redo: handleRedo,
+        undo: () => handleUndoRef.current(),
+        redo: () => handleRedoRef.current(),
         clear: handleClear,
         toggleOnion: () => setOnionSkinEnabled((v) => !v),
       };
@@ -403,9 +475,10 @@ export function DrawingCanvas({
 
   useEffect(() => {
     if (!onHistoryStateChange) return;
+    const entry = historyEntryRef.current;
     const nextState: DrawingCanvasHistoryState = {
-      canUndo: historyIndexRef.current > 0,
-      canRedo: historyIndexRef.current < historyRef.current.length - 1,
+      canUndo: entry.index > 0,
+      canRedo: entry.index < entry.stack.length - 1,
       pathCount: paths.length,
       onionEnabled: onionSkinEnabled,
       hasOnion: availableOnionStates.length > 0,
@@ -434,19 +507,19 @@ export function DrawingCanvas({
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         if (e.shiftKey) {
           e.preventDefault();
-          handleRedo();
+          handleRedoRef.current();
         } else {
           e.preventDefault();
-          handleUndo();
+          handleUndoRef.current();
         }
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
         e.preventDefault();
-        handleRedo();
+        handleRedoRef.current();
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIdsRef.current.length > 0) {
         e.preventDefault();
         const updated = pathsRef.current.filter((p) => !selectedIdsRef.current.includes(p.id));
         setSelectedPathIds([]);
-        updatePathsWithHistory(updated);
+        updatePathsWithHistoryRef.current(updated);
       } else if (e.key === 'Escape') {
         setActivePolylinePoints([]);
         setSelectedPathIds([]);
@@ -456,22 +529,49 @@ export function DrawingCanvas({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const lastFrameSyncKeyRef = useRef<string | undefined>(frameSyncKey);
   useEffect(() => {
-    if (frameSyncKey === undefined || frameSyncKey === lastFrameSyncKeyRef.current) return;
-    lastFrameSyncKeyRef.current = frameSyncKey;
-    setPaths(initialPaths);
-    historyRef.current = [initialPaths];
-    historyIndexRef.current = 0;
-    setHistoryVersion((v) => v + 1);
+    const nextKey = frameSyncKey || '__default__';
+    if (frameSyncKey === undefined || nextKey === lastFrameSyncKeyRef.current) return;
+    const prevKey = lastFrameSyncKeyRef.current;
+    lastFrameSyncKeyRef.current = nextKey;
+
     const nextLayers =
       initialLayers && initialLayers.length > 0
-        ? initialLayers
+        ? cloneDrawingLayers(initialLayers)
         : [{ id: 'layer-1', name: 'Calque 1', visible: true, locked: false, opacity: 1 }];
-    setLayers(nextLayers);
-    setActiveLayerId(nextLayers[0]?.id || 'layer-1');
+
+    const switchedEntry = switchFrameHistoryInStore(
+      frameHistoriesRef.current,
+      prevKey,
+      historyEntryRef.current,
+      nextKey,
+      initialPaths,
+      nextLayers
+    );
+    historyEntryRef.current = switchedEntry;
+    const activeSnap = switchedEntry.stack[switchedEntry.index];
+    const resolvedPaths = cloneVectorPaths(activeSnap?.paths ?? initialPaths);
+    const resolvedLayers =
+      activeSnap?.layers && activeSnap.layers.length > 0
+        ? cloneDrawingLayers(activeSnap.layers)
+        : nextLayers;
+
+    commitPaths(resolvedPaths);
+    commitLayers(resolvedLayers);
+    setActiveLayerId(resolvedLayers[0]?.id || 'layer-1');
     setSelectedPathIds([]);
     setActivePolylinePoints([]);
+    setIsDrawing(false);
+    setIsErasingPartial(false);
+    setIsErasingStroke(false);
+    setIsDraggingShape(false);
+    setActiveHandle(null);
+    hasErasedInCurrentStrokeRef.current = false;
+    hasMutatedDuringDragRef.current = false;
+    currentPointsRef.current = [];
+    setCurrentPoints([]);
+    setHistoryVersion((v) => v + 1);
+
     const prevOnion = onionStates.find(
       (s) => s.id === '__prev_frame__' && s.vectorPaths && s.vectorPaths.length > 0
     );
@@ -531,7 +631,7 @@ export function DrawingCanvas({
     const oldHex = projectPalette.find((c) => c.id === paletteId)?.color?.toLowerCase();
     updateProjectPaletteColor(paletteId, newColor);
 
-    const updatedLocalPaths = paths.map((p) => {
+    const updatedLocalPaths = pathsRef.current.map((p) => {
       let nextStroke = p.stroke;
       let nextStrokeId = p.strokeColorId;
       let nextFill = p.fill;
@@ -552,19 +652,19 @@ export function DrawingCanvas({
         ? { ...p, stroke: nextStroke, strokeColorId: nextStrokeId, fill: nextFill, fillColorId: nextFillId }
         : p;
     });
-    setPaths(updatedLocalPaths);
+    commitPaths(updatedLocalPaths);
     notifyChange(updatedLocalPaths);
   };
 
   const notifyChange = (updatedPaths: VectorPath[]) => {
     if (!svgRef.current) {
-      onVectorChange(updatedPaths);
+      onVectorChangeRef.current(updatedPaths);
       return;
     }
     const svgContent = svgRef.current.outerHTML;
     const encoded = encodeURIComponent(svgContent);
     const dataUrl = `data:image/svg+xml;charset=utf-8,${encoded}`;
-    onVectorChange(updatedPaths, dataUrl);
+    onVectorChangeRef.current(updatedPaths, dataUrl);
   };
 
   const buildColliderBoundsPayload = (
@@ -748,21 +848,33 @@ export function DrawingCanvas({
 
   // Partial eraser execution (partagé)
   const applyPartialEraser = (pt: VectorPoint, radius = Math.max(8, strokeWidth * 1.5)) => {
-    const { nextPaths, changed } = erasePathsAtPoint(paths, pt, radius, activeLayerId, fallbackLayerId);
+    const { nextPaths, changed } = erasePathsAtPoint(
+      pathsRef.current,
+      pt,
+      radius,
+      activeLayerId,
+      fallbackLayerId
+    );
     if (changed) {
       hasErasedInCurrentStrokeRef.current = true;
-      setPaths(nextPaths);
+      commitPaths(nextPaths);
       notifyChange(nextPaths);
     }
   };
 
   // Whole-stroke drag eraser execution (partagé)
   const applyStrokeEraser = (pt: VectorPoint, radius = 8) => {
-    const { nextPaths, changed } = eraseWholeStrokesAtPoint(paths, pt, radius, activeLayerId, fallbackLayerId);
+    const { nextPaths, changed } = eraseWholeStrokesAtPoint(
+      pathsRef.current,
+      pt,
+      radius,
+      activeLayerId,
+      fallbackLayerId
+    );
     if (changed) {
       hasErasedInCurrentStrokeRef.current = true;
       setSelectedPathIds((prev) => prev.filter((id) => nextPaths.some((p) => p.id === id)));
-      setPaths(nextPaths);
+      commitPaths(nextPaths);
       notifyChange(nextPaths);
     }
   };
@@ -821,6 +933,38 @@ export function DrawingCanvas({
     }
 
     if (tool === 'bucket') {
+      // Si l'utilisateur clique directement sur le contour/bordure d'un tracé ou d'une forme visible et déverrouillée,
+      // recolorer le contour avec la couleur de contour active (ou de remplissage en secours)
+      const currentPaths = pathsRef.current;
+      const orderedVisibleUnlockedPaths = [...layersRef.current]
+        .reverse()
+        .filter((l) => l.visible && !l.locked)
+        .flatMap((l) =>
+          currentPaths.filter((p) => (p.layerId || fallbackLayerId) === l.id)
+        );
+      const hitStrokePath = findPathStrokeAtPoint(pt, orderedVisibleUnlockedPaths, 3.5);
+      if (hitStrokePath) {
+        const nextStroke =
+          strokeColor !== 'none'
+            ? strokeColor
+            : fillColor !== 'none'
+            ? fillColor
+            : '#000000';
+        const nextStrokeId =
+          strokeColor !== 'none'
+            ? selectedStrokePaletteId || undefined
+            : fillColor !== 'none'
+            ? selectedFillPaletteId || undefined
+            : 'pal-1';
+        const updated = currentPaths.map((p) =>
+          p.id === hitStrokePath.id
+            ? { ...p, stroke: nextStroke, strokeColorId: nextStrokeId }
+            : p
+        );
+        updatePathsWithHistory(updated);
+        return;
+      }
+
       const activeColor =
         fillColor !== 'none'
           ? fillColor
@@ -833,16 +977,16 @@ export function DrawingCanvas({
           : strokeColor !== 'none'
           ? selectedStrokePaletteId || undefined
           : 'pal-1';
-      const result = applyBucketFill(pt.x, pt.y, paths, activeColor, activeLayerId);
+      const result = applyBucketFill(pt.x, pt.y, currentPaths, activeColor, activeLayerId);
       if (result) {
         if (result.type === 'update_path') {
-          const updated = paths.map((p) =>
+          const updated = currentPaths.map((p) =>
             p.id === result.pathId ? { ...result.updatedPath, fillColorId: activeColorId } : p
           );
           updatePathsWithHistory(updated);
         } else if (result.type === 'new_path') {
           // Insérer le remplissage en arrière-plan sous les contours existants
-          const updated = [{ ...result.newPath, fillColorId: activeColorId }, ...paths];
+          const updated = [{ ...result.newPath, fillColorId: activeColorId }, ...currentPaths];
           updatePathsWithHistory(updated);
         }
       }
@@ -850,12 +994,14 @@ export function DrawingCanvas({
     }
 
     if (tool === 'eraser_partial') {
+      hasErasedInCurrentStrokeRef.current = false;
       setIsErasingPartial(true);
       applyPartialEraser(pt);
       return;
     }
 
     if (tool === 'eraser_stroke') {
+      hasErasedInCurrentStrokeRef.current = false;
       setIsErasingStroke(true);
       applyStrokeEraser(pt);
       return;
@@ -863,6 +1009,7 @@ export function DrawingCanvas({
 
     if (tool === 'pencil' || tool === 'lasso_fill') {
       setIsDrawing(true);
+      currentPointsRef.current = [pt];
       setCurrentPoints([pt]);
       return;
     }
@@ -1021,12 +1168,14 @@ export function DrawingCanvas({
       if (isDraggingShape && dragStartMouse && selectedPathIds.length > 0) {
         const dx = pt.x - dragStartMouse.x;
         const dy = pt.y - dragStartMouse.y;
-
-        const updated = paths.map((p) =>
-          selectedPathIds.includes(p.id) ? translatePath(p, dx, dy) : p
-        );
-        setPaths(updated);
-        setDragStartMouse(pt);
+        if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
+          hasMutatedDuringDragRef.current = true;
+          const updated = pathsRef.current.map((p) =>
+            selectedPathIds.includes(p.id) ? translatePath(p, dx, dy) : p
+          );
+          commitPaths(updated);
+          setDragStartMouse(pt);
+        }
         return;
       }
 
@@ -1065,10 +1214,11 @@ export function DrawingCanvas({
           height: newH,
           cornerRadius: primarySelectedPath.rect?.cornerRadius,
         };
-        const updated = paths.map((p) =>
+        hasMutatedDuringDragRef.current = true;
+        const updated = pathsRef.current.map((p) =>
           p.id === primarySelectedPath.id ? resizeShapeToRect(p, newRect) : p
         );
-        setPaths(updated);
+        commitPaths(updated);
         return;
       }
     }
@@ -1087,16 +1237,19 @@ export function DrawingCanvas({
         ptsToAdd.push(getSVGCoordinates(subEvt));
       }
 
-      setCurrentPoints((prev) => {
-        const pts = [...prev];
-        for (const newPt of ptsToAdd) {
-          const last = pts[pts.length - 1];
-          if (!last || Math.hypot(newPt.x - last.x, newPt.y - last.y) >= 0.7) {
-            pts.push(newPt);
-          }
+      const pts = [...currentPointsRef.current];
+      let added = false;
+      for (const newPt of ptsToAdd) {
+        const last = pts[pts.length - 1];
+        if (!last || Math.hypot(newPt.x - last.x, newPt.y - last.y) >= 0.7) {
+          pts.push(newPt);
+          added = true;
         }
-        return pts;
-      });
+      }
+      if (added) {
+        currentPointsRef.current = pts;
+        setCurrentPoints(pts);
+      }
     } else if (tool === 'line' || tool === 'circle') {
       setCurrentPoint(pt);
     } else if (tool === 'rectangle' && startPoint) {
@@ -1140,9 +1293,11 @@ export function DrawingCanvas({
       setIsErasingPartial(false);
       setIsErasingStroke(false);
       if (hasErasedInCurrentStrokeRef.current) {
-        pushHistoryState(paths);
+        pushHistoryState(pathsRef.current);
+        notifyChange(pathsRef.current);
         hasErasedInCurrentStrokeRef.current = false;
       }
+      return;
     }
 
     if (isMarqueeSelecting) {
@@ -1156,16 +1311,22 @@ export function DrawingCanvas({
       setIsDraggingShape(false);
       setActiveHandle(null);
       setDragStartMouse(null);
-      pushHistoryState(paths);
-      notifyChange(paths);
+      if (hasMutatedDuringDragRef.current) {
+        hasMutatedDuringDragRef.current = false;
+        pushHistoryState(pathsRef.current);
+        notifyChange(pathsRef.current);
+      }
       return;
     }
 
     if (!isDrawing) return;
     setIsDrawing(false);
 
-    if (tool === 'pencil' && currentPoints.length > 0) {
-      const d = pointsToSmoothPath(currentPoints, false);
+    const activeStrokePoints = currentPointsRef.current.length > 0 ? currentPointsRef.current : currentPoints;
+    const basePaths = pathsRef.current;
+
+    if (tool === 'pencil' && activeStrokePoints.length > 0) {
+      const d = pointsToSmoothPath(activeStrokePoints, false);
       const newPath: VectorPath = {
         id: `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         d,
@@ -1174,10 +1335,10 @@ export function DrawingCanvas({
         strokeWidth,
         fill: 'none',
         type: 'freehand',
-        points: currentPoints,
+        points: activeStrokePoints,
         layerId: activeLayerId,
       };
-      const updated = [...paths, newPath];
+      const updated = [...basePaths, newPath];
       updatePathsWithHistory(updated);
     } else if (tool === 'line' && startPoint && currentPoint) {
       if (Math.hypot(currentPoint.x - startPoint.x, currentPoint.y - startPoint.y) >= 1.5) {
@@ -1192,7 +1353,7 @@ export function DrawingCanvas({
           points: [startPoint, currentPoint],
           layerId: activeLayerId,
         };
-        updatePathsWithHistory([...paths, newPath]);
+        updatePathsWithHistory([...basePaths, newPath]);
       }
     } else if (tool === 'circle' && startPoint && currentPoint) {
       const cx = (startPoint.x + currentPoint.x) / 2;
@@ -1212,12 +1373,12 @@ export function DrawingCanvas({
           points: generateCirclePerimeterPoints(cx, cy, r),
           layerId: activeLayerId,
         };
-        const updated = [...paths, newPath];
+        const updated = [...basePaths, newPath];
         setSelectedPathIds([newPath.id]);
         updatePathsWithHistory(updated);
       }
-    } else if (tool === 'lasso_fill' && currentPoints.length > 1) {
-      const d = pointsToSmoothPath(currentPoints, true);
+    } else if (tool === 'lasso_fill' && activeStrokePoints.length > 1) {
+      const d = pointsToSmoothPath(activeStrokePoints, true);
       const effectiveFill = fillColor !== 'none' ? fillColor : strokeColor;
       const effectiveFillId = fillColor !== 'none' ? selectedFillPaletteId : selectedStrokePaletteId;
       const newPath: VectorPath = {
@@ -1229,10 +1390,10 @@ export function DrawingCanvas({
         fill: effectiveFill,
         fillColorId: effectiveFillId || undefined,
         type: 'freehand',
-        points: currentPoints,
+        points: activeStrokePoints,
         layerId: activeLayerId,
       };
-      const updated = [...paths, newPath];
+      const updated = [...basePaths, newPath];
       updatePathsWithHistory(updated);
     } else if (tool === 'rectangle' && currentRect && Math.abs(currentRect.width) > 4) {
       const d = generateRoundedRectPath(currentRect);
@@ -1248,12 +1409,13 @@ export function DrawingCanvas({
         rect: currentRect,
         layerId: activeLayerId,
       };
-      const updated = [...paths, newPath];
+      const updated = [...basePaths, newPath];
       setSelectedPathIds([newPath.id]);
       setTool('select');
       updatePathsWithHistory(updated);
     }
 
+    currentPointsRef.current = [];
     setCurrentPoints([]);
     setCurrentRect(null);
     setStartPoint(null);
@@ -1278,7 +1440,7 @@ export function DrawingCanvas({
       points: activePolylinePoints,
       layerId: activeLayerId,
     };
-    const updated = [...paths, newPath];
+    const updated = [...pathsRef.current, newPath];
     setActivePolylinePoints([]);
     setSelectedPathIds([newPath.id]);
     setTool('select');
@@ -1287,6 +1449,7 @@ export function DrawingCanvas({
 
   const handleShapeClick = (p: VectorPath, e: React.MouseEvent | React.PointerEvent) => {
     e.stopPropagation();
+    const currentPaths = pathsRef.current;
     if (tool === 'bucket') {
       const activeColor =
         fillColor !== 'none'
@@ -1305,21 +1468,21 @@ export function DrawingCanvas({
         const rect = svgEl.getBoundingClientRect();
         const clickX = ((e.clientX - rect.left) / rect.width) * 200;
         const clickY = ((e.clientY - rect.top) / rect.height) * 200;
-        const result = applyBucketFill(clickX, clickY, paths, activeColor, activeLayerId);
+        const result = applyBucketFill(clickX, clickY, currentPaths, activeColor, activeLayerId);
         if (result) {
           if (result.type === 'update_path') {
-            const updated = paths.map((item) =>
+            const updated = currentPaths.map((item) =>
               item.id === result.pathId ? { ...result.updatedPath, fillColorId: activeColorId } : item
             );
             updatePathsWithHistory(updated);
           } else if (result.type === 'new_path') {
-            const updated = [{ ...result.newPath, fillColorId: activeColorId }, ...paths];
+            const updated = [{ ...result.newPath, fillColorId: activeColorId }, ...currentPaths];
             updatePathsWithHistory(updated);
           }
         } else {
           // Si on clique sur une forme et qu'aucune cavité séparée n'est trouvée, colorer directement la forme
           const closedD = p.d.trim().endsWith('Z') ? p.d : `${p.d} Z`;
-          const updated = paths.map((item) =>
+          const updated = currentPaths.map((item) =>
             item.id === p.id ? { ...item, fill: activeColor, fillColorId: activeColorId, d: closedD } : item
           );
           updatePathsWithHistory(updated);
@@ -1328,7 +1491,7 @@ export function DrawingCanvas({
       return;
     }
     if (tool === 'eraser_stroke') {
-      const updated = paths.filter((item) => item.id !== p.id);
+      const updated = currentPaths.filter((item) => item.id !== p.id);
       setSelectedPathIds((prev) => prev.filter((id) => id !== p.id));
       updatePathsWithHistory(updated);
       return;
@@ -1357,7 +1520,7 @@ export function DrawingCanvas({
     }>
   ) => {
     if (selectedPathIds.length === 0) return;
-    const updated = paths.map((p) => {
+    const updated = pathsRef.current.map((p) => {
       if (!selectedPathIds.includes(p.id)) return p;
       let newRect = p.rect;
       let newD = p.d;
@@ -1387,26 +1550,27 @@ export function DrawingCanvas({
     const newSelectedIds: string[] = [];
     const duplicatedPaths: VectorPath[] = [];
 
-    paths.forEach((p) => {
+    pathsRef.current.forEach((p) => {
       if (!selectedPathIds.includes(p.id)) return;
       const newId = `path-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       newSelectedIds.push(newId);
       duplicatedPaths.push({ ...translatePath(p, 10, 10), id: newId });
     });
 
-    const updated = [...paths, ...duplicatedPaths];
+    const updated = [...pathsRef.current, ...duplicatedPaths];
     setSelectedPathIds(newSelectedIds);
     updatePathsWithHistory(updated);
   };
 
   const handleDeleteSelected = () => {
     if (selectedPathIds.length === 0) return;
-    const updated = paths.filter((p) => !selectedPathIds.includes(p.id));
+    const updated = pathsRef.current.filter((p) => !selectedPathIds.includes(p.id));
     setSelectedPathIds([]);
     updatePathsWithHistory(updated);
   };
 
   const handleClear = () => {
+    currentPointsRef.current = [];
     setCurrentPoints([]);
     setActivePolylinePoints([]);
     setSelectedPathIds([]);
@@ -1427,7 +1591,7 @@ export function DrawingCanvas({
       rect: (p as VectorPath).rect,
       points: (p as VectorPath).points,
     }));
-    const updated = [...paths, ...newPaths];
+    const updated = [...pathsRef.current, ...newPaths];
     updatePathsWithHistory(updated);
   };
 
@@ -1451,8 +1615,8 @@ export function DrawingCanvas({
           activePolylineCount={activePolylinePoints.length}
           selectedCount={selectedPathIds.length}
           hideTopHistoryButtons={hideTopHistoryButtons}
-          canUndo={historyIndexRef.current > 0}
-          canRedo={historyIndexRef.current < historyRef.current.length - 1}
+          canUndo={historyEntryRef.current.index > 0}
+          canRedo={historyEntryRef.current.index < historyEntryRef.current.stack.length - 1}
           onUndo={handleUndo}
           onRedo={handleRedo}
           hasReferenceGuide={Boolean(activeReferenceGuide)}
@@ -1477,7 +1641,7 @@ export function DrawingCanvas({
             viewBox="0 0 200 200"
             className={`w-full h-full max-w-[500px] max-h-[500px] aspect-square bg-white rounded-3xl touch-none select-none border border-slate-300 shadow-md ${
               tool === 'eraser_stroke' || tool === 'eraser_partial'
-                ? 'cursor-none'
+                ? 'atelier-cursor-hidden'
                 : tool === 'bucket'
                 ? 'cursor-cell'
                 : tool === 'select'
@@ -1489,7 +1653,16 @@ export function DrawingCanvas({
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
             onPointerLeave={() => {
-              handlePointerUp();
+              if (
+                isDrawing ||
+                isErasingPartial ||
+                isErasingStroke ||
+                isDraggingShape ||
+                Boolean(activeHandle) ||
+                isMarqueeSelecting
+              ) {
+                handlePointerUp();
+              }
               if (cursorPos) setCursorPos(null);
             }}
             onDoubleClick={() => {
@@ -1607,27 +1780,26 @@ export function DrawingCanvas({
                   style={{ pointerEvents: layer.locked ? 'none' : 'auto' }}
                 >
                   {layerPaths.map((p) => {
-                    const isSelected = selectedPathIds.includes(p.id);
                     const isSelectMode = tool === 'select' && !layer.locked;
                     const isEraserStroke = tool === 'eraser_stroke' && !layer.locked;
                     return (
                       <path
                         key={p.id}
                         d={p.d}
-                        stroke={isSelected ? '#6366f1' : p.stroke}
-                        strokeWidth={isSelected ? p.strokeWidth + 1 : p.strokeWidth}
+                        stroke={p.stroke}
+                        strokeWidth={p.strokeWidth}
                         fill={p.fill || 'none'}
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         style={{
                           pointerEvents: isSelectMode || isEraserStroke ? 'auto' : 'none',
                         }}
-                        className={`transition-all ${
+                        className={`transition-opacity ${
                           isEraserStroke
-                            ? 'hover:stroke-rose-500 hover:opacity-40 cursor-pointer'
+                            ? 'hover:stroke-rose-500 hover:opacity-40'
                             : isSelectMode
-                            ? isSelected
-                              ? 'cursor-move filter drop-shadow-xs'
+                            ? selectedPathIds.includes(p.id)
+                              ? 'cursor-move'
                               : 'hover:opacity-90 cursor-pointer'
                             : ''
                         }`}
@@ -1648,6 +1820,7 @@ export function DrawingCanvas({
                                 setSelectedPathIds([p.id]);
                               }
                             }
+                            hasMutatedDuringDragRef.current = false;
                             setIsDraggingShape(true);
                             setDragStartMouse(getSVGCoordinates(e));
                           }
@@ -1780,40 +1953,62 @@ export function DrawingCanvas({
               />
             )}
 
-            {/* Figma-Style Multi-Bounding Box & Transformation Handles */}
+            {/* Cadre de sélection discret (ne recouvre jamais la couleur ni l'épaisseur réelle du trait) */}
             {tool === 'select' && selectedBounds && selectedPathIds.length > 0 && (
               <g className="select-none">
+                {selectedPathIds.length > 1 &&
+                  paths
+                    .filter((p) => selectedPathIds.includes(p.id))
+                    .map((p) => {
+                      const b = sharedGetPathBounds(p);
+                      return (
+                        <rect
+                          key={`sel-sub-${p.id}`}
+                          x={b.x - 1.5}
+                          y={b.y - 1.5}
+                          width={b.width + 3}
+                          height={b.height + 3}
+                          fill="none"
+                          stroke="rgba(99,102,241,0.35)"
+                          strokeWidth="0.65"
+                          strokeDasharray="2.5 2.5"
+                          className="pointer-events-none"
+                        />
+                      );
+                    })}
                 <rect
-                  x={selectedBounds.x}
-                  y={selectedBounds.y}
-                  width={selectedBounds.width}
-                  height={selectedBounds.height}
-                  fill="rgba(99,102,241,0.04)"
-                  stroke="#6366f1"
-                  strokeWidth="1.5"
-                  strokeDasharray="4 3"
+                  x={selectedBounds.x - 2}
+                  y={selectedBounds.y - 2}
+                  width={selectedBounds.width + 4}
+                  height={selectedBounds.height + 4}
+                  fill="transparent"
+                  stroke="rgba(99,102,241,0.65)"
+                  strokeWidth="0.9"
+                  strokeDasharray="3 2.5"
                   className="cursor-move"
                   onPointerDown={(e) => {
                     e.stopPropagation();
                     try {
                       (e.target as Element).setPointerCapture?.(e.pointerId);
                     } catch (_) {}
+                    hasMutatedDuringDragRef.current = false;
                     setIsDraggingShape(true);
                     setDragStartMouse(getSVGCoordinates(e));
                   }}
                 />
 
-                {/* Show corner resize handles if single rect or circle is selected */}
+                {/* Show compact corner resize handles if single rect or circle is selected */}
                 {selectedPathIds.length === 1 && (primarySelectedPath?.rect || primarySelectedPath?.circle) && (
                   <>
                     <rect
-                      x={selectedBounds.x - 4}
-                      y={selectedBounds.y - 4}
-                      width="8"
-                      height="8"
+                      x={selectedBounds.x - 5}
+                      y={selectedBounds.y - 5}
+                      width="6"
+                      height="6"
+                      rx="1"
                       fill="#ffffff"
                       stroke="#6366f1"
-                      strokeWidth="2"
+                      strokeWidth="1.25"
                       className="cursor-nwse-resize"
                       onPointerDown={(e) => {
                         e.stopPropagation();
@@ -1822,13 +2017,14 @@ export function DrawingCanvas({
                       }}
                     />
                     <rect
-                      x={selectedBounds.x + selectedBounds.width - 4}
-                      y={selectedBounds.y - 4}
-                      width="8"
-                      height="8"
+                      x={selectedBounds.x + selectedBounds.width - 1}
+                      y={selectedBounds.y - 5}
+                      width="6"
+                      height="6"
+                      rx="1"
                       fill="#ffffff"
                       stroke="#6366f1"
-                      strokeWidth="2"
+                      strokeWidth="1.25"
                       className="cursor-nesw-resize"
                       onPointerDown={(e) => {
                         e.stopPropagation();
@@ -1837,13 +2033,14 @@ export function DrawingCanvas({
                       }}
                     />
                     <rect
-                      x={selectedBounds.x + selectedBounds.width - 4}
-                      y={selectedBounds.y + selectedBounds.height - 4}
-                      width="8"
-                      height="8"
+                      x={selectedBounds.x + selectedBounds.width - 1}
+                      y={selectedBounds.y + selectedBounds.height - 1}
+                      width="6"
+                      height="6"
+                      rx="1"
                       fill="#ffffff"
                       stroke="#6366f1"
-                      strokeWidth="2"
+                      strokeWidth="1.25"
                       className="cursor-nwse-resize"
                       onPointerDown={(e) => {
                         e.stopPropagation();
@@ -1852,13 +2049,14 @@ export function DrawingCanvas({
                       }}
                     />
                     <rect
-                      x={selectedBounds.x - 4}
-                      y={selectedBounds.y + selectedBounds.height - 4}
-                      width="8"
-                      height="8"
+                      x={selectedBounds.x - 5}
+                      y={selectedBounds.y + selectedBounds.height - 1}
+                      width="6"
+                      height="6"
+                      rx="1"
                       fill="#ffffff"
                       stroke="#6366f1"
-                      strokeWidth="2"
+                      strokeWidth="1.25"
                       className="cursor-nesw-resize"
                       onPointerDown={(e) => {
                         e.stopPropagation();
@@ -2114,7 +2312,7 @@ export function DrawingCanvas({
           <button
             type="button"
             onClick={handleUndo}
-            disabled={historyIndexRef.current <= 0}
+            disabled={historyEntryRef.current.index <= 0}
             className="flex-1 py-1.5 px-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 disabled:opacity-40 rounded-xl border border-slate-200 transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-2xs active:scale-95"
             title="Annuler (Ctrl+Z)"
           >
@@ -2123,7 +2321,7 @@ export function DrawingCanvas({
           <button
             type="button"
             onClick={handleRedo}
-            disabled={historyIndexRef.current >= historyRef.current.length - 1}
+            disabled={historyEntryRef.current.index >= historyEntryRef.current.stack.length - 1}
             className="flex-1 py-1.5 px-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 disabled:opacity-40 rounded-xl border border-slate-200 transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-2xs active:scale-95"
             title="Rétablir (Ctrl+Y)"
           >

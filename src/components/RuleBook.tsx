@@ -994,6 +994,10 @@ export function RuleBook() {
               eventName = `Score ${rule.trigger.variableOperator || '>='} ${rule.trigger.variableValue ?? 5}`;
               eventIcon = '📊';
               eventSub = 'Condition de Score';
+            } else if (rule.trigger.type === 'joint_break' || rule.trigger.phase === 'joint_break') {
+              eventName = 'Rupture de Joint';
+              eventIcon = '⛓️‍💥';
+              eventSub = 'Joint cassé';
             } else if (rule.trigger.type === 'collision') {
               if (rule.trigger.phase === 'collision_release') {
                 eventName = 'Relâcher sur cible';
@@ -1789,7 +1793,9 @@ export function RuleBook() {
                                 : act.spawnLocationMode === 'at_subject'
                                 ? 'Sur Sujet'
                                 : act.spawnLocationMode === 'random'
-                                ? 'Aléatoire'
+                                ? act.spawnRandomScope === 'zone'
+                                  ? 'Aléatoire (Zone)'
+                                  : 'Aléatoire (Canvas)'
                                 : act.spawnLocationMode?.startsWith('offset')
                                 ? 'Décalé'
                                 : 'Fixe';

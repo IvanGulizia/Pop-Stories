@@ -370,7 +370,7 @@ export function buildPhysicsTestScene(presetId: PhysicsTestSceneId): BuiltPhysic
       isDraggable: false,
       vectorPaths: makeCapsuleSvg('#38bdf8', '#0369a1'),
       states: {
-        state_1: { id: 'state_1', name: 'Normal', color: '#38bdf8', scale: 1, rotation: -35 },
+        state_1: { id: 'state_1', name: 'Normal', color: '#38bdf8', scale: 1, rotation: 0 },
       },
       behaviors: [],
     };
@@ -385,6 +385,15 @@ export function buildPhysicsTestScene(presetId: PhysicsTestSceneId): BuiltPhysic
       collideWithWorld: true,
       inheritRotation: false,
       inheritFlip: true,
+      jointChildPivot: { x: 0.5, y: 0.05 },
+      jointEnableAngleLimits: true,
+      jointMinAngle: -75,
+      jointMaxAngle: 75,
+      jointBrakeAngle: 20,
+      jointBrakeStrength: 75,
+      jointInitialAngleOffset: -45,
+      jointAngularStiffness: 25,
+      jointAngularDamping: 1.5,
     });
 
     const ball: Entity = {
@@ -406,6 +415,14 @@ export function buildPhysicsTestScene(presetId: PhysicsTestSceneId): BuiltPhysic
       },
       behaviors: [
         {
+          id: 'beh-drag-ball',
+          type: 'draggable',
+          enabled: true,
+          throwable: true,
+          maxThrowSpeed: 1200,
+          precisePhysicsGrab: true,
+        },
+        {
           id: 'beh-phys-ball',
           type: 'physics',
           enabled: true,
@@ -426,8 +443,21 @@ export function buildPhysicsTestScene(presetId: PhysicsTestSceneId): BuiltPhysic
       springDamping: 8,
       springGravity: 520,
       collideWithWorld: true,
-      inheritRotation: false,
+      inheritRotation: true,
       inheritFlip: true,
+      jointChildPivot: { x: 0.5, y: 0 },
+      jointEnableAngleLimits: true,
+      jointMinAngle: -85,
+      jointMaxAngle: 85,
+      jointBrakeAngle: 22,
+      jointBrakeStrength: 75,
+      jointInitialAngleOffset: -15,
+      jointAngularStiffness: 45,
+      jointAngularDamping: 2.5,
+      jointBreakable: true,
+      jointBreakForce: 280,
+      jointBreakShakeThreshold: 140,
+      jointBreakFallWithGravity: true,
     });
 
     const crate1: Entity = {
@@ -446,7 +476,7 @@ export function buildPhysicsTestScene(presetId: PhysicsTestSceneId): BuiltPhysic
         state_1: { id: 'state_1', name: 'Normal', color: '#10b981', scale: 1, rotation: 0 },
       },
       behaviors: [
-        { id: 'beh-drag-c1', type: 'draggable', enabled: true, throwable: true, maxThrowSpeed: 900 },
+        { id: 'beh-drag-c1', type: 'draggable', enabled: true, throwable: true, maxThrowSpeed: 900, precisePhysicsGrab: true },
         { id: 'beh-phys-c1', type: 'physics', enabled: true, gravity: 600, mass: 1.0, bounce: 0.5, friction: 0.4 },
       ],
     };

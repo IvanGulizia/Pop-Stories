@@ -37,14 +37,21 @@ export function getEffectiveBehaviors(
 }
 
 /**
- * Détermine si une entité est déplaçable à la souris et si l'inertie de lancer est activée.
- * L'inertie de lancer (throwable) n'est active que si l'entité dispose d'une physique dynamique (pas statique).
+ * Détermine si une entité est déplaçable à la souris, si l'inertie de lancer est activée,
+ * et si le mode saisie physique précise / balancement depuis le point saisi est demandé.
  */
 export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
   canDrag: boolean;
   throwable: boolean;
   maxThrowSpeed: number;
   hasDynamicPhysics: boolean;
+  precisePhysicsGrab: boolean;
+  swingAroundGrabPoint: boolean;
+  grabRotationMode: 'free' | 'damped_limited';
+  grabMaxAngle: number;
+  grabBrakeAngle: number;
+  grabAngularStiffness: number;
+  grabAngularDamping: number;
 } {
   const effective = getEffectiveBehaviors(entity, currentState);
   const puppetBehavior = effective.find((b) => b.type === 'interactive_puppet') as
@@ -53,15 +60,35 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
   const dragBehavior = effective.find((b) => b.type === 'draggable') as DraggableBehaviorConfig | undefined;
   const physics = effective.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
 
-  // Une entité n'a de physique dynamique que si le composant 'physics' est présent et n'est pas statique
-  const hasDynamicPhysics = !!physics && physics.isStatic !== true;
+  const attachMode = entity.parentOffset?.attachmentMode || 'rigid';
+  const isDynamicAttachedChild = Boolean(
+    entity.parentId &&
+      (attachMode === 'physics_joint' ||
+        (attachMode === 'spring' && entity.parentOffset?.collideWithWorld === true))
+  );
+
+  // Une entité a de la physique dynamique si Physics non-statique OU si c'est un enfant articulé en physics_joint / spring+monde
+  const hasDynamicPhysics = (!!physics && physics.isStatic !== true) || isDynamicAttachedChild;
 
   if (puppetBehavior && puppetBehavior.enabled !== false) {
+    const grabSource =
+      puppetBehavior.precisePhysicsGrab || !dragBehavior?.precisePhysicsGrab
+        ? puppetBehavior
+        : dragBehavior;
     return {
       canDrag: true,
       throwable: puppetBehavior.throwable !== false && hasDynamicPhysics,
       maxThrowSpeed: puppetBehavior.maxThrowSpeed || 1500,
       hasDynamicPhysics,
+      precisePhysicsGrab:
+        Boolean(puppetBehavior.precisePhysicsGrab || dragBehavior?.precisePhysicsGrab) &&
+        hasDynamicPhysics,
+      swingAroundGrabPoint: Boolean(puppetBehavior.swingAroundGrabPoint),
+      grabRotationMode: grabSource.grabRotationMode || 'free',
+      grabMaxAngle: grabSource.grabMaxAngle ?? 45,
+      grabBrakeAngle: grabSource.grabBrakeAngle ?? 15,
+      grabAngularStiffness: grabSource.grabAngularStiffness ?? 140,
+      grabAngularDamping: grabSource.grabAngularDamping ?? 8,
     };
   }
 
@@ -71,6 +98,13 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
       throwable: dragBehavior.throwable !== false && hasDynamicPhysics,
       maxThrowSpeed: dragBehavior.maxThrowSpeed || 1500,
       hasDynamicPhysics,
+      precisePhysicsGrab: Boolean(dragBehavior.precisePhysicsGrab) && hasDynamicPhysics,
+      swingAroundGrabPoint: false,
+      grabRotationMode: dragBehavior.grabRotationMode || 'free',
+      grabMaxAngle: dragBehavior.grabMaxAngle ?? 45,
+      grabBrakeAngle: dragBehavior.grabBrakeAngle ?? 15,
+      grabAngularStiffness: dragBehavior.grabAngularStiffness ?? 140,
+      grabAngularDamping: dragBehavior.grabAngularDamping ?? 8,
     };
   }
 
@@ -80,5 +114,12 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
     throwable: false,
     maxThrowSpeed: 1500,
     hasDynamicPhysics,
+    precisePhysicsGrab: false,
+    swingAroundGrabPoint: false,
+    grabRotationMode: 'free',
+    grabMaxAngle: 45,
+    grabBrakeAngle: 15,
+    grabAngularStiffness: 140,
+    grabAngularDamping: 8,
   };
 }
