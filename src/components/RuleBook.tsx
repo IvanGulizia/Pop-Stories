@@ -227,7 +227,7 @@ export function RuleBook() {
     rule: DynamicRule,
     subStep: 'choose_object' | 'choose_state' = 'choose_object'
   ) => {
-    const mode = rule.trigger.targetMode || 'type';
+    const mode = rule.trigger.targetMode || (rule.trigger.type === 'target_arrived' ? 'any' : 'type');
     const inst = mode === 'instance' && rule.trigger.targetId ? entities[rule.trigger.targetId] : undefined;
     const type = inst?.type || rule.trigger.targetType || availableEntityOptions[1]?.type || availableEntityOptions[0]?.type || 'plant';
     setActiveModal({
@@ -281,7 +281,10 @@ export function RuleBook() {
     actIdx: number,
     overrideSubStep?: Extract<NonNullable<ActiveModal>, { type: 'action' }>['subStep']
   ) => {
-    const isCollisionOrProx = rule.trigger.type === 'collision' || rule.trigger.type === 'proximity';
+    const isCollisionOrProx =
+      rule.trigger.type === 'collision' ||
+      rule.trigger.type === 'proximity' ||
+      rule.trigger.type === 'target_arrived';
     const subType = rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
     const tarType = rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
     const resolvedTargetType =
@@ -353,6 +356,10 @@ export function RuleBook() {
       parentEntityType: act.parentEntityType,
       parentEntityTag: act.parentEntityTag,
       parentOffset: act.parentOffset,
+      attachKeepCurrentOffset: act.attachKeepCurrentOffset,
+      attachDisableCollisions: act.attachDisableCollisions,
+      detachImpulseSpeed: act.detachImpulseSpeed,
+      detachImpulseAngle: act.detachImpulseAngle,
       moveDistance: act.moveDistance ?? 40,
       moveDirectionMode: act.moveDirectionMode || 'cardinal',
       moveCardinal: act.moveCardinal || 'right',
@@ -432,9 +439,13 @@ export function RuleBook() {
   const completeWizardWithAction = (actionData?: Partial<RuleAction>) => {
     if (!activeWizard) return;
 
-    const needsTarget = activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity';
+    const needsTarget =
+      activeWizard.triggerType === 'collision' ||
+      activeWizard.triggerType === 'proximity' ||
+      activeWizard.triggerType === 'target_arrived';
     const subMode: SelectionMode = activeWizard.subjectMode || 'type';
-    const tarMode: SelectionMode = activeWizard.targetMode || 'type';
+    const tarMode: SelectionMode =
+      activeWizard.targetMode || (activeWizard.triggerType === 'target_arrived' ? 'any' : 'type');
     const resolvedSubType =
       subMode === 'instance' && activeWizard.subjectId
         ? entities[activeWizard.subjectId]?.type || activeWizard.subjectType
@@ -1091,7 +1102,10 @@ export function RuleBook() {
           </div>
         ) : (
           paginatedRules.map((rule) => {
-            const isCollision = rule.trigger.type === 'collision' || rule.trigger.type === 'proximity';
+            const isCollision =
+              rule.trigger.type === 'collision' ||
+              rule.trigger.type === 'proximity' ||
+              rule.trigger.type === 'target_arrived';
 
             // Find subject display info (Type / #Tag / Instance / Tous)
             const subjectMode = rule.trigger.subjectMode || 'type';
@@ -1112,7 +1126,7 @@ export function RuleBook() {
               : 'Tous les états';
 
             // Find target display info (Type / #Tag / Instance / Tous)
-            const targetMode = rule.trigger.targetMode || 'type';
+            const targetMode = rule.trigger.targetMode || (rule.trigger.type === 'target_arrived' ? 'any' : 'type');
             const targetInst = targetMode === 'instance' && rule.trigger.targetId ? entities[rule.trigger.targetId] : undefined;
             const targetType = targetInst?.type || rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
             const targetOpt = availableEntityOptions.find((o) => o.type === targetType);
@@ -1201,6 +1215,10 @@ export function RuleBook() {
               eventName = 'Caméra suit entité';
               eventIcon = '🎥';
               eventSub = 'Nouvelle cible caméra';
+            } else if (rule.trigger.type === 'target_arrived') {
+              eventName = 'Arrivé sur cible';
+              eventIcon = '🏁';
+              eventSub = 'Suivre / Aller vers';
             } else if (rule.trigger.type === 'collision') {
               const sideMap: Record<string, string> = {
                 top: '↑Haut',
@@ -2210,10 +2228,13 @@ export function RuleBook() {
                                 : act.parentTargetMode === 'entity' && act.parentEntityId
                                 ? entities[act.parentEntityId]?.name || 'Entité'
                                 : act.parentEntityType || 'Parent'
-                            }`;
+                            }${act.attachDisableCollisions ? ' • Sans collision' : ''}`;
                           } else if (act.type === 'detach_parent') {
                             actionBadge = 'Détacher Parent';
-                            actionDetail = 'Libérer du parent';
+                            actionDetail =
+                              (act.detachImpulseSpeed || 0) > 0
+                                ? `Lancer ${Math.round(act.detachImpulseSpeed!)}px/s @ ${Math.round(act.detachImpulseAngle ?? -45)}°`
+                                : 'Libérer du parent';
                           } else if (act.type === 'move_entity') {
                             actionBadge = 'Déplacer';
                             const dist = act.moveDistance ?? 40;

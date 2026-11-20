@@ -215,6 +215,38 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
     updateStateBehaviorOverride(entity.id, targetState.id, behaviorId, partial);
   };
 
+  const physicsBehavior = baseBehaviors.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
+  const hasGroundedPhysics = Boolean(
+    physicsBehavior && physicsBehavior.enabled !== false && !physicsBehavior.isStatic
+  );
+  const hasFrozenRotation = Boolean(physicsBehavior?.freezeRotation);
+
+  const handleActivateGroundedPhysics = () => {
+    if (physicsBehavior) {
+      const updated = baseBehaviors.map((b) =>
+        b.id === physicsBehavior.id
+          ? ({
+              ...b,
+              enabled: true,
+              isStatic: false,
+              isTrigger: false,
+              freezeRotation: true,
+            } as PhysicsBehaviorConfig)
+          : b
+      );
+      updateEntityBehaviors(entity.id, updated);
+    } else {
+      const newPhys = {
+        ...createDefaultBehaviorConfig('physics', entity),
+        enabled: true,
+        isStatic: false,
+        isTrigger: false,
+        freezeRotation: true,
+      } as PhysicsBehaviorConfig;
+      updateEntityBehaviors(entity.id, [...baseBehaviors, newPhys]);
+    }
+  };
+
   return (
     <div className="space-y-3">
       {/* En-tête de section */}
@@ -441,6 +473,9 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
                     },
                     onQuickCreateState: handleQuickCreateState,
                     onEditStateDrawing,
+                    hasGroundedPhysics,
+                    hasFrozenRotation,
+                    onActivateGroundedPhysics: handleActivateGroundedPhysics,
                   })}
                 </div>
               )}
@@ -613,6 +648,9 @@ function renderBehaviorControls({
   onDeleteCustomParticle,
   onQuickCreateState,
   onEditStateDrawing,
+  hasGroundedPhysics,
+  hasFrozenRotation,
+  onActivateGroundedPhysics,
 }: {
   behavior: EntityBehavior;
   override?: BehaviorOverride;
@@ -629,6 +667,9 @@ function renderBehaviorControls({
   onDeleteCustomParticle: (presetId: string) => void;
   onQuickCreateState: (suggestedName: string, folderName?: string) => string;
   onEditStateDrawing?: (stateId: string) => void;
+  hasGroundedPhysics: boolean;
+  hasFrozenRotation: boolean;
+  onActivateGroundedPhysics: () => void;
 }) {
   const update = (partial: any) => {
     if (isOverridden) {
@@ -676,10 +717,27 @@ function renderBehaviorControls({
           b={{ ...behavior, ...(override || {}) } as PatrolBehaviorConfig}
           update={update}
           targetEntityOptions={targetEntityOptions}
+          stateList={stateList}
+          onQuickCreateState={onQuickCreateState}
+          onEditStateDrawing={onEditStateDrawing}
+          hasPhysics={hasGroundedPhysics}
+          hasFrozenRotation={hasFrozenRotation}
+          onActivateGroundedPhysics={onActivateGroundedPhysics}
         />
       );
     case 'wandering':
-      return <WanderingBehaviorControls b={{ ...behavior, ...(override || {}) } as WanderingBehaviorConfig} update={update} />;
+      return (
+        <WanderingBehaviorControls
+          b={{ ...behavior, ...(override || {}) } as WanderingBehaviorConfig}
+          update={update}
+          stateList={stateList}
+          onQuickCreateState={onQuickCreateState}
+          onEditStateDrawing={onEditStateDrawing}
+          hasPhysics={hasGroundedPhysics}
+          hasFrozenRotation={hasFrozenRotation}
+          onActivateGroundedPhysics={onActivateGroundedPhysics}
+        />
+      );
     case 'move_to':
       return (
         <MoveToBehaviorControls
@@ -708,6 +766,12 @@ function renderBehaviorControls({
           targetEntityOptions={targetEntityOptions}
           entityTypeOptions={entityTypeOptions}
           availableTags={availableTags}
+          stateList={stateList}
+          onQuickCreateState={onQuickCreateState}
+          onEditStateDrawing={onEditStateDrawing}
+          hasPhysics={hasGroundedPhysics}
+          hasFrozenRotation={hasFrozenRotation}
+          onActivateGroundedPhysics={onActivateGroundedPhysics}
         />
       );
     case 'flee':

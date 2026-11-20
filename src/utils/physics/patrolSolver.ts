@@ -48,6 +48,23 @@ export function resolvePatrolWaypoints(
   return points;
 }
 
+export function getPatrolMoveDirX(
+  state: PatrolRuntimeState,
+  currentCenter: Position,
+  config: PatrolBehaviorConfig,
+  entities: Record<string, Entity>
+): 1 | -1 | 0 {
+  const patrolMode = config.patrolMode || 'symmetric';
+  if (patrolMode === 'waypoints') {
+    const waypoints = resolvePatrolWaypoints(state.originCenter, config, entities);
+    if (waypoints.length === 0) return 0;
+    const idx = Math.max(0, Math.min(waypoints.length - 1, state.waypointIndex));
+    const dx = waypoints[idx].x - currentCenter.x;
+    return Math.abs(dx) > 1 ? (dx > 0 ? 1 : -1) : 0;
+  }
+  return (config.axis || 'horizontal') === 'horizontal' ? state.direction : 0;
+}
+
 export function stepPatrolBehavior(params: {
   state: PatrolRuntimeState;
   currentCenter: Position;
@@ -69,6 +86,7 @@ export function stepPatrolBehavior(params: {
   const pauseDuration = Math.max(0, config.pauseAtEnds ?? config.pauseDuration ?? 0.3);
   const axis = config.axis || 'horizontal';
   const patrolMode = config.patrolMode || 'symmetric';
+  const isGroundedWaypoints = patrolMode === 'waypoints' && config.movementSpace === 'grounded';
 
   state.wallTurnCooldown = Math.max(0, state.wallTurnCooldown - safeDt);
   state.ledgeTurnCooldown = Math.max(0, state.ledgeTurnCooldown - safeDt);
@@ -78,7 +96,7 @@ export function stepPatrolBehavior(params: {
     return {
       vx: 0,
       vy: 0,
-      preserveVerticalVelocity: axis === 'horizontal' && patrolMode !== 'waypoints',
+      preserveVerticalVelocity: (axis === 'horizontal' && patrolMode !== 'waypoints') || isGroundedWaypoints,
       turned: false,
       facingDirX: 0,
     };
@@ -97,20 +115,29 @@ export function stepPatrolBehavior(params: {
       const targetPt = waypoints[state.waypointIndex];
       const dx = targetPt.x - currentCenter.x;
       const dy = targetPt.y - currentCenter.y;
-      const dist = Math.hypot(dx, dy);
+      const dist = isGroundedWaypoints ? Math.abs(dx) : Math.hypot(dx, dy);
+
+      const hitWallInWpDir =
+        Boolean(config.turnOnWall) &&
+        state.wallTurnCooldown <= 0 &&
+        ((dx < -1 && wallHit?.left) || (dx > 1 && wallHit?.right));
+      const hitLedgeInWpDir =
+        isGroundedWaypoints &&
+        Boolean(config.detectLedges) &&
+        state.ledgeTurnCooldown <= 0 &&
+        Boolean(ledgeAhead);
 
       // Demi-tour mur / vide en mode waypoints si configuré
-      if (
-        config.turnOnWall &&
-        state.wallTurnCooldown <= 0 &&
-        ((dx < -1 && wallHit?.left) || (dx > 1 && wallHit?.right))
-      ) {
-        state.wallTurnCooldown = 0.16;
+      if (hitWallInWpDir || hitLedgeInWpDir) {
+        if (hitWallInWpDir) state.wallTurnCooldown = 0.16;
+        if (hitLedgeInWpDir) state.ledgeTurnCooldown = 0.22;
         if (waypoints.length >= 2) {
           state.waypointDir = state.waypointDir === 1 ? -1 : 1;
           state.waypointIndex = Math.max(0, Math.min(waypoints.length - 1, state.waypointIndex + state.waypointDir));
-          return { vx: 0, vy: 0, preserveVerticalVelocity: false, turned: true, facingDirX: 0 };
+          return { vx: 0, vy: 0, preserveVerticalVelocity: isGroundedWaypoints, turned: true, facingDirX: 0 };
         }
+        state.timer = Math.max(0.2, pauseDuration * 0.5);
+        return { vx: 0, vy: 0, preserveVerticalVelocity: isGroundedWaypoints, turned: true, facingDirX: 0 };
       }
 
       const arrivalRadius = Math.max(6, speed * safeDt * 1.5);
@@ -130,7 +157,18 @@ export function stepPatrolBehavior(params: {
             state.waypointIndex = Math.max(0, Math.min(waypoints.length - 1, nextIdx));
           }
         }
-        return { vx: 0, vy: 0, preserveVerticalVelocity: false, turned: true, facingDirX: 0 };
+        return { vx: 0, vy: 0, preserveVerticalVelocity: isGroundedWaypoints, turned: true, facingDirX: 0 };
+      }
+
+      if (isGroundedWaypoints) {
+        const vx = Math.sign(dx) * speed;
+        return {
+          vx,
+          vy: 0,
+          preserveVerticalVelocity: true,
+          turned: false,
+          facingDirX: Math.abs(vx) > 5 ? (vx > 0 ? 1 : -1) : 0,
+        };
       }
 
       const ux = dx / dist;

@@ -25,7 +25,7 @@ import { soundSynth } from '../utils/sound';
 import { dispatchPlayCameraAction } from '../utils/cameraRuntime';
 import { resolveWorldBounds } from '../utils/cameraSolver';
 import { getCollisionContactPoint } from './collisionHelpers';
-import { resolveEntityReference } from './parentingHelpers';
+import { computeRelativeParentOffset, resolveEntityReference } from './parentingHelpers';
 import { computeRandomSpawnPosition } from '../utils/spawnHelpers';
 import {
   canRuleFireWithGate,
@@ -684,13 +684,44 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
         lastSpawnedEntityId
       );
       if (parentEnt && parentEnt.id !== entity.id) {
-        freshSnap?.setEntityParent(entity.id, parentEnt.id, act.parentOffset);
+        const disableCollisions = act.attachDisableCollisions;
+        let resolvedOffset = act.parentOffset;
+        if (act.attachKeepCurrentOffset === true && freshSnap) {
+          const curChild = freshSnap.entities[entity.id] || entity;
+          const curParent = freshSnap.entities[parentEnt.id] || parentEnt;
+          resolvedOffset = computeRelativeParentOffset(curChild, curParent, curChild.parentOffset);
+          if (act.parentOffset?.attachmentMode) {
+            resolvedOffset.attachmentMode = act.parentOffset.attachmentMode;
+          }
+        }
+        if (disableCollisions !== undefined) {
+          if (resolvedOffset) {
+            resolvedOffset = { ...resolvedOffset, disableCollisionsWhileAttached: disableCollisions };
+          } else if (freshSnap) {
+            const curChild = freshSnap.entities[entity.id] || entity;
+            const curParent = freshSnap.entities[parentEnt.id] || parentEnt;
+            resolvedOffset = {
+              ...computeRelativeParentOffset(curChild, curParent, curChild.parentOffset),
+              disableCollisionsWhileAttached: disableCollisions,
+            };
+          }
+        }
+        freshSnap?.setEntityParent(entity.id, parentEnt.id, resolvedOffset);
       }
       return;
     }
 
     if (act.type === 'detach_parent') {
       getBridgeState()?.detachEntity(entity.id);
+      const impulseSpeed = act.detachImpulseSpeed ?? 0;
+      if (impulseSpeed > 0) {
+        const angleRad = ((act.detachImpulseAngle ?? 0) * Math.PI) / 180;
+        queueEntityInitialVelocity(
+          entity.id,
+          Math.cos(angleRad) * impulseSpeed,
+          Math.sin(angleRad) * impulseSpeed
+        );
+      }
       return;
     }
 

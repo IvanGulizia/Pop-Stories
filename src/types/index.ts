@@ -192,6 +192,19 @@ export interface FollowBehaviorConfig extends BaseBehaviorConfig {
   springMaxDistance?: number; // distance max d'élongation en px (0 = libre)
   flipOnMove?: boolean;
   flipInvert?: boolean;
+  movementSpace?: 'free_2d' | 'grounded'; // 'free_2d' = 2D libre (défaut), 'grounded' = au sol / plateforme avec gravité
+  autoJump?: boolean;        // Saut automatique si la cible est plus haute ou face à un obstacle
+  jumpForce?: number;        // px/s, défaut 420
+  jumpCooldown?: number;     // secondes entre 2 sauts auto, défaut 0.7
+  jumpHeightThreshold?: number; // hauteur min au-dessus de l'entité pour sauter (px), défaut 36
+  jumpOnWall?: boolean;      // Sauter aussi en cas d'obstacle mural, défaut true
+  stateBindings?: {
+    idleStateId?: StateId;
+    moveStateId?: StateId;
+    jumpStateId?: StateId;
+    fallStateId?: StateId;
+    minFallHeight?: number; // px minimum de chute avant fallStateId, défaut 20
+  };
 }
 
 export interface MoveToBehaviorConfig extends BaseBehaviorConfig {
@@ -236,10 +249,19 @@ export interface PatrolBehaviorConfig extends BaseBehaviorConfig {
   patrolMode?: PatrolMode;                // 'symmetric' [-range, +range], 'one_way_return' [0, +range], 'waypoints'
   waypoints?: PatrolWaypoint[];
   waypointLoopMode?: PatrolWaypointLoopMode; // 'ping_pong' | 'loop'
+  movementSpace?: 'free_2d' | 'grounded'; // Utilisé notamment en mode waypoints pour préserver la gravité (vy)
   turnOnWall?: boolean;                   // Demi-tour sur collision mur/obstacle
   detectLedges?: boolean;                 // Détection du vide / bord de plateforme
   ledgeCheckDepth?: number;               // Profondeur de sonde vers le bas en px (défaut 28)
   initialDirection?: 1 | -1;              // Sens initial (défaut 1)
+  stateBindings?: {
+    idleStateId?: StateId;
+    moveStateId?: StateId;
+    turnStateId?: StateId;
+    turnDuration?: number; // secondes, défaut 0.15
+    fallStateId?: StateId;
+    minFallHeight?: number; // px minimum de chute avant fallStateId, défaut 20
+  };
 }
 
 export interface WanderingBehaviorConfig extends BaseBehaviorConfig {
@@ -253,8 +275,17 @@ export interface WanderingBehaviorConfig extends BaseBehaviorConfig {
   acceleration?: number;   // 0.05..1 (douceur des virages / accélérations)
   damping?: number;        // 0..0.99 (glisse en pause)
   orientToMovement?: boolean; // Orienter dans le sens du déplacement
+  turnOnWall?: boolean;    // Demi-tour sur mur/obstacle en mode sol
+  detectLedges?: boolean;  // Détection du vide en mode sol
+  ledgeCheckDepth?: number; // Profondeur sonde (défaut 28 px)
   flipOnMove?: boolean;
   flipInvert?: boolean;
+  stateBindings?: {
+    idleStateId?: StateId;
+    moveStateId?: StateId;
+    fallStateId?: StateId;
+    minFallHeight?: number; // px minimum de chute avant fallStateId, défaut 20
+  };
 }
 
 export interface KeyboardControlBehaviorConfig extends BaseBehaviorConfig {
@@ -409,6 +440,8 @@ export interface InteractivePuppetBehaviorConfig extends BaseBehaviorConfig {
   landDuration?: number;         // s, défaut 0.18
   // Détection drag au-dessus d'autres entités / tags
   dragOverTargets?: InteractivePuppetDragOverRule[];
+  // Permet à une interaction active de Marionnette d'interrompre les états de locomotion IA (défaut true)
+  allowInterruptLocomotion?: boolean;
   // Liaisons automatiques d'états visuels (avec garde-fou non-écrasant)
   stateBindings?: {
     idleStateId?: StateId;
@@ -633,6 +666,7 @@ export interface ParentOffset {
   jointBreakForce?: number;         // Seuil de traction/étirement pour casser (défaut 240)
   jointBreakShakeThreshold?: number; // Tolérance aux secousses/inversions rapides (défaut 100 ; 0 = désactivé)
   jointBreakFallWithGravity?: boolean; // Après rupture, tombe librement avec gravité (défaut true)
+  disableCollisionsWhileAttached?: boolean; // Désactive les collisions physiques solides de l'enfant tant qu'il est attaché
 }
 
 export type EntityColliderMode = 'default' | 'trigger_only' | 'disabled';
@@ -688,7 +722,8 @@ export type TriggerType =
   | 'boundary'
   | 'variable'
   | 'joint_break'
-  | 'camera_follow';
+  | 'camera_follow'
+  | 'target_arrived';
 
 export type TriggerPhase =
   | 'click'             // Clic complet (sans drag)
@@ -712,7 +747,8 @@ export type TriggerPhase =
   | 'proximity_enter'   // Approche / Proximité
   | 'boundary_hit'      // Contact bord de scène
   | 'joint_break'       // Rupture d'un joint d'attachement
-  | 'camera_follow';    // La caméra commence à suivre une entité
+  | 'camera_follow'     // La caméra commence à suivre une entité
+  | 'target_arrived';   // Arrivé sur cible (Follow / MoveTo)
 
 export type SelectionMode = 'type' | 'tag' | 'instance' | 'any';
 export type CollisionSideFilter = 'any' | 'top' | 'bottom' | 'left' | 'right' | 'horizontal' | 'vertical';
@@ -944,12 +980,16 @@ export interface RuleAction {
   spawnImpulseSpeed?: number;  // Vitesse d'impulsion initiale en px/s au spawn (0 ou undefined = immobile)
   spawnImpulseAngle?: number;  // Angle de lancement en degrés (0 = droite, -90 = haut, 90 = bas, 180 = gauche)
 
-  // Champs pour 'attach_to_parent'
+  // Champs pour 'attach_to_parent' & 'detach_parent'
   parentTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned';
   parentEntityId?: EntityId;
   parentEntityType?: EntityType;
   parentEntityTag?: string;
   parentOffset?: ParentOffset;
+  attachKeepCurrentOffset?: boolean; // Conserver la position relative actuelle (même si ΔX/ΔY saisis)
+  attachDisableCollisions?: boolean; // Désactiver les collisions solides tant que l'objet est attaché
+  detachImpulseSpeed?: number;       // Vitesse d'éjection/lancer en px/s au détachement (0 = lâcher sur place)
+  detachImpulseAngle?: number;       // Angle d'éjection en degrés (0 = droite, -90 = haut)
 
   // Champs pour 'emit_particles'
   particleOriginMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'event_point';

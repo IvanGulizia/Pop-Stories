@@ -11,16 +11,33 @@ import {
   PatrolWaypoint,
   WanderingBehaviorConfig,
 } from '../../types';
-import { FlipControls, InertiaControls } from './BehaviorSharedControls';
+import {
+  FlipControls,
+  InertiaControls,
+  LocomotionStateBindingsCard,
+  PhysicsGroundedHelperCard,
+} from './BehaviorSharedControls';
 
 export function PatrolBehaviorControls({
   b,
   update,
   targetEntityOptions = [],
+  stateList = [],
+  onQuickCreateState,
+  onEditStateDrawing,
+  hasPhysics,
+  hasFrozenRotation,
+  onActivateGroundedPhysics,
 }: {
   b: PatrolBehaviorConfig;
   update: (partial: any) => void;
   targetEntityOptions?: Entity[];
+  stateList?: EntityState[];
+  onQuickCreateState?: (suggestedName: string, folderName?: string) => string;
+  onEditStateDrawing?: (stateId: string) => void;
+  hasPhysics?: boolean;
+  hasFrozenRotation?: boolean;
+  onActivateGroundedPhysics?: () => void;
 }) {
   const patrolMode: PatrolMode = b.patrolMode || 'symmetric';
   const waypoints: PatrolWaypoint[] = b.waypoints || [];
@@ -265,6 +282,19 @@ export function PatrolBehaviorControls({
             })}
           </div>
 
+          {/* Mode de déplacement (Multi-points : Aérien vs Au sol) */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Espace de déplacement</span>
+            <select
+              value={b.movementSpace || 'free_2d'}
+              onChange={(e) => update({ movementSpace: e.target.value as 'free_2d' | 'grounded' })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[185px]"
+            >
+              <option value="free_2d">Libre 2D / Aérien</option>
+              <option value="grounded">Au sol / Plateforme (Gravité)</option>
+            </select>
+          </div>
+
           <button
             type="button"
             onClick={addWaypoint}
@@ -274,6 +304,16 @@ export function PatrolBehaviorControls({
             <span>Ajouter un point de passage</span>
           </button>
         </div>
+      )}
+
+      {/* Assistant Physique au sol si horizontal ou waypoints grounded */}
+      {((patrolMode !== 'waypoints' && b.axis === 'horizontal') ||
+        (patrolMode === 'waypoints' && b.movementSpace === 'grounded')) && (
+        <PhysicsGroundedHelperCard
+          hasPhysics={hasPhysics}
+          hasFrozenRotation={hasFrozenRotation}
+          onActivate={onActivateGroundedPhysics}
+        />
       )}
 
       {/* Ligne 3: Vitesse de patrouille */}
@@ -330,7 +370,8 @@ export function PatrolBehaviorControls({
           />
         </div>
 
-        {(patrolMode !== 'waypoints' && b.axis === 'horizontal') && (
+        {((patrolMode !== 'waypoints' && b.axis === 'horizontal') ||
+          (patrolMode === 'waypoints' && b.movementSpace === 'grounded')) && (
           <div className="pt-1.5 border-t border-slate-100 space-y-1.5">
             <div className="flex items-center justify-between">
               <div>
@@ -365,6 +406,46 @@ export function PatrolBehaviorControls({
         )}
       </div>
 
+      {/* États visuels automatiques */}
+      <LocomotionStateBindingsCard
+        folderName="Patrouille"
+        stateList={stateList}
+        onQuickCreateState={onQuickCreateState}
+        onEditStateDrawing={onEditStateDrawing}
+        slots={[
+          { key: 'idleStateId', label: 'Repos / Pause (Idle)', hint: 'Quand en pause aux bornes', suggestedName: 'Idle', value: b.stateBindings?.idleStateId },
+          { key: 'moveStateId', label: 'Marche / Mouvement', hint: 'Pendant le déplacement', suggestedName: 'Walk', value: b.stateBindings?.moveStateId },
+          { key: 'turnStateId', label: 'Demi-tour (Turn)', hint: 'Transition courte au changement de sens', suggestedName: 'Turn', value: b.stateBindings?.turnStateId },
+          { key: 'fallStateId', label: 'Chute (Fall)', hint: 'En l’air avec gravité', suggestedName: 'Fall', value: b.stateBindings?.fallStateId },
+        ]}
+        onChangeSlot={(key, stateId) =>
+          update({
+            stateBindings: {
+              ...(b.stateBindings || {}),
+              [key]: stateId,
+            },
+          })
+        }
+        turnDuration={b.stateBindings?.turnDuration}
+        onChangeTurnDuration={(val) =>
+          update({
+            stateBindings: {
+              ...(b.stateBindings || {}),
+              turnDuration: val,
+            },
+          })
+        }
+        minFallHeight={b.stateBindings?.minFallHeight}
+        onChangeMinFallHeight={(val) =>
+          update({
+            stateBindings: {
+              ...(b.stateBindings || {}),
+              minFallHeight: val,
+            },
+          })
+        }
+      />
+
       <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0} update={update} />
       <FlipControls flipOnMove={b.flipOnMove} flipInvert={b.flipInvert} update={update} />
     </div>
@@ -374,10 +455,23 @@ export function PatrolBehaviorControls({
 export function WanderingBehaviorControls({
   b,
   update,
+  stateList = [],
+  onQuickCreateState,
+  onEditStateDrawing,
+  hasPhysics,
+  hasFrozenRotation,
+  onActivateGroundedPhysics,
 }: {
   b: WanderingBehaviorConfig;
   update: (partial: any) => void;
+  stateList?: EntityState[];
+  onQuickCreateState?: (suggestedName: string, folderName?: string) => string;
+  onEditStateDrawing?: (stateId: string) => void;
+  hasPhysics?: boolean;
+  hasFrozenRotation?: boolean;
+  onActivateGroundedPhysics?: () => void;
 }) {
+  const isHorizontal = b.mode === 'horizontal';
   return (
     <div className="space-y-1.5">
       {/* Ligne 1: Mode de déplacement */}
@@ -386,12 +480,20 @@ export function WanderingBehaviorControls({
         <select
           value={b.mode || 'free_2d'}
           onChange={(e) => update({ mode: e.target.value as any })}
-          className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[180px]"
+          className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[190px]"
         >
-          <option value="free_2d">Zone 2D (Toutes directions)</option>
-          <option value="horizontal">Horizontal (Sol / Plateforme)</option>
+          <option value="free_2d">Libre 2D / Aérien</option>
+          <option value="horizontal">Au sol / Plateforme (Gravité)</option>
         </select>
       </div>
+
+      {isHorizontal && (
+        <PhysicsGroundedHelperCard
+          hasPhysics={hasPhysics}
+          hasFrozenRotation={hasFrozenRotation}
+          onActivate={onActivateGroundedPhysics}
+        />
+      )}
 
       {/* Ligne 2: Rayon de la zone */}
       <div className="p-2 bg-white rounded-xl border border-slate-200">
@@ -512,6 +614,86 @@ export function WanderingBehaviorControls({
           />
         </div>
       )}
+
+      {/* Détections physiques (Murs & Bords de plateforme en mode Au sol) */}
+      {isHorizontal && (
+        <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="font-bold text-slate-700 text-xs">Demi-tour sur mur / obstacle</div>
+              <div className="text-[10px] text-slate-400">Inverse la marche si un mur solide bloque</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={Boolean(b.turnOnWall)}
+              onChange={(e) => update({ turnOnWall: e.target.checked })}
+              className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+            />
+          </div>
+
+          <div className="pt-1.5 border-t border-slate-100 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-bold text-slate-700 text-xs">Détection du vide (Bords)</div>
+                <div className="text-[10px] text-slate-400">Reste sur sa plateforme sans tomber</div>
+              </div>
+              <input
+                type="checkbox"
+                checked={Boolean(b.detectLedges)}
+                onChange={(e) => update({ detectLedges: e.target.checked })}
+                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+              />
+            </div>
+            {b.detectLedges && (
+              <div>
+                <div className="flex justify-between items-center text-[11px] text-slate-700">
+                  <span>Profondeur de sonde</span>
+                  <span className="font-mono font-bold text-indigo-700">{b.ledgeCheckDepth ?? 28} px</span>
+                </div>
+                <input
+                  type="range"
+                  min="10"
+                  max="80"
+                  step="2"
+                  value={b.ledgeCheckDepth ?? 28}
+                  onChange={(e) => update({ ledgeCheckDepth: parseInt(e.target.value, 10) })}
+                  className="w-full accent-indigo-600 cursor-pointer"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* États visuels automatiques */}
+      <LocomotionStateBindingsCard
+        folderName="Errance"
+        stateList={stateList}
+        onQuickCreateState={onQuickCreateState}
+        onEditStateDrawing={onEditStateDrawing}
+        slots={[
+          { key: 'idleStateId', label: 'Repos / Pause (Idle)', hint: 'Lors des pauses aléatoires', suggestedName: 'Idle', value: b.stateBindings?.idleStateId },
+          { key: 'moveStateId', label: 'Marche / Errance', hint: 'Pendant le déplacement', suggestedName: 'Walk', value: b.stateBindings?.moveStateId },
+          { key: 'fallStateId', label: 'Chute (Fall)', hint: 'En l’air avec gravité', suggestedName: 'Fall', value: b.stateBindings?.fallStateId },
+        ]}
+        onChangeSlot={(key, stateId) =>
+          update({
+            stateBindings: {
+              ...(b.stateBindings || {}),
+              [key]: stateId,
+            },
+          })
+        }
+        minFallHeight={b.stateBindings?.minFallHeight}
+        onChangeMinFallHeight={(val) =>
+          update({
+            stateBindings: {
+              ...(b.stateBindings || {}),
+              minFallHeight: val,
+            },
+          })
+        }
+      />
 
       <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0.78} update={update} />
       <FlipControls flipOnMove={b.flipOnMove} flipInvert={b.flipInvert} update={update} />
@@ -669,13 +851,26 @@ export function FollowBehaviorControls({
   targetEntityOptions,
   entityTypeOptions,
   availableTags,
+  stateList = [],
+  onQuickCreateState,
+  onEditStateDrawing,
+  hasPhysics,
+  hasFrozenRotation,
+  onActivateGroundedPhysics,
 }: {
   b: FollowBehaviorConfig;
   update: (partial: any) => void;
   targetEntityOptions: Entity[];
   entityTypeOptions: { type: string; label: string }[];
   availableTags: string[];
+  stateList?: EntityState[];
+  onQuickCreateState?: (suggestedName: string, folderName?: string) => string;
+  onEditStateDrawing?: (stateId: string) => void;
+  hasPhysics?: boolean;
+  hasFrozenRotation?: boolean;
+  onActivateGroundedPhysics?: () => void;
 }) {
+  const isGrounded = b.movementSpace === 'grounded';
   return (
     <div className="space-y-1.5">
       {/* Ligne 1: Cible à suivre */}
@@ -861,6 +1056,141 @@ export function FollowBehaviorControls({
           <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0.8} update={update} />
         </>
       )}
+
+      {/* Espace de déplacement : Libre 2D vs Au sol / Plateforme */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+        <span className="font-bold text-slate-700 text-xs">Espace de déplacement</span>
+        <select
+          value={b.movementSpace || 'free_2d'}
+          onChange={(e) => update({ movementSpace: e.target.value as 'free_2d' | 'grounded' })}
+          className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[190px]"
+        >
+          <option value="free_2d">Libre 2D / Aérien</option>
+          <option value="grounded">Au sol / Plateforme (Gravité)</option>
+        </select>
+      </div>
+
+      {isGrounded && (
+        <>
+          <PhysicsGroundedHelperCard
+            hasPhysics={hasPhysics}
+            hasFrozenRotation={hasFrozenRotation}
+            onActivate={onActivateGroundedPhysics}
+          />
+
+          <div className="p-2 bg-sky-50/50 rounded-xl border border-sky-200 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-bold text-sky-950 text-xs">Saut automatique d’obstacles / cibles hautes</div>
+                <div className="text-[10px] text-sky-700">Saute si un mur bloque ou si la cible est en hauteur</div>
+              </div>
+              <input
+                type="checkbox"
+                checked={Boolean(b.autoJump)}
+                onChange={(e) => update({ autoJump: e.target.checked })}
+                className="w-4 h-4 accent-sky-600 rounded cursor-pointer"
+              />
+            </div>
+
+            {b.autoJump && (
+              <div className="space-y-2 pt-1.5 border-t border-sky-200/70">
+                <div>
+                  <div className="flex justify-between items-center text-[11px] text-slate-700">
+                    <span className="font-bold">Force du saut</span>
+                    <span className="font-mono font-bold text-sky-700">{b.jumpForce ?? 420} px/s</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="180"
+                    max="800"
+                    step="20"
+                    value={b.jumpForce ?? 420}
+                    onChange={(e) => update({ jumpForce: parseFloat(e.target.value) })}
+                    className="w-full accent-sky-600"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center text-[11px] text-slate-700">
+                    <span className="font-bold">Délai min. entre 2 sauts</span>
+                    <span className="font-mono font-bold text-sky-700">{(b.jumpCooldown ?? 0.7).toFixed(2)} s</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.2"
+                    max="2.5"
+                    step="0.05"
+                    value={b.jumpCooldown ?? 0.7}
+                    onChange={(e) => update({ jumpCooldown: parseFloat(e.target.value) })}
+                    className="w-full accent-sky-600"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center text-[11px] text-slate-700">
+                    <span className="font-bold">Seuil hauteur cible</span>
+                    <span className="font-mono font-bold text-sky-700">{b.jumpHeightThreshold ?? 36} px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="12"
+                    max="180"
+                    step="4"
+                    value={b.jumpHeightThreshold ?? 36}
+                    onChange={(e) => update({ jumpHeightThreshold: parseInt(e.target.value, 10) })}
+                    className="w-full accent-sky-600"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[11px] font-bold text-slate-700">Sauter aussi face à un mur</span>
+                  <input
+                    type="checkbox"
+                    checked={b.jumpOnWall !== false}
+                    onChange={(e) => update({ jumpOnWall: e.target.checked })}
+                    className="w-4 h-4 accent-sky-600 rounded cursor-pointer"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* États visuels automatiques */}
+      <LocomotionStateBindingsCard
+        folderName="Suivre"
+        stateList={stateList}
+        onQuickCreateState={onQuickCreateState}
+        onEditStateDrawing={onEditStateDrawing}
+        slots={[
+          { key: 'idleStateId', label: 'Repos / Arrivé (Idle)', hint: 'Dans la distance d’arrêt', suggestedName: 'Idle', value: b.stateBindings?.idleStateId },
+          { key: 'moveStateId', label: 'Poursuite / Course', hint: 'En train de suivre la cible', suggestedName: 'Run', value: b.stateBindings?.moveStateId },
+          ...(isGrounded
+            ? [
+                { key: 'jumpStateId', label: 'Saut (Montée)', hint: 'Lors d’un saut automatique', suggestedName: 'Jump', value: b.stateBindings?.jumpStateId },
+                { key: 'fallStateId', label: 'Chute (Fall)', hint: 'En descente dans les airs', suggestedName: 'Fall', value: b.stateBindings?.fallStateId },
+              ]
+            : []),
+        ]}
+        onChangeSlot={(key, stateId) =>
+          update({
+            stateBindings: {
+              ...(b.stateBindings || {}),
+              [key]: stateId,
+            },
+          })
+        }
+        minFallHeight={b.stateBindings?.minFallHeight}
+        onChangeMinFallHeight={(val) =>
+          update({
+            stateBindings: {
+              ...(b.stateBindings || {}),
+              minFallHeight: val,
+            },
+          })
+        }
+      />
 
       <FlipControls flipOnMove={b.flipOnMove} flipInvert={b.flipInvert} update={update} />
     </div>

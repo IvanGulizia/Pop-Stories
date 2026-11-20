@@ -161,6 +161,10 @@ export type ActiveModal =
       parentEntityType?: EntityType;
       parentEntityTag?: string;
       parentOffset?: ParentOffset;
+      attachKeepCurrentOffset?: boolean;
+      attachDisableCollisions?: boolean;
+      detachImpulseSpeed?: number;
+      detachImpulseAngle?: number;
       // Move Entity config
       moveDistance?: number;
       moveDirectionMode?: 'cardinal' | 'angle' | 'facing' | 'toward_target' | 'away_target';
@@ -290,6 +294,10 @@ export interface WizardData {
   parentEntityType?: EntityType;
   parentEntityTag?: string;
   parentOffset?: ParentOffset;
+  attachKeepCurrentOffset?: boolean;
+  attachDisableCollisions?: boolean;
+  detachImpulseSpeed?: number;
+  detachImpulseAngle?: number;
 
   // Move Entity config
   moveDistance?: number;

@@ -86,9 +86,22 @@ import {
 } from './physics/rotateDragSolver';
 import {
   PatrolRuntimeState,
+  getPatrolMoveDirX,
   stepPatrolBehavior,
   detectLedgeAheadFromSolids,
 } from './physics/patrolSolver';
+import {
+  WanderingRuntimeState,
+  FollowJumpRuntimeState,
+  ArrivalTrackerState,
+  StateCandidateInput,
+  approachAxisVelocity,
+  getWanderingMoveDirX,
+  stepWanderingBehavior,
+  stepFollowBehavior,
+  evaluateTargetArrivalEdge,
+  resolveLocomotionAndPuppetState,
+} from './physics/wanderingAndFollowSolver';
 import {
   computeDirectionalCollisionSide,
   shouldIgnoreOneWayCollision,
@@ -108,14 +121,12 @@ const colliderLayerBodyMap = new Map<string, Matter.Body[]>();
 const colliderLayerSignatures = new Map<string, string>();
 const boundaryBodies: Matter.Body[] = [];
 const patrolStates = new Map<string, PatrolRuntimeState>();
-interface WanderingRuntimeState {
-  origin: Position;
-  targetPoint: Position | null;
-  moveTimer: number;
-  pauseTimer: number;
-  currentAngle: number;
-}
+const patrolTurnTimers = new Map<string, number>();
 const wanderingStates = new Map<string, WanderingRuntimeState>();
+const followJumpStates = new Map<string, FollowJumpRuntimeState>();
+const followArrivalTrackers = new Map<string, ArrivalTrackerState>();
+const moveToArrivalTrackers = new Map<string, ArrivalTrackerState>();
+const locomotionAirStates = new Map<string, { peakAirY: number; maxFallDropPx: number }>();
 const activeKeys = new Set<string>();
 let listenersAttached = false;
 
@@ -829,7 +840,12 @@ export function resetMatterPhysicsRuntime() {
   colliderLayerSignatures.clear();
   boundaryBodies.length = 0;
   patrolStates.clear();
+  patrolTurnTimers.clear();
   wanderingStates.clear();
+  followJumpStates.clear();
+  followArrivalTrackers.clear();
+  moveToArrivalTrackers.clear();
+  locomotionAirStates.clear();
   activeKeys.clear();
   activePhysicsCollisionPairs.clear();
   activePhysicsCollisionContacts.clear();
@@ -1026,6 +1042,11 @@ export interface PhysicsTickResult {
     parentId: string;
     breakPoint: Position;
     reason: 'force' | 'shake';
+  }[];
+  arrivedTargetEvents?: {
+    subjectId: string;
+    targetEntityId?: string;
+    eventPosition: Position;
   }[];
   healthDeathSceneAction?: {
     action: 'restart_scene' | 'change_scene';
@@ -1326,7 +1347,12 @@ function ensurePhysicsWorld(
       bodyPivotMeta.delete(id);
       bodySignatures.delete(id);
       patrolStates.delete(id);
+      patrolTurnTimers.delete(id);
       wanderingStates.delete(id);
+      followJumpStates.delete(id);
+      followArrivalTrackers.delete(id);
+      moveToArrivalTrackers.delete(id);
+      locomotionAirStates.delete(id);
       puppetRuntimeStates.delete(id);
       lookAtOrbitStates.delete(id);
       springLinkStates.delete(id);
@@ -1405,7 +1431,8 @@ function ensurePhysicsWorld(
     }
 
     const isSensor =
-      colliderMode === 'trigger_only'
+      colliderMode === 'trigger_only' ||
+      (isAttachedChild && entity.parentOffset?.disableCollisionsWhileAttached === true)
         ? true
         : physics
         ? physics.isTrigger === true
@@ -1570,6 +1597,20 @@ function ensurePhysicsWorld(
           Body.setAngularVelocity(body, 0);
         }
       }
+      const queuedVel = pendingInitialVelocities.get(entity.id);
+      if (queuedVel) {
+        pendingInitialVelocities.delete(entity.id);
+        if (!isStatic) {
+          const maxStepSpeed = 25;
+          const mvx = queuedVel.vx / 60;
+          const mvy = queuedVel.vy / 60;
+          const spd = Math.hypot(mvx, mvy);
+          const fx = spd > maxStepSpeed ? (mvx / spd) * maxStepSpeed : mvx;
+          const fy = spd > maxStepSpeed ? (mvy / spd) * maxStepSpeed : mvy;
+          Matter.Sleeping.set(body, false);
+          Body.setVelocity(body, { x: fx, y: fy });
+        }
+      }
     }
   }
 
@@ -1609,24 +1650,6 @@ function ensurePhysicsWorld(
 }
 
 /**
- * Interpolation fluide de vitesse (Accélération + Inertie/Damping) compatible à 100% avec les comportements existants.
- */
-function approachAxisVelocity(
-  current: number,
-  target: number | null,
-  accel?: number,
-  damping?: number,
-  fallbackDamping?: number
-): number {
-  if (target !== null) {
-    const a = accel !== undefined ? Math.max(0.02, Math.min(1, accel)) : 1;
-    return a >= 0.999 ? target : current + (target - current) * a;
-  }
-  const d = damping !== undefined ? Math.max(0, Math.min(0.99, damping)) : fallbackDamping;
-  return d !== undefined ? current * d : current;
-}
-
-/**
  * Exécute un pas de simulation Matter.js et applique les comportements
  */
 export function stepMatterPhysics(params: {
@@ -1661,7 +1684,11 @@ export function stepMatterPhysics(params: {
   const stateChanges: Record<string, string> = {};
   const variableUpdates: Record<string, number> = {};
   const brokenJointEvents: NonNullable<PhysicsTickResult['brokenJointEvents']> = [];
+  const arrivedTargetEvents: NonNullable<PhysicsTickResult['arrivedTargetEvents']> = [];
   const brokenJointIdSet = new Set<string>();
+  const tickFollowStatus = new Map<string, { isMoving: boolean; triggeredJump: boolean }>();
+  const tickWanderingMoved = new Set<string>();
+  const tickPatrolStatus = new Map<string, { isMoving: boolean; turned: boolean }>();
   let healthDeathSceneAction: PhysicsTickResult['healthDeathSceneAction'];
   const entityList = Object.values(liveEntities);
   keyboardMoveInput.clear();
@@ -1674,7 +1701,7 @@ export function stepMatterPhysics(params: {
   debugSliderTracks.clear();
   debugRotateDragTracks.clear();
 
-  // Pré-calcul des rectangles solides pour la détection du vide (Patrouille 2.0)
+  // Pré-calcul des rectangles solides pour la détection du vide (Patrouille & Errance)
   const solidRectsForLedge: Array<{ id: string; x: number; y: number; width: number; height: number }> = [];
   for (const [bId, b] of bodyMap.entries()) {
     if (b.isStatic && !b.isSensor) {
@@ -1687,6 +1714,51 @@ export function stepMatterPhysics(params: {
       });
     }
   }
+
+  const probeLedgeAhead = (
+    ent: Entity,
+    b: Matter.Body,
+    dirX: 1 | -1,
+    checkDepth: number
+  ): boolean => {
+    const bBounds = {
+      x: b.bounds.min.x,
+      y: b.bounds.min.y,
+      width: Math.max(1, b.bounds.max.x - b.bounds.min.x),
+      height: Math.max(1, b.bounds.max.y - b.bounds.min.y),
+      centerX: b.position.x,
+      centerY: b.position.y,
+      radius: Math.max(b.bounds.max.x - b.bounds.min.x, b.bounds.max.y - b.bounds.min.y) / 2,
+      colliderType: 'box' as const,
+    };
+    const filteredSolids = solidRectsForLedge.filter((r) => r.id !== ent.id);
+    const extraProbeFn =
+      colliderLayers.length > 0
+        ? (px: number, py: number) =>
+            colliderLayers.some((layer) => {
+              if (layer.colliderIsTrigger) return false;
+              const probeBounds = {
+                x: px - 2,
+                y: py - 2,
+                width: 4,
+                height: 4,
+                centerX: px,
+                centerY: py,
+                radius: 2,
+                colliderType: 'box' as const,
+              };
+              return checkEntityAgainstColliderLayer(probeBounds, ent.id, layer, canvasBounds, 2).colliding;
+            })
+        : undefined;
+    return detectLedgeAheadFromSolids({
+      bounds: bBounds,
+      dirX,
+      checkDepth,
+      solidRects: filteredSolids,
+      sceneBounds: canvasBounds,
+      extraProbeFn,
+    });
+  };
 
   // Pré-passe : synchroniser / nettoyer les Matter.Constraints des enfants attachés avec collisions monde
   const topoPrepassEntities = sortEntitiesTopologically(liveEntities);
@@ -2118,13 +2190,13 @@ export function stepMatterPhysics(params: {
       }
     }
 
-    // 4. Patrouille 2.0 (Symétrique, Aller simple, Multi-points, Murs & Vide)
+    // 4. Patrouille 2.0 (Symétrique, Aller simple, Multi-points, Murs & Vide, Compatible Physique/Gravité)
     if (patrol && !controlsLockedByDeath) {
       let patrolState = patrolStates.get(entity.id);
       if (!patrolState) {
         patrolState = {
           originCenter: { x: body.position.x, y: body.position.y },
-          direction: 1,
+          direction: patrol.initialDirection ?? 1,
           timer: 0,
           waypointIndex: 0,
           waypointDir: 1,
@@ -2135,45 +2207,17 @@ export function stepMatterPhysics(params: {
       }
 
       const wallHit = lateralWallHits.get(entity.id);
+      const pMode = patrol.patrolMode || 'symmetric';
+      const shouldCheckLedge =
+        Boolean(patrol.detectLedges) &&
+        ((pMode !== 'waypoints' && (patrol.axis || 'horizontal') === 'horizontal') ||
+          (pMode === 'waypoints' && patrol.movementSpace === 'grounded'));
       let ledgeAhead = false;
-      if (patrol.detectLedges && patrol.axis === 'horizontal' && patrol.patrolMode !== 'waypoints') {
-        const bBounds = {
-          x: body.bounds.min.x,
-          y: body.bounds.min.y,
-          width: Math.max(1, body.bounds.max.x - body.bounds.min.x),
-          height: Math.max(1, body.bounds.max.y - body.bounds.min.y),
-          centerX: body.position.x,
-          centerY: body.position.y,
-          radius: Math.max(body.bounds.max.x - body.bounds.min.x, body.bounds.max.y - body.bounds.min.y) / 2,
-          colliderType: 'box' as const,
-        };
-        const filteredSolids = solidRectsForLedge.filter((r) => r.id !== entity.id);
-        const extraProbeFn =
-          colliderLayers.length > 0
-            ? (px: number, py: number) =>
-                colliderLayers.some((layer) => {
-                  if (layer.colliderIsTrigger) return false;
-                  const probeBounds = {
-                    x: px - 2,
-                    y: py - 2,
-                    width: 4,
-                    height: 4,
-                    centerX: px,
-                    centerY: py,
-                    radius: 2,
-                    colliderType: 'box' as const,
-                  };
-                  return checkEntityAgainstColliderLayer(probeBounds, entity.id, layer, canvasBounds, 2).colliding;
-                })
-            : undefined;
-        ledgeAhead = detectLedgeAheadFromSolids({
-          bounds: bBounds,
-          dirX: patrolState.direction,
-          checkDepth: patrol.ledgeCheckDepth ?? 28,
-          solidRects: filteredSolids,
-          sceneBounds: canvasBounds,
-          extraProbeFn,
-        });
+      if (shouldCheckLedge) {
+        const moveDirX = getPatrolMoveDirX(patrolState, { x: body.position.x, y: body.position.y }, patrol, liveEntities);
+        if (moveDirX !== 0) {
+          ledgeAhead = probeLedgeAhead(entity, body, moveDirX, patrol.ledgeCheckDepth ?? 28);
+        }
       }
 
       const patrolConfigMapped: PatrolBehaviorConfig = {
@@ -2196,6 +2240,7 @@ export function stepMatterPhysics(params: {
       const damp = patrol.damping ?? 0;
 
       if (stepRes.turned) {
+        patrolTurnTimers.set(entity.id, Math.max(0.05, patrol.stateBindings?.turnDuration ?? 0.15));
         Body.setVelocity(
           body,
           stepRes.preserveVerticalVelocity
@@ -2203,16 +2248,26 @@ export function stepMatterPhysics(params: {
             : { x: body.velocity.x * damp, y: body.velocity.y * damp }
         );
       } else {
+        const prevTurn = patrolTurnTimers.get(entity.id) ?? 0;
+        if (prevTurn > 0) {
+          const nextTurn = Math.max(0, prevTurn - dt);
+          if (nextTurn === 0) patrolTurnTimers.delete(entity.id);
+          else patrolTurnTimers.set(entity.id, nextTurn);
+        }
         const nextVx = approachAxisVelocity(body.velocity.x, targetVx, accel, damp, 0);
         const nextVy = stepRes.preserveVerticalVelocity
           ? body.velocity.y
           : approachAxisVelocity(body.velocity.y, targetVy, accel, damp, 0);
         Body.setVelocity(body, { x: nextVx, y: nextVy });
       }
+      const isMovingPatrol = !stepRes.turned && (Math.abs(stepRes.vx) > 0.5 || Math.abs(stepRes.vy) > 0.5);
+      tickPatrolStatus.set(entity.id, { isMoving: isMovingPatrol, turned: stepRes.turned });
+    } else {
+      if (patrolTurnTimers.has(entity.id)) patrolTurnTimers.delete(entity.id);
     }
 
-    // 4b. Errance / Balade aléatoire (Wandering)
-    if (wandering) {
+    // 4b. Errance / Balade aléatoire (Wandering) — Libre 2D ou Sol horizontal avec Murs & Vide
+    if (wandering && !controlsLockedByDeath) {
       let wState = wanderingStates.get(entity.id);
       if (!wState) {
         wState = {
@@ -2221,135 +2276,45 @@ export function stepMatterPhysics(params: {
           moveTimer: 0,
           pauseTimer: 0,
           currentAngle: Math.random() * Math.PI * 2,
+          wallTurnCooldown: 0,
+          ledgeTurnCooldown: 0,
         };
         wanderingStates.set(entity.id, wState);
       }
 
       const mode = wandering.mode || 'free_2d';
-      const radius = Math.max(20, wandering.radius ?? 160);
-      const speedPxFrame = (wandering.speed ?? 90) / 60;
-      const randomnessFactor = Math.max(0, Math.min(100, wandering.randomness ?? 65)) / 100;
-      const interval = Math.max(0.2, wandering.changeInterval ?? 1.5);
-      const maxPause = Math.max(0, wandering.pauseDuration ?? 0.8);
-
-      const pickNextWanderTarget = () => {
-        const durationJitter = 1 - randomnessFactor * 0.4 + Math.random() * (randomnessFactor * 0.9);
-        wState!.moveTimer = Math.max(0.2, interval * durationJitter);
-
-        if (mode === 'horizontal') {
-          const offsetX = body.position.x - wState!.origin.x;
-          let dir: number;
-          if (Math.abs(offsetX) > radius * 0.85) {
-            dir = offsetX > 0 ? -1 : 1;
-          } else if (Math.random() < 0.25 + randomnessFactor * 0.65) {
-            dir = Math.random() < 0.5 ? -1 : 1;
-          } else {
-            dir = Math.cos(wState!.currentAngle) >= 0 ? 1 : -1;
-          }
-          const stepDist = radius * (0.3 + Math.random() * 0.7);
-          const rawTargetX = body.position.x + dir * stepDist;
-          const minBoundX = Math.max(20, wState!.origin.x - radius);
-          const maxBoundX = Math.min(Math.max(40, canvasBounds.width - 20), wState!.origin.x + radius);
-          const clampedX = Math.max(minBoundX, Math.min(maxBoundX, rawTargetX));
-          wState!.targetPoint = { x: clampedX, y: body.position.y };
-          wState!.currentAngle = clampedX >= body.position.x ? 0 : Math.PI;
-          return;
-        }
-
-        // Mode 2D libre dans une zone circulaire autour de origin
-        const dxOrigin = body.position.x - wState!.origin.x;
-        const dyOrigin = body.position.y - wState!.origin.y;
-        const distFromOrigin = Math.hypot(dxOrigin, dyOrigin);
-
-        let nextAngle: number;
-        if (distFromOrigin > radius * 0.85) {
-          // Renvoyer doucement vers l'intérieur de la zone
-          const toCenterAngle = Math.atan2(-dyOrigin, -dxOrigin);
-          nextAngle = toCenterAngle + (Math.random() - 0.5) * (Math.PI * 0.6);
-        } else {
-          // À faible aléatoire : cap fluide; à fort aléatoire : virages vifs jusqu'à 360°
-          const maxTurn = 0.35 + randomnessFactor * (Math.PI - 0.35);
-          nextAngle = wState!.currentAngle + (Math.random() * 2 - 1) * maxTurn;
-        }
-
-        const stepDist = radius * (0.35 + Math.random() * 0.65);
-        let tx = body.position.x + Math.cos(nextAngle) * stepDist;
-        let ty = body.position.y + Math.sin(nextAngle) * stepDist;
-
-        // Contraindre le point cible à l'intérieur du cercle de zone
-        const ox = tx - wState!.origin.x;
-        const oy = ty - wState!.origin.y;
-        const od = Math.hypot(ox, oy);
-        if (od > radius) {
-          tx = wState!.origin.x + (ox / od) * radius;
-          ty = wState!.origin.y + (oy / od) * radius;
-        }
-
-        // Garder dans les marges du canvas visible
-        tx = Math.max(24, Math.min(Math.max(48, canvasBounds.width - 24), tx));
-        ty = Math.max(24, Math.min(Math.max(48, canvasBounds.height - 24), ty));
-
-        wState!.targetPoint = { x: tx, y: ty };
-        wState!.currentAngle = Math.atan2(ty - body.position.y, tx - body.position.x);
-      };
-
-      const wAccel = wandering.acceleration;
-      const wDamp = wandering.damping ?? 0.78;
-
-      if (wState.pauseTimer > 0) {
-        wState.pauseTimer -= dt;
-        if (mode === 'horizontal') {
-          Body.setVelocity(body, { x: body.velocity.x * wDamp, y: body.velocity.y });
-        } else {
-          Body.setVelocity(body, { x: body.velocity.x * wDamp, y: body.velocity.y * wDamp });
-        }
-        if (wState.pauseTimer <= 0) {
-          pickNextWanderTarget();
-        }
-      } else {
-        if (!wState.targetPoint || wState.moveTimer <= 0) {
-          pickNextWanderTarget();
-        }
-
-        wState.moveTimer -= dt;
-        const target = wState.targetPoint!;
-        const dx = target.x - body.position.x;
-        const dy = target.y - body.position.y;
-
-        if (mode === 'horizontal') {
-          const dist = Math.abs(dx);
-          if (dist > 6 && wState.moveTimer > 0) {
-            const nextVx = approachAxisVelocity(body.velocity.x, Math.sign(dx) * speedPxFrame, wAccel, wDamp, wDamp);
-            Body.setVelocity(body, { x: nextVx, y: body.velocity.y });
-          } else if (maxPause > 0 && Math.random() < 0.7) {
-            wState.pauseTimer = maxPause * (0.25 + Math.random() * 0.75);
-            Body.setVelocity(body, { x: body.velocity.x * wDamp, y: body.velocity.y });
-          } else {
-            pickNextWanderTarget();
-          }
-        } else {
-          const dist = Math.hypot(dx, dy);
-          if (dist > 6 && wState.moveTimer > 0) {
-            const nextVx = approachAxisVelocity(body.velocity.x, (dx / dist) * speedPxFrame, wAccel, wDamp, wDamp);
-            const nextVy = approachAxisVelocity(body.velocity.y, (dy / dist) * speedPxFrame, wAccel, wDamp, wDamp);
-            Body.setVelocity(body, {
-              x: nextVx,
-              y: nextVy,
-            });
-            if (wandering.orientToMovement && !physics?.freezeRotation) {
-              const targetAngle = Math.atan2(dy, dx);
-              const diff = shortestAngleDiffRad(body.angle, targetAngle);
-              Body.setAngle(body, body.angle + diff * 0.18);
-            }
-          } else if (maxPause > 0 && Math.random() < 0.7) {
-            wState.pauseTimer = maxPause * (0.25 + Math.random() * 0.75);
-            Body.setVelocity(body, { x: body.velocity.x * wDamp, y: body.velocity.y * wDamp });
-          } else {
-            pickNextWanderTarget();
-          }
+      let ledgeAhead = false;
+      if (mode === 'horizontal' && wandering.detectLedges) {
+        const moveDirX = getWanderingMoveDirX(wState, { x: body.position.x, y: body.position.y });
+        if (moveDirX !== 0) {
+          ledgeAhead = probeLedgeAhead(entity, body, moveDirX, wandering.ledgeCheckDepth ?? 28);
         }
       }
-    } else if (wanderingStates.has(entity.id)) {
+
+      const wRes = stepWanderingBehavior({
+        state: wState,
+        currentCenter: { x: body.position.x, y: body.position.y },
+        currentVelocity: { x: body.velocity.x, y: body.velocity.y },
+        config: wandering,
+        canvasBounds,
+        dt,
+        wallHit: lateralWallHits.get(entity.id),
+        ledgeAhead,
+      });
+
+      Body.setVelocity(body, {
+        x: wRes.vx,
+        y: wRes.preserveVerticalVelocity ? body.velocity.y : wRes.vy,
+      });
+
+      if (wRes.targetAngleRad !== undefined && wandering.orientToMovement && !physics?.freezeRotation) {
+        const diff = shortestAngleDiffRad(body.angle, wRes.targetAngleRad);
+        Body.setAngle(body, body.angle + diff * 0.18);
+      }
+      if (wRes.isMoving) {
+        tickWanderingMoved.add(entity.id);
+      }
+    } else if (!wandering && wanderingStates.has(entity.id)) {
       wanderingStates.delete(entity.id);
     }
 
@@ -2390,10 +2355,11 @@ export function stepMatterPhysics(params: {
     };
 
     // 5. Move To
-    if (moveTo) {
+    if (moveTo && !controlsLockedByDeath) {
       let targetX = entity.position.x;
       let targetY = entity.position.y;
       let hasValidTarget = false;
+      let targetEntityIdForEvent: string | undefined;
 
       if (moveTo.targetType === 'position' && moveTo.targetPosition) {
         targetX = moveTo.targetPosition.x;
@@ -2405,6 +2371,7 @@ export function stepMatterPhysics(params: {
           targetX = targetEntity.position.x;
           targetY = targetEntity.position.y;
           hasValidTarget = true;
+          targetEntityIdForEvent = targetEntity.id;
         }
       } else if (moveTo.targetType === 'nearest_type' || moveTo.targetType === 'nearest_tag') {
         const nearestEntity = findNearestTarget(
@@ -2416,7 +2383,14 @@ export function stepMatterPhysics(params: {
           targetX = nearestEntity.position.x;
           targetY = nearestEntity.position.y;
           hasValidTarget = true;
+          targetEntityIdForEvent = nearestEntity.id;
         }
+      }
+
+      let mtTracker = moveToArrivalTrackers.get(entity.id);
+      if (!mtTracker) {
+        mtTracker = { wasWithinArrival: false };
+        moveToArrivalTrackers.set(entity.id, mtTracker);
       }
 
       if (hasValidTarget) {
@@ -2436,14 +2410,42 @@ export function stepMatterPhysics(params: {
         } else {
           Body.setVelocity(body, { x: body.velocity.x * dampStop, y: body.velocity.y * dampStop });
         }
+
+        if (
+          evaluateTargetArrivalEdge({
+            tracker: mtTracker,
+            distance: dist,
+            arrivalThreshold: 6,
+            hasValidTarget: true,
+          })
+        ) {
+          arrivedTargetEvents.push({
+            subjectId: entity.id,
+            ...(targetEntityIdForEvent ? { targetEntityId: targetEntityIdForEvent } : {}),
+            eventPosition: {
+              x: Math.round(body.position.x * 10) / 10,
+              y: Math.round(body.position.y * 10) / 10,
+            },
+          });
+        }
+      } else {
+        evaluateTargetArrivalEdge({
+          tracker: mtTracker,
+          distance: Infinity,
+          arrivalThreshold: 6,
+          hasValidTarget: false,
+        });
       }
+    } else if (!moveTo && moveToArrivalTrackers.has(entity.id)) {
+      moveToArrivalTrackers.delete(entity.id);
     }
 
-    // 6. Follow
-    if (follow) {
+    // 6. Follow (Libre 2D ou Au sol / Plateforme avec saut automatique + événement Arrivé sur cible)
+    if (follow && !controlsLockedByDeath) {
       let targetX = body.position.x;
       let targetY = body.position.y;
       let hasValidTarget = false;
+      let targetEntityIdForEvent: string | undefined;
 
       if (follow.targetType === 'mouse' && mousePos) {
         targetX = mousePos.x;
@@ -2456,6 +2458,7 @@ export function stepMatterPhysics(params: {
           targetX = targetEntity.position.x + targetOffset.relCenterX;
           targetY = targetEntity.position.y + targetOffset.relCenterY;
           hasValidTarget = true;
+          targetEntityIdForEvent = targetEntity.id;
         }
       } else if (follow.targetType === 'nearest_type' || follow.targetType === 'nearest_tag') {
         const nearestEntity = findNearestTarget(
@@ -2468,65 +2471,99 @@ export function stepMatterPhysics(params: {
           targetX = nearestEntity.position.x + targetOffset.relCenterX;
           targetY = nearestEntity.position.y + targetOffset.relCenterY;
           hasValidTarget = true;
+          targetEntityIdForEvent = nearestEntity.id;
         }
+      }
+
+      let fTracker = followArrivalTrackers.get(entity.id);
+      if (!fTracker) {
+        fTracker = { wasWithinArrival: false };
+        followArrivalTrackers.set(entity.id, fTracker);
       }
 
       if (hasValidTarget) {
+        let jState = followJumpStates.get(entity.id);
+        if (!jState) {
+          jState = { jumpCooldownTimer: 0 };
+          followJumpStates.set(entity.id, jState);
+        }
+        const isBottomFloor = !body.isSensor && body.bounds.max.y >= canvasBounds.height - 3;
+        const isGroundedNow = (groundedEntityIds.has(entity.id) || isBottomFloor) && body.velocity.y >= -0.75;
+        const fSpring = followSpringStates.get(entity.id);
+        const fStep = stepFollowBehavior({
+          currentCenter: { x: body.position.x, y: body.position.y },
+          currentVelocity: { x: body.velocity.x, y: body.velocity.y },
+          targetCenter: { x: targetX, y: targetY },
+          config: follow,
+          springState: fSpring,
+          jumpState: jState,
+          isGrounded: isGroundedNow,
+          wallHit: lateralWallHits.get(entity.id),
+          dt,
+        });
+
+        if (fStep.nextSpringState) {
+          followSpringStates.set(entity.id, fStep.nextSpringState);
+          debugSpringAnchors.set(entity.id, { x: targetX, y: targetY });
+        } else if (followSpringStates.has(entity.id)) {
+          followSpringStates.delete(entity.id);
+        }
+
+        if (fStep.triggeredJump) {
+          groundedEntityIds.delete(entity.id);
+        }
+
+        Body.setVelocity(body, {
+          x: fStep.vx,
+          y: fStep.preserveVerticalVelocity ? body.velocity.y : fStep.vy,
+        });
+
+        tickFollowStatus.set(entity.id, {
+          isMoving: fStep.isMoving,
+          triggeredJump: fStep.triggeredJump,
+        });
+
         const dx = targetX - body.position.x;
         const dy = targetY - body.position.y;
-        const dist = Math.hypot(dx, dy);
-        const minDistance = follow.minDistance ?? 40;
-
-        if (follow.followMode === 'spring') {
-          let fSpring = followSpringStates.get(entity.id);
-          if (!fSpring) {
-            fSpring = {
-              x: body.position.x,
-              y: body.position.y,
-              vx: body.velocity.x * 60,
-              vy: body.velocity.y * 60,
-            };
-            followSpringStates.set(entity.id, fSpring);
-          } else {
-            fSpring.x = body.position.x;
-            fSpring.y = body.position.y;
-          }
-
-          let goalX = body.position.x;
-          let goalY = body.position.y;
-          if (dist > minDistance && dist > 0.001) {
-            goalX = targetX - (dx / dist) * minDistance;
-            goalY = targetY - (dy / dist) * minDistance;
-          }
-          debugSpringAnchors.set(entity.id, { x: targetX, y: targetY });
-
-          const res = stepSpring2D({
-            state: fSpring,
-            targetX: goalX,
-            targetY: goalY,
-            stiffness: follow.springStiffness ?? 120,
-            damping: follow.springDamping ?? 10,
-            maxDistance: follow.springMaxDistance ?? 0,
-            dt,
+        const space = follow.movementSpace || 'free_2d';
+        const arrivalThreshold = Math.max(10, (follow.minDistance ?? 40) + 8);
+        const maxGroundedDy = Math.max(80, entity.size.height * 0.9, (follow.minDistance ?? 40) + 24);
+        const effectiveArrivalDist =
+          space === 'grounded'
+            ? Math.abs(dy) <= maxGroundedDy
+              ? Math.abs(dx)
+              : Infinity
+            : Math.hypot(dx, dy);
+        if (
+          evaluateTargetArrivalEdge({
+            tracker: fTracker,
+            distance: effectiveArrivalDist,
+            arrivalThreshold,
+            hasValidTarget: true,
+          })
+        ) {
+          arrivedTargetEvents.push({
+            subjectId: entity.id,
+            ...(targetEntityIdForEvent ? { targetEntityId: targetEntityIdForEvent } : {}),
+            eventPosition: {
+              x: Math.round(body.position.x * 10) / 10,
+              y: Math.round(body.position.y * 10) / 10,
+            },
           });
-          Body.setVelocity(body, { x: res.vx / 60, y: res.vy / 60 });
-        } else {
-          if (followSpringStates.has(entity.id)) followSpringStates.delete(entity.id);
-          const followAccel = follow.acceleration ?? (follow.smoothing !== undefined ? Math.max(0.04, Math.min(1, follow.smoothing)) : undefined);
-          const followDamp = follow.damping ?? 0.8;
-
-          if (dist > minDistance) {
-            const speed = (follow.speed ?? 150) / 60; // px/s -> px/frame
-            const nextVx = approachAxisVelocity(body.velocity.x, (dx / dist) * speed, followAccel, followDamp, 0.8);
-            const nextVy = approachAxisVelocity(body.velocity.y, (dy / dist) * speed, followAccel, followDamp, 0.8);
-            Body.setVelocity(body, { x: nextVx, y: nextVy });
-          } else {
-            Body.setVelocity(body, { x: body.velocity.x * followDamp, y: body.velocity.y * followDamp });
-          }
         }
+      } else {
+        if (followSpringStates.has(entity.id)) followSpringStates.delete(entity.id);
+        evaluateTargetArrivalEdge({
+          tracker: fTracker,
+          distance: Infinity,
+          arrivalThreshold: 10,
+          hasValidTarget: false,
+        });
       }
-    } else if (followSpringStates.has(entity.id)) {
-      followSpringStates.delete(entity.id);
+    } else if (!follow) {
+      if (followSpringStates.has(entity.id)) followSpringStates.delete(entity.id);
+      if (followJumpStates.has(entity.id)) followJumpStates.delete(entity.id);
+      if (followArrivalTrackers.has(entity.id)) followArrivalTrackers.delete(entity.id);
     }
 
     // 6b. Flee (Fuir une menace)
@@ -3650,6 +3687,7 @@ export function stepMatterPhysics(params: {
       | InteractivePuppetBehaviorConfig
       | undefined;
     let puppetDesiredStateId: string | undefined;
+    let puppetCandidateForEntity: Parameters<typeof resolveLocomotionAndPuppetState>[0]['puppet'];
     let puppetGrabRuntimePivot: EntityPivot | null | undefined;
 
     if (puppet && puppet.enabled !== false) {
@@ -3970,7 +4008,7 @@ export function stepMatterPhysics(params: {
         }
       }
 
-      // Résolution d'état avec garde-fou non-écrasant
+      // Résolution d'état de la Marionnette Interactive (transmis au coordinateur Option A)
       const sb = puppet.stateBindings || {};
       const boundIds = new Set(
         [
@@ -3995,7 +4033,7 @@ export function stepMatterPhysics(params: {
         ].filter((sid): sid is string => Boolean(sid && entity.states[sid]))
       );
 
-      if (boundIds.size > 0 && boundIds.has(entity.currentStateId)) {
+      if (boundIds.size > 0) {
         const hasState = (sid?: string): sid is string => Boolean(sid && entity.states[sid]);
         const isGroundedNow = !hasDynamicBody || !body || rawGrounded || rt.groundedGraceTimer > 0;
         const fallDropNow = body ? Math.max(0, body.position.y - rt.peakAirY) : 0;
@@ -4089,6 +4127,19 @@ export function stepMatterPhysics(params: {
         } else if (hasState(sb.idleStateId)) {
           puppetDesiredStateId = sb.idleStateId;
         }
+
+        const isActiveInteraction = Boolean(
+          isActivelyDragged ||
+            rt.dragReleaseTimer > 0 ||
+            (isGroundedNow && rt.landTimer > 0 && hasState(sb.landStateId)) ||
+            (puppetDesiredStateId !== undefined && puppetDesiredStateId !== sb.idleStateId)
+        );
+        puppetCandidateForEntity = {
+          boundIds,
+          desiredStateId: puppetDesiredStateId,
+          isActiveInteraction,
+          allowInterruptLocomotion: puppet.allowInterruptLocomotion !== false,
+        };
       }
     } else if ((entity.runtimeTilt ?? 0) !== 0) {
       nextRuntimeTilt = 0;
@@ -4494,170 +4545,282 @@ export function stepMatterPhysics(params: {
         health.disableControlsOnDeath !== false
     );
 
-    // Cas 5 : Character Controller — Liaisons d'états visuels avec garde-fou non-écrasant
-    const keyboardCtrl = effectiveBehaviors.find((b) => b.type === 'keyboard_control') as
-      | KeyboardControlBehaviorConfig
-      | undefined;
-    if (!lockStateByDeath && keyboardCtrl && keyboardCtrl.enabled !== false && keyboardCtrl.stateBindings && !stateChanges[entity.id] && body) {
-      const sb = keyboardCtrl.stateBindings;
-      const boundIds = new Set(
-        [sb.idleStateId, sb.moveStateId, sb.jumpStateId, sb.fallStateId, sb.landStateId].filter(
-          (sid): sid is string => Boolean(sid && entity.states[sid])
-        )
-      );
-
-      // Garde-fou strict : ne jamais écraser un état hors locomotion (ex: Blessé, Attaque, Mort)
-      if (boundIds.size > 0 && boundIds.has(entity.currentStateId)) {
+    // Cas 5 & 6b/6c : Coordination Option A des états visuels (Controller, Fuite, Suivre, Patrouille, Errance, Marionnette)
+    if (!lockStateByDeath && !stateChanges[entity.id]) {
+      const hasState = (sid?: string): sid is string => Boolean(sid && entity.states[sid]);
+      const hasDynamicBody = Boolean(body && !body.isStatic);
+      let locoIsGrounded = true;
+      let locoFallDropNow = 0;
+      if (hasDynamicBody && body) {
         const isBottomFloor = !body.isSensor && body.bounds.max.y >= canvasBounds.height - 3;
-        const rawGrounded = (groundedEntityIds.has(entity.id) || isBottomFloor) && body.velocity.y >= -0.75;
-        const wantsToMove = keyboardMoveInput.get(entity.id) === true;
-        const minFallHeight = Math.max(0, sb.minFallHeight ?? 20);
-        let desiredStateId: string | undefined;
-
-        const airState = controllerAirStates.get(entity.id) || {
-          wasGrounded: rawGrounded,
-          groundedGraceTimer: rawGrounded ? 0.075 : 0,
-          airborneTime: 0,
-          peakAirY: body.position.y,
-          maxFallDropPx: 0,
-          landTimer: 0,
-          moveGraceTimer: 0,
-        };
-
-        if (wantsToMove || Math.abs(body.velocity.x) > 0.35) {
-          airState.moveGraceTimer = 0.08;
-        } else if (airState.moveGraceTimer > 0) {
-          airState.moveGraceTimer = Math.max(0, airState.moveGraceTimer - dt);
+        locoIsGrounded = (groundedEntityIds.has(entity.id) || isBottomFloor) && body.velocity.y >= -0.75;
+        let la = locomotionAirStates.get(entity.id);
+        if (!la) {
+          la = { peakAirY: body.position.y, maxFallDropPx: 0 };
+          locomotionAirStates.set(entity.id, la);
         }
+        if (!locoIsGrounded) {
+          la.peakAirY = Math.min(la.peakAirY, body.position.y);
+          locoFallDropNow = Math.max(0, body.position.y - la.peakAirY);
+          la.maxFallDropPx = Math.max(la.maxFallDropPx, locoFallDropNow);
+        } else {
+          la.peakAirY = body.position.y;
+          la.maxFallDropPx = 0;
+        }
+      } else if (locomotionAirStates.has(entity.id)) {
+        locomotionAirStates.delete(entity.id);
+      }
 
-        if (keyboardCtrl.mode === 'platformer') {
-          if (rawGrounded) {
-            airState.groundedGraceTimer = 0.075;
-          } else if (airState.groundedGraceTimer > 0 && body.velocity.y >= -0.85) {
-            airState.groundedGraceTimer = Math.max(0, airState.groundedGraceTimer - dt);
-          } else {
-            airState.groundedGraceTimer = 0;
+      // Candidat 5a : Character Controller (KeyboardControl)
+      let keyboardCand: StateCandidateInput | undefined;
+      const keyboardCtrl = effectiveBehaviors.find((b) => b.type === 'keyboard_control') as
+        | KeyboardControlBehaviorConfig
+        | undefined;
+      if (keyboardCtrl && keyboardCtrl.enabled !== false && keyboardCtrl.stateBindings && body) {
+        const sb = keyboardCtrl.stateBindings;
+        const boundIds = new Set(
+          [sb.idleStateId, sb.moveStateId, sb.jumpStateId, sb.fallStateId, sb.landStateId].filter(
+            (sid): sid is string => hasState(sid)
+          )
+        );
+        if (boundIds.size > 0) {
+          const isBottomFloor = !body.isSensor && body.bounds.max.y >= canvasBounds.height - 3;
+          const rawGrounded = (groundedEntityIds.has(entity.id) || isBottomFloor) && body.velocity.y >= -0.75;
+          const wantsToMove = keyboardMoveInput.get(entity.id) === true;
+          const minFallHeight = Math.max(0, sb.minFallHeight ?? 20);
+          let desiredStateId: string | undefined;
+
+          const airState = controllerAirStates.get(entity.id) || {
+            wasGrounded: rawGrounded,
+            groundedGraceTimer: rawGrounded ? 0.075 : 0,
+            airborneTime: 0,
+            peakAirY: body.position.y,
+            maxFallDropPx: 0,
+            landTimer: 0,
+            moveGraceTimer: 0,
+          };
+
+          if (wantsToMove || Math.abs(body.velocity.x) > 0.35) {
+            airState.moveGraceTimer = 0.08;
+          } else if (airState.moveGraceTimer > 0) {
+            airState.moveGraceTimer = Math.max(0, airState.moveGraceTimer - dt);
           }
 
-          const isGrounded = rawGrounded || airState.groundedGraceTimer > 0;
+          if (keyboardCtrl.mode === 'platformer') {
+            if (rawGrounded) {
+              airState.groundedGraceTimer = 0.075;
+            } else if (airState.groundedGraceTimer > 0 && body.velocity.y >= -0.85) {
+              airState.groundedGraceTimer = Math.max(0, airState.groundedGraceTimer - dt);
+            } else {
+              airState.groundedGraceTimer = 0;
+            }
 
-          if (!isGrounded) {
-            if (airState.wasGrounded) {
+            const isGrounded = rawGrounded || airState.groundedGraceTimer > 0;
+
+            if (!isGrounded) {
+              if (airState.wasGrounded) {
+                airState.peakAirY = body.position.y;
+                airState.maxFallDropPx = 0;
+              } else {
+                airState.peakAirY = Math.min(airState.peakAirY, body.position.y);
+              }
+              const currentDrop = Math.max(0, body.position.y - airState.peakAirY);
+              airState.maxFallDropPx = Math.max(airState.maxFallDropPx, currentDrop);
+              airState.airborneTime += dt;
+              airState.landTimer = 0;
+              airState.wasGrounded = false;
+            } else {
+              const hasFallenEnough =
+                minFallHeight === 0
+                  ? airState.airborneTime >= 0.04
+                  : airState.maxFallDropPx >= minFallHeight;
+              if (!airState.wasGrounded && hasFallenEnough) {
+                airState.landTimer = Math.max(0.05, Math.min(1.0, sb.landDuration ?? 0.15));
+              } else if (airState.landTimer > 0) {
+                airState.landTimer = Math.max(0, airState.landTimer - dt);
+              }
+              airState.airborneTime = 0;
               airState.peakAirY = body.position.y;
               airState.maxFallDropPx = 0;
-            } else {
-              airState.peakAirY = Math.min(airState.peakAirY, body.position.y);
+              airState.wasGrounded = true;
             }
-            const currentDrop = Math.max(0, body.position.y - airState.peakAirY);
-            airState.maxFallDropPx = Math.max(airState.maxFallDropPx, currentDrop);
-            airState.airborneTime += dt;
-            airState.landTimer = 0;
-            airState.wasGrounded = false;
+            controllerAirStates.set(entity.id, airState);
+
+            const fallDropNow = Math.max(0, body.position.y - airState.peakAirY);
+            const canShowFall = minFallHeight === 0 ? airState.airborneTime >= 0.03 : fallDropNow >= minFallHeight;
+            const isMovingHorizontally =
+              wantsToMove ||
+              Math.abs(body.velocity.x) > 0.35 ||
+              (entity.currentStateId === sb.moveStateId && airState.moveGraceTimer > 0 && Math.abs(body.velocity.x) > 0.12);
+
+            if (!isGrounded && body.velocity.y < -0.55 && hasState(sb.jumpStateId)) {
+              desiredStateId = sb.jumpStateId;
+            } else if (!isGrounded && body.velocity.y > 0.75 && canShowFall && hasState(sb.fallStateId)) {
+              desiredStateId = sb.fallStateId;
+            } else if (isGrounded && airState.landTimer > 0 && hasState(sb.landStateId)) {
+              desiredStateId = sb.landStateId;
+            } else if (isMovingHorizontally && hasState(sb.moveStateId)) {
+              desiredStateId = sb.moveStateId;
+            } else if (hasState(sb.idleStateId)) {
+              desiredStateId = sb.idleStateId;
+            }
           } else {
-            const hasFallenEnough =
-              minFallHeight === 0
-                ? airState.airborneTime >= 0.04
-                : airState.maxFallDropPx >= minFallHeight;
-            if (!airState.wasGrounded && hasFallenEnough) {
-              airState.landTimer = Math.max(0.05, Math.min(1.0, sb.landDuration ?? 0.15));
-            } else if (airState.landTimer > 0) {
-              airState.landTimer = Math.max(0, airState.landTimer - dt);
+            controllerAirStates.set(entity.id, airState);
+            const speedMag = Math.hypot(body.velocity.x, body.velocity.y);
+            const isMoving2D =
+              wantsToMove ||
+              speedMag > 0.35 ||
+              (entity.currentStateId === sb.moveStateId && airState.moveGraceTimer > 0 && speedMag > 0.12);
+            if (isMoving2D && hasState(sb.moveStateId)) {
+              desiredStateId = sb.moveStateId;
+            } else if (hasState(sb.idleStateId)) {
+              desiredStateId = sb.idleStateId;
             }
-            airState.airborneTime = 0;
-            airState.peakAirY = body.position.y;
-            airState.maxFallDropPx = 0;
-            airState.wasGrounded = true;
           }
-          controllerAirStates.set(entity.id, airState);
 
-          const fallDropNow = Math.max(0, body.position.y - airState.peakAirY);
-          const canShowFall = minFallHeight === 0 ? airState.airborneTime >= 0.03 : fallDropNow >= minFallHeight;
-          const isMovingHorizontally =
-            wantsToMove ||
-            Math.abs(body.velocity.x) > 0.35 ||
-            (entity.currentStateId === sb.moveStateId && airState.moveGraceTimer > 0 && Math.abs(body.velocity.x) > 0.12);
-
-          if (!isGrounded && body.velocity.y < -0.55 && sb.jumpStateId && entity.states[sb.jumpStateId]) {
-            desiredStateId = sb.jumpStateId;
-          } else if (!isGrounded && body.velocity.y > 0.75 && canShowFall && sb.fallStateId && entity.states[sb.fallStateId]) {
-            desiredStateId = sb.fallStateId;
-          } else if (isGrounded && airState.landTimer > 0 && sb.landStateId && entity.states[sb.landStateId]) {
-            desiredStateId = sb.landStateId;
-          } else if (isMovingHorizontally && sb.moveStateId && entity.states[sb.moveStateId]) {
-            desiredStateId = sb.moveStateId;
-          } else if (sb.idleStateId && entity.states[sb.idleStateId]) {
-            desiredStateId = sb.idleStateId;
-          }
-        } else {
-          controllerAirStates.set(entity.id, airState);
-          const speedMag = Math.hypot(body.velocity.x, body.velocity.y);
-          const isMoving2D =
-            wantsToMove ||
-            speedMag > 0.35 ||
-            (entity.currentStateId === sb.moveStateId && airState.moveGraceTimer > 0 && speedMag > 0.12);
-          if (isMoving2D && sb.moveStateId && entity.states[sb.moveStateId]) {
-            desiredStateId = sb.moveStateId;
-          } else if (sb.idleStateId && entity.states[sb.idleStateId]) {
-            desiredStateId = sb.idleStateId;
-          }
-        }
-
-        if (desiredStateId && desiredStateId !== entity.currentStateId) {
-          stateChanges[entity.id] = desiredStateId;
+          keyboardCand = { boundIds, desiredStateId };
         }
       }
-    }
 
-    // Cas 6b : Appliquer la transition d'état de la Marionnette Interactive (si non déjà modifiée par Santé/Controller)
-    if (!lockStateByDeath && !stateChanges[entity.id] && puppetDesiredStateId && puppetDesiredStateId !== entity.currentStateId) {
-      stateChanges[entity.id] = puppetDesiredStateId;
-    }
-
-    // Cas 6c : États visuels de Peur / Conscience du curseur sur Flee (garde-fou actif)
-    const fleeBeh = effectiveBehaviors.find((b) => b.type === 'flee') as FleeBehaviorConfig | undefined;
-    if (!lockStateByDeath && !stateChanges[entity.id] && fleeBeh && fleeBeh.enabled !== false && fleeBeh.stateBindings) {
-      const fsb = fleeBeh.stateBindings;
-      const fBound = new Set(
-        [fsb.calmStateId, fsb.scaredStateId].filter((sid): sid is string => Boolean(sid && entity.states[sid]))
-      );
-      if (fBound.size > 0 && fBound.has(entity.currentStateId)) {
-        let isSelfOrAncestorDragged = Boolean(activeDragPositions[entity.id]);
-        let ancId = entity.parentId;
-        let depthGuard = 0;
-        while (!isSelfOrAncestorDragged && ancId && liveEntities[ancId] && depthGuard < 16) {
-          if (activeDragPositions[ancId]) {
-            isSelfOrAncestorDragged = true;
-            break;
-          }
-          ancId = liveEntities[ancId].parentId;
-          depthGuard += 1;
-        }
-        const pausedByDrag = fleeBeh.pauseWhileDragged !== false && isSelfOrAncestorDragged;
-        const selfCx = newX + entity.size.width / 2;
-        const selfCy = newY + entity.size.height / 2;
-        const threatPt = resolveTargetWorldPoint(
-          entity.id,
-          selfCx,
-          selfCy,
-          fleeBeh.targetType || 'mouse',
-          fleeBeh.targetEntityId,
-          fleeBeh.targetEntityType,
-          fleeBeh.targetTag,
-          liveEntities,
-          mousePos
+      // Candidat 5b : Flee (Peur / Calme)
+      let fleeCand: (StateCandidateInput & { isScared: boolean }) | undefined;
+      const fleeBeh = effectiveBehaviors.find((b) => b.type === 'flee') as FleeBehaviorConfig | undefined;
+      if (fleeBeh && fleeBeh.enabled !== false && fleeBeh.stateBindings) {
+        const fsb = fleeBeh.stateBindings;
+        const fBound = new Set(
+          [fsb.calmStateId, fsb.scaredStateId].filter((sid): sid is string => hasState(sid))
         );
-        const radius = fleeBeh.fleeRadius ?? 220;
-        const dist = threatPt ? Math.hypot(selfCx - threatPt.x, selfCy - threatPt.y) : Infinity;
-        const isScared = Boolean(threatPt && !pausedByDrag && (radius <= 0 || dist < radius));
-        const nextFleeState =
-          isScared && fsb.scaredStateId && entity.states[fsb.scaredStateId]
-            ? fsb.scaredStateId
-            : !isScared && fsb.calmStateId && entity.states[fsb.calmStateId]
-            ? fsb.calmStateId
-            : undefined;
-        if (nextFleeState && nextFleeState !== entity.currentStateId) {
-          stateChanges[entity.id] = nextFleeState;
+        if (fBound.size > 0) {
+          let isSelfOrAncestorDragged = Boolean(activeDragPositions[entity.id]);
+          let ancId = entity.parentId;
+          let depthGuard = 0;
+          while (!isSelfOrAncestorDragged && ancId && liveEntities[ancId] && depthGuard < 16) {
+            if (activeDragPositions[ancId]) {
+              isSelfOrAncestorDragged = true;
+              break;
+            }
+            ancId = liveEntities[ancId].parentId;
+            depthGuard += 1;
+          }
+          const pausedByDrag = fleeBeh.pauseWhileDragged !== false && isSelfOrAncestorDragged;
+          const selfCx = newX + entity.size.width / 2;
+          const selfCy = newY + entity.size.height / 2;
+          const threatPt = resolveTargetWorldPoint(
+            entity.id,
+            selfCx,
+            selfCy,
+            fleeBeh.targetType || 'mouse',
+            fleeBeh.targetEntityId,
+            fleeBeh.targetEntityType,
+            fleeBeh.targetTag,
+            liveEntities,
+            mousePos
+          );
+          const radius = fleeBeh.fleeRadius ?? 220;
+          const dist = threatPt ? Math.hypot(selfCx - threatPt.x, selfCy - threatPt.y) : Infinity;
+          const isScared = Boolean(threatPt && !pausedByDrag && (radius <= 0 || dist < radius));
+          const nextFleeState =
+            isScared && hasState(fsb.scaredStateId)
+              ? fsb.scaredStateId
+              : !isScared && hasState(fsb.calmStateId)
+              ? fsb.calmStateId
+              : undefined;
+          fleeCand = { boundIds: fBound, desiredStateId: nextFleeState, isScared };
         }
+      }
+
+      // Candidat 5c : Follow (Repos / Déplacement / Saut / Chute)
+      let followCand: StateCandidateInput | undefined;
+      const followBeh = effectiveBehaviors.find((b) => b.type === 'follow') as FollowBehaviorConfig | undefined;
+      if (followBeh && followBeh.enabled !== false && followBeh.stateBindings) {
+        const flsb = followBeh.stateBindings;
+        const flBound = new Set(
+          [flsb.idleStateId, flsb.moveStateId, flsb.jumpStateId, flsb.fallStateId].filter((sid): sid is string =>
+            hasState(sid)
+          )
+        );
+        if (flBound.size > 0) {
+          const fStatus = tickFollowStatus.get(entity.id);
+          const minFallH = Math.max(0, flsb.minFallHeight ?? 20);
+          let desiredStateId: string | undefined;
+          if (hasDynamicBody && body && !locoIsGrounded && (body.velocity.y < -0.55 || fStatus?.triggeredJump) && hasState(flsb.jumpStateId)) {
+            desiredStateId = flsb.jumpStateId;
+          } else if (hasDynamicBody && body && !locoIsGrounded && body.velocity.y > 0.75 && locoFallDropNow >= minFallH && hasState(flsb.fallStateId)) {
+            desiredStateId = flsb.fallStateId;
+          } else if (fStatus?.isMoving && hasState(flsb.moveStateId)) {
+            desiredStateId = flsb.moveStateId;
+          } else if (hasState(flsb.idleStateId)) {
+            desiredStateId = flsb.idleStateId;
+          }
+          followCand = { boundIds: flBound, desiredStateId };
+        }
+      }
+
+      // Candidat 5d : Patrol (Repos / Déplacement / Demi-tour / Chute)
+      let patrolCand: StateCandidateInput | undefined;
+      const patrolBeh = effectiveBehaviors.find((b) => b.type === 'patrol') as PatrolBehaviorConfig | undefined;
+      if (patrolBeh && patrolBeh.enabled !== false && patrolBeh.stateBindings) {
+        const psb = patrolBeh.stateBindings;
+        const pBound = new Set(
+          [psb.idleStateId, psb.moveStateId, psb.turnStateId, psb.fallStateId].filter((sid): sid is string =>
+            hasState(sid)
+          )
+        );
+        if (pBound.size > 0) {
+          const pStatus = tickPatrolStatus.get(entity.id);
+          const minFallH = Math.max(0, psb.minFallHeight ?? 20);
+          let desiredStateId: string | undefined;
+          if ((patrolTurnTimers.get(entity.id) ?? 0) > 0 && hasState(psb.turnStateId)) {
+            desiredStateId = psb.turnStateId;
+          } else if (hasDynamicBody && body && !locoIsGrounded && body.velocity.y > 0.75 && locoFallDropNow >= minFallH && hasState(psb.fallStateId)) {
+            desiredStateId = psb.fallStateId;
+          } else if (pStatus?.isMoving && hasState(psb.moveStateId)) {
+            desiredStateId = psb.moveStateId;
+          } else if (hasState(psb.idleStateId)) {
+            desiredStateId = psb.idleStateId;
+          }
+          patrolCand = { boundIds: pBound, desiredStateId };
+        }
+      }
+
+      // Candidat 5e : Wandering (Repos / Déplacement / Chute)
+      let wanderingCand: StateCandidateInput | undefined;
+      const wanderingBeh = effectiveBehaviors.find((b) => b.type === 'wandering') as
+        | WanderingBehaviorConfig
+        | undefined;
+      if (wanderingBeh && wanderingBeh.enabled !== false && wanderingBeh.stateBindings) {
+        const wsb = wanderingBeh.stateBindings;
+        const wBound = new Set(
+          [wsb.idleStateId, wsb.moveStateId, wsb.fallStateId].filter((sid): sid is string => hasState(sid))
+        );
+        if (wBound.size > 0) {
+          const minFallH = Math.max(0, wsb.minFallHeight ?? 20);
+          let desiredStateId: string | undefined;
+          if (hasDynamicBody && body && !locoIsGrounded && body.velocity.y > 0.75 && locoFallDropNow >= minFallH && hasState(wsb.fallStateId)) {
+            desiredStateId = wsb.fallStateId;
+          } else if (tickWanderingMoved.has(entity.id) && hasState(wsb.moveStateId)) {
+            desiredStateId = wsb.moveStateId;
+          } else if (hasState(wsb.idleStateId)) {
+            desiredStateId = wsb.idleStateId;
+          }
+          wanderingCand = { boundIds: wBound, desiredStateId };
+        }
+      }
+
+      const nextCoordinatedState = resolveLocomotionAndPuppetState({
+        currentStateId: entity.currentStateId,
+        validStateIds: new Set(Object.keys(entity.states)),
+        hasHealthOverride: Boolean(stateChanges[entity.id]),
+        puppet: puppetCandidateForEntity,
+        keyboard: keyboardCand,
+        flee: fleeCand,
+        follow: followCand,
+        patrol: patrolCand,
+        wandering: wanderingCand,
+      });
+
+      if (nextCoordinatedState && nextCoordinatedState !== entity.currentStateId) {
+        stateChanges[entity.id] = nextCoordinatedState;
       }
     }
   }
@@ -4668,6 +4831,7 @@ export function stepMatterPhysics(params: {
     ...(Object.keys(stateChanges).length > 0 ? { stateChanges } : {}),
     ...(Object.keys(variableUpdates).length > 0 ? { variableUpdates } : {}),
     ...(brokenJointEvents.length > 0 ? { brokenJointEvents } : {}),
+    ...(arrivedTargetEvents.length > 0 ? { arrivedTargetEvents } : {}),
     ...(healthDeathSceneAction ? { healthDeathSceneAction } : {}),
   };
 }

@@ -67,7 +67,10 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
   const scenes = useSceneStore((s) => s.scenes || EMPTY_LIST);
   const activeSceneId = useSceneStore((s) => s.activeSceneId);
   const variableNames = Array.from(new Set(['score', ...Object.keys(initialGameVariables)])).sort();
-  const isCollision = rule.trigger.type === 'collision' || rule.trigger.type === 'proximity';
+  const isCollision =
+    rule.trigger.type === 'collision' ||
+    rule.trigger.type === 'proximity' ||
+    rule.trigger.type === 'target_arrived';
   const subjectType = rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
   const targetType = rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
 
@@ -2258,46 +2261,65 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
               )}
 
               <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">Décalage ΔX / ΔY (px)</span>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={activeModal.parentOffset?.x ?? 0}
-                    onChange={(e) =>
-                      setActiveModal({
-                        ...activeModal,
-                        parentOffset: {
-                          x: parseFloat(e.target.value) || 0,
-                          y: activeModal.parentOffset?.y ?? 0,
-                          inheritRotation: activeModal.parentOffset?.inheritRotation ?? true,
-                          inheritFlip: activeModal.parentOffset?.inheritFlip ?? true,
-                        },
-                      })
-                    }
-                    className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
-                  />
-                  <input
-                    type="number"
-                    value={activeModal.parentOffset?.y ?? 0}
-                    onChange={(e) =>
-                      setActiveModal({
-                        ...activeModal,
-                        parentOffset: {
-                          x: activeModal.parentOffset?.x ?? 0,
-                          y: parseFloat(e.target.value) || 0,
-                          inheritRotation: activeModal.parentOffset?.inheritRotation ?? true,
-                          inheritFlip: activeModal.parentOffset?.inheritFlip ?? true,
-                        },
-                      })
-                    }
-                    className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
-                  />
+                <div>
+                  <span className="font-bold text-slate-700 text-xs block">Conserver le décalage actuel</span>
+                  <span className="text-[10px] text-slate-400">
+                    Fige l’objet à sa position relative du moment (idéal pour attraper une balle en vol)
+                  </span>
                 </div>
+                <input
+                  type="checkbox"
+                  checked={Boolean(activeModal.attachKeepCurrentOffset)}
+                  onChange={(e) =>
+                    setActiveModal({ ...activeModal, attachKeepCurrentOffset: e.target.checked })
+                  }
+                  className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
+                />
               </div>
+
+              {!activeModal.attachKeepCurrentOffset && (
+                <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                  <span className="font-bold text-slate-700 text-xs">Décalage ΔX / ΔY (px)</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={activeModal.parentOffset?.x ?? 0}
+                      onChange={(e) =>
+                        setActiveModal({
+                          ...activeModal,
+                          parentOffset: {
+                            x: parseFloat(e.target.value) || 0,
+                            y: activeModal.parentOffset?.y ?? 0,
+                            inheritRotation: activeModal.parentOffset?.inheritRotation ?? true,
+                            inheritFlip: activeModal.parentOffset?.inheritFlip ?? true,
+                          },
+                        })
+                      }
+                      className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                    />
+                    <input
+                      type="number"
+                      value={activeModal.parentOffset?.y ?? 0}
+                      onChange={(e) =>
+                        setActiveModal({
+                          ...activeModal,
+                          parentOffset: {
+                            x: activeModal.parentOffset?.x ?? 0,
+                            y: parseFloat(e.target.value) || 0,
+                            inheritRotation: activeModal.parentOffset?.inheritRotation ?? true,
+                            inheritFlip: activeModal.parentOffset?.inheritFlip ?? true,
+                          },
+                        })
+                      }
+                      className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
                 <span className="font-bold text-slate-700 text-xs">
-                  Hériter rotation & Flip du parent
+                  Hériter rotation &amp; Flip du parent
                 </span>
                 <input
                   type="checkbox"
@@ -2314,6 +2336,23 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                     })
                   }
                   className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+                />
+              </div>
+
+              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                <div>
+                  <span className="font-bold text-slate-700 text-xs block">Désactiver les collisions tant qu’attaché</span>
+                  <span className="text-[10px] text-slate-400">
+                    Évite que l’objet porté ne bloque ou pousse le porteur
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={Boolean(activeModal.attachDisableCollisions)}
+                  onChange={(e) =>
+                    setActiveModal({ ...activeModal, attachDisableCollisions: e.target.checked })
+                  }
+                  className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
                 />
               </div>
             </div>
@@ -2340,6 +2379,8 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                       ? activeModal.parentEntityTag
                       : undefined,
                   parentOffset: activeModal.parentOffset,
+                  attachKeepCurrentOffset: Boolean(activeModal.attachKeepCurrentOffset),
+                  attachDisableCollisions: Boolean(activeModal.attachDisableCollisions),
                 });
               }}
               className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
@@ -2407,6 +2448,63 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                   </select>
                 </div>
               )}
+
+              <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-700">Impulsion au détachement (Lancer)</span>
+                  <span className="font-mono font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded text-[11px]">
+                    {(activeModal.detachImpulseSpeed ?? 0) > 0 ? `${Math.round(activeModal.detachImpulseSpeed!)} px/s` : 'Lâcher sur place'}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="900"
+                  step="25"
+                  value={activeModal.detachImpulseSpeed ?? 0}
+                  onChange={(e) =>
+                    setActiveModal({ ...activeModal, detachImpulseSpeed: parseFloat(e.target.value) })
+                  }
+                  className="w-full accent-rose-600"
+                />
+                {(activeModal.detachImpulseSpeed ?? 0) > 0 && (
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                    <span className="font-bold text-slate-600 text-[11px]">Angle d’éjection (°)</span>
+                    <div className="flex items-center gap-1">
+                      {([
+                        { label: '↖', angle: -135 },
+                        { label: '↑', angle: -90 },
+                        { label: '↗', angle: -45 },
+                        { label: '→', angle: 0 },
+                      ] as const).map((p) => (
+                        <button
+                          key={p.angle}
+                          type="button"
+                          onClick={() => setActiveModal({ ...activeModal, detachImpulseAngle: p.angle })}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer border ${
+                            Math.round(activeModal.detachImpulseAngle ?? -45) === p.angle
+                              ? 'bg-rose-600 text-white border-rose-600'
+                              : 'bg-slate-50 text-slate-600 border-slate-200'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                      <input
+                        type="number"
+                        value={activeModal.detachImpulseAngle ?? -45}
+                        onChange={(e) =>
+                          setActiveModal({
+                            ...activeModal,
+                            detachImpulseAngle: parseFloat(e.target.value) || 0,
+                          })
+                        }
+                        className="w-14 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px] font-mono text-right"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <button
@@ -2419,6 +2517,12 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                   targetType:
                     activeModal.targetMode === 'type'
                       ? activeModal.selectedTargetType || availableEntityOptions[0]?.type
+                      : undefined,
+                  detachImpulseSpeed:
+                    (activeModal.detachImpulseSpeed ?? 0) > 0 ? activeModal.detachImpulseSpeed : undefined,
+                  detachImpulseAngle:
+                    (activeModal.detachImpulseSpeed ?? 0) > 0
+                      ? (activeModal.detachImpulseAngle ?? -45)
                       : undefined,
                 });
               }}

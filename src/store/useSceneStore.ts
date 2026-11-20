@@ -583,6 +583,7 @@ interface SceneState {
   triggerDragRelease: (subjectId: EntityId, eventPosition?: Position) => void;
   triggerJointBreak: (childId: EntityId, parentId: EntityId, breakPoint?: Position) => void;
   triggerCameraFollowEvent: (targetEntityId: EntityId) => void;
+  triggerTargetArrivedEvent: (subjectId: EntityId, targetEntityId?: EntityId, eventPosition?: Position) => void;
   evaluateRules: () => void;
   evaluateRulesWithTemp: (tempPositions?: Record<EntityId, Position>) => void;
 }
@@ -4666,6 +4667,87 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           x: Math.round(subject.position.x + subject.size.width / 2),
           y: Math.round(subject.position.y + subject.size.height / 2),
         },
+        allEntities: entities,
+        updateEntityState,
+        updateEntityDetails,
+        deleteEntity,
+        spawnEntity,
+      });
+    });
+  },
+
+  triggerTargetArrivedEvent: (subjectId, targetEntityId, eventPosition) => {
+    if (get().appMode !== 'play') return;
+    const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
+    const subject = entities[subjectId];
+    if (!subject) return;
+
+    const target = targetEntityId ? entities[targetEntityId] : undefined;
+    const resolvedPoint = eventPosition || {
+      x: Math.round(subject.position.x + subject.size.width / 2),
+      y: Math.round(subject.position.y + subject.size.height / 2),
+    };
+    const now = Date.now();
+
+    const arrivalRules = rules.filter(
+      (r) => r.enabled && (r.trigger.type === 'target_arrived' || r.trigger.phase === 'target_arrived')
+    );
+    if (arrivalRules.length === 0) return;
+
+    arrivalRules.forEach((rule) => {
+      if (
+        !matchesEntityFilter(
+          subject,
+          rule.trigger.subjectMode,
+          rule.trigger.subjectId,
+          rule.trigger.subjectType,
+          rule.trigger.subjectTag
+        )
+      ) {
+        return;
+      }
+
+      if (
+        rule.trigger.subjectStateId &&
+        rule.trigger.subjectStateId !== '' &&
+        subject.currentStateId !== rule.trigger.subjectStateId
+      ) {
+        return;
+      }
+
+      const targetMode = rule.trigger.targetMode || 'any';
+      if (targetMode !== 'any') {
+        if (!target) return;
+        if (
+          !matchesEntityFilter(
+            target,
+            targetMode,
+            rule.trigger.targetId,
+            rule.trigger.targetType,
+            rule.trigger.targetTag
+          )
+        ) {
+          return;
+        }
+        if (
+          rule.trigger.targetStateId &&
+          rule.trigger.targetStateId !== '' &&
+          target.currentStateId !== rule.trigger.targetStateId
+        ) {
+          return;
+        }
+      }
+
+      const cooldownKey = `target_arrived_${rule.id}_${subject.id}_${target?.id || 'pos'}`;
+      if (!canRuleFireWithGate(rule, now, RULE_COOLDOWN_MS, { cooldownKey })) {
+        return;
+      }
+      recordRuleFired(rule, now, { cooldownKey });
+
+      executeRuleActions(rule.actions, {
+        subject,
+        target,
+        eventPosition: resolvedPoint,
         allEntities: entities,
         updateEntityState,
         updateEntityDetails,

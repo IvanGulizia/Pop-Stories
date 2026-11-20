@@ -46,7 +46,10 @@ export function RuleCreationWizardModal({
   completeWizardWithAction,
 }: RuleCreationWizardModalProps) {
   const isWizardGlobal = ['timer', 'keyboard', 'variable'].includes(activeWizard.triggerType);
-  const isWizardRelational = activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity';
+  const isWizardRelational =
+    activeWizard.triggerType === 'collision' ||
+    activeWizard.triggerType === 'proximity' ||
+    activeWizard.triggerType === 'target_arrived';
   const wizardObjectPhase = activeWizard.objectPhase || 'subject';
   const hasWizardParams = true;
 

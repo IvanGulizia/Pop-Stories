@@ -718,6 +718,23 @@ export function InteractivePuppetControls({
           </div>
         </div>
 
+        <label className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-violet-100 cursor-pointer">
+          <div className="min-w-0">
+            <div className="text-[10.5px] font-bold text-slate-700 leading-tight">
+              Prioritaire sur la locomotion pendant l’interaction
+            </div>
+            <div className="text-[9px] text-slate-400">
+              Au repos (Idle), laisse Suivre / Patrouille / Clavier animer l’objet ; dès qu’on le survole ou l’attrape, Marionnette prend le dessus.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={b.allowInterruptLocomotion !== false}
+            onChange={(e) => update({ allowInterruptLocomotion: e.target.checked })}
+            className="w-4 h-4 accent-violet-600 rounded cursor-pointer shrink-0"
+          />
+        </label>
+
         {/* Sous-onglets par phase pour éviter de surcharger l'inspecteur */}
         <div className="grid grid-cols-3 gap-1 bg-white/80 p-1 rounded-xl border border-violet-100">
           <button

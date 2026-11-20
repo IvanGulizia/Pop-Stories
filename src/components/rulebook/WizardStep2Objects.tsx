@@ -83,7 +83,11 @@ export function WizardStep2Objects({
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <span>1️⃣ Objet Sujet (qui touche / approche)</span>
+            <span>
+              {activeWizard.triggerType === 'target_arrived'
+                ? '1️⃣ Objet qui arrive (Sujet)'
+                : '1️⃣ Objet Sujet (qui touche / approche)'}
+            </span>
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">
               {activeWizard.subjectMode === 'any'
                 ? 'Tous'
@@ -109,7 +113,11 @@ export function WizardStep2Objects({
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <span>2️⃣ Objet Cible (touché / approché)</span>
+            <span>
+              {activeWizard.triggerType === 'target_arrived'
+                ? '2️⃣ Cible atteinte (Optionnel)'
+                : '2️⃣ Objet Cible (touché / approché)'}
+            </span>
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
               {activeWizard.targetMode === 'any'
                 ? 'Tous'

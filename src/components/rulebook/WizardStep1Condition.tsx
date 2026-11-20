@@ -1181,6 +1181,44 @@ export function WizardStep1Condition({
             </div>
           </button>
         </div>
+
+        <div className="bg-lime-50/60 p-3.5 rounded-2xl border border-lime-300/80 space-y-2 sm:col-span-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs font-black uppercase text-lime-900">🏁 Arrivée sur Cible (Suivre / Aller vers)</div>
+            <span className="text-[10px] font-bold text-lime-800 bg-lime-100 px-2 py-0.5 rounded-full">
+              Sujet → Cible (Optionnelle)
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveWizard({
+                ...activeWizard,
+                triggerType: 'target_arrived',
+                triggerPhase: 'target_arrived',
+                targetMode: 'any',
+                targetType: undefined,
+                targetId: undefined,
+                targetTag: undefined,
+                targetStateId: undefined,
+                step: 2,
+                objectPhase: 'subject',
+                subjectSubStep: 'choose_object',
+                targetSubStep: 'choose_object',
+                actionSubStep: 'main',
+              });
+            }}
+            className="w-full p-3 bg-white hover:bg-lime-100/70 border border-lime-300 rounded-xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-2xs group"
+          >
+            <span className="text-2xl">🏁</span>
+            <div>
+              <div className="text-xs font-black text-slate-900">Quand une entité arrive sur sa cible</div>
+              <div className="text-[10px] text-slate-500">
+                Ex: un chien atteint la balle lancée ou revient au joueur (composants Suivre / Aller vers)
+              </div>
+            </div>
+          </button>
+        </div>
       </div>
     </div>
   );

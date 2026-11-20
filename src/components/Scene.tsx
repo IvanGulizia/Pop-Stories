@@ -379,6 +379,14 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           });
         }
 
+        // Événements "Arrivé sur cible" (Suivre / Déplacer vers)
+        if (result.arrivedTargetEvents && result.arrivedTargetEvents.length > 0) {
+          const { triggerTargetArrivedEvent } = useSceneStore.getState();
+          result.arrivedTargetEvents.forEach((ev) => {
+            triggerTargetArrivedEvent(ev.subjectId, ev.targetEntityId, ev.eventPosition);
+          });
+        }
+
         // Mise à jour caméra 60 FPS sans re-render React (transforms DOM directs)
         const latestState = useSceneStore.getState();
         const rtCam = stepPlayCameraRuntime(

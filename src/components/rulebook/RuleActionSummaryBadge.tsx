@@ -350,7 +350,7 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         </div>
         <span className="text-xs truncate">{childLabel}</span>
         <span className="text-[10px] text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded font-medium truncate">
-          (➔ {parentLabel})
+          (➔ {parentLabel}{act.attachDisableCollisions ? ' • Sans collision' : ''})
         </span>
       </div>
     );
@@ -366,6 +366,10 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         : act.targetMode === 'tag' && act.targetTag
         ? `#${act.targetTag}`
         : getEntityObj(act.targetType)?.name || 'Objet';
+    const impulseNote =
+      (act.detachImpulseSpeed || 0) > 0
+        ? ` 🚀 ${Math.round(act.detachImpulseSpeed!)}px/s @ ${Math.round(act.detachImpulseAngle ?? -45)}°`
+        : '';
     return (
       <div
         role={canJump ? 'button' : undefined}
@@ -380,7 +384,7 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         </div>
         <span className="text-xs truncate">{targetLabel}</span>
         <span className="text-[10px] text-rose-700 bg-rose-50 px-1.5 py-0.2 rounded font-medium truncate">
-          (Détacher)
+          (Détacher{impulseNote})
         </span>
       </div>
     );

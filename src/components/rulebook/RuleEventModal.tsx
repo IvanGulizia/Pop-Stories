@@ -30,12 +30,15 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
 
   const applyEventTrigger = (patch: Partial<RuleTrigger>, closeAfter = true) => {
     const nextType = patch.type ?? modalTriggerType;
-    const needsTarget = nextType === 'collision' || nextType === 'proximity';
+    const needsTarget =
+      nextType === 'collision' || nextType === 'proximity' || nextType === 'target_arrived';
     updateRule(rule.id, {
       trigger: {
         ...rule.trigger,
         ...patch,
-        ...(needsTarget && !rule.trigger.targetType && !patch.targetType
+        ...(nextType === 'target_arrived' && !rule.trigger.targetMode && !patch.targetMode
+          ? { targetMode: 'any' }
+          : needsTarget && !rule.trigger.targetType && !patch.targetType && rule.trigger.targetMode !== 'any'
           ? { targetType: availableEntityOptions[1]?.type || availableEntityOptions[0]?.type || 'plant' }
           : {}),
       },
@@ -118,9 +121,9 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
           </div>
         ) : modalSubStep === 'config_event_params' ? (
           <div className="bg-slate-50/90 p-5 rounded-3xl border border-slate-200/90 space-y-5 max-w-xl mx-auto shadow-xs">
-            {['click', 'hover', 'drag', 'state_change', 'joint_break', 'camera_follow'].includes(modalTriggerType) && (
+            {['click', 'hover', 'drag', 'state_change', 'joint_break', 'camera_follow', 'target_arrived'].includes(modalTriggerType) && (
               <div className="bg-white border border-slate-200 rounded-2xl p-3 text-xs text-slate-600 font-medium">
-                Configurez la fréquence, les délais d'activation ou l'auto-remise pour cet événement ({modalTriggerType}).
+                Configurez la fréquence, les délais d&apos;activation ou l&apos;auto-remise pour cet événement ({modalTriggerType}).
               </div>
             )}
             {/* 1. Minuteur / Timer */}
@@ -1019,6 +1022,29 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                   <div>
                     <div className="text-xs font-black text-slate-900">Caméra suit une entité</div>
                     <div className="text-[9px] text-slate-500">Déclenché quand la cible suivie change</div>
+                  </div>
+                </button>
+              </div>
+
+              <div className="bg-lime-50/60 p-3 rounded-2xl border border-lime-300/80 space-y-1.5 sm:col-span-4">
+                <div className="text-[11px] font-black uppercase text-lime-900">🏁 Arrivée sur Cible (Suivre / Aller vers)</div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    applyEventTrigger({
+                      type: 'target_arrived',
+                      phase: 'target_arrived',
+                      targetMode: rule.trigger.targetMode || 'any',
+                    })
+                  }
+                  className="w-full p-2.5 bg-white hover:bg-lime-100/70 border border-lime-300 rounded-xl flex items-center gap-2.5 text-left cursor-pointer transition-all shadow-2xs"
+                >
+                  <span className="text-lg">🏁</span>
+                  <div>
+                    <div className="text-xs font-black text-slate-900">Arrivé sur sa cible</div>
+                    <div className="text-[9px] text-slate-500">
+                      Quand une entité Suivre / Aller vers atteint sa cible (ou la souris / coordonnée)
+                    </div>
                   </div>
                 </button>
               </div>

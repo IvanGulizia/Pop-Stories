@@ -2116,42 +2116,59 @@ export function WizardStep3Actions({
             )}
 
             <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-700 text-xs">Décalage ΔX / ΔY (px)</span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  value={activeWizard.parentOffset?.x ?? 0}
-                  onChange={(e) =>
-                    setActiveWizard({
-                      ...activeWizard,
-                      parentOffset: {
-                        x: parseFloat(e.target.value) || 0,
-                        y: activeWizard.parentOffset?.y ?? 0,
-                        inheritRotation: activeWizard.parentOffset?.inheritRotation ?? true,
-                        inheritFlip: activeWizard.parentOffset?.inheritFlip ?? true,
-                      },
-                    })
-                  }
-                  className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
-                />
-                <input
-                  type="number"
-                  value={activeWizard.parentOffset?.y ?? 0}
-                  onChange={(e) =>
-                    setActiveWizard({
-                      ...activeWizard,
-                      parentOffset: {
-                        x: activeWizard.parentOffset?.x ?? 0,
-                        y: parseFloat(e.target.value) || 0,
-                        inheritRotation: activeWizard.parentOffset?.inheritRotation ?? true,
-                        inheritFlip: activeWizard.parentOffset?.inheritFlip ?? true,
-                      },
-                    })
-                  }
-                  className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
-                />
+              <div>
+                <span className="font-bold text-slate-700 text-xs block">Conserver le décalage actuel</span>
+                <span className="text-[10px] text-slate-400">
+                  Fige l’objet à sa position relative du moment (idéal pour attraper une balle en vol)
+                </span>
               </div>
+              <input
+                type="checkbox"
+                checked={Boolean(activeWizard.attachKeepCurrentOffset)}
+                onChange={(e) => setActiveWizard({ ...activeWizard, attachKeepCurrentOffset: e.target.checked })}
+                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
+              />
             </div>
+
+            {!activeWizard.attachKeepCurrentOffset && (
+              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                <span className="font-bold text-slate-700 text-xs">Décalage ΔX / ΔY (px)</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={activeWizard.parentOffset?.x ?? 0}
+                    onChange={(e) =>
+                      setActiveWizard({
+                        ...activeWizard,
+                        parentOffset: {
+                          x: parseFloat(e.target.value) || 0,
+                          y: activeWizard.parentOffset?.y ?? 0,
+                          inheritRotation: activeWizard.parentOffset?.inheritRotation ?? true,
+                          inheritFlip: activeWizard.parentOffset?.inheritFlip ?? true,
+                        },
+                      })
+                    }
+                    className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                  />
+                  <input
+                    type="number"
+                    value={activeWizard.parentOffset?.y ?? 0}
+                    onChange={(e) =>
+                      setActiveWizard({
+                        ...activeWizard,
+                        parentOffset: {
+                          x: activeWizard.parentOffset?.x ?? 0,
+                          y: parseFloat(e.target.value) || 0,
+                          inheritRotation: activeWizard.parentOffset?.inheritRotation ?? true,
+                          inheritFlip: activeWizard.parentOffset?.inheritFlip ?? true,
+                        },
+                      })
+                    }
+                    className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
               <span className="font-bold text-slate-700 text-xs">Hériter rotation &amp; Flip du parent</span>
@@ -2172,6 +2189,21 @@ export function WizardStep3Actions({
                 className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
               />
             </div>
+
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <div>
+                <span className="font-bold text-slate-700 text-xs block">Désactiver les collisions tant qu’attaché</span>
+                <span className="text-[10px] text-slate-400">
+                  Évite que l’objet porté ne bloque ou pousse le porteur
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={Boolean(activeWizard.attachDisableCollisions)}
+                onChange={(e) => setActiveWizard({ ...activeWizard, attachDisableCollisions: e.target.checked })}
+                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
+              />
+            </div>
           </div>
 
           <button
@@ -2186,6 +2218,8 @@ export function WizardStep3Actions({
                 parentEntityType: activeWizard.parentTargetMode === 'type' ? activeWizard.parentEntityType || availableEntityOptions[0]?.type : undefined,
                 parentEntityTag: activeWizard.parentTargetMode === 'tag' ? activeWizard.parentEntityTag : undefined,
                 parentOffset: activeWizard.parentOffset,
+                attachKeepCurrentOffset: Boolean(activeWizard.attachKeepCurrentOffset),
+                attachDisableCollisions: Boolean(activeWizard.attachDisableCollisions),
               });
             }}
             className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
@@ -2242,6 +2276,56 @@ export function WizardStep3Actions({
                 </select>
               </div>
             )}
+
+            <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-slate-700">Impulsion au détachement (Lancer)</span>
+                <span className="font-mono font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded text-[11px]">
+                  {(activeWizard.detachImpulseSpeed ?? 0) > 0 ? `${Math.round(activeWizard.detachImpulseSpeed!)} px/s` : 'Lâcher sur place'}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="900"
+                step="25"
+                value={activeWizard.detachImpulseSpeed ?? 0}
+                onChange={(e) => setActiveWizard({ ...activeWizard, detachImpulseSpeed: parseFloat(e.target.value) })}
+                className="w-full accent-rose-600"
+              />
+              {(activeWizard.detachImpulseSpeed ?? 0) > 0 && (
+                <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                  <span className="font-bold text-slate-600 text-[11px]">Angle d’éjection (°)</span>
+                  <div className="flex items-center gap-1">
+                    {([
+                      { label: '↖', angle: -135 },
+                      { label: '↑', angle: -90 },
+                      { label: '↗', angle: -45 },
+                      { label: '→', angle: 0 },
+                    ] as const).map((p) => (
+                      <button
+                        key={p.angle}
+                        type="button"
+                        onClick={() => setActiveWizard({ ...activeWizard, detachImpulseAngle: p.angle })}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer border ${
+                          Math.round(activeWizard.detachImpulseAngle ?? -45) === p.angle
+                            ? 'bg-rose-600 text-white border-rose-600'
+                            : 'bg-slate-50 text-slate-600 border-slate-200'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                    <input
+                      type="number"
+                      value={activeWizard.detachImpulseAngle ?? -45}
+                      onChange={(e) => setActiveWizard({ ...activeWizard, detachImpulseAngle: parseFloat(e.target.value) || 0 })}
+                      className="w-14 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px] font-mono text-right"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <button
@@ -2252,6 +2336,8 @@ export function WizardStep3Actions({
                 targetMode: activeWizard.actionTargetMode || 'subject',
                 targetTag: activeWizard.actionTargetMode === 'tag' ? activeWizard.actionTargetTag : undefined,
                 targetType: activeWizard.actionTargetMode === 'type' ? activeWizard.actionTargetType || availableEntityOptions[0]?.type : undefined,
+                detachImpulseSpeed: (activeWizard.detachImpulseSpeed ?? 0) > 0 ? activeWizard.detachImpulseSpeed : undefined,
+                detachImpulseAngle: (activeWizard.detachImpulseSpeed ?? 0) > 0 ? (activeWizard.detachImpulseAngle ?? -45) : undefined,
               });
             }}
             className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
