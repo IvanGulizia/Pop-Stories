@@ -1089,6 +1089,7 @@ export interface AppSettings {
   projectPalette?: ProjectPaletteColor[];
   autoSaveEnabled?: boolean;
   stylusOnlyDrawing?: boolean;
+  coloredOnionSkin?: boolean;
 }
 
 export interface CursorPackExportData {

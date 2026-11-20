@@ -1,3 +1,8 @@
+## [Phase 10.39] - 2026-11-20
+### Corrigé & Ajouté
+- **Événements Clavier RuleBook (`WizardStep1Condition.tsx`, `RuleEventModal.tsx`, `useSceneStore.ts`, `App.tsx`)** : Normalisation de `triggerPhase` sur `'down' | 'up'` lors du choix *Touche de Clavier* (correctif du bug bloquant où `'enter'` restait enregistré), compatibilité ascendante dans `triggerKeyEvent`, distinction lettres AZERTY/QWERTY (`e.key`) vs touches physiques `Digit*`/spéciales (`e.code`), déclenchement fiable de plusieurs règles sur la même touche et exécution des actions globales même sans entité sur la scène.
+- **Pelure d'oignon colorée (`types/index.ts`, `useSceneStore.ts`, `SettingsPanel.tsx`, `DrawingGuidesAndOnionSection.tsx`, `DrawingCanvas.tsx`)** : Ajout de `settings.coloredOnionSkin` (activé par défaut) affichant les traits et aplats de la pelure d'oignon avec leurs vraies couleurs au lieu de la silhouette grise pointillée, désactivable dans les Paramètres ou directement via le bouton *Couleurs / Silhouette*.
+
 ## [Phase 10.38] - 2026-11-20
 ### Ajouté & Corrigé (Vague Intermédiaire — 12 Chantiers Ergonomie & Gameplay)
 - **HUD Caméra Top-Bar & Auto-Focus Canvas Play (`App.tsx`, `Scene.tsx`)** : Déplacement des contrôles de zoom/pan hors du canvas vers la barre supérieure et focus clavier automatique du canvas au lancement du Mode Play.

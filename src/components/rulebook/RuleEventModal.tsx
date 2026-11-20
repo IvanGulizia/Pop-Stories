@@ -881,6 +881,10 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                     setActiveModal({
                       ...activeModal,
                       triggerType: 'keyboard',
+                      triggerPhase:
+                        modalTriggerPhase === 'up' || modalTriggerPhase === 'key_up'
+                          ? 'up'
+                          : 'down',
                       subStep: 'key_picker',
                     })
                   }

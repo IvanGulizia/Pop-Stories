@@ -357,14 +357,16 @@ export default function App() {
   useEffect(() => {
     if (appMode !== 'play') return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
       if (e.repeat) return; // Ignore continuous auto-repeat key events
       useSceneStore.getState().triggerKeyEvent(e.key, 'down', e.code);
     };
     const handleKeyUp = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
       useSceneStore.getState().triggerKeyEvent(e.key, 'up', e.code);
     };
     window.addEventListener('keydown', handleKeyDown);

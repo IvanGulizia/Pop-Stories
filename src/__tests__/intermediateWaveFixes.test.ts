@@ -630,4 +630,110 @@ describe('Store Wave Features: BoundarySpace, KeyCode, CameraFollow, Push Transi
       expect(a.name).not.toMatch(/#\d+/);
     }
   });
+
+  it('executes legacy enter-phase keyboard rules, multiple rules on the same key, AZERTY letters cleanly, and empty-scene global rules', () => {
+    useSceneStore.setState({
+      entities: {},
+      entityOrder: [],
+      initialGameVariables: { score: 0, countA: 0, countB: 0, azertyA: 0, azertyOne: 0, emptyScene: 0 },
+    });
+
+    // 1. Legacy wizard bug: phase saved as 'enter' must fire on 'down' (not 'up')
+    useSceneStore.getState().addRule({
+      name: 'Legacy enter phase Space',
+      enabled: true,
+      trigger: {
+        type: 'keyboard',
+        keyName: 'Space',
+        keyCode: 'Space',
+        phase: 'enter',
+        subjectMode: 'any',
+      },
+      actions: [
+        { id: 'a-sp-1', type: 'set_variable', variableName: 'countA', variableOperation: 'add', variableValue: 1 },
+      ],
+    });
+
+    // 2. Second rule on the exact same key must also fire simultaneously
+    useSceneStore.getState().addRule({
+      name: 'Second Space rule',
+      enabled: true,
+      trigger: {
+        type: 'keyboard',
+        keyName: ' ',
+        keyCode: 'Space',
+        phase: 'down',
+        subjectMode: 'any',
+      },
+      actions: [
+        { id: 'a-sp-2', type: 'set_variable', variableName: 'countB', variableOperation: 'add', variableValue: 1 },
+        { id: 'a-sp-score', type: 'add_score', scoreAmount: 10 },
+      ],
+    });
+
+    // 3. AZERTY letter rule picked from A-Z grid (keyName: 'A', keyCode: 'KeyA')
+    useSceneStore.getState().addRule({
+      name: 'AZERTY letter A',
+      enabled: true,
+      trigger: {
+        type: 'keyboard',
+        keyName: 'A',
+        keyCode: 'KeyA',
+        phase: 'down',
+        subjectMode: 'any',
+      },
+      actions: [
+        { id: 'a-az-a', type: 'set_variable', variableName: 'azertyA', variableOperation: 'add', variableValue: 1 },
+      ],
+    });
+
+    // 4. Digit rule must still match by physical keyCode on AZERTY ('&' / 'Digit1')
+    useSceneStore.getState().addRule({
+      name: 'AZERTY Digit1',
+      enabled: true,
+      trigger: {
+        type: 'keyboard',
+        keyName: '1',
+        keyCode: 'Digit1',
+        phase: 'down',
+        subjectMode: 'any',
+      },
+      actions: [
+        { id: 'a-az-1', type: 'set_variable', variableName: 'azertyOne', variableOperation: 'add', variableValue: 1 },
+      ],
+    });
+
+    useSceneStore.getState().setAppMode('play');
+
+    // Space 'up' should NOT trigger 'enter'/'down' rules
+    useSceneStore.getState().triggerKeyEvent(' ', 'up', 'Space');
+    expect(useSceneStore.getState().gameVariables.countA).toBe(0);
+    expect(useSceneStore.getState().gameVariables.countB).toBe(0);
+
+    // Space 'down' triggers BOTH rules even with 0 entities in scene
+    useSceneStore.getState().triggerKeyEvent(' ', 'down', 'Space');
+    expect(useSceneStore.getState().gameVariables.countA).toBe(1);
+    expect(useSceneStore.getState().gameVariables.countB).toBe(1);
+    expect(useSceneStore.getState().gameScore).toBe(10);
+
+    // Pressing 'q' on AZERTY sends code 'KeyA': must NOT falsely trigger the 'A' rule
+    useSceneStore.getState().triggerKeyEvent('q', 'down', 'KeyA');
+    expect(useSceneStore.getState().gameVariables.azertyA).toBe(0);
+
+    // Pressing 'a' on AZERTY sends code 'KeyQ': MUST trigger the 'A' rule
+    useSceneStore.getState().triggerKeyEvent('a', 'down', 'KeyQ');
+    expect(useSceneStore.getState().gameVariables.azertyA).toBe(1);
+
+    // Pressing '&' on AZERTY sends code 'Digit1': MUST trigger the '1' / 'Digit1' rule
+    useSceneStore.getState().triggerKeyEvent('&', 'down', 'Digit1');
+    expect(useSceneStore.getState().gameVariables.azertyOne).toBe(1);
+  });
+
+  it('defaults coloredOnionSkin setting to true and toggles cleanly', () => {
+    expect(useSceneStore.getState().settings.coloredOnionSkin).toBe(true);
+    useSceneStore.getState().updateSettings({ coloredOnionSkin: false });
+    expect(useSceneStore.getState().settings.coloredOnionSkin).toBe(false);
+    useSceneStore.getState().updateSettings({ coloredOnionSkin: true });
+    expect(useSceneStore.getState().settings.coloredOnionSkin).toBe(true);
+  });
 });

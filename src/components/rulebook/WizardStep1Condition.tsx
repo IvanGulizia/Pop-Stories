@@ -62,6 +62,10 @@ export function WizardStep1Condition({
               triggerType: 'keyboard',
               keyName: kName,
               keyCode: kCode,
+              triggerPhase:
+                activeWizard.triggerPhase === 'up' || activeWizard.triggerPhase === 'key_up'
+                  ? 'up'
+                  : 'down',
               step: 3,
               actionSubStep: 'main',
             })
@@ -1003,6 +1007,10 @@ export function WizardStep1Condition({
               setActiveWizard({
                 ...activeWizard,
                 triggerType: 'keyboard',
+                triggerPhase:
+                  activeWizard.triggerPhase === 'up' || activeWizard.triggerPhase === 'key_up'
+                    ? 'up'
+                    : 'down',
                 actionSubStep: 'key_picker',
               });
             }}

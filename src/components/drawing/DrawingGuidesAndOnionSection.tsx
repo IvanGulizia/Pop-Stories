@@ -35,6 +35,8 @@ interface DrawingGuidesAndOnionSectionProps {
   onSelectOnionStateId: (id: string) => void;
   onionOpacity: number;
   onOnionOpacityChange: (val: number) => void;
+  coloredOnionSkin?: boolean;
+  onToggleColoredOnionSkin?: () => void;
 }
 
 export function DrawingGuidesAndOnionSection({
@@ -57,6 +59,8 @@ export function DrawingGuidesAndOnionSection({
   onSelectOnionStateId,
   onionOpacity,
   onOnionOpacityChange,
+  coloredOnionSkin = true,
+  onToggleColoredOnionSkin,
 }: DrawingGuidesAndOnionSectionProps) {
   return (
     <>
@@ -216,6 +220,24 @@ export function DrawingGuidesAndOnionSection({
                 onChange={(e) => onOnionOpacityChange(parseFloat(e.target.value))}
                 className="w-full accent-indigo-600 cursor-pointer h-1 bg-slate-100 rounded-lg"
               />
+
+              {onToggleColoredOnionSkin && (
+                <div className="flex items-center justify-between pt-0.5">
+                  <span className="text-[10px] font-bold text-slate-600">Apparence du repère</span>
+                  <button
+                    type="button"
+                    onClick={onToggleColoredOnionSkin}
+                    className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-colors cursor-pointer border ${
+                      coloredOnionSkin
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                        : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                    }`}
+                    title="Basculer entre les couleurs d'origine et une silhouette grise en pointillés"
+                  >
+                    {coloredOnionSkin ? 'Couleurs' : 'Silhouette'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

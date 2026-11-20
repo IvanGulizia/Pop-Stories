@@ -1662,6 +1662,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     entityFilterDisplayMode: 'icon_and_text',
     projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
     autoSaveEnabled: true,
+    coloredOnionSkin: true,
   },
 
   updateSettings: (partial) => {
@@ -4234,6 +4235,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const targetKey = rule.trigger.keyName || 'Space';
       const targetNorm = targetKey.toLowerCase();
       const targetCodeNorm = (rule.trigger.keyCode || '').toLowerCase();
+      const isAsciiLetterRule = /^key[a-z]$/.test(targetCodeNorm) && /^[a-z]$/.test(targetNorm);
       const isKeyMatch =
         targetKey === 'any' ||
         targetNorm === normalizedInput ||
@@ -4245,7 +4247,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         (targetKey === 'Shift' && (keyName === 'Shift' || keyCode === 'ShiftLeft' || keyCode === 'ShiftRight')) ||
         (targetKey === 'Control' && (keyName === 'Control' || keyCode === 'ControlLeft' || keyCode === 'ControlRight')) ||
         (targetKey === 'Alt' && (keyName === 'Alt' || keyCode === 'AltLeft' || keyCode === 'AltRight')) ||
-        (targetCodeNorm !== '' && normalizedInputCode !== '' && targetCodeNorm === normalizedInputCode);
+        (targetKey === 'Meta' && (keyName === 'Meta' || keyCode === 'MetaLeft' || keyCode === 'MetaRight')) ||
+        (!isAsciiLetterRule && targetCodeNorm !== '' && normalizedInputCode !== '' && targetCodeNorm === normalizedInputCode);
 
       if (!isKeyMatch) return;
 
@@ -4254,11 +4257,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         matchesEntityFilter(e, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)
       ) || allEnts[0];
 
-      if (!subject) return;
+      const revertKey = `kb_${subject?.id || 'global'}_${rule.id}`;
 
-      const revertKey = `kb_${subject.id}_${rule.id}`;
-
-      if (rule.trigger.autoRevert) {
+      if (rule.trigger.autoRevert && subject) {
         if (phase === 'down') {
           if (!preEventAutoRevertStates[revertKey]) {
             preEventAutoRevertStates[revertKey] = subject.currentStateId;
@@ -4273,17 +4274,15 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         }
       }
 
-      // Verify key event phase ('down' vs 'up')
+      // Accepter down/key_down/enter/click pour appui et up/key_up/exit/release pour relâchement
       const rulePhase = rule.trigger.phase || 'down';
-      const phaseMatch =
-        rulePhase === phase ||
-        (rulePhase === 'key_down' && phase === 'down') ||
-        (rulePhase === 'key_up' && phase === 'up') ||
-        (rulePhase === 'click' && phase === 'down');
+      const isUpRule =
+        rulePhase === 'up' || rulePhase === 'key_up' || rulePhase === 'exit' || rulePhase === 'release';
+      const phaseMatch = phase === 'up' ? isUpRule : !isUpRule;
 
       if (!phaseMatch) return;
 
-      const cooldownKey = `key_${rule.id}_${keyName}_${phase}`;
+      const cooldownKey = `key_${rule.id}_${normalizedInput}_${normalizedInputCode}_${phase}`;
       if (!canRuleFireWithGate(rule, now, 50, { cooldownKey })) return;
       recordRuleFired(rule, now, { cooldownKey });
 

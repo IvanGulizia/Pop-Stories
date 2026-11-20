@@ -145,6 +145,7 @@ export function DrawingCanvas({
 }: DrawingCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const stylusOnlyDrawing = useSceneStore((s) => Boolean(s.settings?.stylusOnlyDrawing));
+  const coloredOnionSkin = useSceneStore((s) => s.settings?.coloredOnionSkin !== false);
   const updateSettings = useSceneStore((s) => s.updateSettings);
   const initialLayersResolved = useMemo<DrawingLayer[]>(
     () =>
@@ -1740,10 +1741,16 @@ export function DrawingCanvas({
                   <path
                     key={`onion-${p.id || idx}`}
                     d={p.d}
-                    stroke="#64748b"
+                    stroke={coloredOnionSkin ? (p.stroke || '#64748b') : '#64748b'}
                     strokeWidth={p.strokeWidth || 4}
-                    strokeDasharray="4 2"
-                    fill={p.fill && p.fill !== 'none' ? '#94a3b8' : 'none'}
+                    strokeDasharray={coloredOnionSkin ? undefined : '4 2'}
+                    fill={
+                      p.fill && p.fill !== 'none'
+                        ? coloredOnionSkin
+                          ? p.fill
+                          : '#94a3b8'
+                        : 'none'
+                    }
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
@@ -2314,6 +2321,8 @@ export function DrawingCanvas({
             onSelectOnionStateId={setSelectedOnionStateId}
             onionOpacity={onionOpacity}
             onOnionOpacityChange={setOnionOpacity}
+            coloredOnionSkin={coloredOnionSkin}
+            onToggleColoredOnionSkin={() => updateSettings({ coloredOnionSkin: !coloredOnionSkin })}
           />
         </div>
 

@@ -664,6 +664,31 @@ export function SettingsPanel({ onOpenClearModal, onOpenSlotsModal }: SettingsPa
                 <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
               </button>
             </div>
+
+            {/* Colored Onion Skin */}
+            {(() => {
+              const isColoredOnionOn = settings.coloredOnionSkin !== false;
+              return (
+                <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200">
+                  <div className="flex items-center gap-2">
+                    <Paintbrush className="w-4 h-4 text-indigo-600" />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-slate-800">Pelure d'oignon colorée</span>
+                      <span className="text-[10px] text-slate-500">Sinon, silhouette grise en pointillés</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => updateSettings({ coloredOnionSkin: !isColoredOnionOn })}
+                    className={`w-8 h-4.5 rounded-full transition-colors p-0.5 cursor-pointer flex items-center shrink-0 ${
+                      isColoredOnionOn ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'
+                    }`}
+                  >
+                    <div className="w-3.5 h-3.5 bg-white rounded-full shadow-xs" />
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
