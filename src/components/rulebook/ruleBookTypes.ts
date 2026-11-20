@@ -12,7 +12,32 @@ import {
   CustomParticlePreset,
   CustomParticleUsageMode,
   SceneTransitionType,
+  CameraFollowMode,
 } from '../../types';
+
+export const SCENE_TRANSITION_OPTIONS: {
+  id: SceneTransitionType;
+  label: string;
+  shortLabel: string;
+}[] = [
+  { id: 'fade', label: '🌑 Fondu au noir', shortLabel: 'Fondu noir' },
+  { id: 'fade_white', label: '⬜ Fondu au blanc', shortLabel: 'Fondu blanc' },
+  { id: 'slide_left', label: '⬅️ Glissement gauche', shortLabel: 'Glissé ←' },
+  { id: 'slide_right', label: '➡️ Glissement droite', shortLabel: 'Glissé →' },
+  { id: 'slide_up', label: '⬆️ Glissement haut', shortLabel: 'Glissé ↑' },
+  { id: 'slide_down', label: '⬇️ Glissement bas', shortLabel: 'Glissé ↓' },
+  { id: 'iris', label: '🎯 Iris (noir)', shortLabel: 'Iris noir' },
+  { id: 'iris_white', label: '⚪ Iris (blanc)', shortLabel: 'Iris blanc' },
+  { id: 'wipe_left', label: '🧹 Balayage', shortLabel: 'Balayage' },
+  { id: 'curtain', label: '🎭 Rideau théâtre', shortLabel: 'Rideau' },
+  { id: 'zoom_fade', label: '🔍 Zoom + fondu', shortLabel: 'Zoom fondu' },
+  { id: 'none', label: '⚡ Instantanée', shortLabel: 'Instantané' },
+];
+
+export function getSceneTransitionShortLabel(transition?: SceneTransitionType): string {
+  const id = transition || 'fade';
+  return SCENE_TRANSITION_OPTIONS.find((opt) => opt.id === id)?.shortLabel || 'Fondu noir';
+}
 
 export type ActiveModal =
   | {
@@ -79,7 +104,8 @@ export type ActiveModal =
         | 'choose_detach_parent'
         | 'choose_move_entity'
         | 'choose_variable_action'
-        | 'choose_scene_action';
+        | 'choose_scene_action'
+        | 'choose_camera_action';
       actionType?: ActionType;
       targetMode?: ActionTargetMode;
       selectedTargetType?: EntityType;
@@ -139,6 +165,19 @@ export type ActiveModal =
       targetSceneId?: string;
       sceneTransition?: SceneTransitionType;
       sceneTransitionDuration?: number;
+      // Camera action config
+      cameraCommand?: 'shake' | 'zoom' | 'follow' | 'move_to' | 'reset';
+      cameraShakeIntensity?: number;
+      cameraShakeDuration?: number;
+      cameraZoom?: number;
+      cameraDuration?: number;
+      cameraFollowMode?: CameraFollowMode;
+      cameraTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned';
+      cameraTargetId?: string;
+      cameraTargetType?: EntityType;
+      cameraTargetTag?: string;
+      cameraPosition?: { x: number; y: number };
+      cameraMoveTargetKind?: 'position' | 'entity';
     }
   | null;
 
@@ -169,7 +208,8 @@ export interface WizardData {
     | 'detach_parent_picker'
     | 'move_entity_picker'
     | 'variable_action_picker'
-    | 'scene_action_picker';
+    | 'scene_action_picker'
+    | 'camera_action_picker';
   delayDuration?: number;
   variableOperation?: 'set' | 'add' | 'subtract' | 'multiply';
   scoreAmount?: number;
@@ -272,6 +312,19 @@ export interface WizardData {
   targetSceneId?: string;
   sceneTransition?: SceneTransitionType;
   sceneTransitionDuration?: number;
+  // Camera action config
+  cameraCommand?: 'shake' | 'zoom' | 'follow' | 'move_to' | 'reset';
+  cameraShakeIntensity?: number;
+  cameraShakeDuration?: number;
+  cameraZoom?: number;
+  cameraDuration?: number;
+  cameraFollowMode?: CameraFollowMode;
+  cameraTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned';
+  cameraTargetId?: string;
+  cameraTargetType?: EntityType;
+  cameraTargetTag?: string;
+  cameraPosition?: { x: number; y: number };
+  cameraMoveTargetKind?: 'position' | 'entity';
 }
 
 export interface EntityOption {

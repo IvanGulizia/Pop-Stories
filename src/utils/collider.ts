@@ -297,6 +297,7 @@ export interface EntityHitTestContext {
   scaleY?: number;
   effPivot?: EntityPivot;
   containerRect?: { left: number; top: number; width: number; height: number } | null;
+  camera?: { x: number; y: number; zoom: number };
 }
 
 /**
@@ -329,8 +330,11 @@ export function isPointInsideEntityCollider(
       : null;
 
   if (resolvedContainerRect && resolvedContainerRect.width > 0 && resolvedContainerRect.height > 0) {
-    const canvasX = clientX - resolvedContainerRect.left;
-    const canvasY = clientY - resolvedContainerRect.top;
+    const camZoom = Math.max(0.1, transformContext?.camera?.zoom ?? 1);
+    const camX = transformContext?.camera?.x ?? 0;
+    const camY = transformContext?.camera?.y ?? 0;
+    const canvasX = (clientX - resolvedContainerRect.left) / camZoom + camX;
+    const canvasY = (clientY - resolvedContainerRect.top) / camZoom + camY;
     const pos = transformContext?.position ?? entity.position;
     const effPivot = transformContext?.effPivot ?? resolveEffectivePivot(entity, currentState);
     const rotDeg = transformContext?.totalRotationDeg ?? (currentState?.rotation ?? 0);

@@ -229,26 +229,78 @@ export function DrawingToolsPanel({
         </div>
       </div>
 
-      {/* Opacité du calque actif (arrière-plan, premier-plan, collider) */}
+      {/* Opacité & Parallaxe du calque actif */}
       {activeLayer && (
-        <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-1">
-          <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
-            <span className="truncate">Opacité ({activeLayer.name})</span>
-            <span className="font-mono text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
-              {Math.round((activeLayer.opacity ?? 1) * 100)}%
-            </span>
+        <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5">
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+              <span className="truncate">Opacité ({activeLayer.name})</span>
+              <span className="font-mono text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+                {Math.round((activeLayer.opacity ?? 1) * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={activeLayer.opacity ?? 1}
+              onChange={(e) =>
+                updateLayer(activeLayer!.id, { opacity: parseFloat(e.target.value) })
+              }
+              className="w-full accent-indigo-600 cursor-pointer h-1.5"
+            />
           </div>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={activeLayer.opacity ?? 1}
-            onChange={(e) =>
-              updateLayer(activeLayer!.id, { opacity: parseFloat(e.target.value) })
-            }
-            className="w-full accent-indigo-600 cursor-pointer h-1.5"
-          />
+
+          {!isColliderLayer && (
+            <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                <span>Parallaxe (Profondeur)</span>
+                <span className="font-mono text-sky-700 bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded">
+                  {(activeLayer.parallaxFactor ?? 1) === 0
+                    ? '0× Fixe'
+                    : `${Number((activeLayer.parallaxFactor ?? 1).toFixed(2))}×`}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1.5}
+                step={0.05}
+                value={activeLayer.parallaxFactor ?? 1}
+                onChange={(e) =>
+                  updateLayer(activeLayer!.id, { parallaxFactor: parseFloat(e.target.value) })
+                }
+                className="w-full accent-sky-600 cursor-pointer h-1.5"
+              />
+              <div className="flex flex-wrap gap-1">
+                {[
+                  { val: 0, label: '0× Fixe' },
+                  { val: 0.3, label: '0.3× Loin' },
+                  { val: 0.6, label: '0.6×' },
+                  { val: 1, label: '1× Normal' },
+                  { val: 1.3, label: '1.3× Avant' },
+                ].map((preset) => {
+                  const curVal = activeLayer.parallaxFactor ?? 1;
+                  const isActive = Math.abs(curVal - preset.val) < 0.025;
+                  return (
+                    <button
+                      key={preset.val}
+                      type="button"
+                      onClick={() => updateLayer(activeLayer!.id, { parallaxFactor: preset.val })}
+                      className={`px-1.5 py-0.5 rounded-lg text-[9px] font-bold border cursor-pointer transition-all ${
+                        isActive
+                          ? 'bg-sky-600 text-white border-sky-600'
+                          : 'bg-white text-slate-600 border-slate-200 hover:border-sky-300'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

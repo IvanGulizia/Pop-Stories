@@ -1,3 +1,15 @@
+## [Phase 10.37] - 2026-11-20
+### Ajouté & Amélioré (Vague 3 — Caméra 2D, Monde Étendu, Zoom, Screen Shake, Parallaxe & 12 Transitions)
+- **12 Transitions de Scènes (`types/index.ts`, `Scene.tsx`, `ruleBookTypes.ts`, `RuleActionModal.tsx`, `WizardStep3Actions.tsx`, `RuleBook.tsx`)** :
+  - Ajout de 7 nouvelles transitions : *Fondu au blanc* (`fade_white`), *Glissé haut/bas* (`slide_up`, `slide_down`), *Iris blanc* (`iris_white`), *Balayage* (`wipe_left`), *Rideau cinéma* (`curtain`) et *Zoom + Fondu* (`zoom_fade`), en plus de `none`, `fade`, `slide_left`, `slide_right` et `iris`.
+- **Caméra 2D, Monde Étendu & Parallaxe des Calques (`cameraSolver.ts`, `cameraRuntime.ts`, `SceneCameraModal.tsx`, `DrawingToolsPanel.tsx`, `Scene.tsx`, `useSceneStore.ts`, `ParticleCanvasOverlay.tsx`)** :
+  - Configuration `SceneCameraConfig` par scène (monde viewport vs dimensions personnalisées `worldWidth × worldHeight`, suivi automatique Entité / Type / `#Tag`, axe `both/horizontal/vertical`, lissage `followSmoothing`, zone morte `deadzoneX/Y`, décalage `offsetX/Y`, bornes `clampToWorld`, zoom `0.25×–3×`, départ `initialX/Y` et affichage des limites en Édition) via la modale dédiée *Caméra & Monde* dans la barre d'en-tête (`App.tsx`).
+  - Navigation Éditeur (zoom molette/boutons `0.25×–3×`, déplacement `Espace + glisser` / clic central, recentrage `1:1`) et boucle 60 FPS en Play par refs DOM directes sans re-render React.
+  - Activation complète de `SceneLayer.parallaxFactor` (`0` fixé à l'écran à `1.5` premier plan rapide) avec réglages dédiés dans `DrawingToolsPanel.tsx`.
+  - Conversion exacte écran ↔ monde dans `useEntityPointerInteraction.ts`, `collider.ts`, `ParticleCanvasOverlay.tsx`, `matterPhysicsEngine.ts` (murs `worldBounds`) et `ruleExecutionEngine.ts` (`boundary` sur `worldBounds`), avec culling d'entités hors champ pour les grands niveaux.
+- **Action RuleBook `camera_action` (`CameraActionEditor.tsx`, `RuleActionModal.tsx`, `WizardStep3Actions.tsx`, `RuleActionSummaryBadge.tsx`, `RuleBook.tsx`)** :
+  - Nouvelle action *Caméra & Effets* supportant `shake` (*Screen Shake* + présets Léger/Moyen/Fort), `zoom` animé, `follow` dynamique, `move_to` (coordonnées ou centrage sur entité) et `reset`.
+
 ## [Phase 10.36] - 2026-11-20
 ### Ajouté & Amélioré (Limites/Délais Universels & Vague 2B — Multi-Scènes + Transitions)
 - **Limites, Cooldown, Délais & Front Montant universels (`types/index.ts`, `store/triggerGate.ts`, `store/ruleExecutionEngine.ts`, `store/useSceneStore.ts`, `components/rulebook/*`)** :

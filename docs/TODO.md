@@ -23,6 +23,10 @@
 - [x] **Limites, Cooldown, Délais & Front Montant universels (`triggerGate.ts`, `TriggerLimitsSection.tsx`)** : `triggerMaxCount` (`∞` / `1×` / `N×`), `triggerCooldownSec`, `triggerStartDelaySec`, `triggerRequireReset` (*1× par passage*) sur tous les événements + exécution `'state_change'`.
 - [x] **Multi-Scènes & Transitions (`ProjectScene[]`, `App.tsx`, `Scene.tsx`, `RuleBook`)** : Onglets de scènes, fond par scène, action `change_scene` (`none`, `fade`, `slide_left`, `slide_right`, `iris`), conservation de `gameVariables` inter-scènes.
 
+## Complété récemment — Vague 3 : Caméra 2D, Monde Étendu, Parallaxe & 12 Transitions (Phase 10.37)
+- [x] **12 Transitions de Scènes** : Ajout de *Fondu au blanc* (`fade_white`), *Glissé haut/bas*, *Iris blanc*, *Balayage*, *Rideau* et *Zoom + Fondu*.
+- [x] **Caméra 2D, Monde Étendu, Zoom, Screen Shake & Parallaxe** : Config par scène (`SceneCameraModal`), suivi smooth/deadzone/bornes, HUD navigation Édition, `parallaxFactor` actif sur les calques décor, particules/pointeur/physique en espace monde et action RuleBook `camera_action`.
+
 ## En Pause / Planifié pour plus tard (Corde Élastique & Vague 2B)
 - [ ] **Comportement `corde` / Corde élastique + Line Renderer SVG** :
   - Contrainte physique souple (distance max / élasticité, tirage vers le bas avec résistance pour interrupteur/lampe ou balancement).
@@ -37,8 +41,8 @@
 ## À venir (Pistes futures & Chantiers Planifiés)
 - [x] **Wiggle sur les traits ("Boiling Lines")** : Comportement `stroke_wiggle` avec amplitude, fréquence `1–24 Hz`, finesse, aperçu Édition et cache de variantes déterministes.
 - [x] **Compatibilité iPad / Stylet (Base)** : Drag `PointerEvent` galerie → scène + bouton *Placer*, `h-dvh` / `safe-area`, et mode *Stylet seul* (`stylusOnlyDrawing`, rejet paume). *(Pression/inclinaison Apple Pencil à coupler avec les Brushes personnalisées).*
-- [x] **Multi-Scènes & Transitions** : Gestionnaire de plusieurs scènes dans le projet, règle/action `Changer de scène` avec transition visuelle (`none`, `fade`, `slide_left`, `slide_right`, `iris`) et variables persistantes entre scènes.
-- [ ] **Caméra 2D, Grand Environnement & Parallaxe** : Monde étendu au-delà du viewport, suivi caméra (smooth follow + deadzone + look-ahead), zoom dynamique, *Screen Shake* / effets caméra, et activation réelle de `SceneLayer.parallaxFactor`.
+- [x] **Multi-Scènes & Transitions** : Gestionnaire de plusieurs scènes dans le projet, règle/action `Changer de scène` avec transition visuelle (`12` variantes dont *Fondu au blanc*) et variables persistantes entre scènes.
+- [x] **Caméra 2D, Grand Environnement & Parallaxe** : Monde étendu au-delà du viewport, suivi caméra (smooth follow + deadzone + axes), zoom dynamique, *Screen Shake* / effets caméra, et activation réelle de `SceneLayer.parallaxFactor`.
 - [ ] **Brushes Personnalisées** : Système de brosses avancées (texture/tampon, modulation épaisseur/pression stylet, rendu optimisé) selon cahier des charges utilisateur à définir.
 - [ ] **Prefabs & Véhicules Physiques (2 roues + suspensions)** : Assemblage multi-entités réutilisable et spawnable d'un bloc (châssis + 2 roues motrices + suspensions `physics_joint`/ressort + comportement conduite clavier + inclinaison en vol).
 - [ ] **Mécanique de Tir + Onglet Schéma Visuel de Presets & Refonte UI (Long terme)** :

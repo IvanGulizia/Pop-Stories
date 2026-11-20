@@ -42,8 +42,11 @@ import {
   SpawnRandomZone,
   ProjectScene,
   SceneTransitionType,
+  SceneCameraConfig,
 } from '../types';
 import { getEntityWorldColliderBounds } from '../utils/collider';
+import { DEFAULT_SCENE_CAMERA_CONFIG, resolveWorldBounds } from '../utils/cameraSolver';
+import { initPlayCameraRuntime, resetPlayCameraRuntime } from '../utils/cameraRuntime';
 import {
   resetMatterPhysicsRuntime,
   checkEntityAgainstColliderLayer,
@@ -178,6 +181,9 @@ function buildDefaultScene(
       ? normalizeLayerGroups(overrides.layerGroups)
       : JSON.parse(JSON.stringify(initialSceneLayerGroups)),
     backgroundColor: overrides?.backgroundColor || '#ffffff',
+    camera: overrides?.camera
+      ? { ...DEFAULT_SCENE_CAMERA_CONFIG, ...overrides.camera }
+      : { ...DEFAULT_SCENE_CAMERA_CONFIG },
   };
 }
 
@@ -190,6 +196,7 @@ function syncActiveSceneIntoScenes(state: {
   folders: RuleFolder[];
   layerGroups: SceneLayerGroup[];
   backgroundColor?: string;
+  camera?: SceneCameraConfig;
 }): ProjectScene[] {
   const currentSnapshot: ProjectScene = {
     id: state.activeSceneId || DEFAULT_SCENE_ID,
@@ -201,6 +208,7 @@ function syncActiveSceneIntoScenes(state: {
     folders: JSON.parse(JSON.stringify(state.folders || [])),
     layerGroups: JSON.parse(JSON.stringify(state.layerGroups || [])),
     backgroundColor: state.backgroundColor || '#ffffff',
+    camera: { ...DEFAULT_SCENE_CAMERA_CONFIG, ...(state.camera || {}) },
   };
   const idx = state.scenes.findIndex((s) => s.id === currentSnapshot.id);
   if (idx === -1) {
@@ -290,6 +298,11 @@ interface SceneState {
   scenes: ProjectScene[];
   activeSceneId: string;
   backgroundColor: string;
+  camera: SceneCameraConfig;
+  editorCamera: { x: number; y: number; zoom: number };
+  updateSceneCamera: (partial: Partial<SceneCameraConfig>) => void;
+  setEditorCamera: (partial: Partial<{ x: number; y: number; zoom: number }>) => void;
+  resetEditorCamera: () => void;
   snapshotScenes: ProjectScene[] | null;
   snapshotActiveSceneId: string | null;
   activeSceneTransition: {
@@ -932,6 +945,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   ],
   activeSceneId: DEFAULT_SCENE_ID,
   backgroundColor: '#ffffff',
+  camera: { ...DEFAULT_SCENE_CAMERA_CONFIG },
+  editorCamera: { x: 0, y: 0, zoom: 1 },
   snapshotScenes: null,
   snapshotActiveSceneId: null,
   activeSceneTransition: null,
@@ -939,6 +954,42 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   snapshotEntityOrder: null,
   snapshotRules: null,
   currentSlotId: null,
+
+  updateSceneCamera: (partial) => {
+    set((state) => {
+      const nextCamera: SceneCameraConfig = {
+        ...DEFAULT_SCENE_CAMERA_CONFIG,
+        ...state.camera,
+        ...partial,
+      };
+      return {
+        camera: nextCamera,
+        scenes: state.scenes.map((s) =>
+          s.id === state.activeSceneId ? { ...s, camera: nextCamera } : s
+        ),
+      };
+    });
+  },
+
+  setEditorCamera: (partial) => {
+    set((state) => {
+      const nextZoom =
+        partial.zoom !== undefined
+          ? Math.max(0.25, Math.min(3, Math.round(partial.zoom * 1000) / 1000))
+          : state.editorCamera.zoom;
+      return {
+        editorCamera: {
+          x: partial.x !== undefined && Number.isFinite(partial.x) ? partial.x : state.editorCamera.x,
+          y: partial.y !== undefined && Number.isFinite(partial.y) ? partial.y : state.editorCamera.y,
+          zoom: nextZoom,
+        },
+      };
+    });
+  },
+
+  resetEditorCamera: () => {
+    set({ editorCamera: { x: 0, y: 0, zoom: 1 } });
+  },
 
   createScene: (name) => {
     const state = get();
@@ -959,6 +1010,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       folders: JSON.parse(JSON.stringify(newScene.folders)),
       layerGroups: JSON.parse(JSON.stringify(newScene.layerGroups)),
       backgroundColor: newScene.backgroundColor || '#ffffff',
+      camera: { ...DEFAULT_SCENE_CAMERA_CONFIG, ...(newScene.camera || {}) },
+      editorCamera: { x: 0, y: 0, zoom: 1 },
       selectedEntityId: null,
       selectedLayerId: null,
       activeCollisions: {},
@@ -988,6 +1041,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       folders: JSON.parse(JSON.stringify(target.folders || initialFolders)),
       layerGroups: normalizeLayerGroups(target.layerGroups),
       backgroundColor: target.backgroundColor || '#ffffff',
+      camera: { ...DEFAULT_SCENE_CAMERA_CONFIG, ...(target.camera || {}) },
+      editorCamera: { x: 0, y: 0, zoom: 1 },
       selectedEntityId: targetOrder[0] || null,
       selectedLayerId: null,
       activeCollisions: {},
@@ -1029,6 +1084,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       folders: JSON.parse(JSON.stringify(cloned.folders || initialFolders)),
       layerGroups: normalizeLayerGroups(cloned.layerGroups),
       backgroundColor: cloned.backgroundColor || '#ffffff',
+      camera: { ...DEFAULT_SCENE_CAMERA_CONFIG, ...(cloned.camera || {}) },
+      editorCamera: { x: 0, y: 0, zoom: 1 },
       selectedEntityId: targetOrder[0] || null,
       selectedLayerId: null,
       activeCollisions: {},
@@ -1061,6 +1118,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         folders: JSON.parse(JSON.stringify(nextScene.folders || initialFolders)),
         layerGroups: normalizeLayerGroups(nextScene.layerGroups),
         backgroundColor: nextScene.backgroundColor || '#ffffff',
+        camera: { ...DEFAULT_SCENE_CAMERA_CONFIG, ...(nextScene.camera || {}) },
+        editorCamera: { x: 0, y: 0, zoom: 1 },
         selectedEntityId: nextOrder[0] || null,
         selectedLayerId: null,
         activeCollisions: {},
@@ -1118,6 +1177,11 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         target.entityOrder && target.entityOrder.length > 0
           ? [...target.entityOrder]
           : Object.keys(targetEntities);
+      const targetCamera: SceneCameraConfig = {
+        ...DEFAULT_SCENE_CAMERA_CONFIG,
+        ...(target.camera || {}),
+      };
+      initPlayCameraRuntime(targetCamera, cur.sceneBounds, targetEntities);
 
       set({
         activeSceneId: target.id,
@@ -1127,6 +1191,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         folders: JSON.parse(JSON.stringify(target.folders || initialFolders)),
         layerGroups: normalizeLayerGroups(target.layerGroups),
         backgroundColor: target.backgroundColor || '#ffffff',
+        camera: targetCamera,
         snapshotScenes: updatedSnapshotScenes,
         activeCollisions: {},
         selectedEntityId: null,
@@ -1811,6 +1876,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const snapshot = JSON.parse(JSON.stringify(curState.entities));
       const orderSnapshot = [...(curState.entityOrder || Object.keys(curState.entities))];
       const resetVars = { score: 0, ...curState.initialGameVariables };
+      initPlayCameraRuntime(curState.camera, curState.sceneBounds, curState.entities);
       set({
         appMode: 'play',
         scenes: syncedScenes,
@@ -1831,6 +1897,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       resetMatterPhysicsRuntime();
       clearParticles();
       clearPlayRuntimeState();
+      resetPlayCameraRuntime();
       const {
         snapshotScenes,
         snapshotActiveSceneId,
@@ -1869,6 +1936,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           folders: JSON.parse(JSON.stringify(startScene.folders || initialFolders)),
           layerGroups: normalizeLayerGroups(startScene.layerGroups),
           backgroundColor: startScene.backgroundColor || '#ffffff',
+          camera: { ...DEFAULT_SCENE_CAMERA_CONFIG, ...(startScene.camera || {}) },
           activeSceneTransition: null,
           activeCollisions: {},
           appMode: 'edit',
@@ -1911,6 +1979,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       snapshotEntities,
       snapshotEntityOrder,
       initialGameVariables,
+      sceneBounds,
+      camera,
     } = get();
     const resetVars = { score: 0, ...initialGameVariables };
     if (snapshotScenes && snapshotScenes.length > 0) {
@@ -1930,6 +2000,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         startScene.entityOrder && startScene.entityOrder.length > 0
           ? [...startScene.entityOrder]
           : Object.keys(restoredEntities);
+      const startCam: SceneCameraConfig = { ...DEFAULT_SCENE_CAMERA_CONFIG, ...(startScene.camera || {}) };
+      initPlayCameraRuntime(startCam, sceneBounds, restoredEntities);
       set({
         snapshotScenes: mergedScenes,
         scenes: JSON.parse(JSON.stringify(mergedScenes)),
@@ -1940,14 +2012,17 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         folders: JSON.parse(JSON.stringify(startScene.folders || initialFolders)),
         layerGroups: normalizeLayerGroups(startScene.layerGroups),
         backgroundColor: startScene.backgroundColor || '#ffffff',
+        camera: startCam,
         activeSceneTransition: null,
         activeCollisions: {},
         gameVariables: resetVars,
         gameScore: resetVars.score ?? 0,
       });
     } else if (snapshotEntities) {
+      const restoredEnts = JSON.parse(JSON.stringify(snapshotEntities));
+      initPlayCameraRuntime(camera, sceneBounds, restoredEnts);
       set({
-        entities: JSON.parse(JSON.stringify(snapshotEntities)),
+        entities: restoredEnts,
         entityOrder: snapshotEntityOrder ? [...snapshotEntityOrder] : Object.keys(snapshotEntities),
         activeSceneTransition: null,
         activeCollisions: {},
@@ -3406,6 +3481,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   clearProject: () => {
     clearPlayRuntimeState();
+    resetPlayCameraRuntime();
     const emptyScene = buildDefaultScene(DEFAULT_SCENE_ID, 'Scène 1');
     set({
       entities: {},
@@ -3418,6 +3494,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       customParticles: [],
       layerGroups: JSON.parse(JSON.stringify(emptyScene.layerGroups)),
       backgroundColor: '#ffffff',
+      camera: { ...DEFAULT_SCENE_CAMERA_CONFIG },
+      editorCamera: { x: 0, y: 0, zoom: 1 },
       scenes: [emptyScene],
       activeSceneId: DEFAULT_SCENE_ID,
       snapshotScenes: null,
@@ -3441,6 +3519,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   restoreDefaultScene: () => {
     clearPlayRuntimeState();
+    resetPlayCameraRuntime();
     const defScene = buildDefaultScene(DEFAULT_SCENE_ID, 'Scène 1', {
       entities: initialEntities,
       entityOrder: ['plant-1', 'apple-1'],
@@ -3460,6 +3539,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       customParticles: [],
       layerGroups: JSON.parse(JSON.stringify(defScene.layerGroups)),
       backgroundColor: '#ffffff',
+      camera: { ...DEFAULT_SCENE_CAMERA_CONFIG },
+      editorCamera: { x: 0, y: 0, zoom: 1 },
       scenes: [defScene],
       activeSceneId: DEFAULT_SCENE_ID,
       snapshotScenes: null,
@@ -3486,6 +3567,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   loadTestScenePreset: (presetId) => {
     get().pushSceneHistory();
     clearPlayRuntimeState();
+    resetPlayCameraRuntime();
     const built = buildPhysicsTestScene(presetId);
     const curGizmos = resolveGizmoSettings(get().settings);
     const presetScene = buildDefaultScene(DEFAULT_SCENE_ID, 'Scène 1', {
@@ -3507,6 +3589,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       customParticles: [],
       layerGroups: built.layerGroups,
       backgroundColor: '#ffffff',
+      camera: { ...DEFAULT_SCENE_CAMERA_CONFIG },
+      editorCamera: { x: 0, y: 0, zoom: 1 },
       scenes: [presetScene],
       activeSceneId: DEFAULT_SCENE_ID,
       snapshotScenes: null,
@@ -3554,6 +3638,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       customParticles: state.customParticles,
       layerGroups: state.layerGroups,
       backgroundColor: state.backgroundColor,
+      camera: state.camera,
       scenes: syncedScenes,
       activeSceneId: state.activeSceneId,
       settings: {
@@ -3575,6 +3660,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       }
 
       clearPlayRuntimeState();
+      resetPlayCameraRuntime();
 
       let importedScenes: ProjectScene[] = [];
       if (Array.isArray(data.scenes) && data.scenes.length > 0) {
@@ -3593,6 +3679,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
               folders: Array.isArray(sc?.folders) ? sc.folders : initialFolders,
               layerGroups: sc?.layerGroups,
               backgroundColor: sc?.backgroundColor || '#ffffff',
+              camera: sc?.camera,
             }
           );
         });
@@ -3609,6 +3696,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
             folders: Array.isArray(data.folders) ? data.folders : initialFolders,
             layerGroups: data.layerGroups,
             backgroundColor: data.backgroundColor || '#ffffff',
+            camera: data.camera,
           }),
         ];
       }
@@ -3666,6 +3754,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         scenes: importedScenes,
         activeSceneId: targetActiveScene.id,
         backgroundColor: targetActiveScene.backgroundColor || '#ffffff',
+        camera: { ...DEFAULT_SCENE_CAMERA_CONFIG, ...(targetActiveScene.camera || {}) },
+        editorCamera: { x: 0, y: 0, zoom: 1 },
         entities: importedEntities,
         entityOrder: importedOrder,
         customArchetypes: importedArchetypes,
@@ -4482,7 +4572,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     if (getIsEvaluatingRules()) return;
     setIsEvaluatingRules(true);
     try {
-      const { entities, rules, activeCollisions, sceneBounds, layerGroups, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
+      const { entities, rules, activeCollisions, sceneBounds, camera, layerGroups, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
       const collisionRules = rules.filter((r) => r.enabled && r.trigger.type === 'collision');
 
       // Fusionner les positions des entités actuellement déplacées à la souris (activeDragPositions)
@@ -4497,8 +4587,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const nextCollisions: Record<string, boolean> = { ...activeCollisions };
       const allEntitiesList = Object.values(entities);
       const now = Date.now();
-      const sceneW = Math.max(100, sceneBounds?.width || 800);
-      const sceneH = Math.max(100, sceneBounds?.height || 500);
+      const worldBounds = resolveWorldBounds(sceneBounds || { width: 800, height: 500 }, camera);
+      const sceneW = Math.max(100, worldBounds.width);
+      const sceneH = Math.max(100, worldBounds.height);
 
       // Index des paires d'IDs déjà en contact actif sur au moins une règle (évite qu'une règle Exit rate le verrou après un rétrécissement dû à une règle Enter)
       const activeEntityContactPairs = new Set<string>();

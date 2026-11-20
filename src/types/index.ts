@@ -696,7 +696,52 @@ export interface RuleTrigger {
 
 export type ActionTargetMode = 'subject' | 'target' | 'type' | 'tag' | 'instance' | 'last_spawned';
 
-export type SceneTransitionType = 'none' | 'fade' | 'slide_left' | 'slide_right' | 'iris';
+export type SceneTransitionType =
+  | 'none'
+  | 'fade'
+  | 'fade_white'
+  | 'slide_left'
+  | 'slide_right'
+  | 'slide_up'
+  | 'slide_down'
+  | 'iris'
+  | 'iris_white'
+  | 'wipe_left'
+  | 'curtain'
+  | 'zoom_fade';
+
+export type CameraFollowMode = 'none' | 'entity' | 'type' | 'tag';
+export type CameraFollowAxis = 'both' | 'horizontal' | 'vertical';
+
+export interface SceneCameraConfig {
+  worldMode?: 'viewport' | 'custom';
+  worldWidth?: number;
+  worldHeight?: number;
+  followMode?: CameraFollowMode;
+  followEntityId?: EntityId;
+  followEntityType?: EntityType;
+  followTag?: string;
+  followAxis?: CameraFollowAxis;
+  followSmoothing?: number; // 0.02..1 (défaut 0.14)
+  deadzoneX?: number;       // px (défaut 0)
+  deadzoneY?: number;       // px (défaut 0)
+  offsetX?: number;         // px (défaut 0)
+  offsetY?: number;         // px (défaut 0)
+  clampToWorld?: boolean;   // défaut true
+  zoom?: number;            // 0.25..3 (défaut 1)
+  initialX?: number;        // défaut 0
+  initialY?: number;        // défaut 0
+  showWorldBoundsInEdit?: boolean; // défaut true
+}
+
+export interface CameraRuntimeState {
+  x: number;
+  y: number;
+  zoom: number;
+  shakeX: number;
+  shakeY: number;
+  shakeRotation: number;
+}
 
 export type ActionType =
   | 'change_state'
@@ -712,7 +757,8 @@ export type ActionType =
   | 'detach_parent'
   | 'emit_particles'
   | 'move_entity'
-  | 'change_scene';
+  | 'change_scene'
+  | 'camera_action';
 
 export type SpawnLocationMode =
   | 'at_subject'
@@ -872,6 +918,19 @@ export interface RuleAction {
   targetSceneId?: string;
   sceneTransition?: SceneTransitionType;
   sceneTransitionDuration?: number;
+
+  // Champs pour 'camera_action'
+  cameraCommand?: 'shake' | 'zoom' | 'follow' | 'move_to' | 'reset';
+  cameraShakeIntensity?: number;
+  cameraShakeDuration?: number;
+  cameraZoom?: number;
+  cameraDuration?: number;
+  cameraFollowMode?: CameraFollowMode;
+  cameraTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned';
+  cameraTargetId?: EntityId;
+  cameraTargetType?: EntityType;
+  cameraTargetTag?: string;
+  cameraPosition?: Position;
 }
 
 export interface DynamicRule {
@@ -1008,6 +1067,7 @@ export interface ProjectScene {
   folders: RuleFolder[];
   layerGroups: SceneLayerGroup[];
   backgroundColor?: string;
+  camera?: SceneCameraConfig;
 }
 
 export interface ProjectExportData {
@@ -1023,6 +1083,7 @@ export interface ProjectExportData {
   customParticles?: CustomParticlePreset[];
   layerGroups?: SceneLayerGroup[];
   backgroundColor?: string;
+  camera?: SceneCameraConfig;
   scenes?: ProjectScene[];
   activeSceneId?: string;
   settings?: AppSettings;

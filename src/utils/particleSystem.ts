@@ -118,7 +118,8 @@ export interface ParticlePoolInstance {
     ctx: CanvasRenderingContext2D,
     width: number,
     height: number,
-    dt: number
+    dt: number,
+    camera?: { x: number; y: number; zoom: number }
   ) => boolean;
 }
 
@@ -238,9 +239,17 @@ export function createParticlePool(maxParticles: number = DEFAULT_MAX_PARTICLES)
     ctx: CanvasRenderingContext2D,
     width: number,
     height: number,
-    dt: number
+    dt: number,
+    camera?: { x: number; y: number; zoom: number }
   ): boolean => {
     ctx.clearRect(0, 0, width, height);
+
+    ctx.save();
+    if (camera) {
+      const safeZoom = Math.max(0.1, camera.zoom || 1);
+      ctx.scale(safeZoom, safeZoom);
+      ctx.translate(-(camera.x || 0), -(camera.y || 0));
+    }
 
     let anyActive = false;
     const clampedDt = Math.min(dt, 0.05);
@@ -341,6 +350,7 @@ export function createParticlePool(maxParticles: number = DEFAULT_MAX_PARTICLES)
       ctx.restore();
     }
 
+    ctx.restore();
     ctx.globalAlpha = 1;
     return anyActive;
   };
@@ -366,7 +376,8 @@ export function stepAndRenderParticles(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
-  dt: number
+  dt: number,
+  camera?: { x: number; y: number; zoom: number }
 ): boolean {
-  return defaultScenePool.stepAndRender(ctx, width, height, dt);
+  return defaultScenePool.stepAndRender(ctx, width, height, dt, camera);
 }

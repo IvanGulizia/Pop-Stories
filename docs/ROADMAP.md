@@ -28,8 +28,8 @@ Ce projet suit un développement itératif structuré pour garder une expérienc
    - [x] **Vague 2A — Wiggle++, Variables de jeu (`gameVariables`) & Comportement `slider` contraint (Complété — Phase 10.35)** : `segmentStep`, `verticalScale`, `endpointStability`, `seed`, liaisons `gameVariables`, tiroir Variables & action `set_variable` dans le `RuleBook`, rail 1D / zone 2D / disque, drag direct vs ressort, crantage strict/magnétique, retour élastique.
    - [x] **Vague 2B — Multi-Scènes & Transitions (Complété — Phase 10.36)** : `scenes[]` au niveau projet, barre de scènes, action `change_scene` (`none`, `fade`, `slide_left`, `slide_right`, `iris`), conservation de `gameVariables` inter-scènes et limites/délais universels sur les événements.
    - [ ] **Corde Élastique & Line Renderer SVG** : Contrainte souple (tension/balancement) + tracé SVG dynamique entre ancres (phase dédiée à suivre).
-3. **Chantier C — Monde Étendu & Caméra (Prérequis pour véhicules & tir)** :
-   - **Caméra 2D & Grand Environnement** : Caméra (`follow`, zoom, bornes, *screen shake*, transitions), culling/optimisation viewport, et activation du `parallaxFactor` déjà présent sur `SceneLayer`.
+3. **Chantier C — Monde Étendu & Caméra (Complété — Phase 10.37)** :
+   - [x] **Caméra 2D, Grand Environnement, Zoom, Screen Shake & Parallaxe (`cameraSolver.ts`, `cameraRuntime.ts`, `SceneCameraModal.tsx`)** : Monde étendu paramétrable par scène, suivi caméra (`follow`, smoothing, deadzone, axes, bornes), zoom `0.25×–3×`, *Screen Shake* et actions caméra dans le `RuleBook`, HUD de navigation Édition, activation du `parallaxFactor` (`0–1.5`) sur `SceneLayer`, et 12 transitions de scènes dont *Fondu au blanc*.
 4. **Chantier D — Animation & Pinceaux Avancés** :
    - **Animation Avancée (ADR-006)** : Keyframes intra-état par calques puis transitions interpolées inter-états.
    - **Brushes Personnalisées** : Moteur de pinceau à empreintes/tampons/pression stylet ou rubans SVG/Canvas optimisés.

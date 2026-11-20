@@ -9,6 +9,7 @@ import {
   ParentOffset,
   Position,
   RuleAction,
+  SceneCameraConfig,
   SceneTransitionType,
   Size,
   StateId,
@@ -21,6 +22,8 @@ import {
 } from '../utils/matterPhysicsEngine';
 import { emitParticlesBurst } from '../utils/particleSystem';
 import { soundSynth } from '../utils/sound';
+import { dispatchPlayCameraAction } from '../utils/cameraRuntime';
+import { resolveWorldBounds } from '../utils/cameraSolver';
 import { getCollisionContactPoint } from './collisionHelpers';
 import { resolveEntityReference } from './parentingHelpers';
 import { computeRandomSpawnPosition } from '../utils/spawnHelpers';
@@ -38,6 +41,7 @@ export interface RuleEngineStoreSnapshot {
   customSounds: CustomSound[];
   entities: Record<EntityId, Entity>;
   sceneBounds: Size;
+  camera?: SceneCameraConfig;
   customArchetypes: Record<string, Entity>;
   setEntityParent: (childId: EntityId, parentId: EntityId | null, customOffset?: ParentOffset) => void;
   detachEntity: (childId: EntityId) => void;
@@ -399,7 +403,23 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
 
   // Toujours lire l'état à jour des entités (utile après un spawn ou un délai)
   const liveEntities = bridgeSnap?.entities || helpers.allEntities;
-  const sceneBounds = bridgeSnap?.sceneBounds || { width: 800, height: 500 };
+  const viewportBounds = bridgeSnap?.sceneBounds || { width: 800, height: 500 };
+  const sceneBounds = resolveWorldBounds(viewportBounds, bridgeSnap?.camera);
+
+  if (act.type === 'camera_action') {
+    dispatchPlayCameraAction(
+      act,
+      {
+        subject: helpers.subject,
+        target: helpers.target,
+        entities: liveEntities,
+        lastSpawnedId: lastSpawnedEntityId,
+      },
+      viewportBounds,
+      bridgeSnap?.camera
+    );
+    return;
+  }
 
   if (act.type === 'emit_particles') {
     const originMode = act.particleOriginMode || (helpers.target ? 'target' : 'subject');

@@ -38,6 +38,7 @@ import {
   ActiveModal,
   ParticleDrawingTarget,
   WizardData,
+  getSceneTransitionShortLabel,
 } from './rulebook/ruleBookTypes';
 import {
   formatEntityStateName,
@@ -299,6 +300,8 @@ export function RuleBook() {
         ? 'choose_variable_action'
         : act.type === 'change_scene'
         ? 'choose_scene_action'
+        : act.type === 'camera_action'
+        ? 'choose_camera_action'
         : 'main';
 
     setActiveModal({
@@ -360,6 +363,18 @@ export function RuleBook() {
       targetSceneId: act.targetSceneId,
       sceneTransition: act.sceneTransition ?? 'fade',
       sceneTransitionDuration: act.sceneTransitionDuration ?? 0.45,
+      cameraCommand: act.cameraCommand ?? 'shake',
+      cameraShakeIntensity: act.cameraShakeIntensity ?? 12,
+      cameraShakeDuration: act.cameraShakeDuration ?? 0.35,
+      cameraZoom: act.cameraZoom ?? 1.25,
+      cameraDuration: act.cameraDuration ?? 0.45,
+      cameraFollowMode: act.cameraFollowMode ?? 'entity',
+      cameraTargetMode: act.cameraTargetMode ?? 'subject',
+      cameraTargetId: act.cameraTargetId,
+      cameraTargetType: act.cameraTargetType,
+      cameraTargetTag: act.cameraTargetTag,
+      cameraPosition: act.cameraPosition,
+      cameraMoveTargetKind: act.cameraPosition ? 'position' : 'entity',
     });
   };
 
@@ -579,6 +594,7 @@ export function RuleBook() {
           (a.soundType || '').toLowerCase().includes(q) ||
           (a.spawnEntityType || '').toLowerCase().includes(q) ||
           (a.variableName || '').toLowerCase().includes(q) ||
+          (a.cameraCommand || '').toLowerCase().includes(q) ||
           (a.type || '').toLowerCase().includes(q)
         );
       });
@@ -2181,20 +2197,34 @@ export function RuleBook() {
                             actionDetail = `Délai : ${act.delayDuration || 1}s`;
                           } else if (act.type === 'change_scene') {
                             actionBadge = 'Changer Scène';
-                            const transLabel =
-                              act.sceneTransition === 'none'
-                                ? 'Instantané'
-                                : act.sceneTransition === 'slide_left'
-                                ? 'Glissé ←'
-                                : act.sceneTransition === 'slide_right'
-                                ? 'Glissé →'
-                                : act.sceneTransition === 'iris'
-                                ? 'Iris'
-                                : 'Fondu';
+                            const transLabel = getSceneTransitionShortLabel(act.sceneTransition);
                             actionDetail =
                               act.sceneTransition === 'none'
                                 ? transLabel
                                 : `${transLabel} (${(act.sceneTransitionDuration ?? 0.45).toFixed(2)}s)`;
+                          } else if (act.type === 'camera_action') {
+                            actionBadge = 'Caméra';
+                            const cmd = act.cameraCommand || 'shake';
+                            if (cmd === 'shake') {
+                              actionDetail = `Secousse (${Math.round(act.cameraShakeIntensity ?? 12)}px • ${(act.cameraShakeDuration ?? 0.35).toFixed(2)}s)`;
+                            } else if (cmd === 'zoom') {
+                              actionDetail = `Zoom ${(act.cameraZoom ?? 1.25).toFixed(2)}× (${(act.cameraDuration ?? 0.45).toFixed(2)}s)`;
+                            } else if (cmd === 'follow') {
+                              actionDetail =
+                                act.cameraFollowMode === 'none'
+                                  ? 'Arrêter suivi'
+                                  : act.cameraFollowMode === 'type'
+                                  ? `Suivre ${act.cameraTargetType || 'type'}`
+                                  : act.cameraFollowMode === 'tag'
+                                  ? `Suivre #${act.cameraTargetTag || 'tag'}`
+                                  : 'Suivre cible';
+                            } else if (cmd === 'move_to') {
+                              actionDetail = act.cameraPosition
+                                ? `Aller à (${Math.round(act.cameraPosition.x)}, ${Math.round(act.cameraPosition.y)})`
+                                : 'Centrer sur cible';
+                            } else {
+                              actionDetail = `Reset (${(act.cameraDuration ?? 0.4).toFixed(2)}s)`;
+                            }
                           }
 
                           const detailSubStep: Extract<NonNullable<ActiveModal>, { type: 'action' }>['subStep'] =
@@ -2220,6 +2250,8 @@ export function RuleBook() {
                               ? 'choose_delay_duration'
                               : act.type === 'change_scene'
                               ? 'choose_scene_action'
+                              : act.type === 'camera_action'
+                              ? 'choose_camera_action'
                               : 'main';
 
                           const actionSlotKey = `${rule.id}-act-${act.id}`;
@@ -2330,6 +2362,10 @@ export function RuleBook() {
                                   <div className="w-14 h-14 rounded-2xl bg-violet-50 border border-violet-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
                                     🎬
                                   </div>
+                                ) : act.type === 'camera_action' ? (
+                                  <div className="w-14 h-14 rounded-2xl bg-cyan-50 border border-cyan-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                    🎥
+                                  </div>
                                 ) : (
                                   <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
                                     <EntityMiniPreview
@@ -2355,6 +2391,16 @@ export function RuleBook() {
                                       ? act.variableName || 'score'
                                       : act.type === 'change_scene'
                                       ? scenes.find((s) => s.id === act.targetSceneId)?.name || 'Scène'
+                                      : act.type === 'camera_action'
+                                      ? act.cameraCommand === 'zoom'
+                                        ? 'Zoom Caméra'
+                                        : act.cameraCommand === 'follow'
+                                        ? 'Suivi Caméra'
+                                        : act.cameraCommand === 'move_to'
+                                        ? 'Déplacer Caméra'
+                                        : act.cameraCommand === 'reset'
+                                        ? 'Reset Caméra'
+                                        : 'Screen Shake'
                                       : act.targetMode === 'subject'
                                       ? `Sujet (${subjectOpt?.label || 'Objet'})`
                                       : act.targetMode === 'target'

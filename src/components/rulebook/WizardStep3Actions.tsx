@@ -15,13 +15,18 @@ import {
   Entity,
   ParticleShape,
   RuleAction,
-  SceneTransitionType,
 } from '../../types';
 import { EntityMiniPreview } from '../EntityMiniPreview';
 import { SpawnLocationPicker } from '../SpawnLocationPicker';
 import { invalidateCustomParticleSprite } from '../../utils/particleSystem';
 import { soundSynth } from '../../utils/sound';
-import { EntityOption, ParticleDrawingTarget, WizardData } from './ruleBookTypes';
+import {
+  EntityOption,
+  ParticleDrawingTarget,
+  SCENE_TRANSITION_OPTIONS,
+  WizardData,
+} from './ruleBookTypes';
+import { CameraActionEditor } from './CameraActionEditor';
 import { useSceneStore, EMPTY_RECORD, EMPTY_LIST } from '../../store/useSceneStore';
 
 interface WizardStep3ActionsProps {
@@ -692,6 +697,35 @@ export function WizardStep3Actions({
                       </div>
                       <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                         Naviguer vers une autre scène (avec transition)
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* 4.8. Caméra & Effets */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveWizard({
+                        ...activeWizard,
+                        actionSubStep: 'camera_action_picker',
+                        cameraCommand: activeWizard.cameraCommand || 'shake',
+                        cameraShakeIntensity: activeWizard.cameraShakeIntensity ?? 12,
+                        cameraShakeDuration: activeWizard.cameraShakeDuration ?? 0.35,
+                        cameraZoom: activeWizard.cameraZoom ?? 1.4,
+                        cameraDuration: activeWizard.cameraDuration ?? 0.45,
+                      });
+                    }}
+                    className="w-full p-3.5 bg-white hover:bg-cyan-50/70 border-2 border-slate-200 hover:border-cyan-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-cyan-100 text-cyan-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                      🎥
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-black text-slate-900 group-hover:text-cyan-700 truncate">
+                        Caméra &amp; Effets
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                        Screen shake, zoom, suivi cible ou déplacement
                       </div>
                     </div>
                   </button>
@@ -2554,20 +2588,14 @@ export function WizardStep3Actions({
             <div>
               <label className="text-xs font-bold text-slate-700 block mb-1.5">Effet de transition :</label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {([
-                  { id: 'fade', label: '🌑 Fondu' },
-                  { id: 'slide_left', label: '⬅️ Glissé Gauche' },
-                  { id: 'slide_right', label: '➡️ Glissé Droit' },
-                  { id: 'iris', label: '🎯 Iris' },
-                  { id: 'none', label: '⚡ Instantané' },
-                ] as const).map((t) => (
+                {SCENE_TRANSITION_OPTIONS.map((t) => (
                   <button
                     key={t.id}
                     type="button"
                     onClick={() =>
-                      setActiveWizard({ ...activeWizard, sceneTransition: t.id as SceneTransitionType })
+                      setActiveWizard({ ...activeWizard, sceneTransition: t.id })
                     }
-                    className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                    className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer text-left truncate ${
                       (activeWizard.sceneTransition || 'fade') === t.id
                         ? 'bg-violet-600 text-white border-violet-700 shadow-2xs'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-violet-50'
@@ -2629,6 +2657,20 @@ export function WizardStep3Actions({
             <span>Valider le changement de scène</span>
           </button>
         </div>
+      )}
+
+      {/* Sous-étape Wizard : Caméra & Effets */}
+      {activeWizard.actionSubStep === 'camera_action_picker' && (
+        <CameraActionEditor
+          draft={activeWizard}
+          onPatch={(patch) => setActiveWizard({ ...activeWizard, ...patch })}
+          onConfirm={(actionData) => completeWizardWithAction(actionData)}
+          isRelational={isWizardRelational}
+          isGlobal={isWizardGlobal}
+          entities={entities}
+          availableEntityOptions={availableEntityOptions}
+          allProjectTags={allProjectTags}
+        />
       )}
     </div>
   );

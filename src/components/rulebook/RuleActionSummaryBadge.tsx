@@ -8,7 +8,7 @@ import {
   CustomParticlePreset,
 } from '../../types';
 import { EntityMiniPreview } from '../EntityMiniPreview';
-import { ActionModalSubStep } from './ruleBookTypes';
+import { ActionModalSubStep, getSceneTransitionShortLabel } from './ruleBookTypes';
 import { useSceneStore, EMPTY_LIST } from '../../store/useSceneStore';
 
 export function getEntityObjFromList(
@@ -527,16 +527,7 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
   }
   if (act.type === 'change_scene') {
     const targetSceneName = scenes.find((s) => s.id === act.targetSceneId)?.name || 'Scène';
-    const transLabel =
-      act.sceneTransition === 'none'
-        ? 'Instantané'
-        : act.sceneTransition === 'slide_left'
-        ? 'Glissé ←'
-        : act.sceneTransition === 'slide_right'
-        ? 'Glissé →'
-        : act.sceneTransition === 'iris'
-        ? 'Iris'
-        : 'Fondu';
+    const transLabel = getSceneTransitionShortLabel(act.sceneTransition);
     return (
       <div
         role={canJump ? 'button' : undefined}
@@ -553,6 +544,46 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         <span className="text-xs truncate">Scène → {targetSceneName}</span>
         <span className="text-[10px] text-violet-700 bg-violet-50 px-1.5 py-0.2 rounded font-medium truncate">
           ({transLabel})
+        </span>
+      </div>
+    );
+  }
+  if (act.type === 'camera_action') {
+    const cmd = act.cameraCommand || 'shake';
+    const detail =
+      cmd === 'shake'
+        ? `Secousse ${act.cameraShakeIntensity ?? 12}px`
+        : cmd === 'zoom'
+        ? `Zoom ${(act.cameraZoom ?? 1.4).toFixed(2)}×`
+        : cmd === 'follow'
+        ? act.cameraFollowMode === 'none'
+          ? 'Suivi OFF'
+          : act.cameraFollowMode === 'tag' && act.cameraTargetTag
+          ? `Suivre #${act.cameraTargetTag}`
+          : act.cameraFollowMode === 'type' && act.cameraTargetType
+          ? `Suivre ${getEntityObj(act.cameraTargetType)?.name || act.cameraTargetType}`
+          : 'Suivre cible'
+        : cmd === 'move_to'
+        ? act.cameraPosition
+          ? `Aller (${Math.round(act.cameraPosition.x)}, ${Math.round(act.cameraPosition.y)})`
+          : 'Aller sur cible'
+        : 'Reset';
+    return (
+      <div
+        role={canJump ? 'button' : undefined}
+        tabIndex={canJump ? 0 : undefined}
+        onClick={canJump ? (e) => jumpSub(e, 'choose_camera_action') : undefined}
+        className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+          canJump ? 'hover:border-cyan-400 hover:bg-cyan-50/40 cursor-pointer transition-colors' : ''
+        }`}
+        title="Configurer l'action Caméra"
+      >
+        <div className="w-5 h-5 rounded-md bg-cyan-100 text-cyan-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+          🎥
+        </div>
+        <span className="text-xs truncate">Caméra</span>
+        <span className="text-[10px] text-cyan-700 bg-cyan-50 px-1.5 py-0.2 rounded font-medium truncate">
+          ({detail})
         </span>
       </div>
     );

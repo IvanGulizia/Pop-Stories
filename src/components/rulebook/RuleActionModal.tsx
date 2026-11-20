@@ -7,7 +7,6 @@ import {
   CustomParticlePreset,
   ParticleShape,
   CustomParticleUsageMode,
-  SceneTransitionType,
 } from '../../types';
 import { EntityMiniPreview } from '../EntityMiniPreview';
 import { SpawnLocationPicker } from '../SpawnLocationPicker';
@@ -22,7 +21,13 @@ import {
   Pencil,
   Sliders,
 } from 'lucide-react';
-import { ActiveModal, EntityOption, ParticleDrawingTarget } from './ruleBookTypes';
+import {
+  ActiveModal,
+  EntityOption,
+  ParticleDrawingTarget,
+  SCENE_TRANSITION_OPTIONS,
+} from './ruleBookTypes';
+import { CameraActionEditor } from './CameraActionEditor';
 import { useSceneStore, EMPTY_RECORD, EMPTY_LIST } from '../../store/useSceneStore';
 
 interface RuleActionModalProps {
@@ -635,6 +640,35 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Naviguer vers une autre scène (avec transition)
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* 5.7. Caméra & Effets */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveModal({
+                          ...activeModal,
+                          subStep: 'choose_camera_action',
+                          cameraCommand: activeModal.cameraCommand || 'shake',
+                          cameraShakeIntensity: activeModal.cameraShakeIntensity ?? 12,
+                          cameraShakeDuration: activeModal.cameraShakeDuration ?? 0.35,
+                          cameraZoom: activeModal.cameraZoom ?? 1.4,
+                          cameraDuration: activeModal.cameraDuration ?? 0.45,
+                        })
+                      }
+                      className="w-full p-3.5 bg-white hover:bg-cyan-50/70 border-2 border-slate-200 hover:border-cyan-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-cyan-100 text-cyan-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                        🎥
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-cyan-700 truncate">
+                          Caméra &amp; Effets
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Screen shake, zoom, suivi cible ou déplacement
                         </div>
                       </div>
                     </button>
@@ -2787,20 +2821,14 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">Effet de transition :</label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {([
-                    { id: 'fade', label: '🌑 Fondu' },
-                    { id: 'slide_left', label: '⬅️ Glissé Gauche' },
-                    { id: 'slide_right', label: '➡️ Glissé Droit' },
-                    { id: 'iris', label: '🎯 Iris' },
-                    { id: 'none', label: '⚡ Instantané' },
-                  ] as const).map((t) => (
+                  {SCENE_TRANSITION_OPTIONS.map((t) => (
                     <button
                       key={t.id}
                       type="button"
                       onClick={() =>
-                        setActiveModal({ ...activeModal, sceneTransition: t.id as SceneTransitionType })
+                        setActiveModal({ ...activeModal, sceneTransition: t.id })
                       }
-                      className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer text-left truncate ${
                         (activeModal.sceneTransition || 'fade') === t.id
                           ? 'bg-violet-600 text-white border-violet-700 shadow-2xs'
                           : 'bg-white text-slate-700 border-slate-200 hover:bg-violet-50'
@@ -2862,6 +2890,20 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
               <span>Valider le changement de scène</span>
             </button>
           </div>
+        )}
+
+        {/* Modal Action : Caméra & Effets */}
+        {activeModal.subStep === 'choose_camera_action' && (
+          <CameraActionEditor
+            draft={activeModal}
+            onPatch={(patch) => setActiveModal({ ...activeModal, ...patch })}
+            onConfirm={(actionData) => applyAction(actionData)}
+            isRelational={isCollision}
+            isGlobal={['timer', 'keyboard', 'variable'].includes(rule.trigger.type)}
+            entities={entities}
+            availableEntityOptions={availableEntityOptions}
+            allProjectTags={allProjectTags}
+          />
         )}
       </div>
     </div>

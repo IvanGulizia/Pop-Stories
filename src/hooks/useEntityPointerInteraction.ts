@@ -47,6 +47,8 @@ import {
   resolveEffectivePivot,
 } from '../utils/physics/pivotHelpers';
 import { shortestAngleDiffRad } from '../utils/physics/lookAtSolver';
+import { getActiveCameraView } from '../utils/cameraRuntime';
+import { screenToWorldPoint } from '../utils/cameraSolver';
 
 export interface UseEntityPointerInteractionOptions {
   entity: Entity;
@@ -146,13 +148,19 @@ export function useEntityPointerInteraction({
     return resolvePointerTargetEntity(entity, useSceneStore.getState().entities);
   };
 
+  const getCurrentCameraView = () => {
+    const snap = useSceneStore.getState();
+    return getActiveCameraView(snap.appMode, snap.editorCamera);
+  };
+
   const getSceneEventPosition = (clientX: number, clientY: number) => {
     const container = document.getElementById('scene-canvas-container');
     if (!container) return undefined;
     const rect = container.getBoundingClientRect();
+    const worldPt = screenToWorldPoint(clientX, clientY, rect, getCurrentCameraView());
     return {
-      x: Math.round((clientX - rect.left) * 10) / 10,
-      y: Math.round((clientY - rect.top) * 10) / 10,
+      x: Math.round(worldPt.x * 10) / 10,
+      y: Math.round(worldPt.y * 10) / 10,
     };
   };
 
@@ -183,6 +191,7 @@ export function useEntityPointerInteraction({
       scaleY: sBase * (appMode === 'play' ? (targetEnt.runtimeScaleY ?? 1) : 1),
       effPivot,
       containerRect: container ? container.getBoundingClientRect() : null,
+      camera: getCurrentCameraView(),
     };
   };
 
@@ -388,10 +397,11 @@ export function useEntityPointerInteraction({
     const startY = e.clientY;
     const startWidth = entity.size.width;
     const startHeight = entity.size.height;
+    const zoomAtStart = Math.max(0.1, getCurrentCameraView().zoom || 1);
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
-      const deltaX = moveEvent.clientX - startX;
-      const deltaY = moveEvent.clientY - startY;
+      const deltaX = (moveEvent.clientX - startX) / zoomAtStart;
+      const deltaY = (moveEvent.clientY - startY) / zoomAtStart;
 
       let newWidth = Math.max(minResizeSize, Math.min(maxResizeSize, Math.round(startWidth + deltaX)));
       let newHeight = Math.max(minResizeSize, Math.min(maxResizeSize, Math.round(startHeight + deltaY)));
@@ -431,17 +441,24 @@ export function useEntityPointerInteraction({
     const effPivot = resolveEffectivePivot(entity, currentState);
     const pivotWorld = getPivotWorldPosition(entity.position, entity.size, effPivot);
     const rect = container.getBoundingClientRect();
+    const startWorld = screenToWorldPoint(e.clientX, e.clientY, rect, getCurrentCameraView());
     const startAngleRad = Math.atan2(
-      e.clientY - rect.top - pivotWorld.y,
-      e.clientX - rect.left - pivotWorld.x
+      startWorld.y - pivotWorld.y,
+      startWorld.x - pivotWorld.x
     );
     const startRotationDeg = currentState.rotation ?? 0;
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
       const liveRect = container.getBoundingClientRect();
+      const curWorld = screenToWorldPoint(
+        moveEvent.clientX,
+        moveEvent.clientY,
+        liveRect,
+        getCurrentCameraView()
+      );
       const curAngleRad = Math.atan2(
-        moveEvent.clientY - liveRect.top - pivotWorld.y,
-        moveEvent.clientX - liveRect.left - pivotWorld.x
+        curWorld.y - pivotWorld.y,
+        curWorld.x - pivotWorld.x
       );
       const deltaDeg = (shortestAngleDiffRad(startAngleRad, curAngleRad) * 180) / Math.PI;
       let nextRot = startRotationDeg + deltaDeg;

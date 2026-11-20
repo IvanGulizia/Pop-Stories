@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { MotionConfig } from 'motion/react';
 import { useSceneStore, EMPTY_LIST, EMPTY_RECORD } from '../store/useSceneStore';
 import { SliderBehaviorConfig, VectorPath } from '../types';
 import { Apple } from './Apple';
@@ -19,9 +20,22 @@ import {
   X,
   Lock,
   Crosshair,
+  Hand,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
 } from 'lucide-react';
 import { ParticleCanvasOverlay } from './ParticleCanvasOverlay';
 import { SceneGizmoOverlay } from './SceneGizmoOverlay';
+import {
+  clampCameraZoom,
+  computeLayerParallaxTransform,
+  computeWorldTransformCss,
+  DEFAULT_SCENE_CAMERA_CONFIG,
+  resolveWorldBounds,
+  screenToWorldPoint,
+} from '../utils/cameraSolver';
+import { getActiveCameraView, stepPlayCameraRuntime } from '../utils/cameraRuntime';
 import {
   stepMatterPhysics,
   startKeyboardListening,
@@ -69,8 +83,17 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const appMode = useSceneStore((state) => state.appMode);
   const gameScore = useSceneStore((state) => state.gameScore);
   const backgroundColor = useSceneStore((state) => state.backgroundColor || '#ffffff');
+  const cameraConfig = useSceneStore((state) => state.camera || DEFAULT_SCENE_CAMERA_CONFIG);
+  const editorCamera = useSceneStore((state) => state.editorCamera);
+  const setEditorCamera = useSceneStore((state) => state.setEditorCamera);
+  const resetEditorCamera = useSceneStore((state) => state.resetEditorCamera);
+  const sceneBounds = useSceneStore((state) => state.sceneBounds);
   const activeSceneTransition = useSceneStore((state) => state.activeSceneTransition);
   const [transitionEngaged, setTransitionEngaged] = useState(false);
+
+  const [isPanToolActive, setIsPanToolActive] = useState(false);
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
 
   useEffect(() => {
     if (!activeSceneTransition) {
@@ -84,9 +107,34 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
     return () => window.cancelAnimationFrame(raf);
   }, [activeSceneTransition?.id, activeSceneTransition?.phase]);
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;
+      if (useSceneStore.getState().appMode === 'play') return;
+      setIsSpacePressed(true);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') setIsSpacePressed(false);
+    };
+    const onBlur = () => setIsSpacePressed(false);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
   const hasEntitiesOnCanvas = Object.keys(entities).length > 0;
   const hasArchetypesInCatalog = Object.keys(customArchetypes).length > 0;
   const isCompletelyEmptyProject = !hasEntitiesOnCanvas && !hasArchetypesInCatalog;
+
+  const worldBounds = resolveWorldBounds(sceneBounds, cameraConfig);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -101,8 +149,10 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
       const data = JSON.parse(dataStr);
       if (data.kind === 'entity-archetype' && data.entityType) {
         const rect = e.currentTarget.getBoundingClientRect();
-        const dropX = Math.max(20, Math.min(rect.width - 80, e.clientX - rect.left - 40));
-        const dropY = Math.max(20, Math.min(rect.height - 80, e.clientY - rect.top - 40));
+        const cam = getActiveCameraView(useSceneStore.getState().appMode, editorCamera);
+        const worldPt = screenToWorldPoint(e.clientX, e.clientY, rect, cam);
+        const dropX = Math.max(0, Math.min(worldBounds.width - 60, Math.round(worldPt.x - 40)));
+        const dropY = Math.max(0, Math.min(worldBounds.height - 60, Math.round(worldPt.y - 40)));
 
         spawnEntity({
           type: data.entityType,
@@ -150,6 +200,11 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const batchUpdateEntityTransforms = useSceneStore((state) => state.batchUpdateEntityTransforms);
 
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const shakeWrapperRef = useRef<HTMLDivElement>(null);
+  const worldLayerRef = useRef<HTMLDivElement>(null);
+  const parallaxLayerRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const parallaxFactorsRef = useRef<Record<string, number>>({});
+  const mouseScreenPosRef = useRef<{ x: number; y: number } | null>(null);
   const mousePosRef = useRef<{ x: number; y: number } | null>(null);
   const [pickHoverPt, setPickHoverPt] = useState<{ x: number; y: number } | null>(null);
   const [zoneDragStart, setZoneDragStart] = useState<{ x: number; y: number } | null>(null);
@@ -157,6 +212,13 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const [jointPickHoverPt, setJointPickHoverPt] = useState<{ x: number; y: number } | null>(null);
   const [isDraggingJointPin, setIsDraggingJointPin] = useState(false);
   const setSceneBounds = useSceneStore((state) => state.setSceneBounds);
+
+  const worldTransformPagePoint = useCallback((pt: { x: number; y: number }) => {
+    const snap = useSceneStore.getState();
+    const cam = getActiveCameraView(snap.appMode, snap.editorCamera);
+    const z = Math.max(0.1, cam.zoom || 1);
+    return { x: pt.x / z, y: pt.y / z };
+  }, []);
 
   useEffect(() => {
     if (!spawnCanvasPick) {
@@ -193,10 +255,13 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
     };
   }, [setSceneBounds, ratio]);
 
-  // Boucle de simulation physique Matter.js & contrôles joueur en mode Play (60 FPS)
+  // Boucle de simulation physique Matter.js & Caméra 2D en mode Play (60 FPS)
   useEffect(() => {
     if (!isPlayMode) {
       stopKeyboardListening();
+      if (shakeWrapperRef.current) {
+        shakeWrapperRef.current.style.transform = 'none';
+      }
       return;
     }
 
@@ -221,6 +286,19 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         }
 
         const stateSnapshot = useSceneStore.getState();
+        const viewportSize = { width: liveW, height: liveH };
+        const liveWorldBounds = resolveWorldBounds(viewportSize, stateSnapshot.camera);
+
+        // Convertir la position curseur écran en coordonnées monde selon la caméra Play courante
+        if (mouseScreenPosRef.current) {
+          const camNow = getActiveCameraView('play', stateSnapshot.editorCamera);
+          const safeZ = Math.max(0.1, camNow.zoom || 1);
+          mousePosRef.current = {
+            x: mouseScreenPosRef.current.x / safeZ + camNow.x,
+            y: mouseScreenPosRef.current.y / safeZ + camNow.y,
+          };
+        }
+
         const currentEntities = stateSnapshot.entities;
         const activeColliderLayers = (stateSnapshot.layerGroups || []).flatMap((g) =>
           g.layers.filter(
@@ -233,7 +311,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         const result = stepMatterPhysics({
           entities: currentEntities,
           deltaTime,
-          canvasBounds: { width: liveW, height: liveH },
+          canvasBounds: liveWorldBounds,
           mousePos: mousePosRef.current,
           colliderLayers: activeColliderLayers,
         });
@@ -267,6 +345,33 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
             triggerJointBreak(ev.childId, ev.parentId, ev.breakPoint);
           });
         }
+
+        // Mise à jour caméra 60 FPS sans re-render React (transforms DOM directs)
+        const latestState = useSceneStore.getState();
+        const rtCam = stepPlayCameraRuntime(
+          deltaTime,
+          latestState.entities,
+          viewportSize,
+          latestState.camera
+        );
+
+        if (shakeWrapperRef.current) {
+          const hasShake =
+            Math.abs(rtCam.shakeX) > 0.05 ||
+            Math.abs(rtCam.shakeY) > 0.05 ||
+            Math.abs(rtCam.shakeRotation) > 0.01;
+          shakeWrapperRef.current.style.transform = hasShake
+            ? `translate3d(${rtCam.shakeX}px, ${rtCam.shakeY}px, 0px) rotate(${rtCam.shakeRotation}deg)`
+            : 'none';
+        }
+        if (worldLayerRef.current) {
+          worldLayerRef.current.style.transform = computeWorldTransformCss(rtCam);
+        }
+        Object.entries(parallaxLayerRefs.current).forEach(([layerId, layerEl]) => {
+          if (!layerEl) return;
+          const factor = parallaxFactorsRef.current[layerId] ?? 1;
+          layerEl.style.transform = computeLayerParallaxTransform(rtCam, factor);
+        });
 
         // Évaluation systématique des règles de collision et capteurs à 60 FPS
         useSceneStore.getState().evaluateRules();
@@ -365,13 +470,15 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
       const el = canvasContainerRef.current;
       if (!el) return { x: 0, y: 0 };
       const rect = el.getBoundingClientRect();
-      const rawX = Math.max(0, Math.min(rect.width, clientX - rect.left));
-      const rawY = Math.max(0, Math.min(rect.height, clientY - rect.top));
+      const cam = getActiveCameraView(useSceneStore.getState().appMode, editorCamera);
+      const worldPt = screenToWorldPoint(clientX, clientY, rect, cam);
+      const rawX = Math.max(0, Math.min(worldBounds.width, worldPt.x));
+      const rawY = Math.max(0, Math.min(worldBounds.height, worldPt.y));
       if (spawnCanvasPick?.snapToGrid && spawnCanvasPick.gridStep > 0) {
         const step = spawnCanvasPick.gridStep;
         return {
-          x: Math.round(Math.max(0, Math.min(rect.width, Math.round(rawX / step) * step))),
-          y: Math.round(Math.max(0, Math.min(rect.height, Math.round(rawY / step) * step))),
+          x: Math.round(Math.max(0, Math.min(worldBounds.width, Math.round(rawX / step) * step))),
+          y: Math.round(Math.max(0, Math.min(worldBounds.height, Math.round(rawY / step) * step))),
         };
       }
       return {
@@ -379,18 +486,82 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         y: Math.round(rawY),
       };
     },
-    [spawnCanvasPick]
+    [spawnCanvasPick, editorCamera, worldBounds.width, worldBounds.height]
   );
 
-  const computeCanvasPoint = useCallback((clientX: number, clientY: number) => {
-    const el = canvasContainerRef.current;
-    if (!el) return { x: 0, y: 0 };
-    const rect = el.getBoundingClientRect();
-    return {
-      x: Math.round(Math.max(0, Math.min(rect.width, clientX - rect.left))),
-      y: Math.round(Math.max(0, Math.min(rect.height, clientY - rect.top))),
+  const computeCanvasPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      const el = canvasContainerRef.current;
+      if (!el) return { x: 0, y: 0 };
+      const rect = el.getBoundingClientRect();
+      const cam = getActiveCameraView(useSceneStore.getState().appMode, editorCamera);
+      const worldPt = screenToWorldPoint(clientX, clientY, rect, cam);
+      return {
+        x: Math.round(Math.max(0, Math.min(worldBounds.width, worldPt.x))),
+        y: Math.round(Math.max(0, Math.min(worldBounds.height, worldPt.y))),
+      };
+    },
+    [editorCamera, worldBounds.width, worldBounds.height]
+  );
+
+  const activeCameraView = getActiveCameraView(appMode, editorCamera);
+
+  const handleContainerWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (isPlayMode) return;
+    if (e.ctrlKey || e.metaKey || isPanToolActive || isSpacePressed) {
+      e.preventDefault();
+      const el = canvasContainerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const cur = useSceneStore.getState().editorCamera;
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      const nextZoom = clampCameraZoom(cur.zoom * factor);
+      const screenX = e.clientX - rect.left;
+      const screenY = e.clientY - rect.top;
+      const worldUnderX = screenX / cur.zoom + cur.x;
+      const worldUnderY = screenY / cur.zoom + cur.y;
+      setEditorCamera({
+        zoom: nextZoom,
+        x: Math.round((worldUnderX - screenX / nextZoom) * 10) / 10,
+        y: Math.round((worldUnderY - screenY / nextZoom) * 10) / 10,
+      });
+    }
+  };
+
+  const handleContainerPanPointerDownCapture = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isPlayMode) return;
+    const isMiddleClick = e.button === 1;
+    const isPanClick = (isPanToolActive || isSpacePressed) && e.button === 0;
+    if (!isMiddleClick && !isPanClick) return;
+    if ((e.target as HTMLElement | null)?.closest('[data-camera-hud="true"]')) return;
+
+    e.stopPropagation();
+    e.preventDefault();
+    setIsPanning(true);
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    const startCam = { ...useSceneStore.getState().editorCamera };
+
+    const handleMove = (mv: PointerEvent) => {
+      const dx = (mv.clientX - startClientX) / Math.max(0.1, startCam.zoom);
+      const dy = (mv.clientY - startClientY) / Math.max(0.1, startCam.zoom);
+      setEditorCamera({
+        x: Math.round((startCam.x - dx) * 10) / 10,
+        y: Math.round((startCam.y - dy) * 10) / 10,
+      });
     };
-  }, []);
+
+    const handleUp = () => {
+      setIsPanning(false);
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+      window.removeEventListener('pointercancel', handleUp);
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    window.addEventListener('pointercancel', handleUp);
+  };
 
   return (
     <div
@@ -403,21 +574,33 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         ref={canvasContainerRef}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
+        onWheel={handleContainerWheel}
+        onPointerDownCapture={handleContainerPanPointerDownCapture}
         onPointerMove={(e) => {
           if (canvasContainerRef.current) {
             const rect = canvasContainerRef.current.getBoundingClientRect();
+            const sx = e.clientX - rect.left;
+            const sy = e.clientY - rect.top;
+            mouseScreenPosRef.current = { x: sx, y: sy };
+            const cam = getActiveCameraView(useSceneStore.getState().appMode, editorCamera);
+            const z = Math.max(0.1, cam.zoom || 1);
             mousePosRef.current = {
-              x: e.clientX - rect.left,
-              y: e.clientY - rect.top,
+              x: sx / z + cam.x,
+              y: sy / z + cam.y,
             };
           }
         }}
         onPointerLeave={() => {
+          mouseScreenPosRef.current = null;
           mousePosRef.current = null;
         }}
         className={`relative overflow-hidden select-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-all duration-300 ${
           isCustomCursorActive
             ? 'atelier-cursor-hidden'
+            : isPanning
+            ? 'cursor-grabbing'
+            : !isPlayMode && (isPanToolActive || isSpacePressed)
+            ? 'cursor-grab'
             : !isPlayMode
             ? 'atelier-fine-crosshair'
             : ''
@@ -427,262 +610,415 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           ...getAspectRatioStyle(),
         }}
       >
-        {/* Canvas Grid Background */}
-        {settings.showGrid && settings.gridStyle !== 'clean' && (
-          <div
-            className="absolute inset-0 pointer-events-none transition-opacity duration-300 z-0"
-            style={getGridStyle()}
-          />
-        )}
-
-
-        {/* 1. ARRIÈRE-PLANS DESSINÉS (BACKGROUND LAYERS) */}
-        <div className="absolute inset-0 pointer-events-none z-1">
-          {backgroundGroups.flatMap((g) => g.layers).map((layer) => {
-            if (!layer.visible || !layer.vectorPaths || layer.vectorPaths.length === 0) return null;
-            const isCollider = layer.role === 'collider';
-            if (isCollider && isPlayMode && layer.showColliderInPlay === false) return null;
-            return (
-              <div key={layer.id} className="absolute inset-0">
-                {renderLayerSvg(layer, isCollider)}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* 1.5. CALQUES COLLIDERS DE DÉCOR (MURS / SOLS / CAPTEURS: z-5) */}
-        <div className="absolute inset-0 pointer-events-none z-5">
-          {colliderGroups.flatMap((g) => g.layers).map((layer) => {
-            if (!layer.visible || !layer.vectorPaths || layer.vectorPaths.length === 0) return null;
-            if (isPlayMode && layer.showColliderInPlay === false) return null;
-            return (
-              <div key={layer.id} className="absolute inset-0">
-                {renderLayerSvg(layer, true)}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Empty State Overlay when no entities and no archetypes exist */}
-        {isCompletelyEmptyProject && !spawnCanvasPick && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 pointer-events-auto bg-slate-50/60 backdrop-blur-2xs">
-            <div className="w-16 h-16 bg-white border border-slate-200 rounded-3xl flex items-center justify-center text-3xl shadow-sm mb-4 animate-in zoom-in-95 duration-200">
-              🎨
-            </div>
-            <h3 className="text-xl font-bold text-slate-800 tracking-tight">
-              Nouveau Projet Atelier Vivant
-            </h3>
-            <p className="text-xs text-slate-500 max-w-md mt-1.5 mb-6 leading-relaxed">
-              Votre scène est prête. Créez votre première entité pour commencer à dessiner et animer votre univers :
-            </p>
-
-            <div className="max-w-sm w-full">
-              {/* Option Principale: Créer une Entité */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (onOpenCreateModal) onOpenCreateModal();
-                }}
-                className="w-full p-5 bg-white hover:bg-indigo-50/40 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl shadow-xs hover:shadow-md transition-all text-left flex flex-col justify-between gap-3 group cursor-pointer active:scale-[0.98]"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                    <Paintbrush className="w-5 h-5" />
-                  </div>
-                  <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
-                    Démarrer
-                  </span>
+        {/* ENVELOPPE SCREEN SHAKE & VUE CAMÉRA */}
+        <div
+          ref={shakeWrapperRef}
+          className="absolute inset-0 pointer-events-auto"
+          style={{
+            transform: isPlayMode ? undefined : 'none',
+            transformOrigin: 'center center',
+          }}
+        >
+          {/* 1. ARRIÈRE-PLANS DESSINÉS (BACKGROUND LAYERS + PARALLAXE) */}
+          <div className="absolute inset-0 pointer-events-none z-1">
+            {backgroundGroups.flatMap((g) => g.layers).map((layer) => {
+              if (!layer.visible || !layer.vectorPaths || layer.vectorPaths.length === 0) return null;
+              const isCollider = layer.role === 'collider';
+              if (isCollider && isPlayMode && layer.showColliderInPlay === false) return null;
+              const pFactor = isCollider ? 1 : (layer.parallaxFactor ?? 1);
+              parallaxFactorsRef.current[layer.id] = pFactor;
+              const isLegacyOrFixed = layer.coordinateSpace === 'legacy_200' || pFactor === 0;
+              return (
+                <div
+                  key={layer.id}
+                  ref={(el) => {
+                    if (el) parallaxLayerRefs.current[layer.id] = el;
+                    else delete parallaxLayerRefs.current[layer.id];
+                  }}
+                  className={isLegacyOrFixed ? 'absolute inset-0' : 'absolute left-0 top-0'}
+                  style={{
+                    ...(isLegacyOrFixed
+                      ? {}
+                      : { width: worldBounds.width, height: worldBounds.height }),
+                    transformOrigin: '0 0',
+                    transform: computeLayerParallaxTransform(activeCameraView, pFactor),
+                  }}
+                >
+                  {renderLayerSvg(layer, isCollider)}
                 </div>
-                <div>
-                  <div className="text-sm font-bold text-slate-800 group-hover:text-indigo-950 flex items-center gap-1.5">
-                    Créer une entité
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
-                  </div>
-                  <div className="text-[11px] text-slate-500 mt-1 leading-snug">
-                    Ouvre l'atelier de dessin vectoriel pour concevoir votre premier objet et ses états.
-                  </div>
-                </div>
-              </button>
-            </div>
+              );
+            })}
           </div>
-        )}
 
-        {/* 1.8. RAILS & ZONES DE GLISSIÈRE SLIDERS EN MODE PLAY (z-6, hors debug gizmo) */}
-        {isPlayMode && (() => {
-          const rtSliderTracks = getGizmoRuntimeDebugData().sliderTracks;
-          const sliderEntities = Object.values(entities).filter((ent) => {
-            if (!ent || ent.visible === false || ent.parentId) return false;
-            const st = ent.states[ent.currentStateId];
-            const sb = getEffectiveBehaviors(ent, st).find(
-              (b): b is SliderBehaviorConfig => b.type === 'slider' && b.enabled !== false
-            );
-            return Boolean(sb && sb.showTrackInPlay !== false);
-          });
-          if (sliderEntities.length === 0) return null;
-          return (
-            <svg className="absolute inset-0 w-full h-full pointer-events-none z-6 overflow-visible">
-              {sliderEntities.map((ent) => {
+          {/* 1.5 - 2 - 3.5. MONDE 2D TRANSFORMÉ PAR LA CAMÉRA (Zoom / Pan / Follow) */}
+          <div
+            id="scene-world-layer"
+            ref={worldLayerRef}
+            className="absolute left-0 top-0 pointer-events-none z-[5]"
+            style={{
+              width: worldBounds.width,
+              height: worldBounds.height,
+              transformOrigin: '0 0',
+              transform: computeWorldTransformCss(activeCameraView),
+            }}
+          >
+            {/* Grille de fond étendue au monde */}
+            {settings.showGrid && settings.gridStyle !== 'clean' && (
+              <div
+                className="absolute inset-0 pointer-events-none transition-opacity duration-300 z-0"
+                style={getGridStyle()}
+              />
+            )}
+
+            {/* Repères Monde Étendu & Cadre Caméra initial en mode Édition */}
+            {!isPlayMode &&
+              cameraConfig.worldMode === 'custom' &&
+              cameraConfig.showWorldBoundsInEdit !== false && (
+                <>
+                  <div
+                    className="absolute inset-0 pointer-events-none z-[1] border-2 border-dashed border-sky-400/60 rounded-sm"
+                    style={{
+                      boxShadow: 'inset 0 0 0 1px rgba(14,165,233,0.12)',
+                    }}
+                  >
+                    <span className="absolute top-1.5 left-2 px-1.5 py-0.5 rounded bg-sky-600/85 text-white text-[9px] font-mono font-bold">
+                      Monde {worldBounds.width}×{worldBounds.height}px
+                    </span>
+                  </div>
+                  <div
+                    className="absolute pointer-events-none z-[2] border-2 border-dashed border-emerald-500/75 bg-emerald-500/[0.03]"
+                    style={{
+                      left: cameraConfig.initialX ?? 0,
+                      top: cameraConfig.initialY ?? 0,
+                      width: Math.max(80, Math.round(sceneBounds.width / Math.max(0.25, cameraConfig.zoom ?? 1))),
+                      height: Math.max(80, Math.round(sceneBounds.height / Math.max(0.25, cameraConfig.zoom ?? 1))),
+                    }}
+                  >
+                    <span className="absolute -top-4 left-0 px-1.5 py-0.2 rounded bg-emerald-600/90 text-white text-[9px] font-mono font-bold whitespace-nowrap">
+                      📷 Vue Play ({Math.round((cameraConfig.zoom ?? 1) * 100)}%)
+                    </span>
+                  </div>
+                </>
+              )}
+
+            {/* 1.5. CALQUES COLLIDERS DE DÉCOR (MURS / SOLS / CAPTEURS: z-5) */}
+            <div className="absolute inset-0 pointer-events-none z-5">
+              {colliderGroups.flatMap((g) => g.layers).map((layer) => {
+                if (!layer.visible || !layer.vectorPaths || layer.vectorPaths.length === 0) return null;
+                if (isPlayMode && layer.showColliderInPlay === false) return null;
+                return (
+                  <div key={layer.id} className="absolute inset-0">
+                    {renderLayerSvg(layer, true)}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* 1.8. RAILS & ZONES DE GLISSIÈRE SLIDERS EN MODE PLAY (z-6, hors debug gizmo) */}
+            {isPlayMode && (() => {
+              const rtSliderTracks = getGizmoRuntimeDebugData().sliderTracks;
+              const sliderEntities = Object.values(entities).filter((ent) => {
+                if (!ent || ent.visible === false || ent.parentId) return false;
                 const st = ent.states[ent.currentStateId];
                 const sb = getEffectiveBehaviors(ent, st).find(
                   (b): b is SliderBehaviorConfig => b.type === 'slider' && b.enabled !== false
-                )!;
-                const geom =
-                  rtSliderTracks[ent.id]?.geom ||
-                  getSliderTrackGeometry(
-                    ent.position.x + ent.size.width / 2,
-                    ent.position.y + ent.size.height / 2,
-                    sb
-                  );
-                const stepsX = Math.max(0, Math.round(sb.stepsX ?? 0));
-                const stepsY = Math.max(0, Math.round(sb.stepsY ?? 0));
-
-                if (geom.geometryMode === 'line_1d') {
-                  const nx = -geom.uy;
-                  const ny = geom.ux;
-                  return (
-                    <g key={`play-slider-${ent.id}`}>
-                      <line
-                        x1={geom.startPt.x}
-                        y1={geom.startPt.y}
-                        x2={geom.endPt.x}
-                        y2={geom.endPt.y}
-                        stroke="rgba(148,163,184,0.35)"
-                        strokeWidth={10}
-                        strokeLinecap="round"
-                      />
-                      <line
-                        x1={geom.startPt.x}
-                        y1={geom.startPt.y}
-                        x2={geom.endPt.x}
-                        y2={geom.endPt.y}
-                        stroke="rgba(100,116,139,0.55)"
-                        strokeWidth={2}
-                        strokeLinecap="round"
-                      />
-                      {stepsX >= 2 &&
-                        Array.from({ length: stepsX }).map((_, idx) => {
-                          const t = idx / (stepsX - 1);
-                          const lx = (t - 0.5) * 2 * geom.halfLen;
-                          const px = geom.originCx + geom.ux * lx;
-                          const py = geom.originCy + geom.uy * lx;
-                          return (
-                            <line
-                              key={idx}
-                              x1={px - nx * 5}
-                              y1={py - ny * 5}
-                              x2={px + nx * 5}
-                              y2={py + ny * 5}
-                              stroke="rgba(71,85,105,0.65)"
-                              strokeWidth={1.75}
-                              strokeLinecap="round"
-                            />
-                          );
-                        })}
-                      {sb.returnMode === 'spring_return' && (
-                        <circle
-                          cx={geom.returnWorldPt.x}
-                          cy={geom.returnWorldPt.y}
-                          r={3.5}
-                          fill="rgba(14,165,233,0.75)"
-                        />
-                      )}
-                    </g>
-                  );
-                }
-
-                if (geom.geometryMode === 'rect_2d') {
-                  return (
-                    <g key={`play-slider-${ent.id}`}>
-                      <rect
-                        x={geom.originCx - geom.halfW}
-                        y={geom.originCy - geom.halfH}
-                        width={geom.halfW * 2}
-                        height={geom.halfH * 2}
-                        rx={12}
-                        fill="rgba(148,163,184,0.10)"
-                        stroke="rgba(148,163,184,0.55)"
-                        strokeWidth={2}
-                      />
-                      {stepsX >= 2 && stepsY >= 2 &&
-                        Array.from({ length: stepsX }).flatMap((_, ix) =>
-                          Array.from({ length: stepsY }).map((__, iy) => {
-                            const px = geom.originCx + ((ix / (stepsX - 1)) - 0.5) * 2 * geom.halfW;
-                            const py = geom.originCy + ((iy / (stepsY - 1)) - 0.5) * 2 * geom.halfH;
-                            return (
-                              <circle
-                                key={`${ix}-${iy}`}
-                                cx={px}
-                                cy={py}
-                                r={2}
-                                fill="rgba(100,116,139,0.5)"
-                              />
-                            );
-                          })
-                        )}
-                      {sb.returnMode === 'spring_return' && (
-                        <circle cx={geom.originCx} cy={geom.originCy} r={3.5} fill="rgba(14,165,233,0.75)" />
-                      )}
-                    </g>
-                  );
-                }
-
-                return (
-                  <g key={`play-slider-${ent.id}`}>
-                    <circle
-                      cx={geom.originCx}
-                      cy={geom.originCy}
-                      r={geom.radius}
-                      fill="rgba(148,163,184,0.10)"
-                      stroke="rgba(148,163,184,0.55)"
-                      strokeWidth={2}
-                    />
-                    <circle cx={geom.originCx} cy={geom.originCy} r={3} fill="rgba(100,116,139,0.55)" />
-                  </g>
                 );
-              })}
-            </svg>
-          );
-        })()}
+                return Boolean(sb && sb.showTrackInPlay !== false);
+              });
+              if (sliderEntities.length === 0) return null;
+              return (
+                <svg className="absolute inset-0 w-full h-full pointer-events-none z-6 overflow-visible">
+                  {sliderEntities.map((ent) => {
+                    const st = ent.states[ent.currentStateId];
+                    const sb = getEffectiveBehaviors(ent, st).find(
+                      (b): b is SliderBehaviorConfig => b.type === 'slider' && b.enabled !== false
+                    )!;
+                    const geom =
+                      rtSliderTracks[ent.id]?.geom ||
+                      getSliderTrackGeometry(
+                        ent.position.x + ent.size.width / 2,
+                        ent.position.y + ent.size.height / 2,
+                        sb
+                      );
+                    const stepsX = Math.max(0, Math.round(sb.stepsX ?? 0));
+                    const stepsY = Math.max(0, Math.round(sb.stepsY ?? 0));
 
-        {/* 2. RENDU DES ENTITÉS SELON entityOrder (z-index layering: 10 à 30) */}
-        {(() => {
-          const order = entityOrder && entityOrder.length > 0 ? entityOrder : Object.keys(entities);
-          const allKeys = Array.from(new Set([...order, ...Object.keys(entities)]));
-          return allKeys
-            .map((id) => entities[id])
-            .filter((entity): entity is NonNullable<typeof entity> => Boolean(entity) && entity.visible !== false)
-            .map((entity, index) => {
-              const isSelected = selectedEntityId === entity.id;
-              const zIndexStyle = { zIndex: isSelected && appMode !== 'play' ? 35 : 10 + index };
-              if (entity.type === 'plant') {
-                return <Plant key={entity.id} entity={entity} style={zIndexStyle} />;
-              }
-              if (entity.type === 'apple') {
-                return <Apple key={entity.id} entity={entity} style={zIndexStyle} />;
-              }
-              return <CustomShape key={entity.id} entity={entity} style={zIndexStyle} />;
-            });
-        })()}
+                    if (geom.geometryMode === 'line_1d') {
+                      const nx = -geom.uy;
+                      const ny = geom.ux;
+                      return (
+                        <g key={`play-slider-${ent.id}`}>
+                          <line
+                            x1={geom.startPt.x}
+                            y1={geom.startPt.y}
+                            x2={geom.endPt.x}
+                            y2={geom.endPt.y}
+                            stroke="rgba(148,163,184,0.35)"
+                            strokeWidth={10}
+                            strokeLinecap="round"
+                          />
+                          <line
+                            x1={geom.startPt.x}
+                            y1={geom.startPt.y}
+                            x2={geom.endPt.x}
+                            y2={geom.endPt.y}
+                            stroke="rgba(100,116,139,0.55)"
+                            strokeWidth={2}
+                            strokeLinecap="round"
+                          />
+                          {stepsX >= 2 &&
+                            Array.from({ length: stepsX }).map((_, idx) => {
+                              const t = idx / (stepsX - 1);
+                              const lx = (t - 0.5) * 2 * geom.halfLen;
+                              const px = geom.originCx + geom.ux * lx;
+                              const py = geom.originCy + geom.uy * lx;
+                              return (
+                                <line
+                                  key={idx}
+                                  x1={px - nx * 5}
+                                  y1={py - ny * 5}
+                                  x2={px + nx * 5}
+                                  y2={py + ny * 5}
+                                  stroke="rgba(71,85,105,0.65)"
+                                  strokeWidth={1.75}
+                                  strokeLinecap="round"
+                                />
+                              );
+                            })}
+                          {sb.returnMode === 'spring_return' && (
+                            <circle
+                              cx={geom.returnWorldPt.x}
+                              cy={geom.returnWorldPt.y}
+                              r={3.5}
+                              fill="rgba(14,165,233,0.75)"
+                            />
+                          )}
+                        </g>
+                      );
+                    }
 
-        {/* 2.5. SYSTÈME DE PARTICULES 2D LÉGER (Canvas Overlay 60 FPS, Mode Play) */}
-        <ParticleCanvasOverlay active={isPlayMode} />
+                    if (geom.geometryMode === 'rect_2d') {
+                      return (
+                        <g key={`play-slider-${ent.id}`}>
+                          <rect
+                            x={geom.originCx - geom.halfW}
+                            y={geom.originCy - geom.halfH}
+                            width={geom.halfW * 2}
+                            height={geom.halfH * 2}
+                            rx={12}
+                            fill="rgba(148,163,184,0.10)"
+                            stroke="rgba(148,163,184,0.55)"
+                            strokeWidth={2}
+                          />
+                          {stepsX >= 2 && stepsY >= 2 &&
+                            Array.from({ length: stepsX }).flatMap((_, ix) =>
+                              Array.from({ length: stepsY }).map((__, iy) => {
+                                const px = geom.originCx + ((ix / (stepsX - 1)) - 0.5) * 2 * geom.halfW;
+                                const py = geom.originCy + ((iy / (stepsY - 1)) - 0.5) * 2 * geom.halfH;
+                                return (
+                                  <circle
+                                    key={`${ix}-${iy}`}
+                                    cx={px}
+                                    cy={py}
+                                    r={2}
+                                    fill="rgba(100,116,139,0.5)"
+                                  />
+                                );
+                              })
+                            )}
+                          {sb.returnMode === 'spring_return' && (
+                            <circle cx={geom.originCx} cy={geom.originCy} r={3.5} fill="rgba(14,165,233,0.75)" />
+                          )}
+                        </g>
+                      );
+                    }
 
-        {/* 3. CALQUES DE PREMIER-PLAN DESSINÉS (FOREGROUND & AUTRES: z-40) */}
-        <div className="absolute inset-0 pointer-events-none z-40">
-          {[...otherGroups, ...foregroundGroups].flatMap((g) => g.layers).map((layer) => {
-            if (!layer.visible || !layer.vectorPaths || layer.vectorPaths.length === 0) return null;
-            const isCollider = layer.role === 'collider';
-            if (isCollider && isPlayMode && layer.showColliderInPlay === false) return null;
-            return (
-              <div key={layer.id} className="absolute inset-0">
-                {renderLayerSvg(layer, isCollider)}
+                    return (
+                      <g key={`play-slider-${ent.id}`}>
+                        <circle
+                          cx={geom.originCx}
+                          cy={geom.originCy}
+                          r={geom.radius}
+                          fill="rgba(148,163,184,0.10)"
+                          stroke="rgba(148,163,184,0.55)"
+                          strokeWidth={2}
+                        />
+                        <circle cx={geom.originCx} cy={geom.originCy} r={3} fill="rgba(100,116,139,0.55)" />
+                      </g>
+                    );
+                  })}
+                </svg>
+              );
+            })()}
+
+            {/* 2. RENDU DES ENTITÉS SELON entityOrder (z-index layering: 10 à 30) */}
+            <MotionConfig transformPagePoint={worldTransformPagePoint}>
+              {(() => {
+                const order = entityOrder && entityOrder.length > 0 ? entityOrder : Object.keys(entities);
+                const allKeys = Array.from(new Set([...order, ...Object.keys(entities)]));
+                return allKeys
+                  .map((id) => entities[id])
+                  .filter((entity): entity is NonNullable<typeof entity> => Boolean(entity) && entity.visible !== false)
+                  .map((entity, index) => {
+                    const isSelected = selectedEntityId === entity.id;
+                    const zIndexStyle = { zIndex: isSelected && appMode !== 'play' ? 35 : 10 + index };
+                    if (entity.type === 'plant') {
+                      return <Plant key={entity.id} entity={entity} style={zIndexStyle} />;
+                    }
+                    if (entity.type === 'apple') {
+                      return <Apple key={entity.id} entity={entity} style={zIndexStyle} />;
+                    }
+                    return <CustomShape key={entity.id} entity={entity} style={zIndexStyle} />;
+                  });
+              })()}
+            </MotionConfig>
+
+            {/* 3.5. CALQUE UNIFIÉ DE GIZMOS & DEBUG VISUEL (z-45) */}
+            <SceneGizmoOverlay mousePosRef={mousePosRef} />
+
+            {/* 7. POIGNÉE INTERACTIVE DE GLISSER DU POINT D'ATTACHE JOINT SUR LE CANVAS (MODE ÉDITION) */}
+            {!isPlayMode && !spawnCanvasPick && !jointCanvasPick && !selectedLayerId && selectedEntityId && (() => {
+              const selChild = entities[selectedEntityId];
+              if (!selChild || !selChild.parentId) return null;
+              const selParent = entities[selChild.parentId];
+              if (!selParent || selChild.visible === false) return null;
+              const pinWorld = getChildAttachmentPinWorld(selChild, selParent);
+
+              return (
+                <div
+                  role="button"
+                  tabIndex={-1}
+                  aria-label="Déplacer le point d'attache"
+                  title="Glisser pour déplacer le point d'attache sur la scène (sans bouger les objets)"
+                  onClick={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    useSceneStore.getState().pushSceneHistory();
+                    setIsDraggingJointPin(true);
+                    const startTarget = e.currentTarget;
+                    try {
+                      startTarget.setPointerCapture(e.pointerId);
+                    } catch {
+                      // Ignore if unsupported
+                    }
+
+                    const handleMove = (ev: PointerEvent) => {
+                      const pt = computeCanvasPoint(ev.clientX, ev.clientY);
+                      moveJointAttachmentPin(selChild.id, pt.x, pt.y, true);
+                    };
+
+                    const handleUp = (ev: PointerEvent) => {
+                      setIsDraggingJointPin(false);
+                      try {
+                        startTarget.releasePointerCapture(ev.pointerId);
+                      } catch {
+                        // Ignore
+                      }
+                      window.removeEventListener('pointermove', handleMove);
+                      window.removeEventListener('pointerup', handleUp);
+                      window.removeEventListener('pointercancel', handleUp);
+                    };
+
+                    window.addEventListener('pointermove', handleMove);
+                    window.addEventListener('pointerup', handleUp);
+                    window.addEventListener('pointercancel', handleUp);
+                  }}
+                  style={{
+                    left: `${pinWorld.x}px`,
+                    top: `${pinWorld.y}px`,
+                    touchAction: 'none',
+                  }}
+                  className={`absolute -translate-x-1/2 -translate-y-1/2 z-[48] w-7 h-7 flex items-center justify-center pointer-events-auto ${
+                    isDraggingJointPin ? 'cursor-grabbing scale-110' : 'cursor-grab hover:scale-110'
+                  } transition-transform`}
+                >
+                  <span className="w-4 h-4 rounded-full bg-sky-500/90 border-2 border-white shadow-md flex items-center justify-center">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                  </span>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Empty State Overlay when no entities and no archetypes exist */}
+          {isCompletelyEmptyProject && !spawnCanvasPick && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 pointer-events-auto bg-slate-50/60 backdrop-blur-2xs">
+              <div className="w-16 h-16 bg-white border border-slate-200 rounded-3xl flex items-center justify-center text-3xl shadow-sm mb-4 animate-in zoom-in-95 duration-200">
+                🎨
               </div>
-            );
-          })}
-        </div>
+              <h3 className="text-xl font-bold text-slate-800 tracking-tight">
+                Nouveau Projet Atelier Vivant
+              </h3>
+              <p className="text-xs text-slate-500 max-w-md mt-1.5 mb-6 leading-relaxed">
+                Votre scène est prête. Créez votre première entité pour commencer à dessiner et animer votre univers :
+              </p>
 
-        {/* 3.5. CALQUE UNIFIÉ DE GIZMOS & DEBUG VISUEL (z-45) */}
-        <SceneGizmoOverlay mousePosRef={mousePosRef} />
+              <div className="max-w-sm w-full">
+                {/* Option Principale: Créer une Entité */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onOpenCreateModal) onOpenCreateModal();
+                  }}
+                  className="w-full p-5 bg-white hover:bg-indigo-50/40 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl shadow-xs hover:shadow-md transition-all text-left flex flex-col justify-between gap-3 group cursor-pointer active:scale-[0.98]"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                      <Paintbrush className="w-5 h-5" />
+                    </div>
+                    <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                      Démarrer
+                    </span>
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold text-slate-800 group-hover:text-indigo-950 flex items-center gap-1.5">
+                      Créer une entité
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1 leading-snug">
+                      Ouvre l'atelier de dessin vectoriel pour concevoir votre premier objet et ses états.
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 2.5. SYSTÈME DE PARTICULES 2D LÉGER (Canvas Overlay 60 FPS, Mode Play) */}
+          <ParticleCanvasOverlay active={isPlayMode} />
+
+          {/* 3. CALQUES DE PREMIER-PLAN DESSINÉS (FOREGROUND & AUTRES + PARALLAXE: z-40) */}
+          <div className="absolute inset-0 pointer-events-none z-40">
+            {[...otherGroups, ...foregroundGroups].flatMap((g) => g.layers).map((layer) => {
+              if (!layer.visible || !layer.vectorPaths || layer.vectorPaths.length === 0) return null;
+              const isCollider = layer.role === 'collider';
+              if (isCollider && isPlayMode && layer.showColliderInPlay === false) return null;
+              const pFactor = isCollider ? 1 : (layer.parallaxFactor ?? 1);
+              parallaxFactorsRef.current[layer.id] = pFactor;
+              const isLegacyOrFixed = layer.coordinateSpace === 'legacy_200' || pFactor === 0;
+              return (
+                <div
+                  key={layer.id}
+                  ref={(el) => {
+                    if (el) parallaxLayerRefs.current[layer.id] = el;
+                    else delete parallaxLayerRefs.current[layer.id];
+                  }}
+                  className={isLegacyOrFixed ? 'absolute inset-0' : 'absolute left-0 top-0'}
+                  style={{
+                    ...(isLegacyOrFixed
+                      ? {}
+                      : { width: worldBounds.width, height: worldBounds.height }),
+                    transformOrigin: '0 0',
+                    transform: computeLayerParallaxTransform(activeCameraView, pFactor),
+                  }}
+                >
+                  {renderLayerSvg(layer, isCollider)}
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
         {/* 4. OVERLAY DE DESSIN EN DIRECT SUR SCÈNE (QUAND UN CALQUE DÉCOR EST SÉLECTIONNÉ) */}
         {selectedLayerId && !isPlayMode && (() => {
@@ -702,6 +1038,8 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
             <DirectCanvasDrawingOverlay
               layer={activeLayer}
               isColliderLayer={activeLayer.role === 'collider' || activeGroupKind === 'collider'}
+              editorCamera={editorCamera}
+              worldBounds={worldBounds}
               onUpdatePaths={(paths, skipHistory) =>
                 setLayerVectorPaths(selectedLayerId, paths, skipHistory)
               }
@@ -721,8 +1059,8 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
               onPointerDown={(e) => {
                 e.stopPropagation();
                 const pt = computeCanvasPoint(e.clientX, e.clientY);
-                const dropX = Math.max(20, pt.x - 40);
-                const dropY = Math.max(20, pt.y - 40);
+                const dropX = Math.max(0, pt.x - 40);
+                const dropY = Math.max(0, pt.y - 40);
                 spawnEntity({
                   type: pendingCatalogSpawnType,
                   position: { x: dropX, y: dropY },
@@ -793,9 +1131,8 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
                 e.stopPropagation();
                 e.currentTarget.releasePointerCapture?.(e.pointerId);
                 const endPt = computeSpawnPickPoint(e.clientX, e.clientY);
-                const rectEl = canvasContainerRef.current?.getBoundingClientRect();
-                const maxW = Math.max(40, Math.round(rectEl?.width || 800));
-                const maxH = Math.max(40, Math.round(rectEl?.height || 500));
+                const maxW = Math.max(40, worldBounds.width);
+                const maxH = Math.max(40, worldBounds.height);
 
                 const rawW = Math.abs(endPt.x - zoneDragStart.x);
                 const rawH = Math.abs(endPt.y - zoneDragStart.y);
@@ -824,130 +1161,140 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Grille active uniquement si Snap Grille activé */}
-              {spawnCanvasPick.snapToGrid && (
-                <svg className="absolute inset-0 w-full h-full pointer-events-none">
-                  <defs>
-                    <pattern
-                      id="spawn-pick-grid"
-                      width={spawnCanvasPick.gridStep || 16}
-                      height={spawnCanvasPick.gridStep || 16}
-                      patternUnits="userSpaceOnUse"
-                    >
-                      <path
-                        d={`M ${spawnCanvasPick.gridStep || 16} 0 L 0 0 0 ${spawnCanvasPick.gridStep || 16}`}
-                        fill="none"
-                        stroke={isZonePick ? '#9333ea' : '#10b981'}
-                        strokeOpacity="0.25"
-                        strokeWidth="1"
-                      />
-                    </pattern>
-                  </defs>
-                  <rect x="0" y="0" width="100%" height="100%" fill="url(#spawn-pick-grid)" />
-                </svg>
-              )}
-
-              {/* Visée vectorielle & boîte d'aperçu */}
-              <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
-                {isZonePick && spawnCanvasPick.initialZone && !draftZone && (
-                  <rect
-                    x={spawnCanvasPick.initialZone.x}
-                    y={spawnCanvasPick.initialZone.y}
-                    width={spawnCanvasPick.initialZone.width}
-                    height={spawnCanvasPick.initialZone.height}
-                    rx={8}
-                    fill="rgba(147, 51, 234, 0.08)"
-                    stroke="#9333ea"
-                    strokeOpacity={0.55}
-                    strokeWidth={1.5}
-                    strokeDasharray="6 4"
-                  />
+              <div
+                className="absolute left-0 top-0 pointer-events-none"
+                style={{
+                  width: worldBounds.width,
+                  height: worldBounds.height,
+                  transformOrigin: '0 0',
+                  transform: computeWorldTransformCss(editorCamera),
+                }}
+              >
+                {/* Grille active uniquement si Snap Grille activé */}
+                {spawnCanvasPick.snapToGrid && (
+                  <svg className="absolute inset-0 w-full h-full pointer-events-none">
+                    <defs>
+                      <pattern
+                        id="spawn-pick-grid"
+                        width={spawnCanvasPick.gridStep || 16}
+                        height={spawnCanvasPick.gridStep || 16}
+                        patternUnits="userSpaceOnUse"
+                      >
+                        <path
+                          d={`M ${spawnCanvasPick.gridStep || 16} 0 L 0 0 0 ${spawnCanvasPick.gridStep || 16}`}
+                          fill="none"
+                          stroke={isZonePick ? '#9333ea' : '#10b981'}
+                          strokeOpacity="0.25"
+                          strokeWidth="1"
+                        />
+                      </pattern>
+                    </defs>
+                    <rect x="0" y="0" width="100%" height="100%" fill="url(#spawn-pick-grid)" />
+                  </svg>
                 )}
 
-                {isZonePick && draftZone && (
-                  <rect
-                    x={draftZone.x}
-                    y={draftZone.y}
-                    width={Math.max(4, draftZone.width)}
-                    height={Math.max(4, draftZone.height)}
-                    rx={8}
-                    fill="rgba(147, 51, 234, 0.16)"
-                    stroke="#9333ea"
-                    strokeWidth={2.25}
-                    strokeDasharray="6 4"
-                  />
-                )}
-
-                {spawnCanvasPick.mode === 'offset' && spawnCanvasPick.refCenter && (
-                  <>
-                    <circle
-                      cx={spawnCanvasPick.refCenter.x}
-                      cy={spawnCanvasPick.refCenter.y}
-                      r={5}
-                      fill="#6366f1"
-                      stroke="#ffffff"
-                      strokeWidth={2}
+                {/* Visée vectorielle & boîte d'aperçu */}
+                <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
+                  {isZonePick && spawnCanvasPick.initialZone && !draftZone && (
+                    <rect
+                      x={spawnCanvasPick.initialZone.x}
+                      y={spawnCanvasPick.initialZone.y}
+                      width={spawnCanvasPick.initialZone.width}
+                      height={spawnCanvasPick.initialZone.height}
+                      rx={8}
+                      fill="rgba(147, 51, 234, 0.08)"
+                      stroke="#9333ea"
+                      strokeOpacity={0.55}
+                      strokeWidth={1.5}
+                      strokeDasharray="6 4"
                     />
-                    {pickHoverPt && (
-                      <line
-                        x1={spawnCanvasPick.refCenter.x}
-                        y1={spawnCanvasPick.refCenter.y}
-                        x2={pickHoverPt.x}
-                        y2={pickHoverPt.y}
-                        stroke="#6366f1"
+                  )}
+
+                  {isZonePick && draftZone && (
+                    <rect
+                      x={draftZone.x}
+                      y={draftZone.y}
+                      width={Math.max(4, draftZone.width)}
+                      height={Math.max(4, draftZone.height)}
+                      rx={8}
+                      fill="rgba(147, 51, 234, 0.16)"
+                      stroke="#9333ea"
+                      strokeWidth={2.25}
+                      strokeDasharray="6 4"
+                    />
+                  )}
+
+                  {spawnCanvasPick.mode === 'offset' && spawnCanvasPick.refCenter && (
+                    <>
+                      <circle
+                        cx={spawnCanvasPick.refCenter.x}
+                        cy={spawnCanvasPick.refCenter.y}
+                        r={5}
+                        fill="#6366f1"
+                        stroke="#ffffff"
                         strokeWidth={2}
-                        strokeDasharray="6 4"
                       />
-                    )}
-                  </>
-                )}
+                      {pickHoverPt && (
+                        <line
+                          x1={spawnCanvasPick.refCenter.x}
+                          y1={spawnCanvasPick.refCenter.y}
+                          x2={pickHoverPt.x}
+                          y2={pickHoverPt.y}
+                          stroke="#6366f1"
+                          strokeWidth={2}
+                          strokeDasharray="6 4"
+                        />
+                      )}
+                    </>
+                  )}
 
-                {pickHoverPt && (
-                  <>
-                    <line
-                      x1={pickHoverPt.x}
-                      y1={0}
-                      x2={pickHoverPt.x}
-                      y2="100%"
-                      stroke={isZonePick ? '#9333ea' : '#10b981'}
-                      strokeOpacity={0.45}
-                      strokeWidth={1}
-                      strokeDasharray="4 4"
-                    />
-                    <line
-                      x1={0}
-                      y1={pickHoverPt.y}
-                      x2="100%"
-                      y2={pickHoverPt.y}
-                      stroke={isZonePick ? '#9333ea' : '#10b981'}
-                      strokeOpacity={0.45}
-                      strokeWidth={1}
-                      strokeDasharray="4 4"
-                    />
-                    {!isZonePick && spawnCanvasPick.spawnSize && (
-                      <rect
-                        x={pickHoverPt.x - spawnCanvasPick.spawnSize.width / 2}
-                        y={pickHoverPt.y - spawnCanvasPick.spawnSize.height / 2}
-                        width={spawnCanvasPick.spawnSize.width}
-                        height={spawnCanvasPick.spawnSize.height}
-                        rx={8}
-                        fill="rgba(16, 185, 129, 0.12)"
-                        stroke="#10b981"
-                        strokeWidth={1.75}
-                        strokeDasharray="5 3"
+                  {pickHoverPt && (
+                    <>
+                      <line
+                        x1={pickHoverPt.x}
+                        y1={0}
+                        x2={pickHoverPt.x}
+                        y2={worldBounds.height}
+                        stroke={isZonePick ? '#9333ea' : '#10b981'}
+                        strokeOpacity={0.45}
+                        strokeWidth={1}
+                        strokeDasharray="4 4"
                       />
-                    )}
-                    <circle
-                      cx={pickHoverPt.x}
-                      cy={pickHoverPt.y}
-                      r={5}
-                      fill={isZonePick ? '#9333ea' : '#10b981'}
-                      stroke="#ffffff"
-                      strokeWidth={2}
-                    />
-                  </>
-                )}
-              </svg>
+                      <line
+                        x1={0}
+                        y1={pickHoverPt.y}
+                        x2={worldBounds.width}
+                        y2={pickHoverPt.y}
+                        stroke={isZonePick ? '#9333ea' : '#10b981'}
+                        strokeOpacity={0.45}
+                        strokeWidth={1}
+                        strokeDasharray="4 4"
+                      />
+                      {!isZonePick && spawnCanvasPick.spawnSize && (
+                        <rect
+                          x={pickHoverPt.x - spawnCanvasPick.spawnSize.width / 2}
+                          y={pickHoverPt.y - spawnCanvasPick.spawnSize.height / 2}
+                          width={spawnCanvasPick.spawnSize.width}
+                          height={spawnCanvasPick.spawnSize.height}
+                          rx={8}
+                          fill="rgba(16, 185, 129, 0.12)"
+                          stroke="#10b981"
+                          strokeWidth={1.75}
+                          strokeDasharray="5 3"
+                        />
+                      )}
+                      <circle
+                        cx={pickHoverPt.x}
+                        cy={pickHoverPt.y}
+                        r={5}
+                        fill={isZonePick ? '#9333ea' : '#10b981'}
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                      />
+                    </>
+                  )}
+                </svg>
+              </div>
 
               {/* Barre flottante de contrôle en haut du canvas */}
               <div
@@ -1060,68 +1407,78 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
-                <circle cx={pCenter.x} cy={pCenter.y} r={4.5} fill="#6366f1" stroke="#ffffff" strokeWidth={1.75} />
-                <circle cx={cCenter.x} cy={cCenter.y} r={4.5} fill="#0ea5e9" stroke="#ffffff" strokeWidth={1.75} />
-                {jointPickHoverPt && (
-                  <>
-                    <line
-                      x1={pCenter.x}
-                      y1={pCenter.y}
-                      x2={jointPickHoverPt.x}
-                      y2={jointPickHoverPt.y}
-                      stroke="#6366f1"
-                      strokeWidth={1.75}
-                      strokeDasharray="5 4"
-                    />
-                    <line
-                      x1={cCenter.x}
-                      y1={cCenter.y}
-                      x2={jointPickHoverPt.x}
-                      y2={jointPickHoverPt.y}
-                      stroke="#0ea5e9"
-                      strokeWidth={1.75}
-                      strokeDasharray="5 4"
-                    />
-                    <line
-                      x1={jointPickHoverPt.x}
-                      y1={0}
-                      x2={jointPickHoverPt.x}
-                      y2="100%"
-                      stroke="#0ea5e9"
-                      strokeOpacity={0.35}
-                      strokeWidth={1}
-                      strokeDasharray="4 4"
-                    />
-                    <line
-                      x1={0}
-                      y1={jointPickHoverPt.y}
-                      x2="100%"
-                      y2={jointPickHoverPt.y}
-                      stroke="#0ea5e9"
-                      strokeOpacity={0.35}
-                      strokeWidth={1}
-                      strokeDasharray="4 4"
-                    />
-                    <circle
-                      cx={jointPickHoverPt.x}
-                      cy={jointPickHoverPt.y}
-                      r={10}
-                      fill="rgba(14, 165, 233, 0.16)"
-                      stroke="#0ea5e9"
-                      strokeWidth={1.75}
-                    />
-                    <circle
-                      cx={jointPickHoverPt.x}
-                      cy={jointPickHoverPt.y}
-                      r={4}
-                      fill="#0ea5e9"
-                      stroke="#ffffff"
-                      strokeWidth={2}
-                    />
-                  </>
-                )}
-              </svg>
+              <div
+                className="absolute left-0 top-0 pointer-events-none"
+                style={{
+                  width: worldBounds.width,
+                  height: worldBounds.height,
+                  transformOrigin: '0 0',
+                  transform: computeWorldTransformCss(editorCamera),
+                }}
+              >
+                <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
+                  <circle cx={pCenter.x} cy={pCenter.y} r={4.5} fill="#6366f1" stroke="#ffffff" strokeWidth={1.75} />
+                  <circle cx={cCenter.x} cy={cCenter.y} r={4.5} fill="#0ea5e9" stroke="#ffffff" strokeWidth={1.75} />
+                  {jointPickHoverPt && (
+                    <>
+                      <line
+                        x1={pCenter.x}
+                        y1={pCenter.y}
+                        x2={jointPickHoverPt.x}
+                        y2={jointPickHoverPt.y}
+                        stroke="#6366f1"
+                        strokeWidth={1.75}
+                        strokeDasharray="5 4"
+                      />
+                      <line
+                        x1={cCenter.x}
+                        y1={cCenter.y}
+                        x2={jointPickHoverPt.x}
+                        y2={jointPickHoverPt.y}
+                        stroke="#0ea5e9"
+                        strokeWidth={1.75}
+                        strokeDasharray="5 4"
+                      />
+                      <line
+                        x1={jointPickHoverPt.x}
+                        y1={0}
+                        x2={jointPickHoverPt.x}
+                        y2={worldBounds.height}
+                        stroke="#0ea5e9"
+                        strokeOpacity={0.35}
+                        strokeWidth={1}
+                        strokeDasharray="4 4"
+                      />
+                      <line
+                        x1={0}
+                        y1={jointPickHoverPt.y}
+                        x2={worldBounds.width}
+                        y2={jointPickHoverPt.y}
+                        stroke="#0ea5e9"
+                        strokeOpacity={0.35}
+                        strokeWidth={1}
+                        strokeDasharray="4 4"
+                      />
+                      <circle
+                        cx={jointPickHoverPt.x}
+                        cy={jointPickHoverPt.y}
+                        r={10}
+                        fill="rgba(14, 165, 233, 0.16)"
+                        stroke="#0ea5e9"
+                        strokeWidth={1.75}
+                      />
+                      <circle
+                        cx={jointPickHoverPt.x}
+                        cy={jointPickHoverPt.y}
+                        r={4}
+                        fill="#0ea5e9"
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                      />
+                    </>
+                  )}
+                </svg>
+              </div>
 
               <div
                 onPointerDown={(e) => e.stopPropagation()}
@@ -1151,78 +1508,79 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           );
         })()}
 
-        {/* 7. POIGNÉE INTERACTIVE DE GLISSER DU POINT D'ATTACHE JOINT SUR LE CANVAS (MODE ÉDITION) */}
-        {!isPlayMode && !spawnCanvasPick && !jointCanvasPick && !selectedLayerId && selectedEntityId && (() => {
-          const selChild = entities[selectedEntityId];
-          if (!selChild || !selChild.parentId) return null;
-          const selParent = entities[selChild.parentId];
-          if (!selParent || selChild.visible === false) return null;
-          const pinWorld = getChildAttachmentPinWorld(selChild, selParent);
-
-          return (
-            <div
-              role="button"
-              tabIndex={-1}
-              aria-label="Déplacer le point d'attache"
-              title="Glisser pour déplacer le point d'attache sur la scène (sans bouger les objets)"
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                useSceneStore.getState().pushSceneHistory();
-                setIsDraggingJointPin(true);
-                const startTarget = e.currentTarget;
-                try {
-                  startTarget.setPointerCapture(e.pointerId);
-                } catch {
-                  // Ignore if unsupported
-                }
-
-                const handleMove = (ev: PointerEvent) => {
-                  const pt = computeCanvasPoint(ev.clientX, ev.clientY);
-                  moveJointAttachmentPin(selChild.id, pt.x, pt.y, true);
-                };
-
-                const handleUp = (ev: PointerEvent) => {
-                  setIsDraggingJointPin(false);
-                  try {
-                    startTarget.releasePointerCapture(ev.pointerId);
-                  } catch {
-                    // Ignore
-                  }
-                  window.removeEventListener('pointermove', handleMove);
-                  window.removeEventListener('pointerup', handleUp);
-                  window.removeEventListener('pointercancel', handleUp);
-                };
-
-                window.addEventListener('pointermove', handleMove);
-                window.addEventListener('pointerup', handleUp);
-                window.addEventListener('pointercancel', handleUp);
-              }}
-              style={{
-                left: `${pinWorld.x}px`,
-                top: `${pinWorld.y}px`,
-                touchAction: 'none',
-              }}
-              className={`absolute -translate-x-1/2 -translate-y-1/2 z-[48] w-7 h-7 flex items-center justify-center pointer-events-auto ${
-                isDraggingJointPin ? 'cursor-grabbing scale-110' : 'cursor-grab hover:scale-110'
-              } transition-transform`}
+        {/* 7.5. HUD COMPACT DE NAVIGATION CAMÉRA EN MODE ÉDITION */}
+        {!isPlayMode && !spawnCanvasPick && !jointCanvasPick && !selectedLayerId && (
+          <div
+            data-camera-hud="true"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            className="absolute bottom-2.5 right-2.5 z-[49] flex items-center gap-1 px-2 py-1 bg-white/92 backdrop-blur-md border border-slate-200/90 rounded-2xl shadow-md text-[11px] font-bold text-slate-700"
+          >
+            <button
+              type="button"
+              onClick={() =>
+                setEditorCamera({ zoom: clampCameraZoom(editorCamera.zoom / 1.2) })
+              }
+              className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 cursor-pointer"
+              title="Dézoomer l'éditeur"
             >
-              <span className="w-4 h-4 rounded-full bg-sky-500/90 border-2 border-white shadow-md flex items-center justify-center">
-                <span className="w-1.5 h-1.5 rounded-full bg-white" />
-              </span>
-            </div>
-          );
-        })()}
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditorCamera({ zoom: 1 })}
+              className="px-1.5 py-0.5 rounded-lg hover:bg-slate-100 font-mono text-[10px] tabular-nums min-w-[42px] text-center cursor-pointer"
+              title="Réinitialiser le zoom à 100%"
+            >
+              {Math.round(editorCamera.zoom * 100)}%
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setEditorCamera({ zoom: clampCameraZoom(editorCamera.zoom * 1.2) })
+              }
+              className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 cursor-pointer"
+              title="Zoomer l'éditeur"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+            <div className="w-px h-4 bg-slate-200 mx-0.5" />
+            <button
+              type="button"
+              onClick={() => setIsPanToolActive((v) => !v)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-bold cursor-pointer transition-colors ${
+                isPanToolActive || isSpacePressed
+                  ? 'bg-sky-600 text-white shadow-2xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+              }`}
+              title="Déplacer la vue caméra (maintenir Espace ou clic molette)"
+            >
+              <Hand className="w-3 h-3" />
+              <span className="hidden sm:inline">Main</span>
+            </button>
+            {(editorCamera.x !== 0 || editorCamera.y !== 0 || Math.abs(editorCamera.zoom - 1) > 0.01) && (
+              <button
+                type="button"
+                onClick={() => resetEditorCamera()}
+                className="flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 cursor-pointer"
+                title="Recentrer la vue caméra éditeur (0, 0 · 100%)"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span className="hidden sm:inline">Recentrer</span>
+              </button>
+            )}
+          </div>
+        )}
 
         {/* 8. RIDEAU DE TRANSITION INTER-SCÈNES (Mode Play) */}
         {activeSceneTransition && activeSceneTransition.type !== 'none' && (() => {
           const { type, phase, duration } = activeSceneTransition;
           const ms = Math.max(50, Math.round((duration || 0.45) * 500));
 
-          if (type === 'iris') {
+          if (type === 'iris' || type === 'iris_white') {
             const openHole = phase === 'out' ? !transitionEngaged : transitionEngaged;
             const holeSize = openHole ? 2400 : 0;
+            const irisColor = type === 'iris_white' ? '#ffffff' : '#0f172a';
             return (
               <div className="absolute inset-0 z-[60] pointer-events-none overflow-hidden">
                 <div
@@ -1234,7 +1592,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
                     height: `${holeSize}px`,
                     transform: 'translate(-50%, -50%)',
                     borderRadius: '9999px',
-                    boxShadow: '0 0 0 2400px #0f172a',
+                    boxShadow: `0 0 0 2400px ${irisColor}`,
                     transition: `width ${ms}ms ease-in-out, height ${ms}ms ease-in-out`,
                   }}
                 />
@@ -1264,13 +1622,93 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
             );
           }
 
-          // 'fade'
+          if (type === 'slide_up' || type === 'slide_down') {
+            let yPercent = '0%';
+            if (type === 'slide_up') {
+              yPercent = phase === 'out'
+                ? (transitionEngaged ? '0%' : '100%')
+                : (transitionEngaged ? '-100%' : '0%');
+            } else {
+              yPercent = phase === 'out'
+                ? (transitionEngaged ? '0%' : '-100%')
+                : (transitionEngaged ? '100%' : '0%');
+            }
+            return (
+              <div
+                className="absolute inset-0 z-[60] pointer-events-none bg-slate-950"
+                style={{
+                  transform: `translateY(${yPercent})`,
+                  transition: `transform ${ms}ms ease-in-out`,
+                }}
+              />
+            );
+          }
+
+          if (type === 'wipe_left') {
+            const clip =
+              phase === 'out'
+                ? transitionEngaged
+                  ? 'inset(0% 0% 0% 0%)'
+                  : 'inset(0% 0% 0% 100%)'
+                : transitionEngaged
+                ? 'inset(0% 100% 0% 0%)'
+                : 'inset(0% 0% 0% 0%)';
+            return (
+              <div
+                className="absolute inset-0 z-[60] pointer-events-none bg-slate-950"
+                style={{
+                  clipPath: clip,
+                  transition: `clip-path ${ms}ms ease-in-out`,
+                }}
+              />
+            );
+          }
+
+          if (type === 'curtain') {
+            const closed = phase === 'out' ? transitionEngaged : !transitionEngaged;
+            const shutterWidth = closed ? '50%' : '0%';
+            return (
+              <div className="absolute inset-0 z-[60] pointer-events-none overflow-hidden">
+                <div
+                  className="absolute top-0 bottom-0 left-0 bg-slate-950"
+                  style={{
+                    width: shutterWidth,
+                    transition: `width ${ms}ms ease-in-out`,
+                  }}
+                />
+                <div
+                  className="absolute top-0 bottom-0 right-0 bg-slate-950"
+                  style={{
+                    width: shutterWidth,
+                    transition: `width ${ms}ms ease-in-out`,
+                  }}
+                />
+              </div>
+            );
+          }
+
+          if (type === 'zoom_fade') {
+            const active = phase === 'out' ? transitionEngaged : !transitionEngaged;
+            return (
+              <div
+                className="absolute inset-0 z-[60] pointer-events-none bg-slate-950"
+                style={{
+                  opacity: active ? 1 : 0,
+                  transform: active ? 'scale(1)' : 'scale(1.15)',
+                  transition: `opacity ${ms}ms ease-in-out, transform ${ms}ms ease-in-out`,
+                }}
+              />
+            );
+          }
+
+          // 'fade' | 'fade_white'
           const opacity = phase === 'out'
             ? (transitionEngaged ? 1 : 0)
             : (transitionEngaged ? 0 : 1);
+          const fadeBg = type === 'fade_white' ? 'bg-white' : 'bg-slate-950';
           return (
             <div
-              className="absolute inset-0 z-[60] pointer-events-none bg-slate-950"
+              className={`absolute inset-0 z-[60] pointer-events-none ${fadeBg}`}
               style={{
                 opacity,
                 transition: `opacity ${ms}ms ease-in-out`,
@@ -1287,10 +1725,14 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
 function DirectCanvasDrawingOverlay({
   layer,
   isColliderLayer,
+  editorCamera,
+  worldBounds,
   onUpdatePaths,
 }: {
   layer: any;
   isColliderLayer: boolean;
+  editorCamera: { x: number; y: number; zoom: number };
+  worldBounds: { width: number; height: number };
   onUpdatePaths: (paths: VectorPath[], skipHistory?: boolean) => void;
 }) {
   const drawingTool = useSceneStore((state) => state.drawingTool);
@@ -1371,6 +1813,14 @@ function DirectCanvasDrawingOverlay({
     [drawingSnapToGrid, gridStep]
   );
 
+  const effectiveParallaxFactor = isColliderLayer ? 1 : (layer.parallaxFactor ?? 1);
+  const layerZoomFactor =
+    effectiveParallaxFactor === 0 ? 1 : Math.max(0.1, editorCamera?.zoom || 1);
+  const isLegacyOrFixed = isLegacy200 || effectiveParallaxFactor === 0;
+  const layerTransformCss = isColliderLayer
+    ? computeWorldTransformCss(editorCamera)
+    : computeLayerParallaxTransform(editorCamera, effectiveParallaxFactor);
+
   const getSvgCoordinates = (
     e: React.PointerEvent<SVGSVGElement> | React.MouseEvent<SVGSVGElement>,
     allowSnap = false
@@ -1383,8 +1833,8 @@ function DirectCanvasDrawingOverlay({
       const y = Math.max(0, Math.min(200, ((e.clientY - rect.top) / rect.height) * 200));
       raw = { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
     } else {
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      const x = (e.clientX - rect.left) / layerZoomFactor;
+      const y = (e.clientY - rect.top) / layerZoomFactor;
       raw = { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
     }
     return snapPt(raw, allowSnap);
@@ -1612,12 +2062,12 @@ function DirectCanvasDrawingOverlay({
       }
 
       if (fillColor === 'none') return;
-      const rect = svgRef.current?.getBoundingClientRect();
+      const svgEl = svgRef.current;
       const bounds = isLegacy200
         ? { width: 200, height: 200 }
         : {
-            width: Math.max(200, Math.round(rect?.width || 800)),
-            height: Math.max(200, Math.round(rect?.height || 500)),
+            width: Math.max(200, Math.round(svgEl?.clientWidth || worldBounds.width || 800)),
+            height: Math.max(200, Math.round(svgEl?.clientHeight || worldBounds.height || 500)),
           };
       const result = applyBucketFill(
         pt.x,
@@ -2158,18 +2608,26 @@ function DirectCanvasDrawingOverlay({
         </button>
       </div>
 
-      {/* SVG Canvas Interactive Surface */}
-      <svg
-        ref={svgRef}
-        {...(isLegacy200 ? { viewBox: '0 0 200 200', preserveAspectRatio: 'none' as const } : {})}
-        className={`w-full h-full touch-none select-none overflow-visible ${cursorClass}`}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        onPointerLeave={() => setHoverPt(null)}
-        onDoubleClick={handleDoubleClick}
+      {/* SVG Canvas Interactive Surface (adapté caméra & parallaxe) */}
+      <div
+        className={isLegacyOrFixed ? 'absolute inset-0 overflow-visible' : 'absolute left-0 top-0 overflow-visible'}
+        style={{
+          ...(isLegacyOrFixed ? {} : { width: worldBounds.width, height: worldBounds.height }),
+          transformOrigin: '0 0',
+          transform: layerTransformCss,
+        }}
       >
+        <svg
+          ref={svgRef}
+          {...(isLegacy200 ? { viewBox: '0 0 200 200', preserveAspectRatio: 'none' as const } : {})}
+          className={`w-full h-full touch-none select-none overflow-visible ${cursorClass}`}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onPointerLeave={() => setHoverPt(null)}
+          onDoubleClick={handleDoubleClick}
+        >
         {/* Grille de dessin optionnelle */}
         {drawingShowGrid && (
           <>
@@ -2389,7 +2847,8 @@ function DirectCanvasDrawingOverlay({
             className="pointer-events-none"
           />
         )}
-      </svg>
+        </svg>
+      </div>
     </div>
   );
 }

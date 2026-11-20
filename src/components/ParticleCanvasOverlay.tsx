@@ -6,6 +6,7 @@ import {
   syncCustomParticlePresets,
 } from '../utils/particleSystem';
 import { useSceneStore } from '../store/useSceneStore';
+import { getActiveCameraView } from '../utils/cameraRuntime';
 
 interface ParticleCanvasOverlayProps {
   active: boolean;
@@ -63,7 +64,9 @@ export function ParticleCanvasOverlay({ active }: ParticleCanvasOverlayProps) {
         const cssW = canvas.width / dpr;
         const cssH = canvas.height / dpr;
         if (hasActiveParticles() || dirty) {
-          dirty = stepAndRenderParticles(ctx, cssW, cssH, dt);
+          const storeSnap = useSceneStore.getState();
+          const camView = getActiveCameraView(storeSnap.appMode, storeSnap.editorCamera);
+          dirty = stepAndRenderParticles(ctx, cssW, cssH, dt, camView);
         }
       }
 

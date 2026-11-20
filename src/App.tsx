@@ -9,6 +9,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { ProjectSlotsModal } from './components/ProjectSlotsModal';
 import { FullScreenDrawingModal } from './components/FullScreenDrawingModal';
 import { DrawingToolsPanel } from './components/DrawingToolsPanel';
+import { SceneCameraModal } from './components/SceneCameraModal';
 import { useSceneStore, EMPTY_LIST } from './store/useSceneStore';
 import { SceneLayer, SceneLayerGroup } from './types';
 import {
@@ -29,6 +30,7 @@ import {
   Plus,
   Copy,
   Check,
+  Camera,
 } from 'lucide-react';
 
 export default function App() {
@@ -58,6 +60,7 @@ export default function App() {
   const scenes = useSceneStore((state) => state.scenes || EMPTY_LIST);
   const activeSceneId = useSceneStore((state) => state.activeSceneId);
   const backgroundColor = useSceneStore((state) => state.backgroundColor);
+  const cameraConfig = useSceneStore((state) => state.camera);
   const createScene = useSceneStore((state) => state.createScene);
   const switchScene = useSceneStore((state) => state.switchScene);
   const renameScene = useSceneStore((state) => state.renameScene);
@@ -76,6 +79,7 @@ export default function App() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [isSlotsModalOpen, setIsSlotsModalOpen] = useState(false);
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
   const [saveToast, setSaveToast] = useState<string | null>(null);
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
   const [editingSceneName, setEditingSceneName] = useState<string>('');
@@ -855,6 +859,23 @@ export default function App() {
 
               {appMode === 'edit' && (
                 <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsCameraModalOpen(true)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-bold border cursor-pointer transition-colors ${
+                      cameraConfig?.worldMode === 'custom' || (cameraConfig?.followMode && cameraConfig.followMode !== 'none')
+                        ? 'bg-sky-50 text-sky-700 border-sky-300 hover:bg-sky-100'
+                        : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:text-slate-900'
+                    }`}
+                    title="Configurer la caméra, le suivi de cible et les dimensions du monde de cette scène"
+                  >
+                    <Camera className="w-3.5 h-3.5 text-sky-600" />
+                    <span>
+                      {cameraConfig?.worldMode === 'custom'
+                        ? `Monde ${cameraConfig.worldWidth}×${cameraConfig.worldHeight}`
+                        : 'Caméra'}
+                    </span>
+                  </button>
                   <label
                     className="flex items-center gap-1.5 px-2 py-0.5 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-slate-600 cursor-pointer hover:border-slate-300"
                     title="Couleur de fond de cette scène"
@@ -975,6 +996,8 @@ export default function App() {
           onClose={() => setEditingLayer(null)}
         />
       )}
+
+      {isCameraModalOpen && <SceneCameraModal onClose={() => setIsCameraModalOpen(false)} />}
 
       {/* Nettoyage Modal */}
       {isClearModalOpen && (
