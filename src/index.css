@@ -10,6 +10,16 @@ body,
   overflow: hidden;
   overscroll-behavior: none;
   -webkit-overflow-scrolling: touch;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+select {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* Curseur Croix Fine Statique Haute Précision - Mis en cache matériel GPU (PNG natif) pour éliminer tout scintillement sur Chrome et Firefox */

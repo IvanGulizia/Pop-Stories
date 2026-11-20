@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSceneStore, EMPTY_LIST, EMPTY_RECORD } from '../store/useSceneStore';
-import { VectorPath } from '../types';
+import { SliderBehaviorConfig, VectorPath } from '../types';
 import { Apple } from './Apple';
 import { Plant } from './Plant';
 import { CustomShape } from './CustomShape';
@@ -26,7 +26,10 @@ import {
   stepMatterPhysics,
   startKeyboardListening,
   stopKeyboardListening,
+  getEffectiveBehaviors,
+  getGizmoRuntimeDebugData,
 } from '../utils/matterPhysicsEngine';
+import { getSliderTrackGeometry } from '../utils/physics/sliderSolver';
 import { applyBucketFill } from '../utils/floodFill';
 import {
   generateRoundedRectPath,
@@ -65,6 +68,21 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const settings = useSceneStore((state) => state.settings);
   const appMode = useSceneStore((state) => state.appMode);
   const gameScore = useSceneStore((state) => state.gameScore);
+  const backgroundColor = useSceneStore((state) => state.backgroundColor || '#ffffff');
+  const activeSceneTransition = useSceneStore((state) => state.activeSceneTransition);
+  const [transitionEngaged, setTransitionEngaged] = useState(false);
+
+  useEffect(() => {
+    if (!activeSceneTransition) {
+      setTransitionEngaged(false);
+      return;
+    }
+    setTransitionEngaged(false);
+    const raf = window.requestAnimationFrame(() => {
+      setTransitionEngaged(true);
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [activeSceneTransition?.id, activeSceneTransition?.phase]);
 
   const hasEntitiesOnCanvas = Object.keys(entities).length > 0;
   const hasArchetypesInCatalog = Object.keys(customArchetypes).length > 0;
@@ -122,6 +140,8 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const completeJointCanvasPick = useSceneStore((state) => state.completeJointCanvasPick);
   const cancelJointCanvasPick = useSceneStore((state) => state.cancelJointCanvasPick);
   const moveJointAttachmentPin = useSceneStore((state) => state.moveJointAttachmentPin);
+  const pendingCatalogSpawnType = useSceneStore((state) => state.pendingCatalogSpawnType);
+  const setPendingCatalogSpawnType = useSceneStore((state) => state.setPendingCatalogSpawnType);
 
   const isPlayMode = appMode === 'play';
   const isCustomCursorActive =
@@ -220,6 +240,10 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
 
         if (Object.keys(result.updatedTransforms).length > 0) {
           batchUpdateEntityTransforms(result.updatedTransforms);
+        }
+
+        if (result.variableUpdates) {
+          useSceneStore.getState().batchSetGameVariables(result.variableUpdates);
         }
 
         if (result.stateChanges) {
@@ -391,7 +415,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         onPointerLeave={() => {
           mousePosRef.current = null;
         }}
-        className={`relative bg-white overflow-hidden select-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-all duration-300 ${
+        className={`relative overflow-hidden select-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-all duration-300 ${
           isCustomCursorActive
             ? 'atelier-cursor-hidden'
             : !isPlayMode
@@ -399,6 +423,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
             : ''
         }`}
         style={{
+          backgroundColor,
           ...getAspectRatioStyle(),
         }}
       >
@@ -482,6 +507,143 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           </div>
         )}
 
+        {/* 1.8. RAILS & ZONES DE GLISSIÈRE SLIDERS EN MODE PLAY (z-6, hors debug gizmo) */}
+        {isPlayMode && (() => {
+          const rtSliderTracks = getGizmoRuntimeDebugData().sliderTracks;
+          const sliderEntities = Object.values(entities).filter((ent) => {
+            if (!ent || ent.visible === false || ent.parentId) return false;
+            const st = ent.states[ent.currentStateId];
+            const sb = getEffectiveBehaviors(ent, st).find(
+              (b): b is SliderBehaviorConfig => b.type === 'slider' && b.enabled !== false
+            );
+            return Boolean(sb && sb.showTrackInPlay !== false);
+          });
+          if (sliderEntities.length === 0) return null;
+          return (
+            <svg className="absolute inset-0 w-full h-full pointer-events-none z-6 overflow-visible">
+              {sliderEntities.map((ent) => {
+                const st = ent.states[ent.currentStateId];
+                const sb = getEffectiveBehaviors(ent, st).find(
+                  (b): b is SliderBehaviorConfig => b.type === 'slider' && b.enabled !== false
+                )!;
+                const geom =
+                  rtSliderTracks[ent.id]?.geom ||
+                  getSliderTrackGeometry(
+                    ent.position.x + ent.size.width / 2,
+                    ent.position.y + ent.size.height / 2,
+                    sb
+                  );
+                const stepsX = Math.max(0, Math.round(sb.stepsX ?? 0));
+                const stepsY = Math.max(0, Math.round(sb.stepsY ?? 0));
+
+                if (geom.geometryMode === 'line_1d') {
+                  const nx = -geom.uy;
+                  const ny = geom.ux;
+                  return (
+                    <g key={`play-slider-${ent.id}`}>
+                      <line
+                        x1={geom.startPt.x}
+                        y1={geom.startPt.y}
+                        x2={geom.endPt.x}
+                        y2={geom.endPt.y}
+                        stroke="rgba(148,163,184,0.35)"
+                        strokeWidth={10}
+                        strokeLinecap="round"
+                      />
+                      <line
+                        x1={geom.startPt.x}
+                        y1={geom.startPt.y}
+                        x2={geom.endPt.x}
+                        y2={geom.endPt.y}
+                        stroke="rgba(100,116,139,0.55)"
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                      />
+                      {stepsX >= 2 &&
+                        Array.from({ length: stepsX }).map((_, idx) => {
+                          const t = idx / (stepsX - 1);
+                          const lx = (t - 0.5) * 2 * geom.halfLen;
+                          const px = geom.originCx + geom.ux * lx;
+                          const py = geom.originCy + geom.uy * lx;
+                          return (
+                            <line
+                              key={idx}
+                              x1={px - nx * 5}
+                              y1={py - ny * 5}
+                              x2={px + nx * 5}
+                              y2={py + ny * 5}
+                              stroke="rgba(71,85,105,0.65)"
+                              strokeWidth={1.75}
+                              strokeLinecap="round"
+                            />
+                          );
+                        })}
+                      {sb.returnMode === 'spring_return' && (
+                        <circle
+                          cx={geom.returnWorldPt.x}
+                          cy={geom.returnWorldPt.y}
+                          r={3.5}
+                          fill="rgba(14,165,233,0.75)"
+                        />
+                      )}
+                    </g>
+                  );
+                }
+
+                if (geom.geometryMode === 'rect_2d') {
+                  return (
+                    <g key={`play-slider-${ent.id}`}>
+                      <rect
+                        x={geom.originCx - geom.halfW}
+                        y={geom.originCy - geom.halfH}
+                        width={geom.halfW * 2}
+                        height={geom.halfH * 2}
+                        rx={12}
+                        fill="rgba(148,163,184,0.10)"
+                        stroke="rgba(148,163,184,0.55)"
+                        strokeWidth={2}
+                      />
+                      {stepsX >= 2 && stepsY >= 2 &&
+                        Array.from({ length: stepsX }).flatMap((_, ix) =>
+                          Array.from({ length: stepsY }).map((__, iy) => {
+                            const px = geom.originCx + ((ix / (stepsX - 1)) - 0.5) * 2 * geom.halfW;
+                            const py = geom.originCy + ((iy / (stepsY - 1)) - 0.5) * 2 * geom.halfH;
+                            return (
+                              <circle
+                                key={`${ix}-${iy}`}
+                                cx={px}
+                                cy={py}
+                                r={2}
+                                fill="rgba(100,116,139,0.5)"
+                              />
+                            );
+                          })
+                        )}
+                      {sb.returnMode === 'spring_return' && (
+                        <circle cx={geom.originCx} cy={geom.originCy} r={3.5} fill="rgba(14,165,233,0.75)" />
+                      )}
+                    </g>
+                  );
+                }
+
+                return (
+                  <g key={`play-slider-${ent.id}`}>
+                    <circle
+                      cx={geom.originCx}
+                      cy={geom.originCy}
+                      r={geom.radius}
+                      fill="rgba(148,163,184,0.10)"
+                      stroke="rgba(148,163,184,0.55)"
+                      strokeWidth={2}
+                    />
+                    <circle cx={geom.originCx} cy={geom.originCy} r={3} fill="rgba(100,116,139,0.55)" />
+                  </g>
+                );
+              })}
+            </svg>
+          );
+        })()}
+
         {/* 2. RENDU DES ENTITÉS SELON entityOrder (z-index layering: 10 à 30) */}
         {(() => {
           const order = entityOrder && entityOrder.length > 0 ? entityOrder : Object.keys(entities);
@@ -544,6 +706,48 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
                 setLayerVectorPaths(selectedLayerId, paths, skipHistory)
               }
             />
+          );
+        })()}
+
+        {/* 4.5. OVERLAY PLACEMENT TACTILE DEPUIS LA GALERIE (iPad / Tablette / Souris) */}
+        {pendingCatalogSpawnType && !isPlayMode && !spawnCanvasPick && !jointCanvasPick && (() => {
+          const catalogLabel =
+            customArchetypes[pendingCatalogSpawnType]?.name ||
+            Object.values(entities).find((e) => e.type === pendingCatalogSpawnType)?.name ||
+            pendingCatalogSpawnType;
+          return (
+            <div
+              className="absolute inset-0 z-50 cursor-crosshair touch-none"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                const pt = computeCanvasPoint(e.clientX, e.clientY);
+                const dropX = Math.max(20, pt.x - 40);
+                const dropY = Math.max(20, pt.y - 40);
+                spawnEntity({
+                  type: pendingCatalogSpawnType,
+                  position: { x: dropX, y: dropY },
+                });
+                setPendingCatalogSpawnType(null);
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                className="absolute top-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-3 py-1.5 bg-slate-900/95 text-white border border-emerald-500/60 rounded-2xl shadow-xl cursor-default"
+              >
+                <span className="text-xs font-bold text-emerald-300 whitespace-nowrap">
+                  Touchez la scène pour placer « {catalogLabel} »
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPendingCatalogSpawnType(null)}
+                  className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 cursor-pointer"
+                >
+                  Annuler
+                </button>
+              </div>
+            </div>
           );
         })()}
 
@@ -1008,6 +1212,70 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
                 <span className="w-1.5 h-1.5 rounded-full bg-white" />
               </span>
             </div>
+          );
+        })()}
+
+        {/* 8. RIDEAU DE TRANSITION INTER-SCÈNES (Mode Play) */}
+        {activeSceneTransition && activeSceneTransition.type !== 'none' && (() => {
+          const { type, phase, duration } = activeSceneTransition;
+          const ms = Math.max(50, Math.round((duration || 0.45) * 500));
+
+          if (type === 'iris') {
+            const openHole = phase === 'out' ? !transitionEngaged : transitionEngaged;
+            const holeSize = openHole ? 2400 : 0;
+            return (
+              <div className="absolute inset-0 z-[60] pointer-events-none overflow-hidden">
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: '50%',
+                    top: '50%',
+                    width: `${holeSize}px`,
+                    height: `${holeSize}px`,
+                    transform: 'translate(-50%, -50%)',
+                    borderRadius: '9999px',
+                    boxShadow: '0 0 0 2400px #0f172a',
+                    transition: `width ${ms}ms ease-in-out, height ${ms}ms ease-in-out`,
+                  }}
+                />
+              </div>
+            );
+          }
+
+          if (type === 'slide_left' || type === 'slide_right') {
+            let xPercent = '0%';
+            if (type === 'slide_left') {
+              xPercent = phase === 'out'
+                ? (transitionEngaged ? '0%' : '100%')
+                : (transitionEngaged ? '-100%' : '0%');
+            } else {
+              xPercent = phase === 'out'
+                ? (transitionEngaged ? '0%' : '-100%')
+                : (transitionEngaged ? '100%' : '0%');
+            }
+            return (
+              <div
+                className="absolute inset-0 z-[60] pointer-events-none bg-slate-950"
+                style={{
+                  transform: `translateX(${xPercent})`,
+                  transition: `transform ${ms}ms ease-in-out`,
+                }}
+              />
+            );
+          }
+
+          // 'fade'
+          const opacity = phase === 'out'
+            ? (transitionEngaged ? 1 : 0)
+            : (transitionEngaged ? 0 : 1);
+          return (
+            <div
+              className="absolute inset-0 z-[60] pointer-events-none bg-slate-950"
+              style={{
+                opacity,
+                transition: `opacity ${ms}ms ease-in-out`,
+              }}
+            />
           );
         })()}
       </div>

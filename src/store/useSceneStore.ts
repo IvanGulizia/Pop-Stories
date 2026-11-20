@@ -40,6 +40,8 @@ import {
   StateFolder,
   EntityGroup,
   SpawnRandomZone,
+  ProjectScene,
+  SceneTransitionType,
 } from '../types';
 import { getEntityWorldColliderBounds } from '../utils/collider';
 import {
@@ -98,6 +100,8 @@ import {
   ruleCooldowns,
   preEventAutoRevertStates,
   lastCollisionContacts,
+  prevEvaluatedVariables,
+  activeDelayTimers,
   getIsEvaluatingRules,
   setIsEvaluatingRules,
   clearPlayRuntimeState,
@@ -105,6 +109,12 @@ import {
   executeRuleActions,
   registerRuleEngineStoreBridge,
 } from './ruleExecutionEngine';
+import {
+  canRuleFireWithGate,
+  markContinuousConditionFalse,
+  recordRuleFired,
+  resetPlaySessionClock,
+} from './triggerGate';
 import { buildPhysicsTestScene, PhysicsTestSceneId } from './physicsTestScenes';
 
 export {
@@ -119,11 +129,92 @@ export {
 // Clé de stockage fallback (collection migrée vers IndexedDB)
 const COLLECTION_STORAGE_KEY = 'atelier-vivant-custom-entity-collection-v1';
 
+export const DEFAULT_SCENE_ID = 'scene-1';
+
+function normalizeLayerGroups(raw: any): SceneLayerGroup[] {
+  const base: SceneLayerGroup[] =
+    Array.isArray(raw) && raw.length > 0
+      ? JSON.parse(JSON.stringify(raw))
+      : JSON.parse(JSON.stringify(initialSceneLayerGroups));
+  const normalized = base.map((g) => ({
+    ...g,
+    layers: (g.layers || []).map((l) => ({
+      ...l,
+      coordinateSpace:
+        l.coordinateSpace || ((l.vectorPaths?.length || 0) === 0 ? 'world' : 'legacy_200'),
+    })),
+  }));
+  if (!normalized.some((g) => g.kind === 'collider')) {
+    normalized.splice(1, 0, {
+      id: 'group-col',
+      name: 'Colliders de Décor (Murs / Sols)',
+      kind: 'collider',
+      isCollapsed: false,
+      layers: [],
+    });
+  }
+  return normalized;
+}
+
+function buildDefaultScene(
+  id: string = DEFAULT_SCENE_ID,
+  name: string = 'Scène 1',
+  overrides?: Partial<ProjectScene>
+): ProjectScene {
+  return {
+    id,
+    name,
+    entities: overrides?.entities ? JSON.parse(JSON.stringify(overrides.entities)) : {},
+    entityOrder: overrides?.entityOrder
+      ? [...overrides.entityOrder]
+      : overrides?.entities
+      ? Object.keys(overrides.entities)
+      : [],
+    rules: overrides?.rules ? JSON.parse(JSON.stringify(overrides.rules)) : [],
+    folders: overrides?.folders
+      ? JSON.parse(JSON.stringify(overrides.folders))
+      : JSON.parse(JSON.stringify(initialFolders)),
+    layerGroups: overrides?.layerGroups
+      ? normalizeLayerGroups(overrides.layerGroups)
+      : JSON.parse(JSON.stringify(initialSceneLayerGroups)),
+    backgroundColor: overrides?.backgroundColor || '#ffffff',
+  };
+}
+
+function syncActiveSceneIntoScenes(state: {
+  scenes: ProjectScene[];
+  activeSceneId: string;
+  entities: Record<EntityId, Entity>;
+  entityOrder: EntityId[];
+  rules: DynamicRule[];
+  folders: RuleFolder[];
+  layerGroups: SceneLayerGroup[];
+  backgroundColor?: string;
+}): ProjectScene[] {
+  const currentSnapshot: ProjectScene = {
+    id: state.activeSceneId || DEFAULT_SCENE_ID,
+    name:
+      state.scenes.find((s) => s.id === state.activeSceneId)?.name || 'Scène 1',
+    entities: JSON.parse(JSON.stringify(state.entities || {})),
+    entityOrder: [...(state.entityOrder || Object.keys(state.entities || {}))],
+    rules: JSON.parse(JSON.stringify(state.rules || [])),
+    folders: JSON.parse(JSON.stringify(state.folders || [])),
+    layerGroups: JSON.parse(JSON.stringify(state.layerGroups || [])),
+    backgroundColor: state.backgroundColor || '#ffffff',
+  };
+  const idx = state.scenes.findIndex((s) => s.id === currentSnapshot.id);
+  if (idx === -1) {
+    return [...state.scenes, currentSnapshot];
+  }
+  return state.scenes.map((s, i) => (i === idx ? currentSnapshot : s));
+}
+
 export interface SceneHistorySnapshot {
   entities: Record<EntityId, Entity>;
   entityOrder: EntityId[];
   layerGroups: SceneLayerGroup[];
   rules: DynamicRule[];
+  backgroundColor?: string;
   selectedEntityId: EntityId | null;
   selectedLayerId: string | null;
 }
@@ -133,6 +224,7 @@ function captureSceneSnapshot(state: {
   entityOrder: EntityId[];
   layerGroups: SceneLayerGroup[];
   rules: DynamicRule[];
+  backgroundColor?: string;
   selectedEntityId: EntityId | null;
   selectedLayerId: string | null;
 }): SceneHistorySnapshot {
@@ -141,6 +233,7 @@ function captureSceneSnapshot(state: {
     entityOrder: [...(state.entityOrder || Object.keys(state.entities))],
     layerGroups: JSON.parse(JSON.stringify(state.layerGroups || [])),
     rules: JSON.parse(JSON.stringify(state.rules || [])),
+    backgroundColor: state.backgroundColor || '#ffffff',
     selectedEntityId: state.selectedEntityId,
     selectedLayerId: state.selectedLayerId,
   };
@@ -194,6 +287,24 @@ interface SceneState {
   sceneBounds: Size;
   setSceneBounds: (bounds: Size) => void;
   entityOrder: EntityId[];
+  scenes: ProjectScene[];
+  activeSceneId: string;
+  backgroundColor: string;
+  snapshotScenes: ProjectScene[] | null;
+  snapshotActiveSceneId: string | null;
+  activeSceneTransition: {
+    id: string;
+    type: SceneTransitionType;
+    duration: number;
+    phase: 'out' | 'in';
+  } | null;
+  createScene: (name?: string) => string;
+  switchScene: (sceneId: string) => void;
+  renameScene: (sceneId: string, name: string) => void;
+  duplicateScene: (sceneId: string) => string;
+  deleteScene: (sceneId: string) => boolean;
+  setSceneBackgroundColor: (color: string) => void;
+  changeSceneInPlay: (targetSceneId: string, transition?: SceneTransitionType, duration?: number) => void;
   snapshotEntities: Record<EntityId, Entity> | null;
   snapshotEntityOrder: EntityId[] | null;
   snapshotRules: DynamicRule[] | null;
@@ -204,6 +315,12 @@ interface SceneState {
   ruleBookPage: number;
   setRuleBookPage: (page: number) => void;
   gameScore: number;
+  initialGameVariables: Record<string, number>;
+  gameVariables: Record<string, number>;
+  setInitialGameVariable: (name: string, value: number) => void;
+  deleteInitialGameVariable: (name: string) => void;
+  setGameVariable: (name: string, value: number) => void;
+  batchSetGameVariables: (updates: Record<string, number>) => void;
   triggerKeyEvent: (keyName: string, phase?: 'down' | 'up') => void;
 
   // Direct scene canvas drawing tools state
@@ -251,6 +368,10 @@ interface SceneState {
   completeSpawnCanvasPick: (x: number, y: number, zone?: SpawnRandomZone) => void;
   cancelSpawnCanvasPick: () => void;
   clearSpawnCanvasPickResult: (requestId?: string) => void;
+
+  // Placement tactile (iPad/tablette) depuis la galerie d'entités vers la scène
+  pendingCatalogSpawnType: EntityType | null;
+  setPendingCatalogSpawnType: (type: EntityType | null) => void;
 
   // Interactive live canvas joint attachment pin picker & direct pin drag
   jointCanvasPick: {
@@ -471,11 +592,25 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     if (state.appMode !== 'edit' || state.sceneUndoStack.length === 0) return false;
     const currentSnap = captureSceneSnapshot(state);
     const targetSnap = state.sceneUndoStack[state.sceneUndoStack.length - 1];
+    const nextEntities = JSON.parse(JSON.stringify(targetSnap.entities));
+    const nextOrder = [...targetSnap.entityOrder];
+    const nextLayers = JSON.parse(JSON.stringify(targetSnap.layerGroups));
+    const nextRules = JSON.parse(JSON.stringify(targetSnap.rules));
+    const nextBg = targetSnap.backgroundColor || '#ffffff';
     set({
-      entities: JSON.parse(JSON.stringify(targetSnap.entities)),
-      entityOrder: [...targetSnap.entityOrder],
-      layerGroups: JSON.parse(JSON.stringify(targetSnap.layerGroups)),
-      rules: JSON.parse(JSON.stringify(targetSnap.rules)),
+      entities: nextEntities,
+      entityOrder: nextOrder,
+      layerGroups: nextLayers,
+      rules: nextRules,
+      backgroundColor: nextBg,
+      scenes: syncActiveSceneIntoScenes({
+        ...state,
+        entities: nextEntities,
+        entityOrder: nextOrder,
+        layerGroups: nextLayers,
+        rules: nextRules,
+        backgroundColor: nextBg,
+      }),
       selectedEntityId:
         targetSnap.selectedEntityId && targetSnap.entities[targetSnap.selectedEntityId]
           ? targetSnap.selectedEntityId
@@ -492,11 +627,25 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     if (state.appMode !== 'edit' || state.sceneRedoStack.length === 0) return false;
     const currentSnap = captureSceneSnapshot(state);
     const targetSnap = state.sceneRedoStack[state.sceneRedoStack.length - 1];
+    const nextEntities = JSON.parse(JSON.stringify(targetSnap.entities));
+    const nextOrder = [...targetSnap.entityOrder];
+    const nextLayers = JSON.parse(JSON.stringify(targetSnap.layerGroups));
+    const nextRules = JSON.parse(JSON.stringify(targetSnap.rules));
+    const nextBg = targetSnap.backgroundColor || '#ffffff';
     set({
-      entities: JSON.parse(JSON.stringify(targetSnap.entities)),
-      entityOrder: [...targetSnap.entityOrder],
-      layerGroups: JSON.parse(JSON.stringify(targetSnap.layerGroups)),
-      rules: JSON.parse(JSON.stringify(targetSnap.rules)),
+      entities: nextEntities,
+      entityOrder: nextOrder,
+      layerGroups: nextLayers,
+      rules: nextRules,
+      backgroundColor: nextBg,
+      scenes: syncActiveSceneIntoScenes({
+        ...state,
+        entities: nextEntities,
+        entityOrder: nextOrder,
+        layerGroups: nextLayers,
+        rules: nextRules,
+        backgroundColor: nextBg,
+      }),
       selectedEntityId:
         targetSnap.selectedEntityId && targetSnap.entities[targetSnap.selectedEntityId]
           ? targetSnap.selectedEntityId
@@ -525,7 +674,14 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         draft &&
           (draft.entitiesCount > 0 ||
             draft.rulesCount > 0 ||
-            draft.data?.layerGroups?.some((g) => g.layers?.some((l) => (l.vectorPaths?.length || 0) > 0)))
+            (draft.data?.scenes?.length || 1) > 1 ||
+            draft.data?.layerGroups?.some((g) => g.layers?.some((l) => (l.vectorPaths?.length || 0) > 0)) ||
+            draft.data?.scenes?.some(
+              (sc) =>
+                Object.keys(sc.entities || {}).length > 0 ||
+                (sc.rules?.length || 0) > 0 ||
+                sc.layerGroups?.some((g) => g.layers?.some((l) => (l.vectorPaths?.length || 0) > 0))
+            ))
       );
       set((state) => ({
         projectSlots: slots,
@@ -553,7 +709,16 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     const hasStrokes = Boolean(
       currentData.layerGroups?.some((g) => g.layers?.some((l) => (l.vectorPaths?.length || 0) > 0))
     );
-    if (entitiesCount === 0 && rulesCount === 0 && !hasStrokes && !state.autoSaveDraft) {
+    const hasOtherSceneContent = Boolean(
+      (currentData.scenes?.length || 1) > 1 ||
+        currentData.scenes?.some(
+          (sc) =>
+            Object.keys(sc.entities || {}).length > 0 ||
+            (sc.rules?.length || 0) > 0 ||
+            sc.layerGroups?.some((g) => g.layers?.some((l) => (l.vectorPaths?.length || 0) > 0))
+        )
+    );
+    if (entitiesCount === 0 && rulesCount === 0 && !hasStrokes && !hasOtherSceneContent && !state.autoSaveDraft) {
       return;
     }
     const sizeBytes = estimateJsonBytes(currentData);
@@ -755,14 +920,344 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   entityOrder: ['plant-1', 'apple-1'],
   layerGroups: JSON.parse(JSON.stringify(initialSceneLayerGroups)),
   selectedLayerId: null,
+  scenes: [
+    buildDefaultScene(DEFAULT_SCENE_ID, 'Scène 1', {
+      entities: {},
+      entityOrder: ['plant-1', 'apple-1'],
+      rules: [],
+      folders: initialFolders,
+      layerGroups: initialSceneLayerGroups,
+      backgroundColor: '#ffffff',
+    }),
+  ],
+  activeSceneId: DEFAULT_SCENE_ID,
+  backgroundColor: '#ffffff',
+  snapshotScenes: null,
+  snapshotActiveSceneId: null,
+  activeSceneTransition: null,
   snapshotEntities: null,
   snapshotEntityOrder: null,
   snapshotRules: null,
   currentSlotId: null,
+
+  createScene: (name) => {
+    const state = get();
+    const syncedScenes = syncActiveSceneIntoScenes(state);
+    const newId = `scene-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
+    const nextIdx = syncedScenes.length + 1;
+    const newScene = buildDefaultScene(
+      newId,
+      name?.trim() || `Scène ${nextIdx}`
+    );
+    const nextScenes = [...syncedScenes, newScene];
+    set({
+      scenes: nextScenes,
+      activeSceneId: newId,
+      entities: JSON.parse(JSON.stringify(newScene.entities)),
+      entityOrder: [...newScene.entityOrder],
+      rules: JSON.parse(JSON.stringify(newScene.rules)),
+      folders: JSON.parse(JSON.stringify(newScene.folders)),
+      layerGroups: JSON.parse(JSON.stringify(newScene.layerGroups)),
+      backgroundColor: newScene.backgroundColor || '#ffffff',
+      selectedEntityId: null,
+      selectedLayerId: null,
+      activeCollisions: {},
+      sceneUndoStack: [],
+      sceneRedoStack: [],
+    });
+    return newId;
+  },
+
+  switchScene: (sceneId) => {
+    const state = get();
+    if (state.appMode !== 'edit' || sceneId === state.activeSceneId) return;
+    const syncedScenes = syncActiveSceneIntoScenes(state);
+    const target = syncedScenes.find((s) => s.id === sceneId);
+    if (!target) return;
+    const targetEntities = JSON.parse(JSON.stringify(target.entities || {}));
+    const targetOrder =
+      target.entityOrder && target.entityOrder.length > 0
+        ? [...target.entityOrder]
+        : Object.keys(targetEntities);
+    set({
+      scenes: syncedScenes,
+      activeSceneId: target.id,
+      entities: targetEntities,
+      entityOrder: targetOrder,
+      rules: JSON.parse(JSON.stringify(target.rules || [])),
+      folders: JSON.parse(JSON.stringify(target.folders || initialFolders)),
+      layerGroups: normalizeLayerGroups(target.layerGroups),
+      backgroundColor: target.backgroundColor || '#ffffff',
+      selectedEntityId: targetOrder[0] || null,
+      selectedLayerId: null,
+      activeCollisions: {},
+      sceneUndoStack: [],
+      sceneRedoStack: [],
+    });
+  },
+
+  renameScene: (sceneId, name) => {
+    const clean = name.trim();
+    if (!clean) return;
+    set((state) => ({
+      scenes: state.scenes.map((s) => (s.id === sceneId ? { ...s, name: clean } : s)),
+    }));
+  },
+
+  duplicateScene: (sceneId) => {
+    const state = get();
+    const syncedScenes = syncActiveSceneIntoScenes(state);
+    const source = syncedScenes.find((s) => s.id === sceneId);
+    if (!source) return '';
+    const newId = `scene-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
+    const cloned: ProjectScene = {
+      ...JSON.parse(JSON.stringify(source)),
+      id: newId,
+      name: `${source.name.replace(/\(Copie.*?\)/g, '').trim()} (Copie)`,
+    };
+    const nextScenes = [...syncedScenes, cloned];
+    const targetOrder =
+      cloned.entityOrder && cloned.entityOrder.length > 0
+        ? [...cloned.entityOrder]
+        : Object.keys(cloned.entities || {});
+    set({
+      scenes: nextScenes,
+      activeSceneId: newId,
+      entities: JSON.parse(JSON.stringify(cloned.entities || {})),
+      entityOrder: targetOrder,
+      rules: JSON.parse(JSON.stringify(cloned.rules || [])),
+      folders: JSON.parse(JSON.stringify(cloned.folders || initialFolders)),
+      layerGroups: normalizeLayerGroups(cloned.layerGroups),
+      backgroundColor: cloned.backgroundColor || '#ffffff',
+      selectedEntityId: targetOrder[0] || null,
+      selectedLayerId: null,
+      activeCollisions: {},
+      sceneUndoStack: [],
+      sceneRedoStack: [],
+    });
+    return newId;
+  },
+
+  deleteScene: (sceneId) => {
+    const state = get();
+    const syncedScenes = syncActiveSceneIntoScenes(state);
+    if (syncedScenes.length <= 1) return false;
+    const idx = syncedScenes.findIndex((s) => s.id === sceneId);
+    if (idx === -1) return false;
+    const remaining = syncedScenes.filter((s) => s.id !== sceneId);
+    if (state.activeSceneId === sceneId) {
+      const nextScene = remaining[Math.max(0, idx - 1)] || remaining[0];
+      const nextEntities = JSON.parse(JSON.stringify(nextScene.entities || {}));
+      const nextOrder =
+        nextScene.entityOrder && nextScene.entityOrder.length > 0
+          ? [...nextScene.entityOrder]
+          : Object.keys(nextEntities);
+      set({
+        scenes: remaining,
+        activeSceneId: nextScene.id,
+        entities: nextEntities,
+        entityOrder: nextOrder,
+        rules: JSON.parse(JSON.stringify(nextScene.rules || [])),
+        folders: JSON.parse(JSON.stringify(nextScene.folders || initialFolders)),
+        layerGroups: normalizeLayerGroups(nextScene.layerGroups),
+        backgroundColor: nextScene.backgroundColor || '#ffffff',
+        selectedEntityId: nextOrder[0] || null,
+        selectedLayerId: null,
+        activeCollisions: {},
+        sceneUndoStack: [],
+        sceneRedoStack: [],
+      });
+    } else {
+      set({ scenes: remaining });
+    }
+    return true;
+  },
+
+  setSceneBackgroundColor: (color) => {
+    const clean = color || '#ffffff';
+    set((state) => ({
+      backgroundColor: clean,
+      scenes: state.scenes.map((s) =>
+        s.id === state.activeSceneId ? { ...s, backgroundColor: clean } : s
+      ),
+    }));
+  },
+
+  changeSceneInPlay: (targetSceneId, transition = 'fade', duration = 0.45) => {
+    const initialState = get();
+    if (initialState.appMode !== 'play') return;
+    const baseScenes = initialState.snapshotScenes || initialState.scenes;
+    const targetExists = baseScenes.some((s) => s.id === targetSceneId);
+    if (!targetExists) return;
+    if (initialState.activeSceneTransition) return;
+
+    const commitSwap = () => {
+      const cur = get();
+      if (cur.appMode !== 'play') return;
+      const curBaseScenes = cur.snapshotScenes || cur.scenes;
+      // Conserver les éventuelles règles/dossiers modifiés en Play sur la scène sortante
+      const updatedSnapshotScenes = curBaseScenes.map((s) =>
+        s.id === cur.activeSceneId
+          ? {
+              ...s,
+              rules: JSON.parse(JSON.stringify(cur.rules)),
+              folders: JSON.parse(JSON.stringify(cur.folders)),
+            }
+          : s
+      );
+      const target = updatedSnapshotScenes.find((s) => s.id === targetSceneId);
+      if (!target) return;
+
+      resetMatterPhysicsRuntime();
+      clearParticles();
+      clearPlayRuntimeState();
+      resetPlaySessionClock();
+
+      const targetEntities = JSON.parse(JSON.stringify(target.entities || {}));
+      const targetOrder =
+        target.entityOrder && target.entityOrder.length > 0
+          ? [...target.entityOrder]
+          : Object.keys(targetEntities);
+
+      set({
+        activeSceneId: target.id,
+        entities: targetEntities,
+        entityOrder: targetOrder,
+        rules: JSON.parse(JSON.stringify(target.rules || [])),
+        folders: JSON.parse(JSON.stringify(target.folders || initialFolders)),
+        layerGroups: normalizeLayerGroups(target.layerGroups),
+        backgroundColor: target.backgroundColor || '#ffffff',
+        snapshotScenes: updatedSnapshotScenes,
+        activeCollisions: {},
+        selectedEntityId: null,
+        selectedLayerId: null,
+      });
+      get().evaluateRules();
+    };
+
+    if (transition === 'none' || duration <= 0.02) {
+      commitSwap();
+      return;
+    }
+
+    const transId = `trans-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
+    const halfMs = Math.max(50, Math.round(duration * 500));
+    set({
+      activeSceneTransition: {
+        id: transId,
+        type: transition,
+        duration,
+        phase: 'out',
+      },
+    });
+    const midTimer = setTimeout(() => {
+      activeDelayTimers.delete(midTimer);
+      if (get().appMode !== 'play') return;
+      commitSwap();
+      set({
+        activeSceneTransition: {
+          id: transId,
+          type: transition,
+          duration,
+          phase: 'in',
+        },
+      });
+      const endTimer = setTimeout(() => {
+        activeDelayTimers.delete(endTimer);
+        set((s) => (s.activeSceneTransition?.id === transId ? { activeSceneTransition: null } : s));
+      }, halfMs);
+      activeDelayTimers.add(endTimer);
+    }, halfMs);
+    activeDelayTimers.add(midTimer);
+  },
   collapsedRuleIds: {},
   ruleBookPage: 1,
   setRuleBookPage: (page) => set({ ruleBookPage: Math.max(1, page) }),
   gameScore: 0,
+  initialGameVariables: { score: 0 },
+  gameVariables: { score: 0 },
+  setInitialGameVariable: (rawName, value) => {
+    const cleanName = rawName.trim();
+    if (!cleanName) return;
+    const numeric = Number.isFinite(value) ? Math.round(value * 100) / 100 : 0;
+    set((state) => {
+      const nextInit = { ...state.initialGameVariables, [cleanName]: numeric };
+      if (state.appMode === 'edit') {
+        const nextVars = { ...state.gameVariables, [cleanName]: numeric };
+        return {
+          initialGameVariables: nextInit,
+          gameVariables: nextVars,
+          ...(cleanName === 'score' ? { gameScore: numeric } : {}),
+        };
+      }
+      return { initialGameVariables: nextInit };
+    });
+  },
+  deleteInitialGameVariable: (name) => {
+    const cleanName = name.trim();
+    if (!cleanName || cleanName === 'score') return;
+    set((state) => {
+      const nextInit = { ...state.initialGameVariables };
+      delete nextInit[cleanName];
+      const nextVars = { ...state.gameVariables };
+      if (state.appMode === 'edit') {
+        delete nextVars[cleanName];
+      }
+      return {
+        initialGameVariables: nextInit,
+        ...(state.appMode === 'edit' ? { gameVariables: nextVars } : {}),
+      };
+    });
+  },
+  setGameVariable: (rawName, value) => {
+    const cleanName = rawName.trim();
+    if (!cleanName) return;
+    const numeric = Number.isFinite(value) ? Math.round(value * 100) / 100 : 0;
+    let didChange = false;
+    set((state) => {
+      if (state.gameVariables[cleanName] === numeric) return state;
+      didChange = true;
+      return {
+        gameVariables: {
+          ...state.gameVariables,
+          [cleanName]: numeric,
+        },
+        ...(cleanName === 'score' ? { gameScore: numeric } : {}),
+      };
+    });
+    if (didChange && get().appMode === 'play' && !getIsEvaluatingRules()) {
+      get().evaluateRules();
+    }
+  },
+  batchSetGameVariables: (updates) => {
+    const entries = Object.entries(updates);
+    if (entries.length === 0) return;
+    let didChange = false;
+    set((state) => {
+      let changed = false;
+      const nextVars = { ...state.gameVariables };
+      let nextScore = state.gameScore;
+      for (const [k, rawVal] of entries) {
+        const cleanKey = k.trim();
+        if (!cleanKey) continue;
+        const val = Number.isFinite(rawVal) ? Math.round(rawVal * 100) / 100 : 0;
+        if (nextVars[cleanKey] !== val) {
+          nextVars[cleanKey] = val;
+          changed = true;
+          if (cleanKey === 'score') nextScore = val;
+        }
+      }
+      if (!changed) return state;
+      didChange = true;
+      return {
+        gameVariables: nextVars,
+        ...(nextScore !== state.gameScore ? { gameScore: nextScore } : {}),
+      };
+    });
+    if (didChange && get().appMode === 'play' && !getIsEvaluatingRules()) {
+      get().evaluateRules();
+    }
+  },
   toggleRuleCollapse: (ruleId) => {
     set((state) => ({
       collapsedRuleIds: {
@@ -852,6 +1347,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       if (requestId && state.spawnCanvasPickResult.requestId !== requestId) return state;
       return { spawnCanvasPickResult: null };
     }),
+
+  pendingCatalogSpawnType: null,
+  setPendingCatalogSpawnType: (type) => set({ pendingCatalogSpawnType: type }),
 
   jointCanvasPick: null,
   startJointCanvasPick: (childId) =>
@@ -1306,34 +1804,94 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   setAppMode: (mode) => {
     if (mode === 'play') {
       clearPlayRuntimeState();
-      // Sauvegarder un instantané propre des entités/ordre (les règles restent persistantes même modifiées en Play)
-      const snapshot = JSON.parse(JSON.stringify(get().entities));
-      const orderSnapshot = [...(get().entityOrder || Object.keys(get().entities))];
+      resetPlaySessionClock();
+      const curState = get();
+      const syncedScenes = syncActiveSceneIntoScenes(curState);
+      // Sauvegarder un instantané propre des scènes et entités (les règles restent persistantes même modifiées en Play)
+      const snapshot = JSON.parse(JSON.stringify(curState.entities));
+      const orderSnapshot = [...(curState.entityOrder || Object.keys(curState.entities))];
+      const resetVars = { score: 0, ...curState.initialGameVariables };
       set({
         appMode: 'play',
+        scenes: syncedScenes,
+        snapshotScenes: JSON.parse(JSON.stringify(syncedScenes)),
+        snapshotActiveSceneId: curState.activeSceneId,
+        activeSceneTransition: null,
         spawnCanvasPick: null,
         jointCanvasPick: null,
+        pendingCatalogSpawnType: null,
         snapshotEntities: snapshot,
         snapshotEntityOrder: orderSnapshot,
         snapshotRules: null,
+        gameVariables: resetVars,
+        gameScore: resetVars.score ?? 0,
       });
     } else {
-      // Quand on repasse en mode édition, restaurer la scène mais conserver les règles créées/modifiées en Play
+      // Quand on repasse en mode édition, restaurer la scène de départ mais conserver les règles créées/modifiées en Play
       resetMatterPhysicsRuntime();
       clearParticles();
       clearPlayRuntimeState();
-      const { snapshotEntities, snapshotEntityOrder } = get();
-      if (snapshotEntities) {
+      const {
+        snapshotScenes,
+        snapshotActiveSceneId,
+        activeSceneId,
+        rules,
+        folders,
+        snapshotEntities,
+        snapshotEntityOrder,
+        initialGameVariables,
+      } = get();
+      const resetVars = { score: 0, ...initialGameVariables };
+      if (snapshotScenes && snapshotScenes.length > 0) {
+        // Synchroniser les règles/dossiers édités en Play dans la scène courante avant restauration
+        const mergedScenes = snapshotScenes.map((s) =>
+          s.id === activeSceneId
+            ? {
+                ...s,
+                rules: JSON.parse(JSON.stringify(rules)),
+                folders: JSON.parse(JSON.stringify(folders)),
+              }
+            : s
+        );
+        const startId = snapshotActiveSceneId || activeSceneId;
+        const startScene = mergedScenes.find((s) => s.id === startId) || mergedScenes[0];
+        const restoredEntities = JSON.parse(JSON.stringify(startScene.entities || {}));
+        const restoredOrder =
+          startScene.entityOrder && startScene.entityOrder.length > 0
+            ? [...startScene.entityOrder]
+            : Object.keys(restoredEntities);
+        set({
+          scenes: JSON.parse(JSON.stringify(mergedScenes)),
+          activeSceneId: startScene.id,
+          entities: restoredEntities,
+          entityOrder: restoredOrder,
+          rules: JSON.parse(JSON.stringify(startScene.rules || [])),
+          folders: JSON.parse(JSON.stringify(startScene.folders || initialFolders)),
+          layerGroups: normalizeLayerGroups(startScene.layerGroups),
+          backgroundColor: startScene.backgroundColor || '#ffffff',
+          activeSceneTransition: null,
+          activeCollisions: {},
+          appMode: 'edit',
+          gameVariables: resetVars,
+          gameScore: resetVars.score ?? 0,
+        });
+      } else if (snapshotEntities) {
         set({
           entities: JSON.parse(JSON.stringify(snapshotEntities)),
           entityOrder: snapshotEntityOrder ? [...snapshotEntityOrder] : Object.keys(snapshotEntities),
+          activeSceneTransition: null,
           activeCollisions: {},
           appMode: 'edit',
+          gameVariables: resetVars,
+          gameScore: resetVars.score ?? 0,
         });
       } else {
         set({
           appMode: 'edit',
+          activeSceneTransition: null,
           activeCollisions: {},
+          gameVariables: resetVars,
+          gameScore: resetVars.score ?? 0,
         });
       }
     }
@@ -1343,17 +1901,66 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     resetMatterPhysicsRuntime();
     clearParticles();
     clearPlayRuntimeState();
-    const { snapshotEntities, snapshotEntityOrder } = get();
-    if (snapshotEntities) {
+    resetPlaySessionClock();
+    const {
+      snapshotScenes,
+      snapshotActiveSceneId,
+      activeSceneId,
+      rules,
+      folders,
+      snapshotEntities,
+      snapshotEntityOrder,
+      initialGameVariables,
+    } = get();
+    const resetVars = { score: 0, ...initialGameVariables };
+    if (snapshotScenes && snapshotScenes.length > 0) {
+      const mergedScenes = snapshotScenes.map((s) =>
+        s.id === activeSceneId
+          ? {
+              ...s,
+              rules: JSON.parse(JSON.stringify(rules)),
+              folders: JSON.parse(JSON.stringify(folders)),
+            }
+          : s
+      );
+      const startId = snapshotActiveSceneId || activeSceneId;
+      const startScene = mergedScenes.find((s) => s.id === startId) || mergedScenes[0];
+      const restoredEntities = JSON.parse(JSON.stringify(startScene.entities || {}));
+      const restoredOrder =
+        startScene.entityOrder && startScene.entityOrder.length > 0
+          ? [...startScene.entityOrder]
+          : Object.keys(restoredEntities);
+      set({
+        snapshotScenes: mergedScenes,
+        scenes: JSON.parse(JSON.stringify(mergedScenes)),
+        activeSceneId: startScene.id,
+        entities: restoredEntities,
+        entityOrder: restoredOrder,
+        rules: JSON.parse(JSON.stringify(startScene.rules || [])),
+        folders: JSON.parse(JSON.stringify(startScene.folders || initialFolders)),
+        layerGroups: normalizeLayerGroups(startScene.layerGroups),
+        backgroundColor: startScene.backgroundColor || '#ffffff',
+        activeSceneTransition: null,
+        activeCollisions: {},
+        gameVariables: resetVars,
+        gameScore: resetVars.score ?? 0,
+      });
+    } else if (snapshotEntities) {
       set({
         entities: JSON.parse(JSON.stringify(snapshotEntities)),
         entityOrder: snapshotEntityOrder ? [...snapshotEntityOrder] : Object.keys(snapshotEntities),
+        activeSceneTransition: null,
         activeCollisions: {},
+        gameVariables: resetVars,
+        gameScore: resetVars.score ?? 0,
       });
     } else {
       // Ne jamais vider la scène si aucun instantané n'a été créé
       set({
+        activeSceneTransition: null,
         activeCollisions: {},
+        gameVariables: resetVars,
+        gameScore: resetVars.score ?? 0,
       });
     }
     get().evaluateRules();
@@ -1416,6 +2023,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   updateEntityState: (id, stateId) => {
+    const prevEntity = get().entities[id];
+    const didChangeState = Boolean(
+      prevEntity && prevEntity.states[stateId] && prevEntity.currentStateId !== stateId
+    );
     set((state) => {
       const entity = state.entities[id];
       if (entity && entity.states[stateId]) {
@@ -1444,6 +2055,39 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       }
       return state;
     });
+
+    if (didChangeState && get().appMode === 'play') {
+      const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
+      const subject = entities[id];
+      if (!subject) return;
+      const now = Date.now();
+      const stateRules = rules.filter(
+        (r) =>
+          r.enabled &&
+          r.trigger.type === 'state_change' &&
+          matchesEntityFilter(
+            subject,
+            r.trigger.subjectMode,
+            r.trigger.subjectId,
+            r.trigger.subjectType,
+            r.trigger.subjectTag
+          ) &&
+          (!r.trigger.subjectStateId || r.trigger.subjectStateId === '' || r.trigger.subjectStateId === stateId)
+      );
+      stateRules.forEach((rule) => {
+        const cooldownKey = `state_${rule.id}_${id}`;
+        if (!canRuleFireWithGate(rule, now, RULE_COOLDOWN_MS, { cooldownKey })) return;
+        recordRuleFired(rule, now, { cooldownKey });
+        executeRuleActions(rule.actions, {
+          subject,
+          allEntities: entities,
+          updateEntityState,
+          updateEntityDetails,
+          deleteEntity,
+          spawnEntity,
+        });
+      });
+    }
   },
 
   updateEntitySize: (id, size) => {
@@ -2762,6 +3406,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   clearProject: () => {
     clearPlayRuntimeState();
+    const emptyScene = buildDefaultScene(DEFAULT_SCENE_ID, 'Scène 1');
     set({
       entities: {},
       customArchetypes: {},
@@ -2771,7 +3416,13 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       entityGroups: [],
       customSounds: [],
       customParticles: [],
-      layerGroups: JSON.parse(JSON.stringify(initialSceneLayerGroups)),
+      layerGroups: JSON.parse(JSON.stringify(emptyScene.layerGroups)),
+      backgroundColor: '#ffffff',
+      scenes: [emptyScene],
+      activeSceneId: DEFAULT_SCENE_ID,
+      snapshotScenes: null,
+      snapshotActiveSceneId: null,
+      activeSceneTransition: null,
       projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
       selectedEntityId: null,
       selectedLayerId: 'layer-bg-1',
@@ -2780,21 +3431,40 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       snapshotEntityOrder: null,
       snapshotRules: null,
       hasRecoveryDraftOnBoot: false,
+      initialGameVariables: { score: 0 },
+      gameVariables: { score: 0 },
+      gameScore: 0,
+      sceneUndoStack: [],
+      sceneRedoStack: [],
     });
   },
 
   restoreDefaultScene: () => {
     clearPlayRuntimeState();
-    set({
-      entities: JSON.parse(JSON.stringify(initialEntities)),
+    const defScene = buildDefaultScene(DEFAULT_SCENE_ID, 'Scène 1', {
+      entities: initialEntities,
       entityOrder: ['plant-1', 'apple-1'],
+      rules: initialRules,
+      folders: initialFolders,
+      layerGroups: initialSceneLayerGroups,
+      backgroundColor: '#ffffff',
+    });
+    set({
+      entities: JSON.parse(JSON.stringify(defScene.entities)),
+      entityOrder: [...defScene.entityOrder],
       customArchetypes: JSON.parse(JSON.stringify(defaultCustomArchetypes)),
       entityGroups: [],
-      rules: JSON.parse(JSON.stringify(initialRules)),
-      folders: JSON.parse(JSON.stringify(initialFolders)),
+      rules: JSON.parse(JSON.stringify(defScene.rules)),
+      folders: JSON.parse(JSON.stringify(defScene.folders)),
       customSounds: [],
       customParticles: [],
-      layerGroups: JSON.parse(JSON.stringify(initialSceneLayerGroups)),
+      layerGroups: JSON.parse(JSON.stringify(defScene.layerGroups)),
+      backgroundColor: '#ffffff',
+      scenes: [defScene],
+      activeSceneId: DEFAULT_SCENE_ID,
+      snapshotScenes: null,
+      snapshotActiveSceneId: null,
+      activeSceneTransition: null,
       projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
       snapshotEntities: null,
       snapshotEntityOrder: null,
@@ -2804,6 +3474,11 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       activeCollisions: {},
       appMode: 'edit',
       hasRecoveryDraftOnBoot: false,
+      initialGameVariables: { score: 0 },
+      gameVariables: { score: 0 },
+      gameScore: 0,
+      sceneUndoStack: [],
+      sceneRedoStack: [],
     });
     get().evaluateRules();
   },
@@ -2813,6 +3488,14 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     clearPlayRuntimeState();
     const built = buildPhysicsTestScene(presetId);
     const curGizmos = resolveGizmoSettings(get().settings);
+    const presetScene = buildDefaultScene(DEFAULT_SCENE_ID, 'Scène 1', {
+      entities: built.entities,
+      entityOrder: built.entityOrder,
+      rules: built.rules,
+      folders: built.folders,
+      layerGroups: built.layerGroups,
+      backgroundColor: '#ffffff',
+    });
     set((state) => ({
       entities: built.entities,
       entityOrder: built.entityOrder,
@@ -2823,6 +3506,12 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       customSounds: [],
       customParticles: [],
       layerGroups: built.layerGroups,
+      backgroundColor: '#ffffff',
+      scenes: [presetScene],
+      activeSceneId: DEFAULT_SCENE_ID,
+      snapshotScenes: null,
+      snapshotActiveSceneId: null,
+      activeSceneTransition: null,
       projectPalette: built.projectPalette,
       snapshotEntities: null,
       snapshotEntityOrder: null,
@@ -2850,24 +3539,29 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   exportProject: () => {
-    const { entities, customArchetypes, entityGroups, rules, folders, customSounds, customParticles, layerGroups, settings, projectPalette } = get();
+    const state = get();
+    const syncedScenes = syncActiveSceneIntoScenes(state);
     return {
       version: 1,
       name: 'Projet Atelier Vivant',
       exportedAt: new Date().toISOString(),
-      entities,
-      customArchetypes,
-      entityGroups,
-      rules,
-      folders,
-      customSounds,
-      customParticles,
-      layerGroups,
+      entities: state.entities,
+      customArchetypes: state.customArchetypes,
+      entityGroups: state.entityGroups,
+      rules: state.rules,
+      folders: state.folders,
+      customSounds: state.customSounds,
+      customParticles: state.customParticles,
+      layerGroups: state.layerGroups,
+      backgroundColor: state.backgroundColor,
+      scenes: syncedScenes,
+      activeSceneId: state.activeSceneId,
       settings: {
-        ...settings,
-        projectPalette,
+        ...state.settings,
+        projectPalette: state.projectPalette,
       },
-      projectPalette,
+      projectPalette: state.projectPalette,
+      initialGameVariables: state.initialGameVariables,
     };
   },
 
@@ -2876,53 +3570,80 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       if (!data || typeof data !== 'object') {
         return { success: false, message: 'Format de fichier JSON invalide.' };
       }
-      if (!data.entities && !data.rules && !data.layerGroups) {
+      if (!data.entities && !data.rules && !data.layerGroups && !Array.isArray(data.scenes)) {
         return { success: false, message: 'Le fichier ne contient pas de données de projet valides.' };
       }
 
       clearPlayRuntimeState();
-      const importedEntities = data.entities && typeof data.entities === 'object' ? data.entities : {};
+
+      let importedScenes: ProjectScene[] = [];
+      if (Array.isArray(data.scenes) && data.scenes.length > 0) {
+        importedScenes = data.scenes.map((sc: any, idx: number) => {
+          const scEntities = sc?.entities && typeof sc.entities === 'object' ? sc.entities : {};
+          const scOrder = Array.isArray(sc?.entityOrder)
+            ? [...sc.entityOrder]
+            : Object.keys(scEntities);
+          return buildDefaultScene(
+            sc?.id || `scene-${idx + 1}`,
+            sc?.name || `Scène ${idx + 1}`,
+            {
+              entities: scEntities,
+              entityOrder: scOrder,
+              rules: Array.isArray(sc?.rules) ? sc.rules : [],
+              folders: Array.isArray(sc?.folders) ? sc.folders : initialFolders,
+              layerGroups: sc?.layerGroups,
+              backgroundColor: sc?.backgroundColor || '#ffffff',
+            }
+          );
+        });
+      } else {
+        const legacyEntities = data.entities && typeof data.entities === 'object' ? data.entities : {};
+        const legacyOrder = Array.isArray(data.entityOrder)
+          ? [...data.entityOrder]
+          : Object.keys(legacyEntities);
+        importedScenes = [
+          buildDefaultScene(DEFAULT_SCENE_ID, 'Scène 1', {
+            entities: legacyEntities,
+            entityOrder: legacyOrder,
+            rules: Array.isArray(data.rules) ? data.rules : [],
+            folders: Array.isArray(data.folders) ? data.folders : initialFolders,
+            layerGroups: data.layerGroups,
+            backgroundColor: data.backgroundColor || '#ffffff',
+          }),
+        ];
+      }
+
+      const targetActiveScene =
+        importedScenes.find((s) => s.id === data.activeSceneId) || importedScenes[0];
+      const importedEntities = JSON.parse(JSON.stringify(targetActiveScene.entities || {}));
+      const importedOrder =
+        targetActiveScene.entityOrder && targetActiveScene.entityOrder.length > 0
+          ? [...targetActiveScene.entityOrder]
+          : Object.keys(importedEntities);
+
       // Respect exact project archetypes : do not inject the 3 default items (plant, apple, custom) if not present
       let importedArchetypes: Record<string, Entity> = {};
       if (data.customArchetypes && typeof data.customArchetypes === 'object') {
         importedArchetypes = { ...data.customArchetypes };
       } else {
-        // Deduce archetypes strictly from the imported entities
-        Object.values(importedEntities).forEach((ent: any) => {
-          if (ent && ent.type && !importedArchetypes[ent.type]) {
-            importedArchetypes[ent.type] = {
-              ...ent,
-              position: { x: 0, y: 0 },
-            };
-          }
+        // Deduce archetypes strictly from all scenes' imported entities
+        importedScenes.forEach((sc) => {
+          Object.values(sc.entities || {}).forEach((ent: any) => {
+            if (ent && ent.type && !importedArchetypes[ent.type]) {
+              importedArchetypes[ent.type] = {
+                ...ent,
+                position: { x: 0, y: 0 },
+              };
+            }
+          });
         });
       }
-      const importedRules = Array.isArray(data.rules) ? data.rules : [];
-      const importedFolders = Array.isArray(data.folders) ? data.folders : initialFolders;
+      const importedRules = JSON.parse(JSON.stringify(targetActiveScene.rules || []));
+      const importedFolders = JSON.parse(JSON.stringify(targetActiveScene.folders || initialFolders));
       const importedEntityGroups = Array.isArray(data.entityGroups) ? data.entityGroups : [];
       const importedCustomSounds = Array.isArray(data.customSounds) ? data.customSounds : [];
       const importedCustomParticles = Array.isArray(data.customParticles) ? data.customParticles : [];
-      const rawLayerGroups: SceneLayerGroup[] = Array.isArray(data.layerGroups) && data.layerGroups.length > 0
-        ? data.layerGroups
-        : JSON.parse(JSON.stringify(initialSceneLayerGroups));
-      const normalizedLayerGroups = rawLayerGroups.map((g) => ({
-        ...g,
-        layers: (g.layers || []).map((l) => ({
-          ...l,
-          coordinateSpace:
-            l.coordinateSpace || ((l.vectorPaths?.length || 0) === 0 ? 'world' : 'legacy_200'),
-        })),
-      }));
-      if (!normalizedLayerGroups.some((g) => g.kind === 'collider')) {
-        normalizedLayerGroups.splice(1, 0, {
-          id: 'group-col',
-          name: 'Colliders de Décor (Murs / Sols)',
-          kind: 'collider',
-          isCollapsed: false,
-          layers: [],
-        });
-      }
-      const importedLayerGroups = normalizedLayerGroups;
+      const importedLayerGroups = normalizeLayerGroups(targetActiveScene.layerGroups);
       const importedSettings = data.settings && typeof data.settings === 'object' ? data.settings : undefined;
       const importedPalette: ProjectPaletteColor[] = Array.isArray(data.projectPalette) && data.projectPalette.length > 0
         ? data.projectPalette
@@ -2930,8 +3651,23 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         ? importedSettings.projectPalette
         : JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE));
 
+      const importedVariables: Record<string, number> = {
+        score: 0,
+        ...(data.initialGameVariables && typeof data.initialGameVariables === 'object' && !Array.isArray(data.initialGameVariables)
+          ? Object.fromEntries(
+              Object.entries(data.initialGameVariables).filter(
+                ([k, v]) => typeof k === 'string' && typeof v === 'number' && Number.isFinite(v)
+              )
+            )
+          : {}),
+      };
+
       set((state) => ({
+        scenes: importedScenes,
+        activeSceneId: targetActiveScene.id,
+        backgroundColor: targetActiveScene.backgroundColor || '#ffffff',
         entities: importedEntities,
+        entityOrder: importedOrder,
         customArchetypes: importedArchetypes,
         entityGroups: importedEntityGroups,
         rules: importedRules,
@@ -2940,6 +3676,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         customParticles: importedCustomParticles,
         layerGroups: importedLayerGroups,
         projectPalette: importedPalette,
+        initialGameVariables: importedVariables,
+        gameVariables: { ...importedVariables },
+        gameScore: importedVariables.score ?? 0,
         settings: importedSettings
           ? {
               ...state.settings,
@@ -2948,14 +3687,19 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
               projectPalette: importedPalette,
             }
           : { ...state.settings, projectPalette: importedPalette },
-        selectedEntityId: Object.keys(importedEntities)[0] || null,
+        selectedEntityId: importedOrder[0] || Object.keys(importedEntities)[0] || null,
         selectedLayerId: null,
         activeCollisions: {},
         appMode: 'edit',
+        snapshotScenes: null,
+        snapshotActiveSceneId: null,
+        activeSceneTransition: null,
         snapshotEntities: null,
         snapshotEntityOrder: null,
         snapshotRules: null,
         hasRecoveryDraftOnBoot: false,
+        sceneUndoStack: [],
+        sceneRedoStack: [],
       }));
 
       get().evaluateRules();
@@ -3148,7 +3892,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   // Gestion des Règles
   addRule: (ruleData) => {
     get().pushSceneHistory();
-    const id = `rule-${Date.now().toString(36)}`;
+    const id = `rule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const newRule: DynamicRule = { ...ruleData, id };
     set((state) => ({
       rules: [...state.rules, newRule],
@@ -3384,8 +4128,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       if (!phaseMatch) return;
 
       const cooldownKey = `key_${rule.id}_${keyName}_${phase}`;
-      if (now - (ruleCooldowns[cooldownKey] || 0) < 50) return;
-      ruleCooldowns[cooldownKey] = now;
+      if (!canRuleFireWithGate(rule, now, 50, { cooldownKey })) return;
+      recordRuleFired(rule, now, { cooldownKey });
 
       executeRuleActions(rule.actions, {
         subject,
@@ -3512,6 +4256,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
       // N'exécuter les actions d'entrée/appui que sur les phases non-relâchement (ou si rulePhase est explicitement release)
       if (!isReleasePhase || rule.trigger.phase === 'up' || rule.trigger.phase === 'mouse_up' || rule.trigger.phase === 'exit' || rule.trigger.phase === 'hover_exit') {
+        if (!canRuleFireWithGate(rule, now, 0, { cooldownKey })) {
+          return;
+        }
+        recordRuleFired(rule, now, { cooldownKey });
         executeRuleActions(rule.actions, {
           subject,
           eventPosition: resolvedPoint,
@@ -3569,10 +4317,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       }
 
       const cooldownKey = `drag_release_${rule.id}_${subject.id}`;
-      if (now - (ruleCooldowns[cooldownKey] || 0) < RULE_COOLDOWN_MS) {
+      if (!canRuleFireWithGate(rule, now, RULE_COOLDOWN_MS, { cooldownKey })) {
         return;
       }
-      ruleCooldowns[cooldownKey] = now;
+      recordRuleFired(rule, now, { cooldownKey });
 
       executeRuleActions(rule.actions, {
         subject,
@@ -3623,8 +4371,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           if ((!rule.trigger.subjectStateId || subject.currentStateId === rule.trigger.subjectStateId) &&
               (!rule.trigger.targetStateId || other.currentStateId === rule.trigger.targetStateId)) {
             const cooldownKey = `coll_rel_${rule.id}_${subject.id}_${other.id}`;
-            if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
-              ruleCooldowns[cooldownKey] = now;
+            if (canRuleFireWithGate(rule, now, RULE_COOLDOWN_MS, { cooldownKey })) {
+              recordRuleFired(rule, now, { cooldownKey });
               executeRuleActions(rule.actions, {
                 subject,
                 target: other,
@@ -3644,8 +4392,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           if ((!rule.trigger.subjectStateId || other.currentStateId === rule.trigger.subjectStateId) &&
               (!rule.trigger.targetStateId || subject.currentStateId === rule.trigger.targetStateId)) {
             const cooldownKey = `coll_rel_${rule.id}_${other.id}_${subject.id}`;
-            if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
-              ruleCooldowns[cooldownKey] = now;
+            if (canRuleFireWithGate(rule, now, RULE_COOLDOWN_MS, { cooldownKey })) {
+              recordRuleFired(rule, now, { cooldownKey });
               executeRuleActions(rule.actions, {
                 subject: other,
                 target: subject,
@@ -3706,10 +4454,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       }
 
       const cooldownKey = `joint_break_${rule.id}_${subject.id}`;
-      if (now - (ruleCooldowns[cooldownKey] || 0) < RULE_COOLDOWN_MS) {
+      if (!canRuleFireWithGate(rule, now, RULE_COOLDOWN_MS, { cooldownKey })) {
         return;
       }
-      ruleCooldowns[cooldownKey] = now;
+      recordRuleFired(rule, now, { cooldownKey });
 
       executeRuleActions(rule.actions, {
         subject,
@@ -3982,7 +4730,11 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         if (rule.trigger.timerType === 'once' && lastTrigger > 0) {
           return; // Une seule fois déjà exécutée
         }
+        if (!canRuleFireWithGate(rule, now, 0, { cooldownKey })) {
+          return;
+        }
         ruleCooldowns[cooldownKey] = now;
+        recordRuleFired(rule, now, { cooldownKey });
         const allEnts = Object.values(entities);
         const subject = allEnts.find((e) =>
           matchesEntityFilter(e, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)
@@ -4014,11 +4766,11 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           const centerA = { x: posA.x + entA.size.width / 2, y: posA.y + entA.size.height / 2 };
           const centerB = { x: posB.x + entB.size.width / 2, y: posB.y + entB.size.height / 2 };
           const dist = Math.hypot(centerA.x - centerB.x, centerA.y - centerB.y);
+          const pairKey = `prox_${rule.id}_${entA.id}_${entB.id}`;
 
           if (dist <= reqDist) {
-            const cooldownKey = `prox_${rule.id}_${entA.id}_${entB.id}`;
-            if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
-              ruleCooldowns[cooldownKey] = now;
+            if (canRuleFireWithGate(rule, now, RULE_COOLDOWN_MS, { cooldownKey: pairKey, edgeKey: pairKey, useEdgeGating: true })) {
+              recordRuleFired(rule, now, { cooldownKey: pairKey, edgeKey: pairKey });
               const effA = posA === entA.position ? entA : { ...entA, position: posA };
               const effB = posB === entB.position ? entB : { ...entB, position: posB };
               executeRuleActions(rule.actions, {
@@ -4035,6 +4787,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
                 spawnEntity,
               });
             }
+          } else {
+            markContinuousConditionFalse(rule, pairKey);
           }
         });
       });
@@ -4067,10 +4821,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         if (edge === 'bottom' && hitBottom) hitEdge = true;
         if (edge === 'any' && (hitLeft || hitRight || hitTop || hitBottom)) hitEdge = true;
 
+        const boundKey = `bound_${rule.id}_${subject.id}`;
         if (hitEdge) {
-          const cooldownKey = `bound_${rule.id}_${subject.id}`;
-          if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS) {
-            ruleCooldowns[cooldownKey] = now;
+          if (canRuleFireWithGate(rule, now, RULE_COOLDOWN_MS, { cooldownKey: boundKey, edgeKey: boundKey, useEdgeGating: true })) {
+            recordRuleFired(rule, now, { cooldownKey: boundKey, edgeKey: boundKey });
             const boundaryPt: Position = {
               x: hitLeft && (edge === 'left' || edge === 'any') ? 0 : hitRight && (edge === 'right' || edge === 'any') ? sceneW : Math.round(wb.centerX),
               y: hitTop && (edge === 'top' || edge === 'any') ? 0 : hitBottom && (edge === 'bottom' || edge === 'any') ? sceneH : Math.round(wb.centerY),
@@ -4085,26 +4839,60 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
               spawnEntity,
             });
           }
+        } else {
+          markContinuousConditionFalse(rule, boundKey);
         }
       });
     });
 
     // 6. Règles de Variables / Compteur de Score
     const variableRules = rules.filter((r) => r.enabled && r.trigger.type === 'variable');
+    const liveVars = get().gameVariables || { score: get().gameScore || 0 };
     variableRules.forEach((rule) => {
+      const varName = (rule.trigger.variableName || 'score').trim() || 'score';
+      const currentVal =
+        varName === 'score' ? (liveVars.score ?? get().gameScore ?? 0) : (liveVars[varName] ?? 0);
+      const triggerMode = rule.trigger.variableTriggerMode || 'threshold';
+
+      if (triggerMode === 'on_change') {
+        const changeKey = `varRule_${rule.id}_${varName}`;
+        if (prevEvaluatedVariables[changeKey] === undefined) {
+          prevEvaluatedVariables[changeKey] = currentVal;
+          return;
+        }
+        if (Math.abs(currentVal - prevEvaluatedVariables[changeKey]) > 1e-4) {
+          prevEvaluatedVariables[changeKey] = currentVal;
+          const cooldownKey = `var_${rule.id}`;
+          if (canRuleFireWithGate(rule, now, 40, { cooldownKey })) {
+            recordRuleFired(rule, now, { cooldownKey });
+            const allEnts = Object.values(entities);
+            executeRuleActions(rule.actions, {
+              subject: allEnts[0],
+              allEntities: entities,
+              updateEntityState,
+              updateEntityDetails,
+              deleteEntity,
+              spawnEntity,
+            });
+          }
+        }
+        return;
+      }
+
       const targetVal = rule.trigger.variableValue ?? 5;
       const op = rule.trigger.variableOperator || '>=';
-      const score = get().gameScore || 0;
-
       let satisfied = false;
-      if (op === '>=' && score >= targetVal) satisfied = true;
-      if (op === '==' && score === targetVal) satisfied = true;
-      if (op === '<=' && score <= targetVal) satisfied = true;
+      if (op === '>=' && currentVal >= targetVal) satisfied = true;
+      else if (op === '==' && Math.abs(currentVal - targetVal) <= 1e-4) satisfied = true;
+      else if (op === '<=' && currentVal <= targetVal) satisfied = true;
+      else if (op === '>' && currentVal > targetVal) satisfied = true;
+      else if (op === '<' && currentVal < targetVal) satisfied = true;
+      else if (op === '!=' && Math.abs(currentVal - targetVal) > 1e-4) satisfied = true;
 
+      const cooldownKey = `var_${rule.id}`;
       if (satisfied) {
-        const cooldownKey = `var_${rule.id}`;
-        if (now - (ruleCooldowns[cooldownKey] || 0) >= RULE_COOLDOWN_MS * 2) {
-          ruleCooldowns[cooldownKey] = now;
+        if (canRuleFireWithGate(rule, now, RULE_COOLDOWN_MS * 2, { cooldownKey, edgeKey: rule.id, useEdgeGating: true })) {
+          recordRuleFired(rule, now, { cooldownKey, edgeKey: rule.id });
           const allEnts = Object.values(entities);
           executeRuleActions(rule.actions, {
             subject: allEnts[0],
@@ -4115,6 +4903,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
             spawnEntity,
           });
         }
+      } else {
+        markContinuousConditionFalse(rule, rule.id);
       }
     });
 

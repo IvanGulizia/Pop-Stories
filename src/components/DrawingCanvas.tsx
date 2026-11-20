@@ -3,6 +3,7 @@ import { RotateCcw, Undo2, Redo2 } from 'lucide-react';
 import { VectorPath, VectorPoint, VectorRect, ColliderType, ColliderBounds, DrawingLayer, EntityPivot } from '../types';
 import { applyBucketFill } from '../utils/floodFill';
 import { computeAutoColliderBoundsFromPaths } from '../utils/collider';
+import { shouldIgnorePointerForStylusOnly } from '../utils/strokeWiggle';
 import { useSceneStore, DEFAULT_PROJECT_PALETTE } from '../store/useSceneStore';
 import {
   generateRoundedRectPath,
@@ -143,6 +144,8 @@ export function DrawingCanvas({
   hideTopHistoryButtons = false,
 }: DrawingCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const stylusOnlyDrawing = useSceneStore((s) => Boolean(s.settings?.stylusOnlyDrawing));
+  const updateSettings = useSceneStore((s) => s.updateSettings);
   const initialLayersResolved = useMemo<DrawingLayer[]>(
     () =>
       initialLayers && initialLayers.length > 0
@@ -881,6 +884,9 @@ export function DrawingCanvas({
 
   // --- MOUSE / POINTER / TOUCH HANDLERS ---
   const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (shouldIgnorePointerForStylusOnly(e.pointerType, stylusOnlyDrawing)) {
+      return;
+    }
     try {
       (e.target as Element).setPointerCapture?.(e.pointerId);
     } catch (_) {}
@@ -1042,6 +1048,9 @@ export function DrawingCanvas({
   };
 
   const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (shouldIgnorePointerForStylusOnly(e.pointerType, stylusOnlyDrawing)) {
+      return;
+    }
     const pt = getSVGCoordinates(e);
 
     if (colliderDragAction && colliderDragOriginRef.current) {
@@ -1630,6 +1639,8 @@ export function DrawingCanvas({
           onToggleGrid={() => setShowGrid(!showGrid)}
           snapToGrid={snapToGrid}
           onToggleSnapToGrid={() => setSnapToGrid(!snapToGrid)}
+          stylusOnlyDrawing={stylusOnlyDrawing}
+          onToggleStylusOnly={() => updateSettings({ stylusOnlyDrawing: !stylusOnlyDrawing })}
           onFinishPolyline={() => finishPolyline(false)}
           pathCount={paths.length}
         />
@@ -2073,12 +2084,11 @@ export function DrawingCanvas({
             {showHotspot && (
               <g
                 className="cursor-move select-none"
-                onMouseDown={(e) => {
+                onPointerDown={(e) => {
                   e.stopPropagation();
-                  setIsDraggingHotspot(true);
-                }}
-                onTouchStart={(e) => {
-                  e.stopPropagation();
+                  try {
+                    (e.target as Element).setPointerCapture?.(e.pointerId);
+                  } catch (_) {}
                   setIsDraggingHotspot(true);
                 }}
               >

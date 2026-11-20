@@ -21,12 +21,13 @@ Ce projet suit un développement itératif structuré pour garder une expérienc
 - [x] **Stabilisation dessin, flip, curseurs & zone de spawn (Phase 10.33)** : Undo/Redo timeline par frame, flip Character Controller, curseur neutre hors clic/drag, zone aléatoire de spawn.
 
 ### Ordre d'exécution recommandé (du plus simple / autonome aux chantiers structurants)
-1. **Chantier A — Quick Wins & Ergonomie immédiate** :
-   - **Compatibilité iPad / Apple Pencil** : Audit tactile (remplacement/doublon du drag & drop HTML5 galerie→scène, `100dvh`, gestion des gestes sans hover, option détection stylet/pression).
-   - **Wiggle sur les traits (Ligne vivante / Squigglevision)** : Option de tremblement procédural par entité / état / tracé (seed déterministe + amplitude + FPS de variation façon *Boiling Lines*) à faible coût CPU.
+1. **Chantier A — Quick Wins & Ergonomie immédiate (Complété — Phase 10.34)** :
+   - [x] **Compatibilité iPad / Apple Pencil** : Drag & drop `PointerEvent` galerie→scène + mode tactile *Placer*, `100dvh`, blocage callout iOS, et mode *Stylet seul* (`stylusOnlyDrawing`).
+   - [x] **Wiggle sur les traits (Ligne vivante / Squigglevision)** : Comportement `stroke_wiggle` avec pré-calcul déterministe en cache (`2–6` variantes à `1–24 Hz`) à coût CPU quasi nul.
 2. **Chantier B — Fondations Jeu & Scènes** :
-   - **Multi-Scènes & Transitions** : `scenes[]` au niveau projet, action `change_scene` (avec effets de fondu/transition), gestion d'état persistant inter-scènes (`gameVariables`).
-   - **Sliders Contraints & Corde Élastique (En pause — prêt à démarrer)** : Comportement `slider` + variables de jeu + contrainte/rendu `corde`.
+   - [x] **Vague 2A — Wiggle++, Variables de jeu (`gameVariables`) & Comportement `slider` contraint (Complété — Phase 10.35)** : `segmentStep`, `verticalScale`, `endpointStability`, `seed`, liaisons `gameVariables`, tiroir Variables & action `set_variable` dans le `RuleBook`, rail 1D / zone 2D / disque, drag direct vs ressort, crantage strict/magnétique, retour élastique.
+   - [x] **Vague 2B — Multi-Scènes & Transitions (Complété — Phase 10.36)** : `scenes[]` au niveau projet, barre de scènes, action `change_scene` (`none`, `fade`, `slide_left`, `slide_right`, `iris`), conservation de `gameVariables` inter-scènes et limites/délais universels sur les événements.
+   - [ ] **Corde Élastique & Line Renderer SVG** : Contrainte souple (tension/balancement) + tracé SVG dynamique entre ancres (phase dédiée à suivre).
 3. **Chantier C — Monde Étendu & Caméra (Prérequis pour véhicules & tir)** :
    - **Caméra 2D & Grand Environnement** : Caméra (`follow`, zoom, bornes, *screen shake*, transitions), culling/optimisation viewport, et activation du `parallaxFactor` déjà présent sur `SceneLayer`.
 4. **Chantier D — Animation & Pinceaux Avancés** :

@@ -12,6 +12,7 @@ import {
   Repeat,
   Shield,
   Shuffle,
+  SlidersHorizontal,
   Sparkles,
   Waves,
   Wind,
@@ -87,6 +88,22 @@ export function AddBehaviorModal({ isOpen, onClose, onAddBehavior }: AddBehavior
                 </div>
                 <div className="text-[11px] text-slate-500">
                   Paliers d'approche, survol, saisie, balancement pendulaire, survol de cibles & chute/atterrissage.
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onAddBehavior('slider')}
+              className="w-full p-2.5 rounded-2xl border border-sky-200 bg-sky-50/20 hover:border-sky-400 hover:bg-sky-50/60 flex items-center gap-3 transition-all text-left cursor-pointer group"
+            >
+              <div className="w-8 h-8 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <SlidersHorizontal className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="font-bold text-slate-800 text-xs">Slider & Glissière Contrainte (Rail / Joystick)</div>
+                <div className="text-[11px] text-slate-500">
+                  Rail 1D, zone 2D ou joystick élastique avec crans magnétiques et sortie vers Variables.
                 </div>
               </div>
             </button>
@@ -281,6 +298,22 @@ export function AddBehaviorModal({ isOpen, onClose, onAddBehavior }: AddBehavior
             <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
               Effets Visuels & Particules
             </span>
+            <button
+              type="button"
+              onClick={() => onAddBehavior('stroke_wiggle')}
+              className="w-full p-2.5 rounded-2xl border border-cyan-200 bg-cyan-50/20 hover:border-cyan-400 hover:bg-cyan-50/60 flex items-center gap-3 transition-all text-left cursor-pointer group"
+            >
+              <div className="w-8 h-8 rounded-xl bg-cyan-100 text-cyan-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Waves className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="font-bold text-slate-800 text-xs">Wiggle des Traits (Ligne Vivante)</div>
+                <div className="text-[11px] text-slate-500">
+                  Fait vibrer les contours façon dessin animé traditionnel (variants pré-calculés à faible coût).
+                </div>
+              </div>
+            </button>
+
             <button
               type="button"
               onClick={() => onAddBehavior('particle_emitter')}

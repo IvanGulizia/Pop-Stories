@@ -20,6 +20,7 @@ import {
   ParticleEmitterBehaviorConfig,
   HealthBehaviorConfig,
   JiggleBehaviorConfig,
+  SliderBehaviorConfig,
   EntityPivot,
   GrabRotationMode,
   SceneLayer,
@@ -70,6 +71,11 @@ import {
   createJointBreakRuntimeState,
   evaluateJointBreakState,
 } from './physics/jointBreakSolver';
+import {
+  SliderRuntimeState,
+  SliderTrackGeometry,
+  stepSliderPhysics,
+} from './physics/sliderSolver';
 
 export { getEffectiveBehaviors, isEntityDraggable };
 
@@ -358,6 +364,62 @@ const debugJiggleInfos = new Map<
   { world: Position; angleDeg: number; restDeg: number; squashX: number; squashY: number }
 >();
 
+const sliderStates = new Map<string, SliderRuntimeState>();
+const lastSliderOutputValues = new Map<string, number>();
+const debugSliderTracks = new Map<
+  string,
+  { geom: SliderTrackGeometry; config: SliderBehaviorConfig; valueX: number; valueY: number; stepIndex: number }
+>();
+
+export function startSliderGrab(
+  entityId: string,
+  worldX: number,
+  worldY: number,
+  entityCenter?: Position
+): boolean {
+  const existing = sliderStates.get(entityId);
+  if (existing) {
+    const cx = existing.originCx + (existing.localX === 0 && existing.localY === 0 ? 0 : 0);
+    // Compute current center safely using stored last known or fallback to entityCenter
+    const curCenter = entityCenter || { x: cx, y: existing.originCy };
+    existing.isGrabbed = true;
+    existing.grabOffsetWorld = {
+      x: curCenter.x - worldX,
+      y: curCenter.y - worldY,
+    };
+    existing.targetWorld = { x: worldX, y: worldY };
+    return true;
+  }
+  if (!entityCenter) return false;
+  sliderStates.set(entityId, {
+    originCx: entityCenter.x,
+    originCy: entityCenter.y,
+    localX: 0,
+    localY: 0,
+    vx: 0,
+    vy: 0,
+    isGrabbed: true,
+    grabOffsetWorld: {
+      x: entityCenter.x - worldX,
+      y: entityCenter.y - worldY,
+    },
+    targetWorld: { x: worldX, y: worldY },
+  });
+  return true;
+}
+
+export function updateSliderGrabTarget(entityId: string, worldX: number, worldY: number) {
+  const st = sliderStates.get(entityId);
+  if (!st || !st.isGrabbed) return;
+  st.targetWorld = { x: worldX, y: worldY };
+}
+
+export function endSliderGrab(entityId: string) {
+  const st = sliderStates.get(entityId);
+  if (!st) return;
+  st.isGrabbed = false;
+}
+
 export function isEntityPhysicsGrabbed(entityId: string): boolean {
   return mouseGrabConstraints.has(entityId);
 }
@@ -479,6 +541,7 @@ export function getGizmoRuntimeDebugData(): {
   jointStressRatios: Record<string, number>;
   grabPins: Record<string, { target: Position; grabWorld: Position }>;
   jigglePivots: Record<string, { world: Position; angleDeg: number; restDeg: number; squashX: number; squashY: number }>;
+  sliderTracks: Record<string, { geom: SliderTrackGeometry; config: SliderBehaviorConfig; valueX: number; valueY: number; stepIndex: number }>;
 } {
   const wanderOrigins: Record<string, { origin: Position; targetPoint: Position | null }> = {};
   wanderingStates.forEach((v, k) => {
@@ -511,6 +574,13 @@ export function getGizmoRuntimeDebugData(): {
   debugJiggleInfos.forEach((v, k) => {
     jigglePivots[k] = v;
   });
+  const sliderTracks: Record<
+    string,
+    { geom: SliderTrackGeometry; config: SliderBehaviorConfig; valueX: number; valueY: number; stepIndex: number }
+  > = {};
+  debugSliderTracks.forEach((v, k) => {
+    sliderTracks[k] = v;
+  });
   return {
     wanderOrigins,
     patrolOrigins,
@@ -519,6 +589,7 @@ export function getGizmoRuntimeDebugData(): {
     jointStressRatios,
     grabPins,
     jigglePivots,
+    sliderTracks,
   };
 }
 
@@ -644,6 +715,9 @@ export function resetMatterPhysicsRuntime() {
   debugJointStressRatios.clear();
   debugGrabPins.clear();
   debugJiggleInfos.clear();
+  sliderStates.clear();
+  lastSliderOutputValues.clear();
+  debugSliderTracks.clear();
   nextNegativeGroupId = -100;
 }
 
@@ -789,6 +863,7 @@ export interface PhysicsTickResult {
   >;
   entitiesToDestroy?: string[];
   stateChanges?: Record<string, string>;
+  variableUpdates?: Record<string, number>;
   brokenJointEvents?: {
     childId: string;
     parentId: string;
@@ -1041,6 +1116,7 @@ function ensurePhysicsWorld(
     const effectiveBehaviors = getEffectiveBehaviors(entity, currentState);
 
     const physics = effectiveBehaviors.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
+    const sliderBeh = effectiveBehaviors.find((b) => b.type === 'slider') as SliderBehaviorConfig | undefined;
     const boundary = effectiveBehaviors.find((b) => b.type === 'boundary_behavior') as BoundaryBehaviorConfig | undefined;
     const hasMovement = effectiveBehaviors.some((b) =>
       ['keyboard_control', 'constant_velocity', 'patrol', 'wandering', 'move_to', 'follow', 'flee'].includes(b.type)
@@ -1054,9 +1130,12 @@ function ensurePhysicsWorld(
     // RÈGLE D'OR : Sans composant physics explicite, l'objet n'a PAS de physique dynamique,
     // SAUF si l'enfant attaché demande explicitement un Joint Physique / collision monde,
     // ou s'il vient de rompre son joint cassable avec chute libre active.
+    // Un objet Slider contraint reste statique/cinématique pour ne pas tomber sous la gravité.
     const isBrokenDynamic = brokenJointDynamicIds.has(entity.id);
     let isStatic = true;
-    if (isAttachedChild) {
+    if (sliderBeh && sliderBeh.enabled !== false && !isCollisionAttachedChild) {
+      isStatic = true;
+    } else if (isAttachedChild) {
       isStatic = !isCollisionAttachedChild;
     } else if (isBrokenDynamic) {
       isStatic = false;
@@ -1320,6 +1399,7 @@ export function stepMatterPhysics(params: {
   const flipUpdates = new Map<string, boolean>();
   const entitiesToDestroy: string[] = [];
   const stateChanges: Record<string, string> = {};
+  const variableUpdates: Record<string, number> = {};
   const brokenJointEvents: NonNullable<PhysicsTickResult['brokenJointEvents']> = [];
   const brokenJointIdSet = new Set<string>();
   const entityList = Object.values(liveEntities);
@@ -1330,6 +1410,7 @@ export function stepMatterPhysics(params: {
   debugJointStressRatios.clear();
   debugGrabPins.clear();
   debugJiggleInfos.clear();
+  debugSliderTracks.clear();
 
   // Pré-passe : synchroniser / nettoyer les Matter.Constraints des enfants attachés avec collisions monde
   const topoPrepassEntities = sortEntitiesTopologically(liveEntities);
@@ -1580,6 +1661,10 @@ export function stepMatterPhysics(params: {
         !brokenJointDynamicIds.has(entity.id) &&
         !mouseGrabConstraints.has(entity.id))
     ) {
+      continue;
+    }
+
+    if (effectiveBehaviors.some((b) => b.type === 'slider' && b.enabled !== false)) {
       continue;
     }
 
@@ -2946,6 +3031,7 @@ export function stepMatterPhysics(params: {
     } else {
       // Cas 2 : Entité indépendante (ou parent racine, avec ou sans corps physique)
       if (springLinkStates.has(entity.id)) springLinkStates.delete(entity.id);
+      const sliderBeh = effectiveBehaviors.find((b) => b.type === 'slider') as SliderBehaviorConfig | undefined;
       const rootLookAt = effectiveBehaviors.find((b) => b.type === 'look_at') as LookAtBehaviorConfig | undefined;
       const hasRotationBehavior = effectiveBehaviors.some(
         (b) =>
@@ -2954,11 +3040,74 @@ export function stepMatterPhysics(params: {
           (b.type === 'wandering' && !!(b as WanderingBehaviorConfig).orientToMovement)
       );
 
-      const isActivelyDragged = Boolean(activeDragPositions[entity.id]);
-      if (isActivelyDragged) {
-        const dp = activeDragPositions[entity.id];
-        newX = dp.x;
-        newY = dp.y;
+      if (sliderBeh && sliderBeh.enabled !== false) {
+        const curCx = entity.position.x + entity.size.width / 2;
+        const curCy = entity.position.y + entity.size.height / 2;
+        let slState = sliderStates.get(entity.id);
+        if (!slState) {
+          slState = {
+            originCx: curCx,
+            originCy: curCy,
+            localX: 0,
+            localY: 0,
+            vx: 0,
+            vy: 0,
+            isGrabbed: false,
+            grabOffsetWorld: { x: 0, y: 0 },
+            targetWorld: { x: curCx, y: curCy },
+          };
+          sliderStates.set(entity.id, slState);
+        }
+        const slRes = stepSliderPhysics({ state: slState, config: sliderBeh, dt });
+        newX = Math.round((slRes.worldCenter.x - entity.size.width / 2) * 10) / 10;
+        newY = Math.round((slRes.worldCenter.y - entity.size.height / 2) * 10) / 10;
+
+        if (Math.abs(newX - entity.position.x) > 0.05 || Math.abs(newY - entity.position.y) > 0.05) {
+          pendingPosUpdate = { x: newX, y: newY };
+        }
+
+        if (body) {
+          const offset = colliderOffsets.get(entity.id) || {
+            relCenterX: entity.size.width / 2,
+            relCenterY: entity.size.height / 2,
+          };
+          const effPivot = resolveEffectivePivot(entity, currentState, rawPivotOverride, nextFlipX);
+          const worldCenter = getBodyWorldCenterFromPivot(
+            { x: newX, y: newY },
+            entity.size,
+            offset.relCenterX,
+            offset.relCenterY,
+            effPivot,
+            newRot
+          );
+          Body.setPosition(body, worldCenter);
+        }
+
+        debugSliderTracks.set(entity.id, {
+          geom: slRes.geom,
+          config: sliderBeh,
+          valueX: slRes.outputs.valueX,
+          valueY: slRes.outputs.valueY,
+          stepIndex: slRes.outputs.stepIndex,
+        });
+
+        for (const [varKey, nextVal] of Object.entries(slRes.outputs.updates)) {
+          const prevVal = lastSliderOutputValues.get(varKey);
+          if (prevVal === undefined || Math.abs(nextVal - prevVal) > 0.005) {
+            lastSliderOutputValues.set(varKey, nextVal);
+            variableUpdates[varKey] = nextVal;
+          }
+        }
+      } else {
+        if (sliderStates.has(entity.id)) {
+          sliderStates.delete(entity.id);
+        }
+
+        const isActivelyDragged = Boolean(activeDragPositions[entity.id]);
+        if (isActivelyDragged) {
+          const dp = activeDragPositions[entity.id];
+          newX = dp.x;
+          newY = dp.y;
       } else if (rootLookAt && rootLookAt.enabled !== false && rootLookAt.lookMode === 'pupil_orbit') {
         let orbitRt = lookAtOrbitStates.get(entity.id);
         if (!orbitRt) {
@@ -3075,6 +3224,7 @@ export function stepMatterPhysics(params: {
         if (rotChanged) pendingRotUpdate = newRot;
         else if (isRotFrozen && Math.abs(currentState?.rotation || 0) > 0.1) pendingRotUpdate = 0;
         if (flipChanged) pendingFlipUpdate = nextFlipX;
+        }
       }
     }
 
@@ -4027,6 +4177,7 @@ export function stepMatterPhysics(params: {
     updatedTransforms,
     ...(entitiesToDestroy.length > 0 ? { entitiesToDestroy } : {}),
     ...(Object.keys(stateChanges).length > 0 ? { stateChanges } : {}),
+    ...(Object.keys(variableUpdates).length > 0 ? { variableUpdates } : {}),
     ...(brokenJointEvents.length > 0 ? { brokenJointEvents } : {}),
   };
 }

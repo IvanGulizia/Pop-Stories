@@ -11,12 +11,19 @@
 - [x] Parenting & Follow élastiques (`spring`, `physics_joint`, `collideWithWorld`) + Composant `jiggle` & Gizmos `springsAndJiggle`
 - [x] Finitions Dessin/Gizmos (ordre palette, pivot masqué par défaut, verrous collider/pivot, suppression libellé box/circle), rotation directe canvas, suivi continu en drag, chaînes Jiggle + angle de départ (`initialAngleOffset`), calibration `physics_joint` & 3 scènes de test chargeables
 
-## En Pause / Planifié pour plus tard (Chantier Sliders & Corde Élastique)
-- [ ] **Comportement `slider` contraint + Variables de jeu (`gameVariables`)** :
-  - Modes géométriques : Rail linéaire orientable (1D : longueur px + angle), Zone 2D libre (rectangle ou disque), puis Arc/Cadran rotatif.
+## Complété récemment — Vague 2A & Wiggle++ (Phase 10.35)
+- [x] **Wiggle++ (`StrokeWiggleBehaviorConfig`)** : `segmentStep`, `verticalScale`, `endpointStability`, `seed` + modulation live via `gameVariables`.
+- [x] **Comportement `slider` contraint + Variables de jeu (`gameVariables`)** :
+  - Modes géométriques : Rail linéaire orientable (1D : longueur px + angle), Zone 2D libre (rectangle ou disque). *(Optionnel plus tard : Arc/Cadran rotatif).*
   - Drag physique (ressort vers la souris avec inertie/rebond) vs Drag direct au pixel près (prioritaire sur `draggable`).
   - Crantage (continu ou N crans stricts / magnétiques) + Retour élastique (`none` vs `spring_return` configuré).
-  - Sortie exploitable dans le `RuleBook` (`slider_x`, `slider_y`, `cran_actuel`, déclencheur sur changement de valeur/cran).
+  - Sortie exploitable dans le `RuleBook` (`outputVariableX`, `outputVariableY`, `outputStepVariable`, déclencheur `'threshold'` / `'on_change'`, action `set_variable`, tiroir Variables).
+
+## Complété récemment — Limites Universelles & Vague 2B Multi-Scènes (Phase 10.36)
+- [x] **Limites, Cooldown, Délais & Front Montant universels (`triggerGate.ts`, `TriggerLimitsSection.tsx`)** : `triggerMaxCount` (`∞` / `1×` / `N×`), `triggerCooldownSec`, `triggerStartDelaySec`, `triggerRequireReset` (*1× par passage*) sur tous les événements + exécution `'state_change'`.
+- [x] **Multi-Scènes & Transitions (`ProjectScene[]`, `App.tsx`, `Scene.tsx`, `RuleBook`)** : Onglets de scènes, fond par scène, action `change_scene` (`none`, `fade`, `slide_left`, `slide_right`, `iris`), conservation de `gameVariables` inter-scènes.
+
+## En Pause / Planifié pour plus tard (Corde Élastique & Vague 2B)
 - [ ] **Comportement `corde` / Corde élastique + Line Renderer SVG** :
   - Contrainte physique souple (distance max / élasticité, tirage vers le bas avec résistance pour interrupteur/lampe ou balancement).
   - Couche de rendu SVG dédiée (segment tendu / caténaire / élastique dynamique entre deux ancres).
@@ -28,9 +35,9 @@
 - [ ] **Phase Anim 4 — Vue Graphe d'États (optionnel)** : Visualisation nodale branchée sur les mêmes transitions
 
 ## À venir (Pistes futures & Chantiers Planifiés)
-- [ ] **Wiggle sur les traits ("Boiling Lines")** : Tremblement vectoriel paramétrable (amplitude, fréquence/FPS 4–12 Hz, niveau de détail, par comportement ou propriété d'état/calque) avec cache de frames pour coût CPU quasi nul.
-- [ ] **Compatibilité iPad / Stylet (Apple Pencil)** : Fallback tactile du drag & drop galerie → scène, viewport `100dvh` / `safe-area`, gestes tactiles sans dépendance au `hover`, et support optionnel de la pression/inclinaison du stylet (`e.pointerType === 'pen'`).
-- [ ] **Multi-Scènes & Transitions** : Gestionnaire de plusieurs scènes dans le projet, règle/action `Changer de scène` avec transition visuelle (fondu, glissement, iris) et variables persistantes entre scènes.
+- [x] **Wiggle sur les traits ("Boiling Lines")** : Comportement `stroke_wiggle` avec amplitude, fréquence `1–24 Hz`, finesse, aperçu Édition et cache de variantes déterministes.
+- [x] **Compatibilité iPad / Stylet (Base)** : Drag `PointerEvent` galerie → scène + bouton *Placer*, `h-dvh` / `safe-area`, et mode *Stylet seul* (`stylusOnlyDrawing`, rejet paume). *(Pression/inclinaison Apple Pencil à coupler avec les Brushes personnalisées).*
+- [x] **Multi-Scènes & Transitions** : Gestionnaire de plusieurs scènes dans le projet, règle/action `Changer de scène` avec transition visuelle (`none`, `fade`, `slide_left`, `slide_right`, `iris`) et variables persistantes entre scènes.
 - [ ] **Caméra 2D, Grand Environnement & Parallaxe** : Monde étendu au-delà du viewport, suivi caméra (smooth follow + deadzone + look-ahead), zoom dynamique, *Screen Shake* / effets caméra, et activation réelle de `SceneLayer.parallaxFactor`.
 - [ ] **Brushes Personnalisées** : Système de brosses avancées (texture/tampon, modulation épaisseur/pression stylet, rendu optimisé) selon cahier des charges utilisateur à définir.
 - [ ] **Prefabs & Véhicules Physiques (2 roues + suspensions)** : Assemblage multi-entités réutilisable et spawnable d'un bloc (châssis + 2 roues motrices + suspensions `physics_joint`/ressort + comportement conduite clavier + inclinaison en vol).

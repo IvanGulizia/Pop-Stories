@@ -7,6 +7,7 @@ import {
   CustomParticlePreset,
   ParticleShape,
   CustomParticleUsageMode,
+  SceneTransitionType,
 } from '../../types';
 import { EntityMiniPreview } from '../EntityMiniPreview';
 import { SpawnLocationPicker } from '../SpawnLocationPicker';
@@ -22,6 +23,7 @@ import {
   Sliders,
 } from 'lucide-react';
 import { ActiveModal, EntityOption, ParticleDrawingTarget } from './ruleBookTypes';
+import { useSceneStore, EMPTY_RECORD, EMPTY_LIST } from '../../store/useSceneStore';
 
 interface RuleActionModalProps {
   activeModal: Extract<NonNullable<ActiveModal>, { type: 'action' }>;
@@ -56,6 +58,10 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
   setParticleEditorContext,
   getEntityObj,
 }) => {
+  const initialGameVariables = useSceneStore((s) => s.initialGameVariables || EMPTY_RECORD);
+  const scenes = useSceneStore((s) => s.scenes || EMPTY_LIST);
+  const activeSceneId = useSceneStore((s) => s.activeSceneId);
+  const variableNames = Array.from(new Set(['score', ...Object.keys(initialGameVariables)])).sort();
   const isCollision = rule.trigger.type === 'collision' || rule.trigger.type === 'proximity';
   const subjectType = rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
   const targetType = rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
@@ -573,6 +579,62 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Incrémenter le score de jeu
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* 5.5. Modifier une Variable */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveModal({
+                          ...activeModal,
+                          subStep: 'choose_variable_action',
+                          variableName: activeModal.variableName || 'score',
+                          variableOperation: activeModal.variableOperation || 'set',
+                          variableValue: activeModal.variableValue ?? 1,
+                        })
+                      }
+                      className="w-full p-3.5 bg-white hover:bg-sky-50/70 border-2 border-slate-200 hover:border-sky-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                        📊
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-sky-700 truncate">
+                          Modifier une Variable
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Définir, ajouter, soustraire ou multiplier
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* 5.6. Changer de Scène */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const defaultTarget =
+                          scenes.find((s) => s.id !== activeSceneId)?.id || scenes[0]?.id || 'scene-1';
+                        setActiveModal({
+                          ...activeModal,
+                          subStep: 'choose_scene_action',
+                          targetSceneId: activeModal.targetSceneId || defaultTarget,
+                          sceneTransition: activeModal.sceneTransition || 'fade',
+                          sceneTransitionDuration: activeModal.sceneTransitionDuration ?? 0.45,
+                        });
+                      }}
+                      className="w-full p-3.5 bg-white hover:bg-violet-50/70 border-2 border-slate-200 hover:border-violet-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                        🎬
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-violet-700 truncate">
+                          Changer de Scène
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Naviguer vers une autre scène (avec transition)
                         </div>
                       </div>
                     </button>
@@ -2594,6 +2656,210 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
             >
               <Check className="w-4 h-4" />
               <span>Valider le déplacement</span>
+            </button>
+          </div>
+        )}
+
+        {/* Modal Action : Modifier une Variable */}
+        {activeModal.subStep === 'choose_variable_action' && (
+          <div className="space-y-4 max-w-lg mx-auto py-2">
+            <div className="text-center space-y-1">
+              <div className="w-12 h-12 bg-sky-100 text-sky-700 rounded-2xl flex items-center justify-center text-2xl mx-auto shadow-xs">
+                📊
+              </div>
+              <h4 className="text-sm font-black text-slate-800">Modifier une Variable</h4>
+              <p className="text-xs text-slate-500">
+                Changez la valeur d'une variable de jeu (ou du score) lors du déclenchement.
+              </p>
+            </div>
+
+            <div className="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Nom de la variable :</label>
+                <input
+                  type="text"
+                  list="modal-action-vars"
+                  value={activeModal.variableName ?? 'score'}
+                  onChange={(e) =>
+                    setActiveModal({ ...activeModal, variableName: e.target.value })
+                  }
+                  placeholder="ex: score, vies, slider_x..."
+                  className="w-full px-3 py-2 text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-sky-400"
+                />
+                <datalist id="modal-action-vars">
+                  {variableNames.map((vn) => (
+                    <option key={vn} value={vn} />
+                  ))}
+                </datalist>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Opération :</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {([
+                    { id: 'set', label: '= Définir' },
+                    { id: 'add', label: '+ Ajouter' },
+                    { id: 'subtract', label: '− Retirer' },
+                    { id: 'multiply', label: '× Multiplier' },
+                  ] as const).map((op) => (
+                    <button
+                      key={op.id}
+                      type="button"
+                      onClick={() => setActiveModal({ ...activeModal, variableOperation: op.id })}
+                      className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                        (activeModal.variableOperation || 'set') === op.id
+                          ? 'bg-sky-600 text-white border-sky-700 shadow-2xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-sky-50'
+                      }`}
+                    >
+                      {op.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Valeur :</label>
+                <input
+                  type="number"
+                  step="any"
+                  value={activeModal.variableValue ?? 1}
+                  onChange={(e) => {
+                    const parsed = parseFloat(e.target.value);
+                    setActiveModal({
+                      ...activeModal,
+                      variableValue: Number.isNaN(parsed) ? 0 : parsed,
+                    });
+                  }}
+                  className="w-full px-3 py-2 text-center font-mono text-sm font-black bg-white text-slate-900 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-sky-400"
+                />
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                applyAction({
+                  type: 'set_variable',
+                  variableName: (activeModal.variableName || 'score').trim() || 'score',
+                  variableOperation: activeModal.variableOperation || 'set',
+                  variableValue: activeModal.variableValue ?? 1,
+                });
+              }}
+              className="w-full py-3 bg-sky-600 hover:bg-sky-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
+            >
+              <Check className="w-4 h-4" />
+              <span>Valider l'action Variable</span>
+            </button>
+          </div>
+        )}
+
+        {/* Modal Action : Changer de Scène */}
+        {activeModal.subStep === 'choose_scene_action' && (
+          <div className="space-y-4 max-w-lg mx-auto py-2">
+            <div className="text-center space-y-1">
+              <div className="w-12 h-12 bg-violet-100 text-violet-700 rounded-2xl flex items-center justify-center text-2xl mx-auto shadow-xs">
+                🎬
+              </div>
+              <h4 className="text-sm font-black text-slate-800">Changer de Scène</h4>
+              <p className="text-xs text-slate-500">
+                Choisissez la scène cible et la transition visuelle. Les variables &amp; scores sont conservés.
+              </p>
+            </div>
+
+            <div className="space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Scène de destination :</label>
+                <select
+                  value={activeModal.targetSceneId || scenes[0]?.id || 'scene-1'}
+                  onChange={(e) => setActiveModal({ ...activeModal, targetSceneId: e.target.value })}
+                  className="w-full px-3 py-2.5 text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl outline-none cursor-pointer focus:ring-2 focus:ring-violet-400"
+                >
+                  {scenes.map((sc) => (
+                    <option key={sc.id} value={sc.id}>
+                      {sc.name}
+                      {sc.id === activeSceneId ? ' (Scène actuelle — redémarrer)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">Effet de transition :</label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {([
+                    { id: 'fade', label: '🌑 Fondu' },
+                    { id: 'slide_left', label: '⬅️ Glissé Gauche' },
+                    { id: 'slide_right', label: '➡️ Glissé Droit' },
+                    { id: 'iris', label: '🎯 Iris' },
+                    { id: 'none', label: '⚡ Instantané' },
+                  ] as const).map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() =>
+                        setActiveModal({ ...activeModal, sceneTransition: t.id as SceneTransitionType })
+                      }
+                      className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                        (activeModal.sceneTransition || 'fade') === t.id
+                          ? 'bg-violet-600 text-white border-violet-700 shadow-2xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-violet-50'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {(activeModal.sceneTransition || 'fade') !== 'none' && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-700">Durée de transition :</label>
+                    <span className="text-xs font-mono font-black text-violet-700">
+                      {(activeModal.sceneTransitionDuration ?? 0.45).toFixed(2)}s
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.1}
+                    max={2}
+                    step={0.05}
+                    value={activeModal.sceneTransitionDuration ?? 0.45}
+                    onChange={(e) =>
+                      setActiveModal({
+                        ...activeModal,
+                        sceneTransitionDuration: parseFloat(e.target.value) || 0.45,
+                      })
+                    }
+                    className="w-full accent-violet-600 cursor-pointer"
+                  />
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                const resolvedSceneId =
+                  activeModal.targetSceneId ||
+                  scenes.find((s) => s.id !== activeSceneId)?.id ||
+                  scenes[0]?.id ||
+                  'scene-1';
+                applyAction({
+                  type: 'change_scene',
+                  targetSceneId: resolvedSceneId,
+                  sceneTransition: activeModal.sceneTransition || 'fade',
+                  sceneTransitionDuration:
+                    activeModal.sceneTransition === 'none'
+                      ? 0
+                      : activeModal.sceneTransitionDuration ?? 0.45,
+                });
+              }}
+              className="w-full py-3 bg-violet-600 hover:bg-violet-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
+            >
+              <Check className="w-4 h-4" />
+              <span>Valider le changement de scène</span>
             </button>
           </div>
         )}

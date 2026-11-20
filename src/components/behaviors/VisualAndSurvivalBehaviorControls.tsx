@@ -1,5 +1,6 @@
 import React from 'react';
-import { Paintbrush, Pencil, Sliders, X } from 'lucide-react';
+import { Dices, Paintbrush, Pencil, Sliders, X } from 'lucide-react';
+import { EMPTY_RECORD, useSceneStore } from '../../store/useSceneStore';
 import {
   CustomParticlePreset,
   CustomParticleUsageMode,
@@ -9,6 +10,7 @@ import {
   LookAtBehaviorConfig,
   ParticleEmitterBehaviorConfig,
   ParticleShape,
+  StrokeWiggleBehaviorConfig,
 } from '../../types';
 
 export function LookAtBehaviorControls({
@@ -904,6 +906,321 @@ export function HealthBehaviorControls({
           checked={b.showHealthBar !== false}
           onChange={(e) => update({ showHealthBar: e.target.checked })}
           className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
+        />
+      </div>
+    </div>
+  );
+}
+
+export function StrokeWiggleBehaviorControls({
+  b,
+  update,
+}: {
+  b: StrokeWiggleBehaviorConfig;
+  update: (partial: any) => void;
+}) {
+  const initialGameVariables = useSceneStore((s) => s.initialGameVariables || EMPTY_RECORD);
+  const variableNames = Array.from(new Set(['score', ...Object.keys(initialGameVariables)])).sort();
+  const hasCustomStep = b.segmentStep !== undefined && b.segmentStep > 0;
+  const hasVarBinding = Boolean(b.amplitudeVariableName || b.fpsVariableName);
+
+  return (
+    <div className="space-y-1.5">
+      {/* Amplitude */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200">
+        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+          <span className="font-bold">Amplitude du tremblement</span>
+          <span className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px]">
+            {(b.amplitude ?? 2.2).toFixed(1)}
+          </span>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="15"
+          step="0.2"
+          value={b.amplitude ?? 2.2}
+          onChange={(e) => update({ amplitude: parseFloat(e.target.value) })}
+          className="w-full accent-cyan-600 cursor-pointer"
+        />
+      </div>
+
+      {/* Fréquence FPS */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200">
+        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+          <div>
+            <span className="font-bold">Rythme (FPS)</span>
+            <span className="text-[10px] text-slate-400 block">4–8 Hz recommandé pour un rendu crayonné naturel</span>
+          </div>
+          <span className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px] shrink-0">
+            {b.fps ?? 6} Hz
+          </span>
+        </div>
+        <input
+          type="range"
+          min="1"
+          max="24"
+          step="1"
+          value={b.fps ?? 6}
+          onChange={(e) => update({ fps: parseInt(e.target.value, 10) })}
+          className="w-full accent-cyan-600 cursor-pointer"
+        />
+      </div>
+
+      {/* Nombre de variantes pré-calculées */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200">
+        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+          <span className="font-bold">Variantes en boucle</span>
+          <span className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px]">
+            {b.frameCount ?? 4} tracés
+          </span>
+        </div>
+        <input
+          type="range"
+          min="2"
+          max="6"
+          step="1"
+          value={b.frameCount ?? 4}
+          onChange={(e) => update({ frameCount: parseInt(e.target.value, 10) })}
+          className="w-full accent-cyan-600 cursor-pointer"
+        />
+      </div>
+
+      {/* Finesse de subdivision (preset ou pas exact en px) */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+        <div className="flex items-center justify-between">
+          <span className="font-bold text-slate-700 text-xs">Finesse de vibration</span>
+          {hasCustomStep && (
+            <button
+              type="button"
+              onClick={() => update({ segmentStep: undefined })}
+              className="text-[10px] font-semibold text-cyan-700 hover:underline cursor-pointer"
+            >
+              Revenir aux préréglages
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-lg">
+          {([
+            { id: 'low', label: 'Douce', step: 28 },
+            { id: 'medium', label: 'Normale', step: 16 },
+            { id: 'high', label: 'Nerveuse', step: 10 },
+          ] as const).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => update({ detail: opt.id, segmentStep: undefined })}
+              className={`py-1 px-2 rounded-md text-[10px] font-bold cursor-pointer transition-all ${
+                !hasCustomStep && (b.detail || 'medium') === opt.id
+                  ? 'bg-cyan-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:bg-white/70'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <div className="pt-1">
+          <div className="flex justify-between items-center text-[11px] text-slate-600 mb-0.5">
+            <span>Pas exact (px)</span>
+            <span className="font-mono font-bold text-cyan-700">
+              {hasCustomStep
+                ? `${b.segmentStep}px`
+                : `Auto (${(b.detail || 'medium') === 'low' ? 28 : (b.detail || 'medium') === 'high' ? 10 : 16}px)`}
+            </span>
+          </div>
+          <input
+            type="range"
+            min="6"
+            max="48"
+            step="2"
+            value={b.segmentStep ?? ((b.detail || 'medium') === 'low' ? 28 : (b.detail || 'medium') === 'high' ? 10 : 16)}
+            onChange={(e) => update({ segmentStep: parseInt(e.target.value, 10) })}
+            className="w-full accent-cyan-600 cursor-pointer"
+          />
+        </div>
+      </div>
+
+      {/* Contrôles avancés : Anisotropie verticale, Stabilité des bouts & Graine */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
+        <div>
+          <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
+            <span className="font-bold">Échelle verticale (Y / X)</span>
+            <span className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px]">
+              ×{(b.verticalScale ?? 1).toFixed(1)}
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="2"
+            step="0.1"
+            value={b.verticalScale ?? 1}
+            onChange={(e) => update({ verticalScale: parseFloat(e.target.value) })}
+            className="w-full accent-cyan-600 cursor-pointer"
+          />
+        </div>
+
+        <div>
+          <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
+            <div>
+              <span className="font-bold">Stabilité des extrémités</span>
+              <span className="text-[10px] text-slate-400 block">Ancre les bouts sur les traits ouverts</span>
+            </div>
+            <span className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px] shrink-0">
+              {Math.round((b.endpointStability ?? 0) * 100)}%
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={b.endpointStability ?? 0}
+            onChange={(e) => update({ endpointStability: parseFloat(e.target.value) })}
+            className="w-full accent-cyan-600 cursor-pointer"
+          />
+        </div>
+
+        <div>
+          <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
+            <span className="font-bold">Graine aléatoire (Seed)</span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono font-bold text-slate-600 text-[11px]">
+                #{b.seed ?? 0}
+              </span>
+              <button
+                type="button"
+                onClick={() => update({ seed: Math.floor(Math.random() * 1000) })}
+                className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-cyan-50 text-slate-700 hover:text-cyan-700 text-[10px] font-bold flex items-center gap-1 cursor-pointer border border-slate-200"
+                title="Générer une nouvelle graine"
+              >
+                <Dices className="w-3 h-3" /> Aléatoire
+              </button>
+            </div>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="999"
+            step="1"
+            value={b.seed ?? 0}
+            onChange={(e) => update({ seed: parseInt(e.target.value, 10) })}
+            className="w-full accent-cyan-600 cursor-pointer"
+          />
+        </div>
+      </div>
+
+      {/* Piloter par Variables (optionnel) */}
+      <details
+        open={hasVarBinding}
+        className="p-2 bg-cyan-50/40 rounded-xl border border-cyan-200/80 space-y-1.5"
+      >
+        <summary className="text-xs font-bold text-cyan-900 cursor-pointer select-none flex items-center justify-between">
+          <span>Piloter par Variables (optionnel)</span>
+          {hasVarBinding && (
+            <span className="text-[10px] font-mono bg-cyan-100 text-cyan-800 px-1.5 py-0.5 rounded">
+              Actif
+            </span>
+          )}
+        </summary>
+
+        <datalist id="wiggle-vars-list">
+          {variableNames.map((v) => (
+            <option key={v} value={v} />
+          ))}
+        </datalist>
+
+        <div className="pt-1.5 space-y-2">
+          <div className="grid grid-cols-[1fr_76px] gap-1.5 items-end">
+            <div>
+              <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
+                Variable → Amplitude
+              </label>
+              <input
+                type="text"
+                list="wiggle-vars-list"
+                placeholder="ex: tension"
+                value={b.amplitudeVariableName || ''}
+                onChange={(e) => update({ amplitudeVariableName: e.target.value.trim() || undefined })}
+                className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-slate-800"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
+                Mult.
+              </label>
+              <input
+                type="number"
+                step="0.05"
+                value={b.amplitudeVariableMultiplier ?? 0.1}
+                onChange={(e) =>
+                  update({ amplitudeVariableMultiplier: parseFloat(e.target.value) || 0 })
+                }
+                className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-slate-800"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-[1fr_76px] gap-1.5 items-end">
+            <div>
+              <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
+                Variable → Cadence (FPS)
+              </label>
+              <input
+                type="text"
+                list="wiggle-vars-list"
+                placeholder="ex: vitesse"
+                value={b.fpsVariableName || ''}
+                onChange={(e) => update({ fpsVariableName: e.target.value.trim() || undefined })}
+                className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-slate-800"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
+                Mult.
+              </label>
+              <input
+                type="number"
+                step="0.1"
+                value={b.fpsVariableMultiplier ?? 0.2}
+                onChange={(e) =>
+                  update({ fpsVariableMultiplier: parseFloat(e.target.value) || 0 })
+                }
+                className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-slate-800"
+              />
+            </div>
+          </div>
+          <p className="text-[10px] text-slate-500 leading-tight">
+            En Play, s'ajoute à la valeur de base : <code className="font-mono">base + var × mult</code>.
+          </p>
+        </div>
+      </details>
+
+      {/* Options */}
+      <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+        <div>
+          <div className="font-bold text-slate-700 text-xs">Animer aussi les formes remplies</div>
+          <div className="text-[10px] text-slate-400">Désactivez pour ne faire vibrer que les traits</div>
+        </div>
+        <input
+          type="checkbox"
+          checked={b.affectFill !== false}
+          onChange={(e) => update({ affectFill: e.target.checked })}
+          className="w-4 h-4 accent-cyan-600 rounded cursor-pointer"
+        />
+      </div>
+
+      <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+        <div>
+          <div className="font-bold text-slate-700 text-xs">Aperçu en mode Édition</div>
+          <div className="text-[10px] text-slate-400">Permet de régler l'effet sans lancer Play</div>
+        </div>
+        <input
+          type="checkbox"
+          checked={Boolean(b.previewInEdit)}
+          onChange={(e) => update({ previewInEdit: e.target.checked })}
+          className="w-4 h-4 accent-cyan-600 rounded cursor-pointer"
         />
       </div>
     </div>

@@ -9,6 +9,7 @@ import {
 } from '../../types';
 import { EntityMiniPreview } from '../EntityMiniPreview';
 import { ActionModalSubStep } from './ruleBookTypes';
+import { useSceneStore, EMPTY_LIST } from '../../store/useSceneStore';
 
 export function getEntityObjFromList(
   type: string | undefined,
@@ -83,6 +84,7 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
   formatStateName,
   openRuleActionModal,
 }) => {
+  const scenes = useSceneStore((s) => s.scenes || EMPTY_LIST);
   const canJump = Boolean(rule && actIdx !== undefined);
   const jumpMain = (e: React.MouseEvent) => {
     if (!rule || actIdx === undefined) return;
@@ -473,6 +475,36 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
       </div>
     );
   }
+  if (act.type === 'set_variable') {
+    const varName = act.variableName || 'score';
+    const opSym =
+      act.variableOperation === 'add'
+        ? '+'
+        : act.variableOperation === 'subtract'
+        ? '−'
+        : act.variableOperation === 'multiply'
+        ? '×'
+        : '=';
+    return (
+      <div
+        role={canJump ? 'button' : undefined}
+        tabIndex={canJump ? 0 : undefined}
+        onClick={canJump ? (e) => jumpSub(e, 'choose_variable_action') : undefined}
+        className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+          canJump ? 'hover:border-sky-400 hover:bg-sky-50/40 cursor-pointer transition-colors' : ''
+        }`}
+        title="Configurer l'action sur la variable"
+      >
+        <div className="w-5 h-5 rounded-md bg-sky-100 text-sky-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+          📊
+        </div>
+        <span className="text-xs truncate">{varName}</span>
+        <span className="text-[10px] text-sky-700 bg-sky-50 px-1.5 py-0.2 rounded font-medium truncate">
+          ({opSym} {act.variableValue ?? 1})
+        </span>
+      </div>
+    );
+  }
   if (act.type === 'delay') {
     return (
       <div
@@ -489,6 +521,38 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         <span className="text-xs truncate">Pause</span>
         <span className="text-[10px] text-cyan-700 bg-cyan-50 px-1.5 py-0.2 rounded font-medium truncate">
           ({act.delayDuration || 1}s)
+        </span>
+      </div>
+    );
+  }
+  if (act.type === 'change_scene') {
+    const targetSceneName = scenes.find((s) => s.id === act.targetSceneId)?.name || 'Scène';
+    const transLabel =
+      act.sceneTransition === 'none'
+        ? 'Instantané'
+        : act.sceneTransition === 'slide_left'
+        ? 'Glissé ←'
+        : act.sceneTransition === 'slide_right'
+        ? 'Glissé →'
+        : act.sceneTransition === 'iris'
+        ? 'Iris'
+        : 'Fondu';
+    return (
+      <div
+        role={canJump ? 'button' : undefined}
+        tabIndex={canJump ? 0 : undefined}
+        onClick={canJump ? (e) => jumpSub(e, 'choose_scene_action') : undefined}
+        className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+          canJump ? 'hover:border-violet-400 hover:bg-violet-50/40 cursor-pointer transition-colors' : ''
+        }`}
+        title="Configurer le changement de scène"
+      >
+        <div className="w-5 h-5 rounded-md bg-violet-100 text-violet-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+          🎬
+        </div>
+        <span className="text-xs truncate">Scène → {targetSceneName}</span>
+        <span className="text-[10px] text-violet-700 bg-violet-50 px-1.5 py-0.2 rounded font-medium truncate">
+          ({transLabel})
         </span>
       </div>
     );

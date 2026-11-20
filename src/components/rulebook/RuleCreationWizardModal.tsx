@@ -48,7 +48,7 @@ export function RuleCreationWizardModal({
   const isWizardGlobal = ['timer', 'keyboard', 'variable'].includes(activeWizard.triggerType);
   const isWizardRelational = activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity';
   const wizardObjectPhase = activeWizard.objectPhase || 'subject';
-  const hasWizardParams = ['timer', 'keyboard', 'proximity', 'boundary', 'variable', 'collision'].includes(activeWizard.triggerType);
+  const hasWizardParams = true;
 
   const isPickingSpawnOnCanvas = useSceneStore((s) => Boolean(s.spawnCanvasPick));
 

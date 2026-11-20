@@ -1,6 +1,8 @@
 import React from 'react';
 import { ArrowRight, ChevronRight } from 'lucide-react';
 import { WizardData } from './ruleBookTypes';
+import { useSceneStore, EMPTY_RECORD } from '../../store/useSceneStore';
+import { TriggerLimitsSection } from './TriggerLimitsSection';
 
 interface WizardStep1ConditionProps {
   activeWizard: WizardData;
@@ -15,6 +17,9 @@ export function WizardStep1Condition({
   isWizardGlobal,
   isWizardRelational,
 }: WizardStep1ConditionProps) {
+  const initialGameVariables = useSceneStore((s) => s.initialGameVariables || EMPTY_RECORD);
+  const variableNames = Array.from(new Set(['score', ...Object.keys(initialGameVariables)])).sort();
+
   if (activeWizard.actionSubStep === 'key_picker') {
     return (
       <div className="space-y-4">
@@ -228,30 +233,84 @@ export function WizardStep1Condition({
         {/* 4. Variable / Score */}
         {activeWizard.triggerType === 'variable' && (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Comparaison :</label>
-                <select
-                  value={activeWizard.variableOperator || '>='}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, variableOperator: e.target.value as any })}
-                  className="w-full text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2.5 outline-none cursor-pointer"
-                >
-                  <option value=">=">Supérieur ou Égal (&gt;=)</option>
-                  <option value="==">Exactement Égal (==)</option>
-                  <option value="<=">Inférieur ou Égal (&lt;=)</option>
-                </select>
-              </div>
+            <div>
+              <label className="text-xs font-bold text-slate-700 block mb-1">Nom de la variable :</label>
+              <input
+                type="text"
+                list="wizard-var-names"
+                value={activeWizard.variableName ?? 'score'}
+                onChange={(e) => setActiveWizard({ ...activeWizard, variableName: e.target.value })}
+                placeholder="score, slider_x..."
+                className="w-full text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-amber-400"
+              />
+              <datalist id="wizard-var-names">
+                {variableNames.map((vn) => (
+                  <option key={vn} value={vn} />
+                ))}
+              </datalist>
+            </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Valeur du Score :</label>
-                <input
-                  type="number"
-                  value={activeWizard.variableValue ?? 5}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, variableValue: parseInt(e.target.value) || 0 })}
-                  className="w-full text-center text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2 outline-none"
-                />
+            <div>
+              <label className="text-xs font-bold text-slate-700 block mb-1">Mode de déclenchement :</label>
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveWizard({ ...activeWizard, variableTriggerMode: 'threshold' })}
+                  className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                    (activeWizard.variableTriggerMode || 'threshold') !== 'on_change'
+                      ? 'bg-amber-50 border-amber-500 text-amber-800 shadow-2xs'
+                      : 'bg-white border-slate-200 text-slate-600'
+                  }`}
+                >
+                  🎯 Seuil / Comparaison
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveWizard({ ...activeWizard, variableTriggerMode: 'on_change' })}
+                  className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                    activeWizard.variableTriggerMode === 'on_change'
+                      ? 'bg-sky-50 border-sky-500 text-sky-800 shadow-2xs'
+                      : 'bg-white border-slate-200 text-slate-600'
+                  }`}
+                >
+                  ⚡ À chaque changement
+                </button>
               </div>
             </div>
+
+            {(activeWizard.variableTriggerMode || 'threshold') !== 'on_change' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">Comparaison :</label>
+                  <select
+                    value={activeWizard.variableOperator || '>='}
+                    onChange={(e) => setActiveWizard({ ...activeWizard, variableOperator: e.target.value as any })}
+                    className="w-full text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2.5 outline-none cursor-pointer"
+                  >
+                    <option value=">=">Supérieur ou Égal (&gt;=)</option>
+                    <option value=">">Strictement Supérieur (&gt;)</option>
+                    <option value="==">Exactement Égal (==)</option>
+                    <option value="!=">Différent de (!=)</option>
+                    <option value="<=">Inférieur ou Égal (&lt;=)</option>
+                    <option value="<">Strictement Inférieur (&lt;)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">Valeur cible :</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={activeWizard.variableValue ?? 5}
+                    onChange={(e) => {
+                      const parsed = parseFloat(e.target.value);
+                      setActiveWizard({ ...activeWizard, variableValue: Number.isNaN(parsed) ? 0 : parsed });
+                    }}
+                    className="w-full text-center text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2 outline-none"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -313,6 +372,17 @@ export function WizardStep1Condition({
             </button>
           </div>
         )}
+
+        {/* 6.5. Limites de déclenchement, Cooldown, Délai & Front montant */}
+        <TriggerLimitsSection
+          triggerType={activeWizard.triggerType}
+          variableTriggerMode={activeWizard.variableTriggerMode}
+          triggerMaxCount={activeWizard.triggerMaxCount}
+          triggerCooldownSec={activeWizard.triggerCooldownSec}
+          triggerStartDelaySec={activeWizard.triggerStartDelaySec}
+          triggerRequireReset={activeWizard.triggerRequireReset}
+          onChange={(patch) => setActiveWizard({ ...activeWizard, ...patch })}
+        />
 
         {/* 7. Option d'Auto-remise dédiée */}
         {['click', 'hover', 'keyboard', 'collision', 'proximity'].includes(activeWizard.triggerType) && (
@@ -944,18 +1014,19 @@ export function WizardStep1Condition({
               setActiveWizard({
                 ...activeWizard,
                 triggerType: 'variable',
-                variableName: 'score',
-                variableOperator: '>=',
-                variableValue: 5,
+                variableName: activeWizard.variableName || 'score',
+                variableOperator: activeWizard.variableOperator || '>=',
+                variableValue: activeWizard.variableValue ?? 5,
+                variableTriggerMode: activeWizard.variableTriggerMode || 'threshold',
                 actionSubStep: 'config_event_params',
               });
             }}
             className="w-full p-2.5 bg-white hover:bg-amber-100 border border-amber-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs group"
           >
-            <span className="text-xl">🏆</span>
+            <span className="text-xl">📊</span>
             <div>
-              <div className="text-xs font-black text-slate-900">Score &amp; Compteur</div>
-              <div className="text-[9px] text-slate-500">Régler le seuil (Global) →</div>
+              <div className="text-xs font-black text-slate-900">Variable &amp; Score</div>
+              <div className="text-[9px] text-slate-500">Seuil ou changement (Global) →</div>
             </div>
           </button>
         </div>

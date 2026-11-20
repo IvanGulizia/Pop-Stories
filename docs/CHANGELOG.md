@@ -1,3 +1,37 @@
+## [Phase 10.36] - 2026-11-20
+### Ajouté & Amélioré (Limites/Délais Universels & Vague 2B — Multi-Scènes + Transitions)
+- **Limites, Cooldown, Délais & Front Montant universels (`types/index.ts`, `store/triggerGate.ts`, `store/ruleExecutionEngine.ts`, `store/useSceneStore.ts`, `components/rulebook/*`)** :
+  - Ajout de `triggerMaxCount` (`∞` illimité, `1×` une seule fois, ou `N×`), `triggerCooldownSec` (temps min entre 2 tirs), `triggerStartDelaySec` (attente après lancement Play / entrée de scène) et `triggerRequireReset` (*1× par passage / front montant* sur `variable` seuil, `proximity` et `boundary`).
+  - Accès universel au bouton `⚙️` et à `<TriggerLimitsSection />` pour **tous** les types d'événements dans les modales d'édition et l'assistant de création, badges visuels sur les cartes Storyboard, raccourci `1×` sur les règles Variable et prise en charge runtime de l'événement `'state_change'`.
+- **Multi-Scènes & Transitions (`types/index.ts`, `store/useSceneStore.ts`, `store/ruleExecutionEngine.ts`, `App.tsx`, `Scene.tsx`, `RuleActionModal.tsx`, `WizardStep3Actions.tsx`, `RuleActionSummaryBadge.tsx`, `RuleBook.tsx`)** :
+  - Modèle `ProjectScene[]` (`entities`, `entityOrder`, `rules`, `folders`, `layerGroups`, `backgroundColor`) avec synchronisation rétrocompatible vers l'API du store et import/export JSON supportant multi-scènes et anciens projets mono-scène.
+  - Barre de scènes en haut du workspace (`App.tsx`) : bascule rapide, création (`+ Scène`), renommage inline, duplication, suppression et couleur de fond par scène.
+  - Action `change_scene` avec choix de la scène cible, 5 transitions (`none`, `fade`, `slide_left`, `slide_right`, `iris`), durée réglable, rideau animé dans `Scene.tsx`, conservation de `gameVariables`/`gameScore` entre scènes et restauration de la scène initiale au Stop (tout en conservant les règles modifiées en Play).
+- **Tests Vitest (`src/__tests__/triggerLimitsAndMultiScenes.test.ts`)** : Couverture complète de `triggerMaxCount`, `triggerCooldownSec`, `triggerStartDelaySec`, `triggerRequireReset`, `state_change`, CRUD multi-scènes, import/export et `change_scene` avec transitions.
+
+## [Phase 10.35] - 2026-11-19
+### Ajouté & Amélioré (Wiggle++ & Vague 2A — Variables de Jeu + Slider Contraint)
+- **Wiggle++ Contrôles Étendus (`types/index.ts`, `utils/strokeWiggle.ts`, `CustomShape.tsx`, `VisualAndSurvivalBehaviorControls.tsx`)** :
+  - Ajout des réglages `segmentStep` (6–48 px), `verticalScale` (0–2), `endpointStability` (0–1, conservation des extrémités sur traits ouverts) et `seed` (0–999).
+  - Ajout de la modulation temps réel par variable de jeu pour l'amplitude (`amplitudeVariableName`, `amplitudeVariableMultiplier`) et la fréquence (`fpsVariableName`, `fpsVariableMultiplier`).
+- **Variables de Jeu & RuleBook (`types/index.ts`, `useSceneStore.ts`, `ruleExecutionEngine.ts`, `components/RuleBook.tsx`, `components/rulebook/*`)** :
+  - Ajout de `initialGameVariables` (`{ score: 0 }` par défaut, persistant/exportable/restauré au Stop) et de `gameVariables` runtime bidirectionnellement synchronisé avec `gameScore` sur la clé `'score'`.
+  - Nouveau tiroir **Variables** dans le `RuleBook` (création, valeur initiale en Édition, lecture temps réel en Play, protection de `'score'`), déclencheur `'variable'` sur variable libre (`threshold` à 6 opérateurs `>=, >, ==, !=, <=, <` avec décimales ou `'on_change'` avec tolérance `1e-4`), et nouvelle action `'set_variable'` (`set | add | subtract | multiply`).
+- **Comportement `slider` Contraint (`types/index.ts`, `utils/physics/sliderSolver.ts`, `utils/physics/behaviorResolution.ts`, `matterPhysicsEngine.ts`, `useEntityPointerInteraction.ts`, `Scene.tsx`, `SceneGizmoOverlay.tsx`, `SliderBehaviorControls.tsx`, `gizmoHelpers.ts`)** :
+  - Modes géométriques : Rail linéaire orientable `1D` (`length`, `angle`), Zone `2D` rectangle (`width`, `height`) et Disque (`radius`).
+  - Modes `'direct'` vs `'physics_spring'` (ressort virtuel à inertie/rebond, prioritaire sur `draggable` pour éviter tout conflit), crantage `'strict'` ou `'magnetic'` (`stepsX`, `stepsY`, `magneticStrength`), retour `'none'` ou `'spring_return'`, sorties automatiques vers `gameVariables` (`outputVariableX`, `outputVariableY`, `outputStepVariable`, `outputMin`, `outputMax`), rendu rail/zone optionnel en Play (`showTrackInPlay`) et catégorie gizmo `'sliders'`.
+- **Tests Vitest (`src/__tests__/sliderAndVariables.test.ts`, `src/__tests__/physicsSolvers.test.ts`)** : 9 nouveaux tests couvrant `sliderSolver`, `Wiggle++`, la priorité `slider > draggable`, `gameVariables` et l'évaluation des règles `variable` / `set_variable` (72 tests au total).
+
+## [Phase 10.34] - 2026-11-19
+### Ajouté & Amélioré (Vague 1 — Quick Wins)
+- **Wiggle sur les traits / *Boiling Lines* (`types/index.ts`, `utils/strokeWiggle.ts`, `CustomShape.tsx`, `VisualAndSurvivalBehaviorControls.tsx`, `behaviorMetadata.tsx`, `AddBehaviorModal.tsx`, `BehaviorManager.tsx`)** :
+  - Nouveau comportement `stroke_wiggle` paramétrable (amplitude, rythme `1–24 Hz`, variantes en boucle `2–6`, finesse `Douce / Normale / Nerveuse`, option sur formes remplies et aperçu en Édition).
+  - Pré-calcul déterministe en cache (`buildWiggledPathVariants`) via `useMemo`, réduisant le coût d'animation au simple changement d'index sans recalcul géométrique par frame.
+- **Compatibilité iPad / Tablette & Stylet Apple Pencil (`index.css`, `App.tsx`, `useSceneStore.ts`, `EntityGallery.tsx`, `Scene.tsx`, `DrawingCanvas.tsx`, `DrawingCanvasTopBar.tsx`)** :
+  - Ajout d'un drag universel par `PointerEvent` depuis la poignée de la galerie vers `#scene-canvas-container` et d'un bouton *Placer* (`MapPin`) avec bannière tactile « Touchez la scène pour placer » (contournant la limitation du Drag & Drop HTML5 sur iPadOS Safari).
+  - Ajout du bouton *Stylet seul* (`stylusOnlyDrawing`) dans l'atelier de dessin (rejet paume ignorant `pointerType === 'touch'` tout en conservant `pen` et `mouse`), passage en `h-dvh`, protection `-webkit-touch-callout` et unification du hotspot sur `onPointerDown`.
+- **Tests Vitest (`src/__tests__/strokeWiggleAndTouch.test.ts`)** : Couverture du déterminisme/cache `buildWiggledPathVariants` et de `shouldIgnorePointerForStylusOnly`.
+
 ## [Phase 10.33] - 2026-11-18
 ### Corrigé & Ajouté
 - **Undo/Redo fiable en Mode Dessin avec Timeline (`utils/drawingHistory.ts`, `DrawingCanvas.tsx`, `FullScreenDrawingModal.tsx`)** :

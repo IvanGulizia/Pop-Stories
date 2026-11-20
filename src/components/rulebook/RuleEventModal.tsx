@@ -2,6 +2,8 @@ import React from 'react';
 import { DynamicRule, RuleTrigger } from '../../types';
 import { ChevronLeft, ChevronRight, X, Check } from 'lucide-react';
 import { ActiveModal, EntityOption } from './ruleBookTypes';
+import { useSceneStore, EMPTY_RECORD } from '../../store/useSceneStore';
+import { TriggerLimitsSection } from './TriggerLimitsSection';
 
 interface RuleEventModalProps {
   activeModal: Extract<NonNullable<ActiveModal>, { type: 'event' }>;
@@ -18,6 +20,8 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
   updateRule,
   availableEntityOptions,
 }) => {
+  const initialGameVariables = useSceneStore((s) => s.initialGameVariables || EMPTY_RECORD);
+  const variableNames = Array.from(new Set(['score', ...Object.keys(initialGameVariables)])).sort();
   const modalTriggerType = activeModal.triggerType || rule.trigger.type;
   const modalSubStep = activeModal.subStep || 'main';
   const modalTriggerPhase = activeModal.triggerPhase ?? rule.trigger.phase;
@@ -74,9 +78,9 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                 })
               }
               className="px-2.5 py-1 bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 rounded-xl text-[11px] font-bold cursor-pointer transition-colors"
-              title="Régler les paramètres détaillés et l'auto-remise"
+              title="Régler les limites, délais, paramètres détaillés et l'auto-remise"
             >
-              ⚙️ Paramètres &amp; Auto-remise
+              ⚙️ Limites &amp; Paramètres
             </button>
           )}
           <button
@@ -146,6 +150,11 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
           </div>
         ) : modalSubStep === 'config_event_params' ? (
           <div className="bg-slate-50/90 p-5 rounded-3xl border border-slate-200/90 space-y-5 max-w-xl mx-auto shadow-xs">
+            {['click', 'hover', 'drag', 'state_change', 'joint_break'].includes(modalTriggerType) && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-3 text-xs text-slate-600 font-medium">
+                Configurez la fréquence, les délais d'activation ou l'auto-remise pour cet événement ({modalTriggerType}).
+              </div>
+            )}
             {/* 1. Minuteur / Timer */}
             {modalTriggerType === 'timer' && (
               <div className="space-y-4">
@@ -297,32 +306,89 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
 
             {/* 4. Variable / Score */}
             {modalTriggerType === 'variable' && (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-4">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Comparaison :</label>
-                  <select
-                    value={activeModal.variableOperator || '>='}
-                    onChange={(e) =>
-                      setActiveModal({ ...activeModal, variableOperator: e.target.value as any })
-                    }
-                    className="w-full text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2.5 outline-none cursor-pointer"
-                  >
-                    <option value=">=">Supérieur ou Égal (&gt;=)</option>
-                    <option value="==">Exactement Égal (==)</option>
-                    <option value="<=">Inférieur ou Égal (&lt;=)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Valeur du Score :</label>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">Nom de la variable :</label>
                   <input
-                    type="number"
-                    value={activeModal.variableValue ?? 5}
-                    onChange={(e) =>
-                      setActiveModal({ ...activeModal, variableValue: parseInt(e.target.value, 10) || 0 })
-                    }
-                    className="w-full text-center text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2 outline-none"
+                    type="text"
+                    list="modal-var-names"
+                    value={activeModal.variableName ?? 'score'}
+                    onChange={(e) => setActiveModal({ ...activeModal, variableName: e.target.value })}
+                    placeholder="score, slider_x..."
+                    className="w-full text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-amber-400"
                   />
+                  <datalist id="modal-var-names">
+                    {variableNames.map((vn) => (
+                      <option key={vn} value={vn} />
+                    ))}
+                  </datalist>
                 </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">Mode de déclenchement :</label>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal({ ...activeModal, variableTriggerMode: 'threshold' })}
+                      className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                        (activeModal.variableTriggerMode || 'threshold') !== 'on_change'
+                          ? 'bg-amber-50 border-amber-500 text-amber-800 shadow-2xs'
+                          : 'bg-white border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      🎯 Seuil / Comparaison
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal({ ...activeModal, variableTriggerMode: 'on_change' })}
+                      className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                        activeModal.variableTriggerMode === 'on_change'
+                          ? 'bg-sky-50 border-sky-500 text-sky-800 shadow-2xs'
+                          : 'bg-white border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      ⚡ À chaque changement
+                    </button>
+                  </div>
+                </div>
+
+                {(activeModal.variableTriggerMode || 'threshold') !== 'on_change' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Comparaison :</label>
+                      <select
+                        value={activeModal.variableOperator || '>='}
+                        onChange={(e) =>
+                          setActiveModal({ ...activeModal, variableOperator: e.target.value as any })
+                        }
+                        className="w-full text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2.5 outline-none cursor-pointer"
+                      >
+                        <option value=">=">Supérieur ou Égal (&gt;=)</option>
+                        <option value=">">Strictement Supérieur (&gt;)</option>
+                        <option value="==">Exactement Égal (==)</option>
+                        <option value="!=">Différent de (!=)</option>
+                        <option value="<=">Inférieur ou Égal (&lt;=)</option>
+                        <option value="<">Strictement Inférieur (&lt;)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Valeur cible :</label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={activeModal.variableValue ?? 5}
+                        onChange={(e) => {
+                          const parsed = parseFloat(e.target.value);
+                          setActiveModal({
+                            ...activeModal,
+                            variableValue: Number.isNaN(parsed) ? 0 : parsed,
+                          });
+                        }}
+                        className="w-full text-center text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2 outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -345,6 +411,17 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                 </select>
               </div>
             )}
+
+            {/* 5.5. Limites de déclenchement, Cooldown, Délai & Front montant */}
+            <TriggerLimitsSection
+              triggerType={modalTriggerType}
+              variableTriggerMode={activeModal.variableTriggerMode}
+              triggerMaxCount={activeModal.triggerMaxCount}
+              triggerCooldownSec={activeModal.triggerCooldownSec}
+              triggerStartDelaySec={activeModal.triggerStartDelaySec}
+              triggerRequireReset={activeModal.triggerRequireReset}
+              onChange={(patch) => setActiveModal({ ...activeModal, ...patch })}
+            />
 
             {/* 6. Option d'Auto-remise */}
             {['click', 'hover', 'keyboard', 'collision', 'proximity'].includes(modalTriggerType) && (
@@ -396,10 +473,15 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                   keyName: activeModal.keyName,
                   proximityDistance: activeModal.proximityDistance,
                   boundaryEdge: activeModal.boundaryEdge,
-                  variableName: activeModal.variableName || 'score',
+                  variableName: (activeModal.variableName || 'score').trim() || 'score',
                   variableOperator: activeModal.variableOperator || '>=',
                   variableValue: activeModal.variableValue ?? 5,
+                  variableTriggerMode: activeModal.variableTriggerMode || 'threshold',
                   autoRevert: modalAutoRevert,
+                  triggerMaxCount: activeModal.triggerMaxCount,
+                  triggerCooldownSec: activeModal.triggerCooldownSec,
+                  triggerStartDelaySec: activeModal.triggerStartDelaySec,
+                  triggerRequireReset: activeModal.triggerRequireReset,
                 });
               }}
               className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
@@ -795,15 +877,16 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                       variableName: activeModal.variableName ?? 'score',
                       variableOperator: activeModal.variableOperator ?? '>=',
                       variableValue: activeModal.variableValue ?? 5,
+                      variableTriggerMode: activeModal.variableTriggerMode ?? 'threshold',
                       subStep: 'config_event_params',
                     })
                   }
                   className="w-full p-2 bg-white hover:bg-amber-100 border border-amber-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs"
                 >
-                  <span className="text-lg">🏆</span>
+                  <span className="text-lg">📊</span>
                   <div>
-                    <div className="text-xs font-black text-slate-900">Score / Compteur</div>
-                    <div className="text-[9px] text-slate-500">Seuil valeur →</div>
+                    <div className="text-xs font-black text-slate-900">Variable &amp; Score</div>
+                    <div className="text-[9px] text-slate-500">Seuil ou changement →</div>
                   </div>
                 </button>
               </div>

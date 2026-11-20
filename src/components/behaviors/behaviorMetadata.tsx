@@ -11,6 +11,7 @@ import {
   Repeat,
   Shield,
   Shuffle,
+  SlidersHorizontal,
   Sparkles,
   Waves,
   Wind,
@@ -34,6 +35,8 @@ import {
   ParticleEmitterBehaviorConfig,
   PatrolBehaviorConfig,
   PhysicsBehaviorConfig,
+  SliderBehaviorConfig,
+  StrokeWiggleBehaviorConfig,
   WanderingBehaviorConfig,
 } from '../../types';
 
@@ -252,9 +255,48 @@ export function createDefaultBehaviorConfig(type: BehaviorType, entity: Entity):
         restAngleOffset: 0,
         initialAngleOffset: 0,
         squashIntensity: 0.25,
-        collideWithWorld: true,
+      collideWithWorld: true,
         useCustomPivot: false,
       } as JiggleBehaviorConfig;
+    case 'stroke_wiggle':
+      return {
+        id: generateBehaviorId('stroke_wiggle'),
+        type: 'stroke_wiggle',
+        enabled: true,
+        amplitude: 2.2,
+        fps: 6,
+        frameCount: 4,
+        detail: 'medium',
+        affectFill: true,
+        previewInEdit: false,
+      } as StrokeWiggleBehaviorConfig;
+    case 'slider':
+      return {
+        id: generateBehaviorId('slider'),
+        type: 'slider',
+        enabled: true,
+        geometryMode: 'line_1d',
+        length: 220,
+        angle: 0,
+        width: 180,
+        height: 180,
+        radius: 90,
+        dragMode: 'physics_spring',
+        dragStiffness: 220,
+        dragDamping: 16,
+        boundaryBounce: 0.35,
+        stepsX: 0,
+        stepsY: 0,
+        stepMode: 'magnetic',
+        magneticStrength: 140,
+        returnMode: 'none',
+        returnPosition: 0.5,
+        returnStiffness: 140,
+        returnDamping: 12,
+        outputMin: 0,
+        outputMax: 100,
+        showTrackInPlay: true,
+      } as SliderBehaviorConfig;
   }
 }
 
@@ -292,6 +334,10 @@ export function getBehaviorIcon(type: BehaviorType): React.ReactNode {
       return <Heart className="w-4 h-4 text-rose-500" />;
     case 'jiggle':
       return <Waves className="w-4 h-4 text-fuchsia-600" />;
+    case 'stroke_wiggle':
+      return <Waves className="w-4 h-4 text-cyan-600" />;
+    case 'slider':
+      return <SlidersHorizontal className="w-4 h-4 text-sky-600" />;
   }
 }
 
@@ -329,5 +375,9 @@ export function getBehaviorTitle(type: BehaviorType): string {
       return 'Santé & Dégâts';
     case 'jiggle':
       return 'Jiggle & Ressort Rotatif';
+    case 'stroke_wiggle':
+      return 'Wiggle des Traits (Ligne Vivante)';
+    case 'slider':
+      return 'Slider & Glissière Contrainte';
   }
 }

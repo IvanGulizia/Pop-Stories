@@ -5,6 +5,7 @@ import {
   EntityState,
   InteractivePuppetBehaviorConfig,
   PhysicsBehaviorConfig,
+  SliderBehaviorConfig,
 } from '../../types';
 
 /**
@@ -38,10 +39,11 @@ export function getEffectiveBehaviors(
 
 /**
  * Détermine si une entité est déplaçable à la souris, si l'inertie de lancer est activée,
- * et si le mode saisie physique précise / balancement depuis le point saisi est demandé.
+ * et si le mode saisie physique précise / balancement depuis le point saisi / slider contraint est demandé.
  */
 export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
   canDrag: boolean;
+  hasSlider: boolean;
   throwable: boolean;
   maxThrowSpeed: number;
   hasDynamicPhysics: boolean;
@@ -54,6 +56,7 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
   grabAngularDamping: number;
 } {
   const effective = getEffectiveBehaviors(entity, currentState);
+  const sliderBehavior = effective.find((b) => b.type === 'slider') as SliderBehaviorConfig | undefined;
   const puppetBehavior = effective.find((b) => b.type === 'interactive_puppet') as
     | InteractivePuppetBehaviorConfig
     | undefined;
@@ -70,6 +73,24 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
   // Une entité a de la physique dynamique si Physics non-statique OU si c'est un enfant articulé en physics_joint / spring+monde
   const hasDynamicPhysics = (!!physics && physics.isStatic !== true) || isDynamicAttachedChild;
 
+  // Priorité stricte au composant Slider contraint (évite tout conflit avec Draggable/Marionnette)
+  if (sliderBehavior && sliderBehavior.enabled !== false) {
+    return {
+      canDrag: true,
+      hasSlider: true,
+      throwable: false,
+      maxThrowSpeed: 0,
+      hasDynamicPhysics: false,
+      precisePhysicsGrab: false,
+      swingAroundGrabPoint: false,
+      grabRotationMode: 'free',
+      grabMaxAngle: 45,
+      grabBrakeAngle: 15,
+      grabAngularStiffness: 140,
+      grabAngularDamping: 8,
+    };
+  }
+
   if (puppetBehavior && puppetBehavior.enabled !== false) {
     const grabSource =
       puppetBehavior.precisePhysicsGrab || !dragBehavior?.precisePhysicsGrab
@@ -77,6 +98,7 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
         : dragBehavior;
     return {
       canDrag: true,
+      hasSlider: false,
       throwable: puppetBehavior.throwable !== false && hasDynamicPhysics,
       maxThrowSpeed: puppetBehavior.maxThrowSpeed || 1500,
       hasDynamicPhysics,
@@ -95,6 +117,7 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
   if (dragBehavior) {
     return {
       canDrag: dragBehavior.enabled !== false,
+      hasSlider: false,
       throwable: dragBehavior.throwable !== false && hasDynamicPhysics,
       maxThrowSpeed: dragBehavior.maxThrowSpeed || 1500,
       hasDynamicPhysics,
@@ -111,6 +134,7 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
   // Par défaut en mode Play, les entités ne sont PAS draggables sans composant actif
   return {
     canDrag: false,
+    hasSlider: false,
     throwable: false,
     maxThrowSpeed: 1500,
     hasDynamicPhysics,

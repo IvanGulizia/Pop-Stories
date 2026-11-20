@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useSceneStore, EMPTY_LIST, EMPTY_RECORD } from '../store/useSceneStore';
 import { EntityMiniPreview } from './EntityMiniPreview';
 import {
@@ -16,6 +16,7 @@ import {
   FolderOpen,
   ChevronDown,
   ChevronRight,
+  MapPin,
   X,
 } from 'lucide-react';
 import { EntityType, Entity } from '../types';
@@ -55,6 +56,9 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
   const updateEntityGroup = useSceneStore((state) => state.updateEntityGroup);
   const deleteEntityGroup = useSceneStore((state) => state.deleteEntityGroup);
   const assignEntityTypeToGroup = useSceneStore((state) => state.assignEntityTypeToGroup);
+  const spawnEntity = useSceneStore((state) => state.spawnEntity);
+  const pendingCatalogSpawnType = useSceneStore((state) => state.pendingCatalogSpawnType);
+  const setPendingCatalogSpawnType = useSceneStore((state) => state.setPendingCatalogSpawnType);
 
   const [renamingType, setRenamingType] = useState<string | null>(null);
   const [tempName, setTempName] = useState<string>('');
@@ -65,9 +69,53 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
   const [tempGroupName, setTempGroupName] = useState('');
   const [draggingCatalogType, setDraggingCatalogType] = useState<string | null>(null);
   const [dragOverGroupId, setDragOverGroupId] = useState<string | 'root' | null>(null);
+  const [pointerDragItem, setPointerDragItem] = useState<{
+    type: EntityType;
+    name: string;
+    clientX: number;
+    clientY: number;
+  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const entityList = Object.values(entities);
+
+  // Drag tactile / stylet depuis la poignée de la galerie vers le canvas de scène (contourne l'absence de Drag&Drop HTML5 sur iPadOS)
+  useEffect(() => {
+    if (!pointerDragItem) return;
+    const handleMove = (ev: PointerEvent) => {
+      setPointerDragItem((prev) =>
+        prev ? { ...prev, clientX: ev.clientX, clientY: ev.clientY } : null
+      );
+    };
+    const handleUp = (ev: PointerEvent) => {
+      const container = document.getElementById('scene-canvas-container');
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        if (
+          ev.clientX >= rect.left &&
+          ev.clientX <= rect.right &&
+          ev.clientY >= rect.top &&
+          ev.clientY <= rect.bottom
+        ) {
+          const dropX = Math.max(20, Math.min(rect.width - 80, ev.clientX - rect.left - 40));
+          const dropY = Math.max(20, Math.min(rect.height - 80, ev.clientY - rect.top - 40));
+          spawnEntity({
+            type: pointerDragItem.type,
+            position: { x: Math.round(dropX), y: Math.round(dropY) },
+          });
+        }
+      }
+      setPointerDragItem(null);
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    window.addEventListener('pointercancel', handleUp);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+      window.removeEventListener('pointercancel', handleUp);
+    };
+  }, [pointerDragItem?.type, spawnEntity]);
 
   const notify = (msg: string) => {
     setNotificationMsg(msg);
@@ -289,7 +337,23 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
                 title="Cliquez pour inspecter • Double-cliquez pour renommer • Glissez sur la scène ou dans un groupe"
               >
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <div className="text-slate-300 group-hover:text-slate-500 transition-colors cursor-grab active:cursor-grabbing shrink-0">
+                  <div
+                    onPointerDown={(e) => {
+                      if (isRenaming) return;
+                      e.stopPropagation();
+                      try {
+                        (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+                      } catch (_) {}
+                      setPointerDragItem({
+                        type: item.type,
+                        name: item.name,
+                        clientX: e.clientX,
+                        clientY: e.clientY,
+                      });
+                    }}
+                    className="p-1 -ml-1 text-slate-300 group-hover:text-slate-500 transition-colors cursor-grab active:cursor-grabbing shrink-0 touch-none"
+                    title="Glisser sur la scène (compatible souris, doigt & stylet)"
+                  >
                     <GripVertical className="w-3.5 h-3.5" />
                   </div>
                   <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center p-1 overflow-hidden shrink-0 border border-slate-200/70">
@@ -334,6 +398,25 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
+                  {/* Bouton Placer (Tap-to-place iPad/tactile ou clic précis sur scène) */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPendingCatalogSpawnType(
+                        pendingCatalogSpawnType === item.type ? null : item.type
+                      );
+                    }}
+                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                      pendingCatalogSpawnType === item.type
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
+                    }`}
+                    title="Placer sur la scène (toucher la scène pour déposer une instance)"
+                  >
+                    <MapPin className="w-3.5 h-3.5" />
+                  </button>
+
                   {/* Bouton pour sauvegarder dans la Collection Locale permanente */}
                   <button
                     type="button"
@@ -709,6 +792,15 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
               })
             )}
           </div>
+        </div>
+      )}
+
+      {pointerDragItem && (
+        <div
+          className="fixed z-50 pointer-events-none px-3 py-1.5 rounded-xl bg-slate-900/90 text-white text-xs font-bold shadow-xl border border-indigo-400/50 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap"
+          style={{ left: pointerDragItem.clientX, top: pointerDragItem.clientY }}
+        >
+          + {pointerDragItem.name}
         </div>
       )}
     </div>

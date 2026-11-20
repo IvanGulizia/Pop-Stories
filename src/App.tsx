@@ -26,6 +26,9 @@ import {
   FolderArchive,
   Save,
   Clock,
+  Plus,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 export default function App() {
@@ -52,6 +55,15 @@ export default function App() {
   const lastAutoSaveAt = useSceneStore((state) => state.lastAutoSaveAt);
   const restoreAutoSaveDraft = useSceneStore((state) => state.restoreAutoSaveDraft);
   const dismissRecoveryBanner = useSceneStore((state) => state.dismissRecoveryBanner);
+  const scenes = useSceneStore((state) => state.scenes || EMPTY_LIST);
+  const activeSceneId = useSceneStore((state) => state.activeSceneId);
+  const backgroundColor = useSceneStore((state) => state.backgroundColor);
+  const createScene = useSceneStore((state) => state.createScene);
+  const switchScene = useSceneStore((state) => state.switchScene);
+  const renameScene = useSceneStore((state) => state.renameScene);
+  const duplicateScene = useSceneStore((state) => state.duplicateScene);
+  const deleteScene = useSceneStore((state) => state.deleteScene);
+  const setSceneBackgroundColor = useSceneStore((state) => state.setSceneBackgroundColor);
 
   // Main UI View States
   const [activeView, setActiveView] = useState<'canvas' | 'rules'>('canvas');
@@ -65,6 +77,8 @@ export default function App() {
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [isSlotsModalOpen, setIsSlotsModalOpen] = useState(false);
   const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
+  const [editingSceneName, setEditingSceneName] = useState<string>('');
   const autoSaveTimerRef = useRef<number | null>(null);
 
   // Drawing Layer State
@@ -110,6 +124,10 @@ export default function App() {
       layerGroups: initialState.layerGroups,
       projectPalette: initialState.projectPalette,
       settings: initialState.settings,
+      initialGameVariables: initialState.initialGameVariables,
+      scenes: initialState.scenes,
+      activeSceneId: initialState.activeSceneId,
+      backgroundColor: initialState.backgroundColor,
     };
 
     const unsubscribe = useSceneStore.subscribe((state) => {
@@ -124,7 +142,11 @@ export default function App() {
         state.customParticles !== prevSig.customParticles ||
         state.layerGroups !== prevSig.layerGroups ||
         state.projectPalette !== prevSig.projectPalette ||
-        state.settings !== prevSig.settings;
+        state.settings !== prevSig.settings ||
+        state.initialGameVariables !== prevSig.initialGameVariables ||
+        state.scenes !== prevSig.scenes ||
+        state.activeSceneId !== prevSig.activeSceneId ||
+        state.backgroundColor !== prevSig.backgroundColor;
 
       if (!changed) return;
       prevSig = {
@@ -138,6 +160,10 @@ export default function App() {
         layerGroups: state.layerGroups,
         projectPalette: state.projectPalette,
         settings: state.settings,
+        initialGameVariables: state.initialGameVariables,
+        scenes: state.scenes,
+        activeSceneId: state.activeSceneId,
+        backgroundColor: state.backgroundColor,
       };
 
       if (autoSaveTimerRef.current) {
@@ -362,7 +388,7 @@ export default function App() {
   };
 
   return (
-    <div className={`h-screen w-screen text-slate-900 font-sans flex flex-col overflow-hidden select-none transition-colors duration-300 ${
+    <div className={`h-dvh w-screen text-slate-900 font-sans flex flex-col overflow-hidden select-none transition-colors duration-300 ${
       appMode === 'play' && settings.playModeOverlay !== false ? 'bg-[#0b0e17]' : 'bg-[#edf0f5]'
     }`}>
       {/* Modal de création de dessin vectoriel */}
@@ -428,6 +454,9 @@ export default function App() {
                 if (useSceneStore.getState().jointCanvasPick) {
                   useSceneStore.getState().cancelJointCanvasPick();
                 }
+                if (useSceneStore.getState().pendingCatalogSpawnType) {
+                  useSceneStore.getState().setPendingCatalogSpawnType(null);
+                }
                 setHasVisitedRules(true);
                 setActiveView('rules');
               }}
@@ -446,7 +475,7 @@ export default function App() {
           <div className="flex items-center gap-2 bg-[#1e233a] p-1 rounded-full border border-[#2e3556] shadow-xs">
             {/* Button 1: Edit Mode */}
             <button
-              onMouseDown={(e) => e.preventDefault()}
+              onPointerDown={(e) => e.preventDefault()}
               onClick={(e) => {
                 e.currentTarget.blur();
                 setAppMode('edit');
@@ -463,7 +492,7 @@ export default function App() {
 
             {/* Button 2: Play Mode */}
             <button
-              onMouseDown={(e) => e.preventDefault()}
+              onPointerDown={(e) => e.preventDefault()}
               onClick={(e) => {
                 e.currentTarget.blur();
                 if (appMode === 'play') {
@@ -486,7 +515,7 @@ export default function App() {
 
             {/* Button 3: Reset Scene */}
             <button
-              onMouseDown={(e) => e.preventDefault()}
+              onPointerDown={(e) => e.preventDefault()}
               onClick={(e) => {
                 e.currentTarget.blur();
                 resetScene();
@@ -499,7 +528,7 @@ export default function App() {
 
             {/* Button 4: Deselect / Close */}
             <button
-              onMouseDown={(e) => e.preventDefault()}
+              onPointerDown={(e) => e.preventDefault()}
               onClick={(e) => {
                 e.currentTarget.blur();
                 if (selectedLayerId) selectLayer(null);
@@ -671,6 +700,188 @@ export default function App() {
             ? 'z-30 border-emerald-500/60 ring-4 ring-emerald-500/30 shadow-2xl'
             : 'border-slate-300/80 z-10'
         }`}>
+          {/* Barre de Scènes (Multi-scènes) */}
+          {(appMode === 'edit' || scenes.length > 1) && (
+            <div className="px-3 py-1.5 bg-slate-50/95 border-b border-slate-200/80 flex items-center justify-between gap-2 shrink-0 overflow-x-auto scrollbar-thin">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1 shrink-0">
+                  Scènes
+                </span>
+                {scenes.map((sc) => {
+                  const isActive = sc.id === activeSceneId;
+                  const isRenaming = editingSceneId === sc.id;
+                  if (appMode === 'play') {
+                    return (
+                      <div
+                        key={sc.id}
+                        className={`px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1.5 shrink-0 transition-all ${
+                          isActive
+                            ? 'bg-emerald-600 text-white shadow-2xs'
+                            : 'bg-slate-200/70 text-slate-500'
+                        }`}
+                      >
+                        <span
+                          className="w-2.5 h-2.5 rounded-full border border-black/15 shrink-0"
+                          style={{ backgroundColor: sc.backgroundColor || '#ffffff' }}
+                        />
+                        <span className="truncate max-w-[120px]">{sc.name}</span>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={sc.id}
+                      onClick={() => {
+                        if (!isActive && !isRenaming) {
+                          setEditingSceneId(null);
+                          switchScene(sc.id);
+                        }
+                      }}
+                      onDoubleClick={() => {
+                        setEditingSceneId(sc.id);
+                        setEditingSceneName(sc.name);
+                      }}
+                      className={`group px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1.5 shrink-0 border transition-all cursor-pointer ${
+                        isActive
+                          ? 'bg-white text-indigo-700 border-indigo-300 shadow-2xs'
+                          : 'bg-slate-200/50 text-slate-600 border-transparent hover:bg-white hover:border-slate-200 hover:text-slate-900'
+                      }`}
+                      title={isActive ? 'Double-cliquer pour renommer cette scène' : `Ouvrir ${sc.name}`}
+                    >
+                      <span
+                        className="w-2.5 h-2.5 rounded-full border border-slate-300 shrink-0"
+                        style={{ backgroundColor: sc.backgroundColor || '#ffffff' }}
+                      />
+                      {isRenaming ? (
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            if (editingSceneName.trim()) {
+                              renameScene(sc.id, editingSceneName.trim());
+                            }
+                            setEditingSceneId(null);
+                          }}
+                          className="flex items-center gap-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="text"
+                            autoFocus
+                            value={editingSceneName}
+                            onChange={(e) => setEditingSceneName(e.target.value)}
+                            onBlur={() => {
+                              if (editingSceneName.trim()) {
+                                renameScene(sc.id, editingSceneName.trim());
+                              }
+                              setEditingSceneId(null);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') {
+                                setEditingSceneId(null);
+                              }
+                            }}
+                            className="w-24 px-1.5 py-0.2 bg-indigo-50 border border-indigo-300 rounded-md text-[11px] font-bold text-slate-900 outline-none"
+                          />
+                          <button
+                            type="submit"
+                            className="p-0.5 text-emerald-600 hover:bg-emerald-50 rounded cursor-pointer"
+                            title="Valider"
+                          >
+                            <Check className="w-3 h-3" />
+                          </button>
+                        </form>
+                      ) : (
+                        <>
+                          <span className="truncate max-w-[120px]">{sc.name}</span>
+                          {isActive && (
+                            <div className="flex items-center gap-0.5 ml-0.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingSceneId(sc.id);
+                                  setEditingSceneName(sc.name);
+                                }}
+                                className="p-0.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded cursor-pointer"
+                                title="Renommer la scène"
+                              >
+                                <Pencil className="w-2.5 h-2.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  duplicateScene(sc.id);
+                                }}
+                                className="p-0.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded cursor-pointer"
+                                title="Dupliquer cette scène"
+                              >
+                                <Copy className="w-2.5 h-2.5" />
+                              </button>
+                              {scenes.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    deleteScene(sc.id);
+                                  }}
+                                  className="p-0.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded cursor-pointer"
+                                  title="Supprimer cette scène"
+                                >
+                                  <Trash2 className="w-2.5 h-2.5" />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {appMode === 'edit' && (
+                  <button
+                    type="button"
+                    onClick={() => createScene()}
+                    className="px-2 py-1 rounded-xl text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
+                    title="Créer une nouvelle scène"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Scène</span>
+                  </button>
+                )}
+              </div>
+
+              {appMode === 'edit' && (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <label
+                    className="flex items-center gap-1.5 px-2 py-0.5 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-slate-600 cursor-pointer hover:border-slate-300"
+                    title="Couleur de fond de cette scène"
+                  >
+                    <span>Fond</span>
+                    <input
+                      type="color"
+                      value={backgroundColor || '#ffffff'}
+                      onChange={(e) => setSceneBackgroundColor(e.target.value)}
+                      className="w-4 h-4 rounded cursor-pointer border-0 p-0 bg-transparent"
+                    />
+                  </label>
+                  {backgroundColor && backgroundColor.toLowerCase() !== '#ffffff' && (
+                    <button
+                      type="button"
+                      onClick={() => setSceneBackgroundColor('#ffffff')}
+                      className="px-1.5 py-0.5 text-[10px] font-bold text-slate-500 hover:text-slate-800 bg-slate-200/70 hover:bg-slate-200 rounded-lg cursor-pointer"
+                      title="Réinitialiser le fond blanc"
+                    >
+                      Blanc
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {activeView === 'canvas' && (
             <div className="flex-1 relative flex items-center justify-center min-h-0 overflow-hidden">
               <Scene onOpenCreateModal={() => setIsCreateModalOpen(true)} />

@@ -28,8 +28,11 @@ import {
   setEntityRuntimeVelocity,
   setPuppetGrabPivot,
   startPhysicsGrab,
+  startSliderGrab,
   syncEntityDragPosition,
   updatePhysicsGrabTarget,
+  updateSliderGrabTarget,
+  endSliderGrab,
 } from '../utils/matterPhysicsEngine';
 import {
   getEntityDragControls,
@@ -99,6 +102,7 @@ export function useEntityPointerInteraction({
 
   const {
     canDrag: canDragFromBehavior,
+    hasSlider,
     throwable,
     maxThrowSpeed,
   } = isEntityDraggable(entity, currentState);
@@ -599,6 +603,103 @@ export function useEntityPointerInteraction({
             (attachMode === 'spring' && liveTarget.parentOffset?.collideWithWorld === true))
       );
 
+      // Mode 0 : Slider contraint (prioritaire sur draggable et saisie libre)
+      if (canDragTarget && liveDragInfo.hasSlider && pt) {
+        const entityCenter = {
+          x: liveTarget.position.x + liveTarget.size.width / 2,
+          y: liveTarget.position.y + liveTarget.size.height / 2,
+        };
+        const started = startSliderGrab(liveTarget.id, pt.x, pt.y, entityCenter);
+        if (started) {
+          if (physicsGrabCleanupRef.current) {
+            physicsGrabCleanupRef.current();
+            physicsGrabCleanupRef.current = null;
+          }
+          isPhysicsGrabbingRef.current = true;
+          lastDragEvalTimeRef.current = 0;
+          notifyEntityDragLifecycle(liveTarget.id, 'start', liveTarget.position);
+          setIsDragging(true);
+          setCursorState('drag');
+
+          const downClientX = e.clientX;
+          const downClientY = e.clientY;
+
+          const handleSliderMove = (moveEv: PointerEvent) => {
+            if (Math.hypot(moveEv.clientX - downClientX, moveEv.clientY - downClientY) > 4) {
+              hasMovedBeyondDragThresholdRef.current = true;
+            }
+            const movePt = getSceneEventPosition(moveEv.clientX, moveEv.clientY);
+            if (movePt) {
+              updateSliderGrabTarget(liveTarget.id, movePt.x, movePt.y);
+            }
+            notifyEntityDragLifecycle(
+              liveTarget.id,
+              'move',
+              undefined,
+              hasMovedBeyondDragThresholdRef.current
+            );
+            setCursorState('drag');
+          };
+
+          const cleanupSliderListeners = () => {
+            window.removeEventListener('pointermove', handleSliderMove);
+            window.removeEventListener('pointerup', handleSliderUp);
+            window.removeEventListener('pointercancel', handleSliderUp);
+          };
+
+          const handleSliderUp = (upEv: PointerEvent) => {
+            cleanupSliderListeners();
+            physicsGrabCleanupRef.current = null;
+            isPhysicsGrabbingRef.current = false;
+            lastDragEndTimeRef.current = performance.now();
+            upHandledForPointerRef.current = true;
+
+            endSliderGrab(liveTarget.id);
+            notifyEntityDragLifecycle(
+              liveTarget.id,
+              'end',
+              undefined,
+              hasMovedBeyondDragThresholdRef.current
+            );
+            evaluateRulesWithTemp();
+
+            const latestTarget =
+              useSceneStore.getState().entities[liveTarget.id] || liveTarget;
+            const upPt = getSceneEventPosition(upEv.clientX, upEv.clientY);
+            const duration = Date.now() - (pointerDownTimeRef.current || 0);
+            const dist = Math.hypot(upEv.clientX - downClientX, upEv.clientY - downClientY);
+            const isPureClick = !hasMovedBeyondDragThresholdRef.current && dist < 6 && duration < 700;
+
+            if (isPureClick) {
+              lastHandledClickTimeRef.current = Date.now();
+              selectEntity(liveTarget.id);
+              triggerPointerEvent(liveTarget.id, 'click', upPt);
+              triggerPointerEvent(liveTarget.id, 'mouse_up', upPt);
+            } else {
+              triggerPointerEvent(liveTarget.id, 'mouse_up', upPt);
+              if (hasMovedBeyondDragThresholdRef.current) {
+                triggerDragRelease(liveTarget.id, upPt);
+              }
+            }
+
+            setIsDragging(false);
+            setCursorState('release');
+            setTimeout(() => {
+              hasMovedBeyondDragThresholdRef.current = false;
+              if (!isDraggingRef.current && !isPhysicsGrabbingRef.current) {
+                setCursorState(getHoverStateFor(latestTarget));
+              }
+            }, 120);
+          };
+
+          physicsGrabCleanupRef.current = cleanupSliderListeners;
+          window.addEventListener('pointermove', handleSliderMove);
+          window.addEventListener('pointerup', handleSliderUp);
+          window.addEventListener('pointercancel', handleSliderUp);
+          return;
+        }
+      }
+
       // Mode 1 : Saisie physique (contrainte Matter.js au point cliqué si precisePhysicsGrab ou enfant articulé dynamique)
       if (canDragTarget && (liveDragInfo.precisePhysicsGrab || isDynamicAttachedChild) && pt) {
         const grabOptions = liveDragInfo.precisePhysicsGrab
@@ -897,6 +998,7 @@ export function useEntityPointerInteraction({
     isSelected,
     currentState,
     canDragFromBehavior,
+    hasSlider,
     canDrag,
     x,
     y,

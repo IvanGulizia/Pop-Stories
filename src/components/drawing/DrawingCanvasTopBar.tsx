@@ -6,6 +6,7 @@ import {
   Grid,
   Magnet,
   Check,
+  PenTool,
 } from 'lucide-react';
 import { VectorPoint } from '../../types';
 
@@ -30,6 +31,8 @@ interface DrawingCanvasTopBarProps {
   onToggleGrid: () => void;
   snapToGrid: boolean;
   onToggleSnapToGrid: () => void;
+  stylusOnlyDrawing?: boolean;
+  onToggleStylusOnly?: () => void;
   onFinishPolyline: () => void;
   pathCount: number;
 }
@@ -55,6 +58,8 @@ export function DrawingCanvasTopBar({
   onToggleGrid,
   snapToGrid,
   onToggleSnapToGrid,
+  stylusOnlyDrawing = false,
+  onToggleStylusOnly,
   onFinishPolyline,
   pathCount,
 }: DrawingCanvasTopBarProps) {
@@ -203,6 +208,22 @@ export function DrawingCanvasTopBar({
             <Magnet className="w-3 h-3" />
             <span>Snap {snapToGrid ? 'On' : 'Off'}</span>
           </button>
+
+          {onToggleStylusOnly && (
+            <button
+              type="button"
+              onClick={onToggleStylusOnly}
+              className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                stylusOnlyDrawing
+                  ? 'bg-purple-100 text-purple-800 border border-purple-200 shadow-2xs'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+              }`}
+              title="Mode iPad / Apple Pencil : ignore les tracés au doigt (rejet paume) tout en laissant stylet et souris actifs"
+            >
+              <PenTool className="w-3 h-3" />
+              <span className="hidden sm:inline">Stylet seul</span>
+            </button>
+          )}
         </div>
 
         {tool === 'polyline' && activePolylineCount >= 2 && (

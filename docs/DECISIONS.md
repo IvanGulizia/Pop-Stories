@@ -69,3 +69,20 @@
 - **Décisions :**
   - **Contrainte ressort Matter.js (`mouseGrabConstraints`) plutôt que déplacement cinématique** : Lorsque `precisePhysicsGrab` est actif sur une entité à physique dynamique (`physics`, `physics_joint`, ou `spring+collideWithWorld`), le drag contourne Framer Motion et pilote un `Matter.Constraint` de longueur nulle au point local cliqué, préservant la rotation sous gravité, les collisions décor et la traction réelle sur les joints.
   - **Réancrage visuel & signature corps stable à la rupture (`brokenJointDynamicIds`)** : Enlever `attachMode` et `collideWithWorld` de `bodySignatures` (déjà reflétés par `isStatic`/`isSensor`) et conserver les entités détachées par rupture dans `brokenJointDynamicIds` garantit que `detachEntity` ne détruit ni ne recrée le `Matter.Body`, préservant ainsi l'élan angulaire, la prise en main active et la chute gravitaire immédiate.
+
+## ADR-011 : Registre Unifié `gameVariables`, Priorité `slider > draggable` & `sliderSolver` Pur
+- **Date :** 2026-11-19
+- **Contexte :** Introduire des variables numériques globales exploitables à la fois par les règles (`RuleBook`), le `slider` contraint et le `stroke_wiggle` modulé, sans casser la rétrocompatibilité des règles `score` existantes ni entrer en conflit avec `draggable` / `interactive_puppet`.
+- **Décisions :**
+  - **Synchronisation bidirectionnelle `'score'` ↔ `gameScore`** : `initialGameVariables` (`{ score: 0 }` par défaut) et `gameVariables` coexistent avec `gameScore` et `add_score`. Toute lecture ou écriture sur `'score'` (via `set_variable`, `add_score`, `setGameVariable`, `batchSetGameVariables` ou `reset`) maintient `gameScore` et `gameVariables.score` strictement synchronisés.
+  - **Priorité stricte `slider` dans `isEntityDraggable`** : Lorsqu'un comportement `slider` actif est présent, `useEntityPointerInteraction` et `matterPhysicsEngine` routent le drag vers `sliderSolver` (en contournant le drag libre et Framer Motion `throwable`), supprimant tout conflit d'entrée souris.
+  - **Solveur pur `sliderSolver.ts` + rendu Play découplé** : Toute la cinématique 1D/2D (projection sur rail, bornes, crantage strict/magnétique, ressort de rappel et mapping `outputMin..outputMax`) est isolée en fonctions pures testables, tandis que `Scene.tsx` / `SceneGizmoOverlay.tsx` gèrent le rendu du rail en Play (`showTrackInPlay`) et Édition (`sliders`).
+
+## ADR-012 : Portail Temporel des Déclencheurs (`triggerGate.ts`) & Synchronisation Multi-Scènes Rétrocompatible
+- **Date :** 2026-11-20
+- **Contexte :** Introduire des limites universelles (`1×`, `N×`, cooldown, délai initial, front montant) sur tous les déclencheurs et permettre des projets multi-scènes sans réécrire les composants consommateurs (`Scene.tsx`, `Inspector.tsx`, `RuleBook.tsx`, `matterPhysicsEngine.ts`).
+- **Décisions :**
+  - **Portail pur hors store (`triggerGate.ts`)** : Centraliser `ruleFireCounts`, `ruleLastFireTimestamps`, `ruleConditionWasTrue` et `playSessionStartedAt` dans un module dédié réinitialisé à chaque lancement Play, Stop/Reset et changement de scène en Play, garantissant une sémantique uniforme entre tous les événements (y compris `collision` et `state_change`).
+  - **Synchronisation bidirectionnelle `scenes[]` ↔ champs racine du store** : Conserver `entities`, `entityOrder`, `rules`, `folders`, `layerGroups` et `backgroundColor` à la racine du store pour la scène active tout en les synchronisant dans `scenes[]` via `syncActiveSceneIntoScenes`. L'import legacy mono-scène s'encapsule automatiquement en `scene-1`.
+  - **Conservation des `gameVariables` inter-scènes + restauration de scène initiale au Stop** : En Play, `changeSceneInPlay` réinitialise Matter.js, particules, timers et compteurs de règles de la nouvelle scène tout en préservant `gameVariables`/`gameScore` ; au retour en Édition, la scène de départ (`snapshotActiveSceneId`) et les entités initiales (`snapshotScenes`) sont restaurées tout en préservant les règles éditées pendant le jeu.
+

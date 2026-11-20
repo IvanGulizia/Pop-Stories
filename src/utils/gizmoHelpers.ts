@@ -12,6 +12,7 @@ export const DEFAULT_GIZMO_SETTINGS: GizmoSettings = {
     aiZones: 'edit',
     physicsVectors: 'edit',
     springsAndJiggle: 'edit',
+    sliders: 'edit',
   },
 };
 
@@ -80,6 +81,13 @@ export const GIZMO_CATEGORY_LIST: GizmoCategoryMeta[] = [
     colorClass: 'text-amber-700',
     dotColor: '#f59e0b',
   },
+  {
+    id: 'sliders',
+    label: 'Sliders & Glissières',
+    description: 'Rails 1D, zones 2D (boîte/disque), crans et position de rappel',
+    colorClass: 'text-sky-700',
+    dotColor: '#0ea5e9',
+  },
 ];
 
 export function resolveGizmoSettings(settings?: AppSettings): GizmoSettings {
@@ -99,6 +107,7 @@ export function resolveGizmoSettings(settings?: AppSettings): GizmoSettings {
       aiZones: raw?.categories?.aiZones ?? DEFAULT_GIZMO_SETTINGS.categories.aiZones,
       physicsVectors: raw?.categories?.physicsVectors ?? DEFAULT_GIZMO_SETTINGS.categories.physicsVectors,
       springsAndJiggle: raw?.categories?.springsAndJiggle ?? DEFAULT_GIZMO_SETTINGS.categories.springsAndJiggle,
+      sliders: raw?.categories?.sliders ?? DEFAULT_GIZMO_SETTINGS.categories.sliders,
     },
   };
 }

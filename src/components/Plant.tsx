@@ -16,6 +16,7 @@ export function Plant({ entity, style }: PlantProps) {
     enableHoverScaleAnimation,
     isSelected,
     currentState,
+    hasSlider,
     canDrag,
     x,
     y,
@@ -77,7 +78,7 @@ export function Plant({ entity, style }: PlantProps) {
         pointerEvents: 'none',
         ...style,
       }}
-      drag={canDrag}
+      drag={appMode === 'play' && hasSlider ? false : canDrag}
       dragControls={dragControls}
       dragListener={false}
       dragMomentum={false}

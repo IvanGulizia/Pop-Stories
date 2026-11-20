@@ -31,6 +31,7 @@ import {
   Mic,
   Check,
   GripVertical,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { soundSynth } from '../utils/sound';
 import {
@@ -50,6 +51,7 @@ export function RuleBook() {
   const entities = useSceneStore((state) => state.entities);
   const customArchetypes = useSceneStore((state) => state.customArchetypes || EMPTY_RECORD);
   const rules = useSceneStore((state) => state.rules);
+  const scenes = useSceneStore((state) => state.scenes || EMPTY_LIST);
   const folders = useSceneStore((state) => state.folders || EMPTY_LIST);
   const customSounds = useSceneStore((state) => state.customSounds || EMPTY_LIST);
   const addRule = useSceneStore((state) => state.addRule);
@@ -65,6 +67,11 @@ export function RuleBook() {
   const addCustomParticle = useSceneStore((state) => state.addCustomParticle);
   const updateCustomParticle = useSceneStore((state) => state.updateCustomParticle);
   const deleteCustomParticle = useSceneStore((state) => state.deleteCustomParticle);
+  const appMode = useSceneStore((state) => state.appMode);
+  const initialGameVariables = useSceneStore((state) => state.initialGameVariables || EMPTY_RECORD);
+  const gameVariables = useSceneStore((state) => state.gameVariables || EMPTY_RECORD);
+  const setInitialGameVariable = useSceneStore((state) => state.setInitialGameVariable);
+  const deleteInitialGameVariable = useSceneStore((state) => state.deleteInitialGameVariable);
 
   // Pagination & Rule Drag-and-Drop state
   const currentPage = useSceneStore((state) => state.ruleBookPage || 1);
@@ -81,15 +88,32 @@ export function RuleBook() {
   const [particleDrawingTarget, setParticleDrawingTarget] = useState<ParticleDrawingTarget | null>(null);
   const [particleEditorContext, setParticleEditorContext] = useState<'wizard' | 'modal' | null>(null);
 
-  // Folder & Search state
+  // Folder, Search & Variables drawer state
   const [selectedFolderId, setSelectedFolderId] = useState<string | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isCreatingFolder, setIsCreatingFolder] = useState<boolean>(false);
   const [newFolderName, setNewFolderName] = useState<string>('');
   const [isSoundModalOpen, setIsSoundModalOpen] = useState<boolean>(false);
+  const [isVariablesOpen, setIsVariablesOpen] = useState<boolean>(false);
+  const [newVarName, setNewVarName] = useState<string>('');
+  const [newVarValue, setNewVarValue] = useState<string>('0');
   const [, setPlayingSoundId] = useState<string | null>(null);
   const collapsedRuleIds = useSceneStore((state) => state.collapsedRuleIds || EMPTY_RECORD);
   const toggleCollapseRule = useSceneStore((state) => state.toggleRuleCollapse);
+
+  const sortedVariableNames = useMemo(() => {
+    const names = Array.from(new Set(['score', ...Object.keys(initialGameVariables), ...Object.keys(gameVariables)]));
+    return names.sort((a, b) => (a === 'score' ? -1 : b === 'score' ? 1 : a.localeCompare(b)));
+  }, [initialGameVariables, gameVariables]);
+
+  const handleCreateVariable = () => {
+    const clean = newVarName.trim().replace(/\s+/g, '_');
+    if (!clean) return;
+    const parsed = parseFloat(newVarValue);
+    setInitialGameVariable(clean, Number.isFinite(parsed) ? parsed : 0);
+    setNewVarName('');
+    setNewVarValue('0');
+  };
 
   // Sound preview helper
   const handlePlayPreview = (soundType?: SoundType, customSoundId?: string) => {
@@ -233,9 +257,14 @@ export function RuleBook() {
       variableName: rule.trigger.variableName ?? 'score',
       variableOperator: rule.trigger.variableOperator ?? '>=',
       variableValue: rule.trigger.variableValue ?? 5,
+      variableTriggerMode: rule.trigger.variableTriggerMode ?? 'threshold',
       autoRevert: rule.trigger.autoRevert ?? false,
       collisionExitMargin: rule.trigger.collisionExitMargin ?? 10,
       collisionTriggerOnce: rule.trigger.collisionTriggerOnce ?? false,
+      triggerMaxCount: rule.trigger.triggerMaxCount,
+      triggerCooldownSec: rule.trigger.triggerCooldownSec,
+      triggerStartDelaySec: rule.trigger.triggerStartDelaySec,
+      triggerRequireReset: rule.trigger.triggerRequireReset,
     });
   };
 
@@ -266,6 +295,10 @@ export function RuleBook() {
         ? 'choose_detach_parent'
         : act.type === 'move_entity'
         ? 'choose_move_entity'
+        : act.type === 'set_variable'
+        ? 'choose_variable_action'
+        : act.type === 'change_scene'
+        ? 'choose_scene_action'
         : 'main';
 
     setActiveModal({
@@ -320,6 +353,13 @@ export function RuleBook() {
       moveTargetEntityId: act.moveTargetEntityId,
       moveTargetEntityType: act.moveTargetEntityType,
       moveTargetTag: act.moveTargetTag,
+      variableName: act.variableName ?? 'score',
+      variableOperation: act.variableOperation ?? 'set',
+      variableValue: act.variableValue ?? 1,
+      scoreAmount: act.scoreAmount ?? 1,
+      targetSceneId: act.targetSceneId,
+      sceneTransition: act.sceneTransition ?? 'fade',
+      sceneTransitionDuration: act.sceneTransitionDuration ?? 0.45,
     });
   };
 
@@ -423,9 +463,14 @@ export function RuleBook() {
         variableName: activeWizard.variableName,
         variableOperator: activeWizard.variableOperator,
         variableValue: activeWizard.variableValue,
+        variableTriggerMode: activeWizard.variableTriggerMode,
         autoRevert: activeWizard.autoRevert,
         collisionExitMargin: activeWizard.collisionExitMargin,
         collisionTriggerOnce: activeWizard.collisionTriggerOnce,
+        triggerMaxCount: activeWizard.triggerMaxCount,
+        triggerCooldownSec: activeWizard.triggerCooldownSec,
+        triggerStartDelaySec: activeWizard.triggerStartDelaySec,
+        triggerRequireReset: activeWizard.triggerRequireReset,
       },
       actions,
     });
@@ -526,16 +571,18 @@ export function RuleBook() {
       const targetOpt = availableEntityOptions.find((o) => o.type === rule.trigger.targetType);
       const subjectMatch = (subjectOpt?.label || rule.trigger.subjectType || '').toLowerCase().includes(q);
       const targetMatch = (targetOpt?.label || rule.trigger.targetType || '').toLowerCase().includes(q);
+      const variableMatch = (rule.trigger.variableName || '').toLowerCase().includes(q);
       const actionMatch = rule.actions.some((a) => {
         const customSound = a.customSoundId ? customSounds.find((s) => s.id === a.customSoundId) : null;
         return (
           (customSound?.name || '').toLowerCase().includes(q) ||
           (a.soundType || '').toLowerCase().includes(q) ||
           (a.spawnEntityType || '').toLowerCase().includes(q) ||
+          (a.variableName || '').toLowerCase().includes(q) ||
           (a.type || '').toLowerCase().includes(q)
         );
       });
-      if (!ruleNameMatch && !subjectMatch && !targetMatch && !actionMatch) return false;
+      if (!ruleNameMatch && !subjectMatch && !targetMatch && !variableMatch && !actionMatch) return false;
     }
 
     // 3. Filtrage par Entité (Bandeau 1-clic racine)
@@ -611,6 +658,28 @@ export function RuleBook() {
             )}
           </button>
 
+          {/* Bouton pour ouvrir le panneau des Variables du Projet */}
+          <button
+            type="button"
+            onClick={() => setIsVariablesOpen((v) => !v)}
+            className={`px-2.5 py-1 text-xs font-bold rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
+              isVariablesOpen
+                ? 'bg-emerald-600 text-white border-emerald-700'
+                : 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100/80 text-emerald-800'
+            }`}
+            title="Gérer les variables du jeu (score, sliders, compteurs...)"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            <span>Variables</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                isVariablesOpen ? 'bg-emerald-800/60 text-white' : 'bg-emerald-200/80 text-emerald-900'
+              }`}
+            >
+              {sortedVariableNames.length}
+            </span>
+          </button>
+
           {/* Bouton discret pour basculer les filtres optionnels */}
           {!settings?.showRuleFilters && (
             <button
@@ -639,6 +708,101 @@ export function RuleBook() {
           <span>Nouvelle règle</span>
         </button>
       </div>
+
+      {/* --- VARIABLES DU PROJET DRAWER --- */}
+      {isVariablesOpen && (
+        <div className="bg-white rounded-2xl border border-emerald-200 p-3 space-y-2.5 shadow-2xs shrink-0">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <div className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                <span>📊 Variables du Projet</span>
+                {appMode === 'play' && (
+                  <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                    Valeurs en direct (Play)
+                  </span>
+                )}
+              </div>
+              <div className="text-[10px] text-slate-500">
+                Définissez les valeurs de départ (Édition) ou observez les sorties de vos sliders et règles en Play.
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={newVarName}
+                onChange={(e) => setNewVarName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreateVariable();
+                }}
+                placeholder="Nom (ex: vitesse, porte)"
+                className="px-2.5 py-1 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 w-36"
+              />
+              <input
+                type="number"
+                step="any"
+                value={newVarValue}
+                onChange={(e) => setNewVarValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreateVariable();
+                }}
+                className="px-2 py-1 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 w-16 text-center font-mono"
+                title="Valeur initiale"
+              />
+              <button
+                type="button"
+                onClick={handleCreateVariable}
+                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl cursor-pointer flex items-center gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Ajouter</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {sortedVariableNames.map((varName) => {
+              const initVal = initialGameVariables[varName] ?? 0;
+              const liveVal = gameVariables[varName] ?? initVal;
+              return (
+                <div
+                  key={varName}
+                  className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs"
+                >
+                  <span className="font-mono font-bold text-slate-800">{varName}</span>
+                  {appMode === 'play' ? (
+                    <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-900 font-mono font-black text-[11px]">
+                      {Number.isInteger(liveVal) ? liveVal : liveVal.toFixed(2)}
+                    </span>
+                  ) : (
+                    <input
+                      type="number"
+                      step="any"
+                      value={initVal}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        setInitialGameVariable(varName, Number.isFinite(v) ? v : 0);
+                      }}
+                      className="w-16 px-1.5 py-0.5 text-center font-mono font-bold bg-white border border-slate-200 rounded-lg outline-none focus:border-emerald-500 text-[11px]"
+                      title="Valeur initiale au lancement Play"
+                    />
+                  )}
+                  {varName !== 'score' && appMode === 'edit' && (
+                    <button
+                      type="button"
+                      onClick={() => deleteInitialGameVariable(varName)}
+                      className="text-slate-400 hover:text-rose-600 cursor-pointer p-0.5"
+                      title={`Supprimer la variable ${varName}`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* --- 1-CLICK ENTITY FILTER BAR AT ROOT OF RULEBOOK --- */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 shrink-0 scrollbar-thin bg-slate-100/70 p-1.5 rounded-2xl border border-slate-200/80">
@@ -991,9 +1155,16 @@ export function RuleBook() {
               eventIcon = '🖼️';
               eventSub = 'Toucher le cadre';
             } else if (rule.trigger.type === 'variable') {
-              eventName = `Score ${rule.trigger.variableOperator || '>='} ${rule.trigger.variableValue ?? 5}`;
-              eventIcon = '📊';
-              eventSub = 'Condition de Score';
+              const varName = rule.trigger.variableName || 'score';
+              if (rule.trigger.variableTriggerMode === 'on_change') {
+                eventName = `${varName} (changement)`;
+                eventIcon = '📊';
+                eventSub = 'À chaque modification';
+              } else {
+                eventName = `${varName} ${rule.trigger.variableOperator || '>='} ${rule.trigger.variableValue ?? 5}`;
+                eventIcon = '📊';
+                eventSub = 'Condition sur Variable';
+              }
             } else if (rule.trigger.type === 'joint_break' || rule.trigger.phase === 'joint_break') {
               eventName = 'Rupture de Joint';
               eventIcon = '⛓️‍💥';
@@ -1204,21 +1375,51 @@ export function RuleBook() {
                             <span>{eventIcon}</span>
                             <span>{eventName}</span>
                           </button>
-                          {['timer', 'keyboard', 'proximity', 'boundary', 'variable', 'collision'].includes(rule.trigger.type) && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openRuleEventModal(
-                                  rule,
-                                  rule.trigger.type === 'keyboard' ? 'key_picker' : 'config_event_params'
-                                );
-                              }}
-                              className="px-1.5 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300/80 font-bold text-[10px] transition-colors cursor-pointer"
-                              title="Configurer les paramètres de la condition"
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openRuleEventModal(
+                                rule,
+                                rule.trigger.type === 'keyboard' ? 'key_picker' : 'config_event_params'
+                              );
+                            }}
+                            className="px-1.5 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300/80 font-bold text-[10px] transition-colors cursor-pointer"
+                            title="Configurer les limites, délais et paramètres de la condition"
+                          >
+                            ⚙️
+                          </button>
+                          {rule.trigger.triggerMaxCount !== undefined && rule.trigger.triggerMaxCount > 0 && (
+                            <span
+                              className="px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-300/80 font-black text-[10px]"
+                              title={`Maximum ${rule.trigger.triggerMaxCount} déclenchement(s) par session/scène`}
                             >
-                              ⚙️
-                            </button>
+                              {rule.trigger.triggerMaxCount === 1 ? '1×' : `${rule.trigger.triggerMaxCount}×`}
+                            </span>
+                          )}
+                          {rule.trigger.triggerCooldownSec !== undefined && rule.trigger.triggerCooldownSec > 0 && (
+                            <span
+                              className="px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-800 border border-sky-300/80 font-bold text-[10px]"
+                              title={`Cooldown : ${rule.trigger.triggerCooldownSec}s entre 2 tirs`}
+                            >
+                              ⏱{rule.trigger.triggerCooldownSec}s
+                            </span>
+                          )}
+                          {rule.trigger.triggerStartDelaySec !== undefined && rule.trigger.triggerStartDelaySec > 0 && (
+                            <span
+                              className="px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-800 border border-violet-300/80 font-bold text-[10px]"
+                              title={`Délai après lancement : ${rule.trigger.triggerStartDelaySec}s`}
+                            >
+                              +{rule.trigger.triggerStartDelaySec}s
+                            </span>
+                          )}
+                          {rule.trigger.triggerRequireReset && (
+                            <span
+                              className="px-1.5 py-0.5 rounded-md bg-cyan-100 text-cyan-800 border border-cyan-300/80 font-black text-[10px]"
+                              title="1× par passage (Front montant)"
+                            >
+                              ↗
+                            </span>
                           )}
                         </div>
 
@@ -1366,11 +1567,31 @@ export function RuleBook() {
                           className="w-36 h-36 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group"
                           title="Cliquer pour changer le type de condition"
                         >
-                          <div className="flex items-center justify-between w-full">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                          <div className="flex items-center justify-between w-full gap-1">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">
                               1. Quand
                             </span>
-                            {['timer', 'keyboard', 'proximity', 'boundary', 'variable', 'collision'].includes(rule.trigger.type) && (
+                            <div className="flex items-center gap-0.5 shrink-0">
+                              {rule.trigger.triggerMaxCount !== undefined && rule.trigger.triggerMaxCount > 0 && (
+                                <span className="text-[8px] font-black bg-emerald-500/90 text-white px-1 py-0.5 rounded">
+                                  {rule.trigger.triggerMaxCount === 1 ? '1×' : `${rule.trigger.triggerMaxCount}×`}
+                                </span>
+                              )}
+                              {rule.trigger.triggerCooldownSec !== undefined && rule.trigger.triggerCooldownSec > 0 && (
+                                <span className="text-[8px] font-bold bg-sky-500/80 text-white px-1 py-0.5 rounded">
+                                  ⏱{rule.trigger.triggerCooldownSec}s
+                                </span>
+                              )}
+                              {rule.trigger.triggerStartDelaySec !== undefined && rule.trigger.triggerStartDelaySec > 0 && (
+                                <span className="text-[8px] font-bold bg-violet-500/80 text-white px-1 py-0.5 rounded">
+                                  +{rule.trigger.triggerStartDelaySec}s
+                                </span>
+                              )}
+                              {rule.trigger.triggerRequireReset && (
+                                <span className="text-[8px] font-black bg-cyan-500/80 text-white px-1 py-0.5 rounded" title="Front montant">
+                                  ↗
+                                </span>
+                              )}
                               <button
                                 type="button"
                                 onClick={(e) => {
@@ -1381,11 +1602,11 @@ export function RuleBook() {
                                   );
                                 }}
                                 className="text-[9px] font-bold bg-white/10 hover:bg-amber-400 hover:text-slate-900 text-amber-300 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
-                                title="Ouvrir les réglages de cette condition"
+                                title="Ouvrir les limites, délais et réglages de cette condition"
                               >
                                 ⚙️
                               </button>
-                            )}
+                            </div>
                           </div>
                           <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center text-2xl shadow-inner group-hover:scale-110 transition-transform">
                             {eventIcon}
@@ -1458,22 +1679,100 @@ export function RuleBook() {
                               </div>
                             )}
                             {rule.trigger.type === 'variable' && (
-                              <div className="mt-1 flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                <select
-                                  value={rule.trigger.variableOperator || '>='}
-                                  onChange={(e) => updateRule(rule.id, { trigger: { ...rule.trigger, variableOperator: e.target.value as any } })}
-                                  className="text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none cursor-pointer"
-                                >
-                                  <option value=">=">&gt;=</option>
-                                  <option value="==">==</option>
-                                  <option value="<=">&lt;=</option>
-                                </select>
-                                <input
-                                  type="number"
-                                  value={rule.trigger.variableValue ?? 5}
-                                  onChange={(e) => updateRule(rule.id, { trigger: { ...rule.trigger, variableValue: parseInt(e.target.value) || 0 } })}
-                                  className="w-10 text-center text-[10px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none"
-                                />
+                              <div className="mt-1 space-y-1" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="text"
+                                    value={rule.trigger.variableName ?? 'score'}
+                                    onChange={(e) =>
+                                      updateRule(rule.id, {
+                                        trigger: { ...rule.trigger, variableName: e.target.value || 'score' },
+                                      })
+                                    }
+                                    placeholder="var"
+                                    className="w-full text-[9px] font-bold bg-slate-800 text-amber-200 border border-slate-700 rounded px-1 py-0.5 outline-none text-center font-mono"
+                                    title="Nom de la variable"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateRule(rule.id, {
+                                        trigger: {
+                                          ...rule.trigger,
+                                          variableTriggerMode:
+                                            rule.trigger.variableTriggerMode === 'on_change' ? 'threshold' : 'on_change',
+                                        },
+                                      })
+                                    }
+                                    title={
+                                      rule.trigger.variableTriggerMode === 'on_change'
+                                        ? 'Mode : À chaque changement (cliquer pour passer en seuil)'
+                                        : 'Mode : Seuil (cliquer pour déclencher à chaque changement)'
+                                    }
+                                    className={`px-1 py-0.5 rounded text-[8px] font-black cursor-pointer border shrink-0 ${
+                                      rule.trigger.variableTriggerMode === 'on_change'
+                                        ? 'bg-emerald-500 text-white border-emerald-400'
+                                        : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                                    }`}
+                                  >
+                                    Δ
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateRule(rule.id, {
+                                        trigger: {
+                                          ...rule.trigger,
+                                          triggerMaxCount: rule.trigger.triggerMaxCount === 1 ? undefined : 1,
+                                        },
+                                      })
+                                    }
+                                    title={
+                                      rule.trigger.triggerMaxCount === 1
+                                        ? 'Limite active : 1 seule fois (cliquer pour passer en illimité)'
+                                        : 'Limiter à 1 seule fois'
+                                    }
+                                    className={`px-1 py-0.5 rounded text-[8px] font-black cursor-pointer border shrink-0 ${
+                                      rule.trigger.triggerMaxCount === 1
+                                        ? 'bg-emerald-500 text-white border-emerald-400'
+                                        : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                                    }`}
+                                  >
+                                    1×
+                                  </button>
+                                </div>
+                                {(rule.trigger.variableTriggerMode || 'threshold') !== 'on_change' && (
+                                  <div className="flex items-center justify-center gap-1">
+                                    <select
+                                      value={rule.trigger.variableOperator || '>='}
+                                      onChange={(e) =>
+                                        updateRule(rule.id, {
+                                          trigger: { ...rule.trigger, variableOperator: e.target.value as any },
+                                        })
+                                      }
+                                      className="text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none cursor-pointer"
+                                    >
+                                      <option value=">=">&gt;=</option>
+                                      <option value=">">&gt;</option>
+                                      <option value="==">==</option>
+                                      <option value="!=">!=</option>
+                                      <option value="<=">&lt;=</option>
+                                      <option value="<">&lt;</option>
+                                    </select>
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      value={rule.trigger.variableValue ?? 5}
+                                      onChange={(e) => {
+                                        const v = parseFloat(e.target.value);
+                                        updateRule(rule.id, {
+                                          trigger: { ...rule.trigger, variableValue: Number.isFinite(v) ? v : 0 },
+                                        });
+                                      }}
+                                      className="w-12 text-center text-[10px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none"
+                                    />
+                                  </div>
+                                )}
                               </div>
                             )}
                             {rule.trigger.type === 'collision' && (
@@ -1865,9 +2164,37 @@ export function RuleBook() {
                           } else if (act.type === 'add_score') {
                             actionBadge = 'Score';
                             actionDetail = `+${act.scoreAmount || 1} point(s)`;
+                          } else if (act.type === 'set_variable') {
+                            actionBadge = 'Variable';
+                            const vName = act.variableName || 'score';
+                            const opSym =
+                              act.variableOperation === 'add'
+                                ? '+'
+                                : act.variableOperation === 'subtract'
+                                ? '−'
+                                : act.variableOperation === 'multiply'
+                                ? '×'
+                                : '=';
+                            actionDetail = `${vName} ${opSym} ${act.variableValue ?? 1}`;
                           } else if (act.type === 'delay') {
                             actionBadge = 'Attendre (Pause)';
                             actionDetail = `Délai : ${act.delayDuration || 1}s`;
+                          } else if (act.type === 'change_scene') {
+                            actionBadge = 'Changer Scène';
+                            const transLabel =
+                              act.sceneTransition === 'none'
+                                ? 'Instantané'
+                                : act.sceneTransition === 'slide_left'
+                                ? 'Glissé ←'
+                                : act.sceneTransition === 'slide_right'
+                                ? 'Glissé →'
+                                : act.sceneTransition === 'iris'
+                                ? 'Iris'
+                                : 'Fondu';
+                            actionDetail =
+                              act.sceneTransition === 'none'
+                                ? transLabel
+                                : `${transLabel} (${(act.sceneTransitionDuration ?? 0.45).toFixed(2)}s)`;
                           }
 
                           const detailSubStep: Extract<NonNullable<ActiveModal>, { type: 'action' }>['subStep'] =
@@ -1887,8 +2214,12 @@ export function RuleBook() {
                               ? 'choose_move_entity'
                               : act.type === 'play_sound'
                               ? 'choose_sound'
+                              : act.type === 'set_variable'
+                              ? 'choose_variable_action'
                               : act.type === 'delay'
                               ? 'choose_delay_duration'
+                              : act.type === 'change_scene'
+                              ? 'choose_scene_action'
                               : 'main';
 
                           const actionSlotKey = `${rule.id}-act-${act.id}`;
@@ -1960,6 +2291,10 @@ export function RuleBook() {
                                   <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
                                     🏆
                                   </div>
+                                ) : act.type === 'set_variable' ? (
+                                  <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                    📊
+                                  </div>
                                 ) : act.type === 'play_sound' ? (
                                   <div className="relative w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
                                     🔊
@@ -1991,6 +2326,10 @@ export function RuleBook() {
                                   <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
                                     ⏱️
                                   </div>
+                                ) : act.type === 'change_scene' ? (
+                                  <div className="w-14 h-14 rounded-2xl bg-violet-50 border border-violet-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                    🎬
+                                  </div>
                                 ) : (
                                   <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-1 shadow-2xs group-hover:scale-105 transition-transform">
                                     <EntityMiniPreview
@@ -2012,6 +2351,10 @@ export function RuleBook() {
                                       ? customSound?.name || `Son ${act.soundType || ''}`
                                       : act.type === 'add_score'
                                       ? 'Ajouter Score'
+                                      : act.type === 'set_variable'
+                                      ? act.variableName || 'score'
+                                      : act.type === 'change_scene'
+                                      ? scenes.find((s) => s.id === act.targetSceneId)?.name || 'Scène'
                                       : act.targetMode === 'subject'
                                       ? `Sujet (${subjectOpt?.label || 'Objet'})`
                                       : act.targetMode === 'target'

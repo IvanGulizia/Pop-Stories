@@ -103,7 +103,9 @@ export type BehaviorType =
   | 'boundary_behavior'
   | 'particle_emitter'
   | 'health'
-  | 'jiggle';
+  | 'jiggle'
+  | 'stroke_wiggle'
+  | 'slider';
 
 export interface BaseBehaviorConfig {
   id: string;
@@ -411,7 +413,9 @@ export type EntityBehavior =
   | BoundaryBehaviorConfig
   | ParticleEmitterBehaviorConfig
   | HealthBehaviorConfig
-  | JiggleBehaviorConfig;
+  | JiggleBehaviorConfig
+  | StrokeWiggleBehaviorConfig
+  | SliderBehaviorConfig;
 
 export interface EntityPivot {
   x: number; // normalisé 0..1 (0.5 = centre horizontal)
@@ -431,6 +435,57 @@ export interface JiggleBehaviorConfig extends BaseBehaviorConfig {
   collideWithWorld?: boolean; // Réagir aux impacts contre murs/sols/objets (défaut true)
   useCustomPivot?: boolean; // Surcharger le pivot de l'entité pour ce jiggle
   pivotOverride?: EntityPivot;
+}
+
+export interface StrokeWiggleBehaviorConfig extends BaseBehaviorConfig {
+  type: 'stroke_wiggle';
+  amplitude: number;              // Amplitude de tremblement en unités SVG 0..15 (défaut 2.2)
+  fps: number;                    // Vitesse de cycle des traits 1..24 Hz (défaut 6)
+  frameCount: number;             // Nombre de variantes pré-calculées en boucle 2..6 (défaut 4)
+  detail?: 'low' | 'medium' | 'high'; // Densité de subdivision des traits (défaut 'medium')
+  segmentStep?: number;           // Pas exact de subdivision en unités SVG (6..48)
+  verticalScale?: number;         // Multiplicateur d'amplitude verticale 0..2 (défaut 1)
+  endpointStability?: number;     // Stabilisation des extrémités sur traits ouverts 0..1 (défaut 0)
+  seed?: number;                  // Graine aléatoire déterministe 0..999 (défaut 0)
+  affectFill?: boolean;           // Animer aussi les formes remplies (défaut true)
+  previewInEdit?: boolean;        // Aperçu animé également en mode Édition (défaut false)
+  amplitudeVariableName?: string;       // Variable pilotant dynamiquement l'amplitude
+  amplitudeVariableMultiplier?: number; // Multiplicateur de variable pour l'amplitude
+  fpsVariableName?: string;             // Variable pilotant dynamiquement la cadence (FPS)
+  fpsVariableMultiplier?: number;       // Multiplicateur de variable pour les FPS
+}
+
+export type SliderGeometryMode = 'line_1d' | 'rect_2d' | 'circle_2d';
+export type SliderDragMode = 'direct' | 'physics_spring';
+export type SliderStepMode = 'strict' | 'magnetic';
+export type SliderReturnMode = 'none' | 'spring_return';
+
+export interface SliderBehaviorConfig extends BaseBehaviorConfig {
+  type: 'slider';
+  geometryMode: SliderGeometryMode;
+  length?: number;           // Rail 1D : longueur totale en px (défaut 220)
+  angle?: number;            // Rail 1D : angle en degrés (0 = horizontal, 90 = vertical)
+  width?: number;            // Zone 2D Rect : largeur en px (défaut 180)
+  height?: number;           // Zone 2D Rect : hauteur en px (défaut 180)
+  radius?: number;           // Zone 2D Disque : rayon en px (défaut 90)
+  dragMode: SliderDragMode;  // 'direct' | 'physics_spring'
+  dragStiffness?: number;    // Raideur ressort curseur en mode physique (défaut 220)
+  dragDamping?: number;      // Amortissement en mode physique (défaut 16)
+  boundaryBounce?: number;   // Rebond sur les butées 0..0.95 (défaut 0.35)
+  stepsX?: number;           // Crans sur X / rail (0 = continu, >=2 = N crans)
+  stepsY?: number;           // Crans sur Y en 2D Rect (0 = continu, >=2 = N crans)
+  stepMode?: SliderStepMode; // 'strict' | 'magnetic'
+  magneticStrength?: number; // Force d'aimantation des crans magnétiques (défaut 140)
+  returnMode?: SliderReturnMode; // 'none' | 'spring_return'
+  returnPosition?: number;   // Position de rappel 1D normalisée 0..1 (défaut 0.5 = centre)
+  returnStiffness?: number;  // Raideur du ressort de retour (défaut 140)
+  returnDamping?: number;    // Amortissement du ressort de retour (défaut 12)
+  outputVariableX?: string;  // Variable liée à l'axe X / progression 1D
+  outputVariableY?: string;  // Variable liée à l'axe Y (2D)
+  outputStepVariable?: string; // Variable entière du cran courant (0..N-1)
+  outputMin?: number;        // Borne min de sortie (défaut 0 en 1D, -1 en 2D)
+  outputMax?: number;        // Borne max de sortie (défaut 100 en 1D, 1 en 2D)
+  showTrackInPlay?: boolean; // Afficher le rail / zone de glissière en Mode Play (défaut true)
 }
 
 export type BehaviorOverride = {
@@ -626,13 +681,22 @@ export interface RuleTrigger {
   // Configuration Bords de Scène
   boundaryEdge?: 'any' | 'top' | 'bottom' | 'left' | 'right';
 
-  // Configuration Compteur / Score
-  variableName?: string;        // 'score' | 'counter'
-  variableOperator?: '>=' | '==' | '<=';
+  // Configuration Compteur / Variables
+  variableName?: string;        // 'score' | 'slider_x' | ...
+  variableOperator?: '>=' | '==' | '<=' | '>' | '<' | '!=';
   variableValue?: number;
+  variableTriggerMode?: 'threshold' | 'on_change';
+
+  // Limites de déclenchement & Délais universels
+  triggerMaxCount?: number;     // 0 / undefined = illimité, 1 = une seule fois ("once"), N > 1 = N fois max
+  triggerCooldownSec?: number;  // Délai minimum en secondes entre deux déclenchements de cette règle
+  triggerStartDelaySec?: number;// Délai initial (secondes) après le début du Play / entrée scène avant activation
+  triggerRequireReset?: boolean;// Front montant : doit redevenir faux avant de pouvoir se redéclencher
 }
 
 export type ActionTargetMode = 'subject' | 'target' | 'type' | 'tag' | 'instance' | 'last_spawned';
+
+export type SceneTransitionType = 'none' | 'fade' | 'slide_left' | 'slide_right' | 'iris';
 
 export type ActionType =
   | 'change_state'
@@ -642,11 +706,13 @@ export type ActionType =
   | 'spawn_entity'
   | 'play_sound'
   | 'add_score'
+  | 'set_variable'
   | 'delay'
   | 'attach_to_parent'
   | 'detach_parent'
   | 'emit_particles'
-  | 'move_entity';
+  | 'move_entity'
+  | 'change_scene';
 
 export type SpawnLocationMode =
   | 'at_subject'
@@ -796,6 +862,16 @@ export interface RuleAction {
 
   // Champs pour 'add_score'
   scoreAmount?: number;
+
+  // Champs pour 'set_variable'
+  variableName?: string;
+  variableOperation?: 'set' | 'add' | 'subtract' | 'multiply';
+  variableValue?: number;
+
+  // Champs pour 'change_scene'
+  targetSceneId?: string;
+  sceneTransition?: SceneTransitionType;
+  sceneTransitionDuration?: number;
 }
 
 export interface DynamicRule {
@@ -842,7 +918,8 @@ export type GizmoCategoryId =
   | 'puppetZones'
   | 'aiZones'
   | 'physicsVectors'
-  | 'springsAndJiggle';
+  | 'springsAndJiggle'
+  | 'sliders';
 
 export interface GizmoSettings {
   masterEnabled: boolean;
@@ -872,6 +949,7 @@ export interface AppSettings {
   entityFilterDisplayMode?: 'icon_only' | 'icon_and_text' | 'text_only';
   projectPalette?: ProjectPaletteColor[];
   autoSaveEnabled?: boolean;
+  stylusOnlyDrawing?: boolean;
 }
 
 export interface CursorPackExportData {
@@ -921,6 +999,17 @@ export interface EntityGroup {
   entityTypes: string[];
 }
 
+export interface ProjectScene {
+  id: string;
+  name: string;
+  entities: Record<EntityId, Entity>;
+  entityOrder: EntityId[];
+  rules: DynamicRule[];
+  folders: RuleFolder[];
+  layerGroups: SceneLayerGroup[];
+  backgroundColor?: string;
+}
+
 export interface ProjectExportData {
   version: number;
   name?: string;
@@ -933,8 +1022,12 @@ export interface ProjectExportData {
   customSounds?: CustomSound[];
   customParticles?: CustomParticlePreset[];
   layerGroups?: SceneLayerGroup[];
+  backgroundColor?: string;
+  scenes?: ProjectScene[];
+  activeSceneId?: string;
   settings?: AppSettings;
   projectPalette?: ProjectPaletteColor[];
+  initialGameVariables?: Record<string, number>;
 }
 
 

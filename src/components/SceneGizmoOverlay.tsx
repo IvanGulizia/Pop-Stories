@@ -13,6 +13,7 @@ import {
   PatrolBehaviorConfig,
   PhysicsBehaviorConfig,
   Position,
+  SliderBehaviorConfig,
   WanderingBehaviorConfig,
 } from '../types';
 import { getEntityWorldColliderBounds } from '../utils/collider';
@@ -22,6 +23,7 @@ import {
   getEffectiveBehaviors,
   getGizmoRuntimeDebugData,
 } from '../utils/matterPhysicsEngine';
+import { getSliderTrackGeometry } from '../utils/physics/sliderSolver';
 import {
   getParentAnchorWorldPosition,
   getPivotWorldPosition,
@@ -172,6 +174,7 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
   const showAiZones = isGizmoCategoryVisible(settings, 'aiZones', isPlayMode);
   const showPhysicsVectors = isGizmoCategoryVisible(settings, 'physicsVectors', isPlayMode);
   const showSpringsAndJiggle = isGizmoCategoryVisible(settings, 'springsAndJiggle', isPlayMode);
+  const showSliders = isGizmoCategoryVisible(settings, 'sliders', isPlayMode);
 
   const anyVisible =
     showHitboxes ||
@@ -181,15 +184,16 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
     showPuppetZones ||
     showAiZones ||
     showPhysicsVectors ||
-    showSpringsAndJiggle;
+    showSpringsAndJiggle ||
+    showSliders;
 
-  // Rafraîchissement fluide en Mode Play pour cibles souris / orbites / zones IA / ressorts & jiggle
+  // Rafraîchissement fluide en Mode Play pour cibles souris / orbites / zones IA / ressorts & sliders
   const [, setTick] = useState(0);
   useEffect(() => {
     if (
       !isPlayMode ||
       !anyVisible ||
-      (!showLookAt && !showAiZones && !showPuppetZones && !showSpringsAndJiggle)
+      (!showLookAt && !showAiZones && !showPuppetZones && !showSpringsAndJiggle && !showSliders)
     ) {
       return;
     }
@@ -200,7 +204,7 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
     };
     rafId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafId);
-  }, [isPlayMode, anyVisible, showLookAt, showAiZones, showPuppetZones, showSpringsAndJiggle]);
+  }, [isPlayMode, anyVisible, showLookAt, showAiZones, showPuppetZones, showSpringsAndJiggle, showSliders]);
 
   if (!anyVisible) return null;
 
@@ -1777,6 +1781,201 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
           })}
         </>
       )}
+
+      {/* 9. GIZMOS SLIDERS & GLISSIÈRES CONTRAINTES */}
+      {showSliders &&
+        targetEntities.map((entity) => {
+          const currentState = entity.states[entity.currentStateId];
+          const effective = getEffectiveBehaviors(entity, currentState);
+          const slider = effective.find((b) => b.type === 'slider') as
+            | SliderBehaviorConfig
+            | undefined;
+          if (!slider) return null;
+
+          const rtTrack = isPlayMode ? runtimeDebug?.sliderTracks?.[entity.id] : undefined;
+          const center = getEntityCenter(entity);
+          const geom =
+            rtTrack?.geom || getSliderTrackGeometry(center.x, center.y, slider);
+          const stepsX = Math.max(0, Math.round(slider.stepsX ?? 0));
+          const stepsY = Math.max(0, Math.round(slider.stepsY ?? 0));
+          const is2D = geom.geometryMode !== 'line_1d';
+
+          let badgeLabel = '';
+          if (rtTrack) {
+            badgeLabel = is2D
+              ? `X:${rtTrack.valueX} Y:${rtTrack.valueY}`
+              : `${rtTrack.valueX}${stepsX >= 2 ? ` [#${rtTrack.stepIndex}]` : ''}`;
+          } else {
+            badgeLabel =
+              geom.geometryMode === 'line_1d'
+                ? `Rail ${Math.round(geom.halfLen * 2)}px (${Math.round(slider.angle ?? 0)}°)`
+                : geom.geometryMode === 'rect_2d'
+                ? `Zone ${Math.round(geom.halfW * 2)}×${Math.round(geom.halfH * 2)}`
+                : `Disque R=${Math.round(geom.radius)}px`;
+          }
+
+          const nx = -geom.uy;
+          const ny = geom.ux;
+
+          return (
+            <g key={`gizmo-slider-${entity.id}`}>
+              {geom.geometryMode === 'line_1d' && (
+                <>
+                  <line
+                    x1={geom.startPt.x}
+                    y1={geom.startPt.y}
+                    x2={geom.endPt.x}
+                    y2={geom.endPt.y}
+                    stroke="#0ea5e9"
+                    strokeWidth="2.2"
+                    strokeDasharray="6 4"
+                  />
+                  {/* Butées d'extrémités */}
+                  <line
+                    x1={geom.startPt.x - nx * 9}
+                    y1={geom.startPt.y - ny * 9}
+                    x2={geom.startPt.x + nx * 9}
+                    y2={geom.startPt.y + ny * 9}
+                    stroke="#0284c7"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                  />
+                  <line
+                    x1={geom.endPt.x - nx * 9}
+                    y1={geom.endPt.y - ny * 9}
+                    x2={geom.endPt.x + nx * 9}
+                    y2={geom.endPt.y + ny * 9}
+                    stroke="#0284c7"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                  />
+                  {/* Crans */}
+                  {stepsX >= 2 &&
+                    Array.from({ length: stepsX }).map((_, idx) => {
+                      const t = idx / (stepsX - 1);
+                      const lx = (t - 0.5) * 2 * geom.halfLen;
+                      const px = geom.originCx + geom.ux * lx;
+                      const py = geom.originCy + geom.uy * lx;
+                      return (
+                        <line
+                          key={idx}
+                          x1={px - nx * 5.5}
+                          y1={py - ny * 5.5}
+                          x2={px + nx * 5.5}
+                          y2={py + ny * 5.5}
+                          stroke="#0369a1"
+                          strokeWidth="1.6"
+                        />
+                      );
+                    })}
+                </>
+              )}
+
+              {geom.geometryMode === 'rect_2d' && (
+                <>
+                  <rect
+                    x={geom.originCx - geom.halfW}
+                    y={geom.originCy - geom.halfH}
+                    width={geom.halfW * 2}
+                    height={geom.halfH * 2}
+                    rx={6}
+                    fill="rgba(14, 165, 233, 0.08)"
+                    stroke="#0ea5e9"
+                    strokeWidth="1.75"
+                    strokeDasharray="6 4"
+                  />
+                  {stepsX >= 2 &&
+                    stepsY >= 2 &&
+                    Array.from({ length: stepsX }).flatMap((_, ix) =>
+                      Array.from({ length: stepsY }).map((__, iy) => {
+                        const px = geom.originCx + (ix / (stepsX - 1) - 0.5) * 2 * geom.halfW;
+                        const py = geom.originCy + (iy / (stepsY - 1) - 0.5) * 2 * geom.halfH;
+                        return (
+                          <circle
+                            key={`${ix}-${iy}`}
+                            cx={px}
+                            cy={py}
+                            r={2.2}
+                            fill="#0284c7"
+                            fillOpacity={0.75}
+                          />
+                        );
+                      })
+                    )}
+                </>
+              )}
+
+              {geom.geometryMode === 'circle_2d' && (
+                <circle
+                  cx={geom.originCx}
+                  cy={geom.originCy}
+                  r={geom.radius}
+                  fill="rgba(14, 165, 233, 0.08)"
+                  stroke="#0ea5e9"
+                  strokeWidth="1.75"
+                  strokeDasharray="6 4"
+                />
+              )}
+
+              {/* Point d'origine & cible de rappel */}
+              <circle
+                cx={geom.originCx}
+                cy={geom.originCy}
+                r={3.5}
+                fill="#ffffff"
+                stroke="#0284c7"
+                strokeWidth="1.5"
+              />
+              {slider.returnMode === 'spring_return' && (
+                <g>
+                  <circle
+                    cx={geom.returnWorldPt.x}
+                    cy={geom.returnWorldPt.y}
+                    r={6}
+                    fill="rgba(14, 165, 233, 0.22)"
+                    stroke="#0284c7"
+                    strokeWidth="1.5"
+                  />
+                  <line
+                    x1={center.x}
+                    y1={center.y}
+                    x2={geom.returnWorldPt.x}
+                    y2={geom.returnWorldPt.y}
+                    stroke="#38bdf8"
+                    strokeWidth="1.35"
+                    strokeDasharray="3 3"
+                  />
+                </g>
+              )}
+
+              {/* Badge info slider */}
+              {(isPlayMode || selectedEntityId === entity.id) && (
+                <g transform={`translate(${center.x}, ${entity.position.y - 14})`}>
+                  <rect
+                    x={-54}
+                    y={-10}
+                    width={108}
+                    height={14}
+                    rx={4}
+                    fill="#0369a1"
+                    fillOpacity={0.92}
+                  />
+                  <text
+                    x={0}
+                    y={0}
+                    textAnchor="middle"
+                    fill="#ffffff"
+                    fontSize="8.5"
+                    fontFamily="monospace"
+                    fontWeight="700"
+                  >
+                    {badgeLabel}
+                  </text>
+                </g>
+              )}
+            </g>
+          );
+        })}
     </svg>
   );
 }

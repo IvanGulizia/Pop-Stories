@@ -17,6 +17,7 @@ export function Apple({ entity, style }: AppleProps) {
     isSelected,
     currentState,
     canDragFromBehavior,
+    hasSlider,
     canDrag,
     x,
     y,
@@ -68,7 +69,7 @@ export function Apple({ entity, style }: AppleProps) {
         pointerEvents: 'none',
         ...style,
       }}
-      drag={canDrag}
+      drag={appMode === 'play' && hasSlider ? false : canDrag}
       dragControls={dragControls}
       dragListener={false}
       dragMomentum={false}

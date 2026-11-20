@@ -1,8 +1,11 @@
 import { motion } from 'motion/react';
-import { Entity } from '../types';
-import { useEffect, useState } from 'react';
+import { Entity, StrokeWiggleBehaviorConfig } from '../types';
+import { useEffect, useMemo, useState } from 'react';
+import { useSceneStore } from '../store/useSceneStore';
 import { useEntityPointerInteraction } from '../hooks/useEntityPointerInteraction';
 import { resolveEffectivePivot } from '../utils/physics/pivotHelpers';
+import { getEffectiveBehaviors } from '../utils/physics/behaviorResolution';
+import { buildWiggledPathVariants } from '../utils/strokeWiggle';
 import { EntitySelectionOverlay } from './EntitySelectionOverlay';
 
 interface CustomShapeProps {
@@ -18,6 +21,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
     isSelected,
     currentState,
     canDragFromBehavior,
+    hasSlider,
     canDrag,
     x,
     y,
@@ -97,6 +101,78 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
     currentState?.drawingLayers ??
     (currentState.id === 'state_1' ? entity.drawingLayers : undefined);
 
+  // Effet Wiggle des traits ("Boiling Lines") avec variantes pré-calculées en cache et liaison Variable optionnelle
+  const effectiveBehaviors = getEffectiveBehaviors(entity, currentState);
+  const wiggleBehavior = effectiveBehaviors.find(
+    (b): b is StrokeWiggleBehaviorConfig => b.type === 'stroke_wiggle' && b.enabled
+  );
+  const ampVarName = wiggleBehavior?.amplitudeVariableName?.trim() || '';
+  const fpsVarName = wiggleBehavior?.fpsVariableName?.trim() || '';
+  const ampVarValue = useSceneStore((s) =>
+    ampVarName ? (s.appMode === 'play' ? s.gameVariables[ampVarName] : s.initialGameVariables[ampVarName]) : undefined
+  );
+  const fpsVarValue = useSceneStore((s) =>
+    fpsVarName ? (s.appMode === 'play' ? s.gameVariables[fpsVarName] : s.initialGameVariables[fpsVarName]) : undefined
+  );
+
+  const rawEffectiveAmp =
+    (wiggleBehavior?.amplitude ?? 0) +
+    (ampVarName ? (ampVarValue ?? 0) * (wiggleBehavior?.amplitudeVariableMultiplier ?? 1) : 0);
+  // Quantification par pas de 0.2 pour éviter de recalculer les variantes sur du bruit flottant continu
+  const quantizedAmplitude = Math.max(0, Math.min(15, Math.round(rawEffectiveAmp * 5) / 5));
+
+  const rawEffectiveFps =
+    (wiggleBehavior?.fps ?? 6) +
+    (fpsVarName ? (fpsVarValue ?? 0) * (wiggleBehavior?.fpsVariableMultiplier ?? 1) : 0);
+  const effectiveWiggleFps = Math.max(1, Math.min(24, Math.round(rawEffectiveFps)));
+
+  const isWiggleActive = Boolean(
+    wiggleBehavior &&
+      (appMode === 'play' || wiggleBehavior.previewInEdit) &&
+      quantizedAmplitude > 0.01 &&
+      activeVectorPaths &&
+      activeVectorPaths.length > 0
+  );
+  const wiggleVariants = useMemo(() => {
+    if (!isWiggleActive || !wiggleBehavior || !activeVectorPaths) return null;
+    return buildWiggledPathVariants(activeVectorPaths, {
+      amplitude: quantizedAmplitude,
+      frameCount: wiggleBehavior.frameCount,
+      detail: wiggleBehavior.detail,
+      segmentStep: wiggleBehavior.segmentStep,
+      verticalScale: wiggleBehavior.verticalScale,
+      endpointStability: wiggleBehavior.endpointStability,
+      seed: wiggleBehavior.seed,
+      affectFill: wiggleBehavior.affectFill,
+    });
+  }, [
+    isWiggleActive,
+    activeVectorPaths,
+    quantizedAmplitude,
+    wiggleBehavior?.frameCount,
+    wiggleBehavior?.detail,
+    wiggleBehavior?.segmentStep,
+    wiggleBehavior?.verticalScale,
+    wiggleBehavior?.endpointStability,
+    wiggleBehavior?.seed,
+    wiggleBehavior?.affectFill,
+  ]);
+  const [wiggleSlot, setWiggleSlot] = useState(0);
+
+  useEffect(() => {
+    setWiggleSlot(0);
+    if (!isWiggleActive || !wiggleVariants || wiggleVariants.length <= 1 || !wiggleBehavior) return;
+    const timer = window.setInterval(() => {
+      setWiggleSlot((prev) => (prev + 1) % wiggleVariants.length);
+    }, Math.max(40, Math.round(1000 / effectiveWiggleFps)));
+    return () => window.clearInterval(timer);
+  }, [isWiggleActive, wiggleVariants, effectiveWiggleFps]);
+
+  const renderedVectorPaths =
+    isWiggleActive && wiggleVariants && wiggleVariants.length > 0
+      ? wiggleVariants[wiggleSlot % wiggleVariants.length]
+      : activeVectorPaths;
+
   const effPivot = resolveEffectivePivot(entity, currentState);
   const baseScale = currentState.scale ?? 1;
   const runtimeScaleX = appMode === 'play' ? (entity.runtimeScaleX ?? 1) : 1;
@@ -120,7 +196,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
         pointerEvents: 'none',
         ...style,
       }}
-      drag={canDrag}
+      drag={appMode === 'play' && hasSlider ? false : canDrag}
       dragControls={dragControls}
       dragListener={false}
       dragMomentum={false}
@@ -195,7 +271,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
         }`}
         style={{ transform: entity.flipX ? 'scaleX(-1)' : undefined }}
       >
-        {(activeVectorPaths && activeVectorPaths.length > 0) ? (
+        {(renderedVectorPaths && renderedVectorPaths.length > 0) ? (
           <div className="w-full h-full flex items-center justify-center select-none p-1">
             <svg
               viewBox="0 0 200 200"
@@ -203,7 +279,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
             >
               {(() => {
                 const layers = activeDrawingLayers;
-                const paths = activeVectorPaths;
+                const paths = renderedVectorPaths;
                 if (!layers || layers.length === 0) {
                   return paths.map((p) => (
                     <path

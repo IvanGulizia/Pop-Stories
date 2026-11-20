@@ -9,6 +9,7 @@ import {
   ParentOffset,
   Position,
   RuleAction,
+  SceneTransitionType,
   Size,
   StateId,
 } from '../types';
@@ -23,10 +24,17 @@ import { soundSynth } from '../utils/sound';
 import { getCollisionContactPoint } from './collisionHelpers';
 import { resolveEntityReference } from './parentingHelpers';
 import { computeRandomSpawnPosition } from '../utils/spawnHelpers';
+import {
+  canRuleFireWithGate,
+  clearTriggerGateState,
+  recordRuleFired,
+  resetPlaySessionClock,
+} from './triggerGate';
 
 export interface RuleEngineStoreSnapshot {
   appMode: AppMode;
   gameScore: number;
+  gameVariables: Record<string, number>;
   customSounds: CustomSound[];
   entities: Record<EntityId, Entity>;
   sceneBounds: Size;
@@ -34,11 +42,12 @@ export interface RuleEngineStoreSnapshot {
   setEntityParent: (childId: EntityId, parentId: EntityId | null, customOffset?: ParentOffset) => void;
   detachEntity: (childId: EntityId) => void;
   updateEntityPosition: (id: EntityId, position: Position) => void;
+  changeSceneInPlay: (targetSceneId: string, transition?: SceneTransitionType, duration?: number) => void;
 }
 
 export interface RuleEngineStoreBridge {
   getState: () => RuleEngineStoreSnapshot;
-  setState: (partial: { gameScore?: number }) => void;
+  setState: (partial: { gameScore?: number; gameVariables?: Record<string, number> }) => void;
 }
 
 let storeBridge: RuleEngineStoreBridge | null = null;
@@ -69,6 +78,7 @@ export const preCollisionStates: Record<
 export const preEventAutoRevertStates: Record<string, string> = {};
 export const lastCollisionContacts: Record<string, Position> = {};
 export const firedCollisionOnceKeys: Record<string, boolean> = {};
+export const prevEvaluatedVariables: Record<string, number> = {};
 export const activeDelayTimers = new Set<ReturnType<typeof setTimeout>>();
 
 let isEvaluatingRules = false;
@@ -100,7 +110,10 @@ export function clearPlayRuntimeState() {
   Object.keys(preEventAutoRevertStates).forEach((k) => delete preEventAutoRevertStates[k]);
   Object.keys(lastCollisionContacts).forEach((k) => delete lastCollisionContacts[k]);
   Object.keys(firedCollisionOnceKeys).forEach((k) => delete firedCollisionOnceKeys[k]);
+  Object.keys(prevEvaluatedVariables).forEach((k) => delete prevEvaluatedVariables[k]);
   Object.keys(getActiveDragPositions()).forEach((id) => setActiveDragPosition(id, null));
+  clearTriggerGateState();
+  resetPlaySessionClock();
   lastSpawnedEntityId = null;
 }
 
@@ -269,13 +282,13 @@ export function handleCollisionPair(
       return;
     }
 
-    // Cooldown séparé enter vs exit (avec amortissement anti-rebond sur exit)
+    // Cooldown séparé enter vs exit + limites universelles (once / N fois / cooldown / délai initial)
     const cooldownKey = `collision_${rule.id}_${subject.id}_${target.id}_${isExiting ? 'exit' : 'enter'}`;
     const cooldownDuration = isExiting ? 120 : RULE_COOLDOWN_MS;
-    if (now - (ruleCooldowns[cooldownKey] || 0) < cooldownDuration) {
+    if (!canRuleFireWithGate(rule, now, cooldownDuration, { cooldownKey })) {
       return;
     }
-    ruleCooldowns[cooldownKey] = now;
+    recordRuleFired(rule, now, { cooldownKey });
 
     if (rule.trigger.collisionTriggerOnce) {
       firedCollisionOnceKeys[collisionKey] = true;
@@ -323,11 +336,51 @@ export function executeRuleActions(actions: RuleAction[], helpers: RuleActionExe
 export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpers) {
   const bridgeSnap = getBridgeState();
 
+  if (act.type === 'change_scene') {
+    if (act.targetSceneId) {
+      bridgeSnap?.changeSceneInPlay(
+        act.targetSceneId,
+        act.sceneTransition || 'fade',
+        act.sceneTransitionDuration ?? 0.45
+      );
+    }
+    return;
+  }
+
   if (act.type === 'add_score') {
     const amount = act.scoreAmount ?? 1;
-    const current = bridgeSnap?.gameScore || 0;
-    storeBridge?.setState({ gameScore: current + amount });
+    const current = bridgeSnap?.gameVariables?.score ?? bridgeSnap?.gameScore ?? 0;
+    const nextScore = Math.round((current + amount) * 100) / 100;
+    storeBridge?.setState({
+      gameScore: nextScore,
+      gameVariables: {
+        ...(bridgeSnap?.gameVariables || { score: 0 }),
+        score: nextScore,
+      },
+    });
     soundSynth.play('win');
+    return;
+  }
+
+  if (act.type === 'set_variable') {
+    const varName = (act.variableName || 'score').trim() || 'score';
+    const op = act.variableOperation || 'set';
+    const operand = Number(act.variableValue ?? 1);
+    const curVars = bridgeSnap?.gameVariables || { score: bridgeSnap?.gameScore ?? 0 };
+    const currentVal = varName === 'score' ? (curVars.score ?? bridgeSnap?.gameScore ?? 0) : (curVars[varName] ?? 0);
+    let nextVal = currentVal;
+    if (op === 'set') nextVal = operand;
+    else if (op === 'add') nextVal = currentVal + operand;
+    else if (op === 'subtract') nextVal = currentVal - operand;
+    else if (op === 'multiply') nextVal = currentVal * operand;
+    const rounded = Math.round(nextVal * 100) / 100;
+    storeBridge?.setState({
+      gameVariables: {
+        ...curVars,
+        [varName]: rounded,
+      },
+      ...(varName === 'score' ? { gameScore: rounded } : {}),
+    });
     return;
   }
 

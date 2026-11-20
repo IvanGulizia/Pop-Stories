@@ -31,6 +31,8 @@ import {
   ParticleEmitterBehaviorConfig,
   PatrolBehaviorConfig,
   PhysicsBehaviorConfig,
+  SliderBehaviorConfig,
+  StrokeWiggleBehaviorConfig,
   WanderingBehaviorConfig,
 } from '../types';
 import { useSceneStore, EMPTY_LIST, EMPTY_RECORD } from '../store/useSceneStore';
@@ -61,10 +63,12 @@ import {
   WanderingBehaviorControls,
 } from './behaviors/MovementAndAIBehaviorControls';
 import { JiggleBehaviorControls } from './behaviors/JiggleBehaviorControls';
+import { SliderBehaviorControls } from './behaviors/SliderBehaviorControls';
 import {
   HealthBehaviorControls,
   LookAtBehaviorControls,
   ParticleEmitterBehaviorControls,
+  StrokeWiggleBehaviorControls,
 } from './behaviors/VisualAndSurvivalBehaviorControls';
 
 interface BehaviorManagerProps {
@@ -735,5 +739,9 @@ function renderBehaviorControls({
       );
     case 'jiggle':
       return <JiggleBehaviorControls b={{ ...behavior, ...(override || {}) } as JiggleBehaviorConfig} update={update} />;
+    case 'stroke_wiggle':
+      return <StrokeWiggleBehaviorControls b={{ ...behavior, ...(override || {}) } as StrokeWiggleBehaviorConfig} update={update} />;
+    case 'slider':
+      return <SliderBehaviorControls b={{ ...behavior, ...(override || {}) } as SliderBehaviorConfig} update={update} />;
   }
 }

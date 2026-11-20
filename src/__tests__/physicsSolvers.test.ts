@@ -69,6 +69,7 @@ describe('behaviorResolution', () => {
     });
     expect(isEntityDraggable(noPhysicsDrag, noPhysicsDrag.states.default)).toEqual({
       canDrag: true,
+      hasSlider: false,
       throwable: false,
       maxThrowSpeed: 1500,
       hasDynamicPhysics: false,
@@ -90,6 +91,7 @@ describe('behaviorResolution', () => {
     });
     expect(isEntityDraggable(puppetDynamic, puppetDynamic.states.default)).toEqual({
       canDrag: true,
+      hasSlider: false,
       throwable: true,
       maxThrowSpeed: 900,
       hasDynamicPhysics: true,

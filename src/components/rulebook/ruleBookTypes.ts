@@ -11,6 +11,7 @@ import {
   ParentOffset,
   CustomParticlePreset,
   CustomParticleUsageMode,
+  SceneTransitionType,
 } from '../../types';
 
 export type ActiveModal =
@@ -44,11 +45,16 @@ export type ActiveModal =
       proximityDistance?: number;
       boundaryEdge?: 'any' | 'top' | 'bottom' | 'left' | 'right';
       variableName?: string;
-      variableOperator?: '>=' | '==' | '<=';
+      variableOperator?: '>=' | '==' | '<=' | '>' | '<' | '!=';
       variableValue?: number;
+      variableTriggerMode?: 'threshold' | 'on_change';
       autoRevert?: boolean;
       collisionExitMargin?: number;
       collisionTriggerOnce?: boolean;
+      triggerMaxCount?: number;
+      triggerCooldownSec?: number;
+      triggerStartDelaySec?: number;
+      triggerRequireReset?: boolean;
     }
   | {
       type: 'action';
@@ -71,10 +77,16 @@ export type ActiveModal =
         | 'choose_particles'
         | 'choose_attach_parent'
         | 'choose_detach_parent'
-        | 'choose_move_entity';
+        | 'choose_move_entity'
+        | 'choose_variable_action'
+        | 'choose_scene_action';
       actionType?: ActionType;
       targetMode?: ActionTargetMode;
       selectedTargetType?: EntityType;
+      variableName?: string;
+      variableOperation?: 'set' | 'add' | 'subtract' | 'multiply';
+      variableValue?: number;
+      scoreAmount?: number;
       pendingSpawnType?: EntityType;
       pendingSpawnInitialStateId?: string;
       toggleStateA?: string;
@@ -123,6 +135,10 @@ export type ActiveModal =
       moveTargetEntityId?: string;
       moveTargetEntityType?: EntityType;
       moveTargetTag?: string;
+      // Scene change config
+      targetSceneId?: string;
+      sceneTransition?: SceneTransitionType;
+      sceneTransitionDuration?: number;
     }
   | null;
 
@@ -151,8 +167,12 @@ export interface WizardData {
     | 'particle_picker'
     | 'attach_parent_picker'
     | 'detach_parent_picker'
-    | 'move_entity_picker';
+    | 'move_entity_picker'
+    | 'variable_action_picker'
+    | 'scene_action_picker';
   delayDuration?: number;
+  variableOperation?: 'set' | 'add' | 'subtract' | 'multiply';
+  scoreAmount?: number;
   name: string;
   subjectMode?: SelectionMode;
   subjectId?: EntityId;
@@ -239,11 +259,19 @@ export interface WizardData {
   proximityDistance?: number;
   boundaryEdge?: 'any' | 'top' | 'bottom' | 'left' | 'right';
   variableName?: string;
-  variableOperator?: '>=' | '==' | '<=';
+  variableOperator?: '>=' | '==' | '<=' | '>' | '<' | '!=';
   variableValue?: number;
+  variableTriggerMode?: 'threshold' | 'on_change';
   autoRevert?: boolean;
   collisionExitMargin?: number;
   collisionTriggerOnce?: boolean;
+  triggerMaxCount?: number;
+  triggerCooldownSec?: number;
+  triggerStartDelaySec?: number;
+  triggerRequireReset?: boolean;
+  targetSceneId?: string;
+  sceneTransition?: SceneTransitionType;
+  sceneTransitionDuration?: number;
 }
 
 export interface EntityOption {
