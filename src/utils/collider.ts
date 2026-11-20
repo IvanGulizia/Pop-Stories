@@ -12,6 +12,11 @@ export interface EntityColliderGeometry {
   colliderType: ColliderType;
 }
 
+export interface WorldColliderBounds extends EntityColliderGeometry {
+  scaleX?: number;
+  scaleY?: number;
+}
+
 /**
  * Extracts coordinate bounds from SVG vector paths in 200x200 canvas space.
  */

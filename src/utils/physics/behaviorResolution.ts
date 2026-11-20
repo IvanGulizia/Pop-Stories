@@ -5,6 +5,7 @@ import {
   EntityState,
   InteractivePuppetBehaviorConfig,
   PhysicsBehaviorConfig,
+  RotateDragBehaviorConfig,
   SliderBehaviorConfig,
 } from '../../types';
 
@@ -39,11 +40,12 @@ export function getEffectiveBehaviors(
 
 /**
  * Détermine si une entité est déplaçable à la souris, si l'inertie de lancer est activée,
- * et si le mode saisie physique précise / balancement depuis le point saisi / slider contraint est demandé.
+ * et si le mode saisie physique précise / balancement depuis le point saisi / slider ou rotate_drag est demandé.
  */
 export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
   canDrag: boolean;
   hasSlider: boolean;
+  hasRotateDrag: boolean;
   throwable: boolean;
   maxThrowSpeed: number;
   hasDynamicPhysics: boolean;
@@ -57,6 +59,9 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
 } {
   const effective = getEffectiveBehaviors(entity, currentState);
   const sliderBehavior = effective.find((b) => b.type === 'slider') as SliderBehaviorConfig | undefined;
+  const rotateDragBehavior = effective.find((b) => b.type === 'rotate_drag') as
+    | RotateDragBehaviorConfig
+    | undefined;
   const puppetBehavior = effective.find((b) => b.type === 'interactive_puppet') as
     | InteractivePuppetBehaviorConfig
     | undefined;
@@ -78,6 +83,26 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
     return {
       canDrag: true,
       hasSlider: true,
+      hasRotateDrag: false,
+      throwable: false,
+      maxThrowSpeed: 0,
+      hasDynamicPhysics: false,
+      precisePhysicsGrab: false,
+      swingAroundGrabPoint: false,
+      grabRotationMode: 'free',
+      grabMaxAngle: 45,
+      grabBrakeAngle: 15,
+      grabAngularStiffness: 140,
+      grabAngularDamping: 8,
+    };
+  }
+
+  // Priorité au cadran rotatif au drag
+  if (rotateDragBehavior && rotateDragBehavior.enabled !== false) {
+    return {
+      canDrag: true,
+      hasSlider: false,
+      hasRotateDrag: true,
       throwable: false,
       maxThrowSpeed: 0,
       hasDynamicPhysics: false,
@@ -99,6 +124,7 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
     return {
       canDrag: true,
       hasSlider: false,
+      hasRotateDrag: false,
       throwable: puppetBehavior.throwable !== false && hasDynamicPhysics,
       maxThrowSpeed: puppetBehavior.maxThrowSpeed || 1500,
       hasDynamicPhysics,
@@ -118,6 +144,7 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
     return {
       canDrag: dragBehavior.enabled !== false,
       hasSlider: false,
+      hasRotateDrag: false,
       throwable: dragBehavior.throwable !== false && hasDynamicPhysics,
       maxThrowSpeed: dragBehavior.maxThrowSpeed || 1500,
       hasDynamicPhysics,
@@ -135,6 +162,7 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
   return {
     canDrag: false,
     hasSlider: false,
+    hasRotateDrag: false,
     throwable: false,
     maxThrowSpeed: 1500,
     hasDynamicPhysics,

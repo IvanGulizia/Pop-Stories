@@ -36,7 +36,7 @@ export const initialSceneLayerGroups: SceneLayerGroup[] = [
     id: 'group-bg',
     name: 'Arrière-plan (Background)',
     kind: 'background',
-    isCollapsed: false,
+    isCollapsed: true,
     layers: [
       {
         id: 'layer-bg-1',
@@ -54,14 +54,14 @@ export const initialSceneLayerGroups: SceneLayerGroup[] = [
     id: 'group-col',
     name: 'Colliders de Décor (Murs / Sols)',
     kind: 'collider',
-    isCollapsed: false,
+    isCollapsed: true,
     layers: [],
   },
   {
     id: 'group-fg',
     name: 'Premier-plan (Foreground)',
     kind: 'foreground',
-    isCollapsed: false,
+    isCollapsed: true,
     layers: [],
   },
 ];

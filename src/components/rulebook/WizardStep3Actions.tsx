@@ -730,6 +730,33 @@ export function WizardStep3Actions({
                     </div>
                   </button>
 
+                  {/* 4.9. Caméra : Suivre une entité (raccourci direct) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveWizard({
+                        ...activeWizard,
+                        actionSubStep: 'camera_action_picker',
+                        cameraCommand: 'follow',
+                        cameraFollowMode: activeWizard.cameraFollowMode || 'entity',
+                        cameraDuration: activeWizard.cameraDuration ?? 0.45,
+                      });
+                    }}
+                    className="w-full p-3.5 bg-white hover:bg-teal-50/70 border-2 border-slate-200 hover:border-teal-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-teal-100 text-teal-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                      🎯
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-black text-slate-900 group-hover:text-teal-700 truncate">
+                        Caméra : Suivre une entité
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                        Changer dynamiquement la cible suivie par la caméra
+                      </div>
+                    </div>
+                  </button>
+
                   {/* 5. Émettre des Particules */}
                   <button
                     type="button"

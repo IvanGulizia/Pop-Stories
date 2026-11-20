@@ -47,6 +47,7 @@ import {
 } from './rulebook/RuleActionSummaryBadge';
 import { RuleCreationWizardModal } from './rulebook/RuleCreationWizardModal';
 import { RuleSlotEditModal } from './rulebook/RuleSlotEditModal';
+import { formatKeyboardTriggerLabel } from './rulebook/KeyboardKeySelector';
 
 export function RuleBook() {
   const entities = useSceneStore((state) => state.entities);
@@ -253,8 +254,10 @@ export function RuleBook() {
       timerInterval: rule.trigger.timerInterval ?? 2,
       timerType: rule.trigger.timerType ?? 'repeat',
       keyName: rule.trigger.keyName ?? 'Space',
+      keyCode: rule.trigger.keyCode,
       proximityDistance: rule.trigger.proximityDistance ?? 80,
       boundaryEdge: rule.trigger.boundaryEdge ?? 'any',
+      boundarySpace: rule.trigger.boundarySpace ?? 'world',
       variableName: rule.trigger.variableName ?? 'score',
       variableOperator: rule.trigger.variableOperator ?? '>=',
       variableValue: rule.trigger.variableValue ?? 5,
@@ -262,6 +265,9 @@ export function RuleBook() {
       autoRevert: rule.trigger.autoRevert ?? false,
       collisionExitMargin: rule.trigger.collisionExitMargin ?? 10,
       collisionTriggerOnce: rule.trigger.collisionTriggerOnce ?? false,
+      collisionSide: rule.trigger.collisionSide ?? 'any',
+      collisionSideTarget: rule.trigger.collisionSideTarget ?? 'subject',
+      collisionRequireDownward: rule.trigger.collisionRequireDownward ?? false,
       triggerMaxCount: rule.trigger.triggerMaxCount,
       triggerCooldownSec: rule.trigger.triggerCooldownSec,
       triggerStartDelaySec: rule.trigger.triggerStartDelaySec,
@@ -473,8 +479,10 @@ export function RuleBook() {
         timerInterval: activeWizard.timerInterval,
         timerType: activeWizard.timerType,
         keyName: activeWizard.keyName,
+        keyCode: activeWizard.keyCode,
         proximityDistance: activeWizard.proximityDistance,
         boundaryEdge: activeWizard.boundaryEdge,
+        boundarySpace: activeWizard.boundarySpace,
         variableName: activeWizard.variableName,
         variableOperator: activeWizard.variableOperator,
         variableValue: activeWizard.variableValue,
@@ -482,6 +490,9 @@ export function RuleBook() {
         autoRevert: activeWizard.autoRevert,
         collisionExitMargin: activeWizard.collisionExitMargin,
         collisionTriggerOnce: activeWizard.collisionTriggerOnce,
+        collisionSide: activeWizard.collisionSide,
+        collisionSideTarget: activeWizard.collisionSideTarget,
+        collisionRequireDownward: activeWizard.collisionRequireDownward,
         triggerMaxCount: activeWizard.triggerMaxCount,
         triggerCooldownSec: activeWizard.triggerCooldownSec,
         triggerStartDelaySec: activeWizard.triggerStartDelaySec,
@@ -1155,7 +1166,7 @@ export function RuleBook() {
               eventSub = rule.trigger.timerType === 'once' ? 'Après délai' : 'Chaque intervalle';
             } else if (rule.trigger.type === 'keyboard') {
               const kPhase = rule.trigger.phase === 'up' || rule.trigger.phase === 'key_up' ? ' (Relâché)' : ' (Appui)';
-              eventName = `Touche [${rule.trigger.keyName || 'Espace'}]${kPhase}`;
+              eventName = `Touche [${formatKeyboardTriggerLabel(rule.trigger.keyName, rule.trigger.keyCode)}]${kPhase}`;
               eventIcon = '⌨️';
               eventSub = 'Touche Clavier';
             } else if (rule.trigger.type === 'state_change') {
@@ -1167,9 +1178,10 @@ export function RuleBook() {
               eventIcon = '📏';
               eventSub = 'Approche de Cible';
             } else if (rule.trigger.type === 'boundary') {
-              eventName = 'Bord de Scène';
-              eventIcon = '🖼️';
-              eventSub = 'Toucher le cadre';
+              const isVp = rule.trigger.boundarySpace === 'viewport';
+              eventName = isVp ? 'Bord du Cadre' : 'Bord du Monde';
+              eventIcon = isVp ? '🖼️' : '🌍';
+              eventSub = isVp ? 'Cadre visible caméra' : 'Limites de scène';
             } else if (rule.trigger.type === 'variable') {
               const varName = rule.trigger.variableName || 'score';
               if (rule.trigger.variableTriggerMode === 'on_change') {
@@ -1185,23 +1197,40 @@ export function RuleBook() {
               eventName = 'Rupture de Joint';
               eventIcon = '⛓️‍💥';
               eventSub = 'Joint cassé';
+            } else if (rule.trigger.type === 'camera_follow') {
+              eventName = 'Caméra suit entité';
+              eventIcon = '🎥';
+              eventSub = 'Nouvelle cible caméra';
             } else if (rule.trigger.type === 'collision') {
+              const sideMap: Record<string, string> = {
+                top: '↑Haut',
+                bottom: '↓Bas',
+                left: '←Gauche',
+                right: '→Droite',
+                horizontal: '↔Horiz',
+                vertical: '↕Vert',
+              };
+              const sideTag =
+                rule.trigger.collisionSide && rule.trigger.collisionSide !== 'any'
+                  ? ` • ${sideMap[rule.trigger.collisionSide] || rule.trigger.collisionSide}`
+                  : '';
+              const stompTag = rule.trigger.collisionRequireDownward ? ' • Stomp' : '';
               if (rule.trigger.phase === 'collision_release') {
                 eventName = 'Relâcher sur cible';
                 eventIcon = '🎯';
-                eventSub = 'Collision on Release';
+                eventSub = `Relâché sur cible${sideTag}${stompTag}`;
               } else if (rule.trigger.phase === 'exit' || rule.trigger.phase === 'release') {
                 eventName = 'Collision Sortie';
                 eventIcon = '💨';
-                eventSub = 'Collision on Exit';
+                eventSub = `Fin contact${sideTag}`;
               } else if (rule.trigger.phase === 'stay') {
                 eventName = 'Contact Continu';
                 eventIcon = '⏳';
-                eventSub = 'Pendant le contact';
+                eventSub = `Maintenu${sideTag}${stompTag}`;
               } else {
                 eventName = 'Collision Entrée';
                 eventIcon = '💥';
-                eventSub = 'Collision on Enter';
+                eventSub = `Contact${sideTag}${stompTag}`;
               }
             }
 
@@ -1647,23 +1676,14 @@ export function RuleBook() {
                             )}
                             {rule.trigger.type === 'keyboard' && (
                               <div className="mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                <select
-                                  value={rule.trigger.keyName || 'Space'}
-                                  onChange={(e) => updateRule(rule.id, { trigger: { ...rule.trigger, keyName: e.target.value } })}
-                                  className="text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none cursor-pointer flex-1 text-center"
+                                <button
+                                  type="button"
+                                  onClick={() => openRuleEventModal(rule, 'key_picker')}
+                                  className="text-[9px] font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 rounded px-1.5 py-0.5 cursor-pointer flex-1 truncate text-center"
+                                  title="Cliquer pour choisir ou capturer une touche"
                                 >
-                                  <option value="Space">Espace</option>
-                                  <option value="ArrowUp">↑ Haut</option>
-                                  <option value="ArrowDown">↓ Bas</option>
-                                  <option value="ArrowLeft">← Gauche</option>
-                                  <option value="ArrowRight">→ Droite</option>
-                                  <option value="Enter">Entrée</option>
-                                  <option value="a">Touche A</option>
-                                  <option value="w">Touche W</option>
-                                  <option value="s">Touche S</option>
-                                  <option value="d">Touche D</option>
-                                  <option value="any">Toute touche</option>
-                                </select>
+                                  ⌨️ {formatKeyboardTriggerLabel(rule.trigger.keyName, rule.trigger.keyCode)}
+                                </button>
                               </div>
                             )}
                             {rule.trigger.type === 'proximity' && (
@@ -1680,13 +1700,29 @@ export function RuleBook() {
                               </div>
                             )}
                             {rule.trigger.type === 'boundary' && (
-                              <div className="mt-1" onClick={(e) => e.stopPropagation()}>
+                              <div className="mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    updateRule(rule.id, {
+                                      trigger: {
+                                        ...rule.trigger,
+                                        boundarySpace:
+                                          rule.trigger.boundarySpace === 'viewport' ? 'world' : 'viewport',
+                                      },
+                                    })
+                                  }
+                                  title="Basculer entre Bords du Monde et Bords du Cadre visible"
+                                  className="text-[8px] font-black bg-slate-800 hover:bg-slate-700 text-rose-300 border border-slate-700 rounded px-1 py-0.5 cursor-pointer shrink-0"
+                                >
+                                  {rule.trigger.boundarySpace === 'viewport' ? 'Cadre' : 'Monde'}
+                                </button>
                                 <select
                                   value={rule.trigger.boundaryEdge || 'any'}
                                   onChange={(e) => updateRule(rule.id, { trigger: { ...rule.trigger, boundaryEdge: e.target.value as any } })}
-                                  className="text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none cursor-pointer w-full"
+                                  className="text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none cursor-pointer flex-1 min-w-0"
                                 >
-                                  <option value="any">Tous bords</option>
+                                  <option value="any">Tous</option>
                                   <option value="top">Haut</option>
                                   <option value="bottom">Bas</option>
                                   <option value="left">Gauche</option>
@@ -1793,6 +1829,24 @@ export function RuleBook() {
                             )}
                             {rule.trigger.type === 'collision' && (
                               <div className="mt-1 flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                <select
+                                  value={rule.trigger.collisionSide || 'any'}
+                                  onChange={(e) =>
+                                    updateRule(rule.id, {
+                                      trigger: { ...rule.trigger, collisionSide: e.target.value as any },
+                                    })
+                                  }
+                                  title="Côté du contact"
+                                  className="text-[8px] font-bold bg-slate-800 text-sky-300 border border-slate-700 rounded px-0.5 py-0.5 outline-none cursor-pointer max-w-[54px]"
+                                >
+                                  <option value="any">Tous</option>
+                                  <option value="top">↑Haut</option>
+                                  <option value="bottom">↓Bas</option>
+                                  <option value="left">←G</option>
+                                  <option value="right">→D</option>
+                                  <option value="horizontal">↔H</option>
+                                  <option value="vertical">↕V</option>
+                                </select>
                                 <input
                                   type="number"
                                   min={0}
@@ -1808,9 +1862,8 @@ export function RuleBook() {
                                     })
                                   }
                                   title="Marge anti-rebond de sortie (px)"
-                                  className="w-10 text-center text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-0.5 py-0.5 outline-none"
+                                  className="w-8 text-center text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-0.5 py-0.5 outline-none"
                                 />
-                                <span className="text-[8px] text-slate-400">px</span>
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -1822,7 +1875,7 @@ export function RuleBook() {
                                     })
                                   }
                                   title="Limiter à 1 seul déclenchement par paire d'objets"
-                                  className={`px-1.5 py-0.5 rounded text-[8px] font-black cursor-pointer border transition-colors ${
+                                  className={`px-1 py-0.5 rounded text-[8px] font-black cursor-pointer border transition-colors ${
                                     rule.trigger.collisionTriggerOnce
                                       ? 'bg-emerald-500 text-white border-emerald-400'
                                       : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
@@ -2115,10 +2168,17 @@ export function RuleBook() {
                                 ? 'Décalé'
                                 : 'Fixe';
                             const spawnEntForState = getEntityObj(act.spawnEntityType);
+                            const spawnOptLabel = availableEntityOptions.find(
+                              (o) => o.type === act.spawnEntityType
+                            )?.label;
+                            const spawnCleanName =
+                              spawnEntForState?.name ||
+                              (spawnOptLabel && !spawnOptLabel.startsWith('custom_') ? spawnOptLabel : undefined) ||
+                              'Objet';
                             const initStName = act.spawnInitialStateId
                               ? spawnEntForState?.states[act.spawnInitialStateId]?.name
                               : undefined;
-                            actionDetail = `+ ${act.spawnEntityType || 'Objet'}${initStName ? ` (${initStName})` : ''} • ${locLabel}`;
+                            actionDetail = `+ ${spawnCleanName}${initStName ? ` (${initStName})` : ''} • ${locLabel}`;
                           } else if (act.type === 'emit_particles') {
                             actionBadge = 'Particules';
                             const selectedIds =
@@ -2210,12 +2270,28 @@ export function RuleBook() {
                             } else if (cmd === 'zoom') {
                               actionDetail = `Zoom ${(act.cameraZoom ?? 1.25).toFixed(2)}× (${(act.cameraDuration ?? 0.45).toFixed(2)}s)`;
                             } else if (cmd === 'follow') {
+                              const followEntName = act.cameraTargetId
+                                ? entities[act.cameraTargetId]?.name
+                                : undefined;
+                              const followTypeName = act.cameraTargetType
+                                ? getEntityObj(act.cameraTargetType)?.name ||
+                                  availableEntityOptions.find((o) => o.type === act.cameraTargetType)?.label
+                                : undefined;
+                              const effFollowMode = act.cameraFollowMode || act.cameraTargetMode;
                               actionDetail =
                                 act.cameraFollowMode === 'none'
                                   ? 'Arrêter suivi'
-                                  : act.cameraFollowMode === 'type'
-                                  ? `Suivre ${act.cameraTargetType || 'type'}`
-                                  : act.cameraFollowMode === 'tag'
+                                  : act.cameraTargetMode === 'subject'
+                                  ? 'Suivre le Sujet'
+                                  : act.cameraTargetMode === 'target'
+                                  ? 'Suivre la Cible'
+                                  : act.cameraTargetMode === 'last_spawned'
+                                  ? 'Suivre dernier apparu'
+                                  : effFollowMode === 'entity'
+                                  ? `Suivre ${followEntName || 'Entité'}`
+                                  : effFollowMode === 'type'
+                                  ? `Suivre ${followTypeName || 'Objet'}`
+                                  : effFollowMode === 'tag'
                                   ? `Suivre #${act.cameraTargetTag || 'tag'}`
                                   : 'Suivre cible';
                             } else if (cmd === 'move_to') {
@@ -2380,7 +2456,11 @@ export function RuleBook() {
                                 <div className="w-full">
                                   <div className="text-[11px] font-bold text-slate-800 truncate">
                                     {act.type === 'spawn_entity'
-                                      ? `Créer ${act.spawnEntityType || 'Objet'}`
+                                      ? `Créer ${
+                                          getEntityObj(act.spawnEntityType)?.name ||
+                                          availableEntityOptions.find((o) => o.type === act.spawnEntityType)?.label ||
+                                          'Objet'
+                                        }`
                                       : act.type === 'emit_particles'
                                       ? 'Salve de particules'
                                       : act.type === 'play_sound'

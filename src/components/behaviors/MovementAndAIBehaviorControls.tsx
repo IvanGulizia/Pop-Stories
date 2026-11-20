@@ -1,5 +1,5 @@
 import React from 'react';
-import { Paintbrush, Plus } from 'lucide-react';
+import { ArrowDown, ArrowUp, Paintbrush, Plus, Trash2 } from 'lucide-react';
 import {
   Entity,
   EntityState,
@@ -7,6 +7,8 @@ import {
   FollowBehaviorConfig,
   MoveToBehaviorConfig,
   PatrolBehaviorConfig,
+  PatrolMode,
+  PatrolWaypoint,
   WanderingBehaviorConfig,
 } from '../../types';
 import { FlipControls, InertiaControls } from './BehaviorSharedControls';
@@ -14,43 +16,265 @@ import { FlipControls, InertiaControls } from './BehaviorSharedControls';
 export function PatrolBehaviorControls({
   b,
   update,
+  targetEntityOptions = [],
 }: {
   b: PatrolBehaviorConfig;
   update: (partial: any) => void;
+  targetEntityOptions?: Entity[];
 }) {
+  const patrolMode: PatrolMode = b.patrolMode || 'symmetric';
+  const waypoints: PatrolWaypoint[] = b.waypoints || [];
+  const pauseVal = b.pauseAtEnds ?? b.pauseDuration ?? 0.5;
+
+  const addWaypoint = () => {
+    const lastWp = waypoints[waypoints.length - 1];
+    const nextWp: PatrolWaypoint = {
+      id: `wp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
+      mode: 'position',
+      x: lastWp ? lastWp.x + 120 : 200,
+      y: lastWp ? lastWp.y : 200,
+      pauseSec: 0,
+    };
+    update({ waypoints: [...waypoints, nextWp] });
+  };
+
+  const updateWaypoint = (idx: number, patch: Partial<PatrolWaypoint>) => {
+    const next = waypoints.map((wp, i) => (i === idx ? { ...wp, ...patch } : wp));
+    update({ waypoints: next });
+  };
+
+  const removeWaypoint = (idx: number) => {
+    update({ waypoints: waypoints.filter((_, i) => i !== idx) });
+  };
+
+  const moveWaypoint = (idx: number, dir: -1 | 1) => {
+    const targetIdx = idx + dir;
+    if (targetIdx < 0 || targetIdx >= waypoints.length) return;
+    const next = [...waypoints];
+    const [item] = next.splice(idx, 1);
+    next.splice(targetIdx, 0, item);
+    update({ waypoints: next });
+  };
+
   return (
     <div className="space-y-1.5">
-      {/* Ligne 1: Axe de patrouille */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-        <span className="font-bold text-slate-700 text-xs">Axe d'oscillation</span>
-        <select
-          value={b.axis}
-          onChange={(e) => update({ axis: e.target.value as any })}
-          className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-        >
-          <option value="horizontal">Horizontal (Gauche - Droite)</option>
-          <option value="vertical">Vertical (Haut - Bas)</option>
-        </select>
+      {/* Ligne 0: Mode de patrouille */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+        <span className="font-bold text-slate-700 text-xs block">Mode de patrouille</span>
+        <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-lg">
+          {([
+            { id: 'symmetric', label: 'Symétrique ↔' },
+            { id: 'one_way_return', label: 'Aller-retour →' },
+            { id: 'waypoints', label: 'Multi-points 📍' },
+          ] as const).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => update({ patrolMode: opt.id })}
+              className={`py-1 px-1.5 rounded-md text-[10px] font-bold cursor-pointer transition-all ${
+                patrolMode === opt.id
+                  ? 'bg-blue-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:bg-white/70'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] text-slate-400 leading-tight">
+          {patrolMode === 'symmetric'
+            ? 'Oscille symétriquement de -Distance à +Distance autour du point de départ.'
+            : patrolMode === 'one_way_return'
+            ? 'Part du point de départ (0) jusqu’à +Distance puis revient au départ.'
+            : 'Suit une liste ordonnée de points (coordonnées ou entités de la scène).'}
+        </p>
       </div>
 
-      {/* Ligne 2: Portée de patrouille */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200">
-        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-          <span className="font-bold">Distance de patrouille</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.range} px
-          </span>
+      {patrolMode !== 'waypoints' ? (
+        <>
+          {/* Ligne 1: Axe de patrouille */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Axe d'oscillation</span>
+            <select
+              value={b.axis}
+              onChange={(e) => update({ axis: e.target.value as any })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              <option value="horizontal">Horizontal (Gauche - Droite)</option>
+              <option value="vertical">Vertical (Haut - Bas)</option>
+            </select>
+          </div>
+
+          {/* Sens initial */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Sens initial</span>
+            <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg">
+              <button
+                type="button"
+                onClick={() => update({ initialDirection: 1 })}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                  (b.initialDirection ?? 1) === 1 ? 'bg-blue-600 text-white' : 'text-slate-600'
+                }`}
+              >
+                {b.axis === 'vertical' ? '↓ Bas (+)' : '→ Droite (+)'}
+              </button>
+              <button
+                type="button"
+                onClick={() => update({ initialDirection: -1 })}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                  b.initialDirection === -1 ? 'bg-blue-600 text-white' : 'text-slate-600'
+                }`}
+              >
+                {b.axis === 'vertical' ? '↑ Haut (-)' : '← Gauche (-)'}
+              </button>
+            </div>
+          </div>
+
+          {/* Ligne 2: Portée de patrouille */}
+          <div className="p-2 bg-white rounded-xl border border-slate-200">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="font-bold">Distance de patrouille</span>
+              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+                {b.range} px
+              </span>
+            </div>
+            <input
+              type="range"
+              min="20"
+              max="600"
+              step="10"
+              value={b.range}
+              onChange={(e) => update({ range: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+        </>
+      ) : (
+        /* Éditeur Multi-points (Waypoints) */
+        <div className="p-2 bg-blue-50/40 rounded-xl border border-blue-200 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-bold text-blue-950 text-xs">Parcours ({waypoints.length} points)</span>
+            <select
+              value={b.waypointLoopMode || 'ping_pong'}
+              onChange={(e) => update({ waypointLoopMode: e.target.value as any })}
+              className="bg-white border border-blue-200 rounded-lg px-1.5 py-0.5 text-[10px] font-bold text-blue-800"
+            >
+              <option value="ping_pong">Aller-retour (Ping-Pong)</option>
+              <option value="loop">Boucle fermée (1 → N → 1)</option>
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            {waypoints.map((wp, idx) => {
+              const wpMode = wp.mode || (wp.entityId ? 'entity' : 'position');
+              return (
+                <div key={wp.id} className="p-1.5 bg-white rounded-lg border border-slate-200 space-y-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[10px] font-black text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">
+                      #{idx + 1}
+                    </span>
+                    <select
+                      value={wpMode}
+                      onChange={(e) => updateWaypoint(idx, { mode: e.target.value as 'position' | 'entity' })}
+                      className="bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-700"
+                    >
+                      <option value="position">Position X / Y</option>
+                      <option value="entity">Entité cible</option>
+                    </select>
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => moveWaypoint(idx, -1)}
+                        disabled={idx === 0}
+                        className="p-0.5 text-slate-400 hover:text-slate-700 disabled:opacity-30 cursor-pointer"
+                        title="Monter"
+                      >
+                        <ArrowUp className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveWaypoint(idx, 1)}
+                        disabled={idx === waypoints.length - 1}
+                        className="p-0.5 text-slate-400 hover:text-slate-700 disabled:opacity-30 cursor-pointer"
+                        title="Descendre"
+                      >
+                        <ArrowDown className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeWaypoint(idx)}
+                        className="p-0.5 text-slate-400 hover:text-rose-600 cursor-pointer"
+                        title="Supprimer ce point"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {wpMode === 'entity' ? (
+                    <select
+                      value={wp.entityId || ''}
+                      onChange={(e) => updateWaypoint(idx, { entityId: e.target.value || undefined })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[11px] font-medium text-slate-800"
+                    >
+                      <option value="">-- Choisir une entité --</option>
+                      {targetEntityOptions.map((ent) => (
+                        <option key={ent.id} value={ent.id}>
+                          {ent.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-1">
+                      <label className="text-[9px] font-bold text-slate-500">
+                        X
+                        <input
+                          type="number"
+                          value={Math.round(wp.x)}
+                          onChange={(e) => updateWaypoint(idx, { x: parseFloat(e.target.value) || 0 })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[11px] font-mono font-bold text-slate-800"
+                        />
+                      </label>
+                      <label className="text-[9px] font-bold text-slate-500">
+                        Y
+                        <input
+                          type="number"
+                          value={Math.round(wp.y)}
+                          onChange={(e) => updateWaypoint(idx, { y: parseFloat(e.target.value) || 0 })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[11px] font-mono font-bold text-slate-800"
+                        />
+                      </label>
+                      <label className="text-[9px] font-bold text-slate-500">
+                        Pause (s)
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          value={wp.pauseSec ?? wp.pauseDuration ?? 0}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            updateWaypoint(idx, { pauseSec: val, pauseDuration: val });
+                          }}
+                          className="w-full bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[11px] font-mono font-bold text-slate-800"
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            onClick={addWaypoint}
+            className="w-full py-1.5 bg-white hover:bg-blue-50 border border-dashed border-blue-300 rounded-lg text-[11px] font-bold text-blue-700 flex items-center justify-center gap-1 cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Ajouter un point de passage</span>
+          </button>
         </div>
-        <input
-          type="range"
-          min="20"
-          max="400"
-          step="10"
-          value={b.range}
-          onChange={(e) => update({ range: parseFloat(e.target.value) })}
-          className="w-full accent-indigo-600"
-        />
-      </div>
+      )}
 
       {/* Ligne 3: Vitesse de patrouille */}
       <div className="p-2 bg-white rounded-xl border border-slate-200">
@@ -71,21 +295,74 @@ export function PatrolBehaviorControls({
         />
       </div>
 
-      {/* Ligne 4: Pause aux extrémités */}
+      {/* Ligne 4: Pause aux bornes */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-        <span className="font-bold text-slate-700 text-xs">Pause aux bornes</span>
+        <span className="font-bold text-slate-700 text-xs">Pause aux bornes / points</span>
         <div className="flex items-center gap-1">
           <input
             type="number"
             min="0"
             max="10"
             step="0.1"
-            value={b.pauseDuration}
-            onChange={(e) => update({ pauseDuration: parseFloat(e.target.value) || 0 })}
+            value={pauseVal}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value) || 0;
+              update({ pauseDuration: v, pauseAtEnds: v });
+            }}
             className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
           />
           <span className="text-slate-400 text-xs">sec</span>
         </div>
+      </div>
+
+      {/* Détections physiques (Murs & Bords de plateforme) */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="font-bold text-slate-700 text-xs">Demi-tour sur mur / obstacle</div>
+            <div className="text-[10px] text-slate-400">Inverse la direction si un obstacle solide bloque</div>
+          </div>
+          <input
+            type="checkbox"
+            checked={Boolean(b.turnOnWall)}
+            onChange={(e) => update({ turnOnWall: e.target.checked })}
+            className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+          />
+        </div>
+
+        {(patrolMode !== 'waypoints' && b.axis === 'horizontal') && (
+          <div className="pt-1.5 border-t border-slate-100 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-bold text-slate-700 text-xs">Détection du vide (Bords)</div>
+                <div className="text-[10px] text-slate-400">Évite de tomber en bout de plateforme</div>
+              </div>
+              <input
+                type="checkbox"
+                checked={Boolean(b.detectLedges)}
+                onChange={(e) => update({ detectLedges: e.target.checked })}
+                className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+              />
+            </div>
+            {b.detectLedges && (
+              <div>
+                <div className="flex justify-between items-center text-[11px] text-slate-700">
+                  <span>Profondeur de sonde</span>
+                  <span className="font-mono font-bold text-blue-700">{b.ledgeCheckDepth ?? 28} px</span>
+                </div>
+                <input
+                  type="range"
+                  min="10"
+                  max="80"
+                  step="2"
+                  value={b.ledgeCheckDepth ?? 28}
+                  onChange={(e) => update({ ledgeCheckDepth: parseInt(e.target.value, 10) })}
+                  className="w-full accent-blue-600 cursor-pointer"
+                />
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0} update={update} />

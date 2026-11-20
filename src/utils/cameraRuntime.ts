@@ -3,6 +3,8 @@ import {
   applyCameraCommandToController,
   CameraControllerState,
   createInitialCameraControllerState,
+  getActiveCameraFollowTarget,
+  getVisibleWorldRect,
   resolveWorldBounds,
   SimpleCameraView,
   stepCameraController,
@@ -17,6 +19,23 @@ let latestPlayCamera: CameraRuntimeState = {
   shakeY: 0,
   shakeRotation: 0,
 };
+let lastEmittedFollowTargetId: string | null = null;
+let pendingFollowTargetId: string | null = null;
+
+function syncFollowTargetChange(
+  entities?: Record<string, Entity>,
+  config?: SceneCameraConfig
+): void {
+  if (!entities) return;
+  const target = getActiveCameraFollowTarget(entities, config, controllerState.followOverride);
+  const nextId = target ? target.id : null;
+  if (nextId !== lastEmittedFollowTargetId) {
+    lastEmittedFollowTargetId = nextId;
+    if (nextId) {
+      pendingFollowTargetId = nextId;
+    }
+  }
+}
 
 export function initPlayCameraRuntime(
   config?: SceneCameraConfig,
@@ -24,6 +43,9 @@ export function initPlayCameraRuntime(
   entities?: Record<string, Entity>
 ): CameraRuntimeState {
   controllerState = createInitialCameraControllerState(config, viewport, entities);
+  lastEmittedFollowTargetId = null;
+  pendingFollowTargetId = null;
+  syncFollowTargetChange(entities, config);
   latestPlayCamera = {
     x: controllerState.x,
     y: controllerState.y,
@@ -37,6 +59,8 @@ export function initPlayCameraRuntime(
 
 export function resetPlayCameraRuntime(): void {
   controllerState = createInitialCameraControllerState();
+  lastEmittedFollowTargetId = null;
+  pendingFollowTargetId = null;
   latestPlayCamera = {
     x: 0,
     y: 0,
@@ -62,6 +86,7 @@ export function stepPlayCameraRuntime(
     worldBounds,
     config
   );
+  syncFollowTargetChange(entities, config);
   return latestPlayCamera;
 }
 
@@ -78,6 +103,33 @@ export function dispatchPlayCameraAction(
 ): void {
   const worldBounds = resolveWorldBounds(viewport, config);
   applyCameraCommandToController(controllerState, action, context, viewport, worldBounds, config);
+  syncFollowTargetChange(context.entities, config);
+}
+
+export function consumePlayCameraFollowChange(): string | null {
+  const id = pendingFollowTargetId;
+  pendingFollowTargetId = null;
+  return id;
+}
+
+export function getPlayCameraFollowTargetId(): string | null {
+  return lastEmittedFollowTargetId;
+}
+
+export function getPlayVisibleViewportRect(viewport: Size): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} {
+  return getVisibleWorldRect(
+    {
+      x: latestPlayCamera.x,
+      y: latestPlayCamera.y,
+      zoom: latestPlayCamera.zoom,
+    },
+    viewport
+  );
 }
 
 export function getPlayCameraRuntime(): CameraRuntimeState {

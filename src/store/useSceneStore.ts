@@ -46,7 +46,16 @@ import {
 } from '../types';
 import { getEntityWorldColliderBounds } from '../utils/collider';
 import { DEFAULT_SCENE_CAMERA_CONFIG, resolveWorldBounds } from '../utils/cameraSolver';
-import { initPlayCameraRuntime, resetPlayCameraRuntime } from '../utils/cameraRuntime';
+import {
+  initPlayCameraRuntime,
+  resetPlayCameraRuntime,
+  getPlayVisibleViewportRect,
+} from '../utils/cameraRuntime';
+import {
+  captureStageSnapshot,
+  releaseTransitionSnapshot,
+  clearAllTransitionSnapshots,
+} from '../utils/transitionSnapshotCache';
 import {
   resetMatterPhysicsRuntime,
   checkEntityAgainstColliderLayer,
@@ -97,6 +106,8 @@ import {
   checkCollision,
   getCollisionContactPoint,
   findTargetEntityOrArchetype,
+  checkDirectionalCollisionSide,
+  computeBoundaryHitEdges,
 } from './collisionHelpers';
 import {
   RULE_COOLDOWN_MS,
@@ -152,7 +163,7 @@ function normalizeLayerGroups(raw: any): SceneLayerGroup[] {
       id: 'group-col',
       name: 'Colliders de Décor (Murs / Sols)',
       kind: 'collider',
-      isCollapsed: false,
+      isCollapsed: true,
       layers: [],
     });
   }
@@ -300,9 +311,11 @@ interface SceneState {
   backgroundColor: string;
   camera: SceneCameraConfig;
   editorCamera: { x: number; y: number; zoom: number };
+  editorPanToolActive: boolean;
   updateSceneCamera: (partial: Partial<SceneCameraConfig>) => void;
   setEditorCamera: (partial: Partial<{ x: number; y: number; zoom: number }>) => void;
   resetEditorCamera: () => void;
+  setEditorPanToolActive: (active: boolean) => void;
   snapshotScenes: ProjectScene[] | null;
   snapshotActiveSceneId: string | null;
   activeSceneTransition: {
@@ -310,6 +323,7 @@ interface SceneState {
     type: SceneTransitionType;
     duration: number;
     phase: 'out' | 'in';
+    outgoingSnapshotKey?: string;
   } | null;
   createScene: (name?: string) => string;
   switchScene: (sceneId: string) => void;
@@ -318,6 +332,7 @@ interface SceneState {
   deleteScene: (sceneId: string) => boolean;
   setSceneBackgroundColor: (color: string) => void;
   changeSceneInPlay: (targetSceneId: string, transition?: SceneTransitionType, duration?: number) => void;
+  restartSceneInPlay: (transition?: SceneTransitionType, duration?: number) => void;
   snapshotEntities: Record<EntityId, Entity> | null;
   snapshotEntityOrder: EntityId[] | null;
   snapshotRules: DynamicRule[] | null;
@@ -334,7 +349,7 @@ interface SceneState {
   deleteInitialGameVariable: (name: string) => void;
   setGameVariable: (name: string, value: number) => void;
   batchSetGameVariables: (updates: Record<string, number>) => void;
-  triggerKeyEvent: (keyName: string, phase?: 'down' | 'up') => void;
+  triggerKeyEvent: (keyName: string, phase?: 'down' | 'up', keyCode?: string) => void;
 
   // Direct scene canvas drawing tools state
   drawingTool: UnifiedDrawTool;
@@ -567,6 +582,7 @@ interface SceneState {
   triggerPointerEvent: (entityId: EntityId, phase: TriggerPhase, eventPosition?: Position) => void;
   triggerDragRelease: (subjectId: EntityId, eventPosition?: Position) => void;
   triggerJointBreak: (childId: EntityId, parentId: EntityId, breakPoint?: Position) => void;
+  triggerCameraFollowEvent: (targetEntityId: EntityId) => void;
   evaluateRules: () => void;
   evaluateRulesWithTemp: (tempPositions?: Record<EntityId, Position>) => void;
 }
@@ -947,6 +963,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   backgroundColor: '#ffffff',
   camera: { ...DEFAULT_SCENE_CAMERA_CONFIG },
   editorCamera: { x: 0, y: 0, zoom: 1 },
+  editorPanToolActive: false,
   snapshotScenes: null,
   snapshotActiveSceneId: null,
   activeSceneTransition: null,
@@ -989,6 +1006,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   resetEditorCamera: () => {
     set({ editorCamera: { x: 0, y: 0, zoom: 1 } });
+  },
+
+  setEditorPanToolActive: (active) => {
+    set({ editorPanToolActive: active });
   },
 
   createScene: (name) => {
@@ -1206,6 +1227,34 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     }
 
     const transId = `trans-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
+
+    // Transition Push : capture instantanée de la scène sortante, bascule immédiate sur la nouvelle scène
+    // et glissement simultané (sortante poussée dehors + entrante qui rentre).
+    if (transition.startsWith('push_')) {
+      const captured = captureStageSnapshot(transId, initialState.backgroundColor);
+      const outgoingSnapshotKey = captured ? transId : undefined;
+      commitSwap();
+      const totalMs = Math.max(80, Math.round(duration * 1000));
+      set({
+        activeSceneTransition: {
+          id: transId,
+          type: transition,
+          duration,
+          phase: 'in',
+          outgoingSnapshotKey,
+        },
+      });
+      const endTimer = setTimeout(() => {
+        activeDelayTimers.delete(endTimer);
+        if (outgoingSnapshotKey) {
+          releaseTransitionSnapshot(outgoingSnapshotKey);
+        }
+        set((s) => (s.activeSceneTransition?.id === transId ? { activeSceneTransition: null } : s));
+      }, totalMs);
+      activeDelayTimers.add(endTimer);
+      return;
+    }
+
     const halfMs = Math.max(50, Math.round(duration * 500));
     set({
       activeSceneTransition: {
@@ -1234,6 +1283,12 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       activeDelayTimers.add(endTimer);
     }, halfMs);
     activeDelayTimers.add(midTimer);
+  },
+
+  restartSceneInPlay: (transition = 'fade', duration = 0.45) => {
+    const cur = get();
+    if (cur.appMode !== 'play') return;
+    cur.changeSceneInPlay(cur.activeSceneId, transition, duration);
   },
   collapsedRuleIds: {},
   ruleBookPage: 1,
@@ -1898,6 +1953,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       clearParticles();
       clearPlayRuntimeState();
       resetPlayCameraRuntime();
+      clearAllTransitionSnapshots();
       const {
         snapshotScenes,
         snapshotActiveSceneId,
@@ -1970,6 +2026,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     clearParticles();
     clearPlayRuntimeState();
     resetPlaySessionClock();
+    clearAllTransitionSnapshots();
     const {
       snapshotScenes,
       snapshotActiveSceneId,
@@ -3092,7 +3149,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     if (type === 'plant') {
       newEntity = {
         id,
-        name: `Plante #${count}`,
+        name: 'Plante',
         type: 'plant',
         tags: existingPeer ? [...(existingPeer.tags || [])] : ['plante', 'nature'],
         position: { x: 200 + ((count * 30) % 200), y: 250 },
@@ -3127,7 +3184,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     } else if (type === 'apple') {
       newEntity = {
         id,
-        name: `Pomme #${count}`,
+        name: 'Pomme',
         type: 'apple',
         tags: existingPeer ? [...(existingPeer.tags || [])] : ['nourriture', 'fruit'],
         position: { x: 100 + ((count * 40) % 250), y: 100 },
@@ -3156,7 +3213,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     } else {
       newEntity = {
         id,
-        name: `Étoile #${count}`,
+        name: 'Étoile',
         type: 'custom',
         tags: existingPeer ? [...(existingPeer.tags || [])] : ['magique', 'etoile'],
         position: { x: 300, y: 150 },
@@ -3360,7 +3417,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       newEntity = {
         ...JSON.parse(JSON.stringify(archetype)),
         id,
-        name: `${archetype.name.replace(/#\d+/, '').trim()} #${count}`,
+        name: archetype.name.replace(/\s*#\d+$/g, '').trim() || archetype.name,
         position,
         currentStateId: targetState,
         size: size ? { width: Math.max(16, size.width), height: Math.max(16, size.height) } : (archetype.size || { width: 256, height: 256 }),
@@ -3368,7 +3425,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     } else if (type === 'apple') {
       newEntity = {
         id,
-        name: `Pomme #${count}`,
+        name: 'Pomme',
         type: 'apple',
         tags: ['nourriture', 'fruit'],
         position,
@@ -3383,7 +3440,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     } else if (type === 'plant') {
       newEntity = {
         id,
-        name: `Plante #${count}`,
+        name: 'Plante',
         type: 'plant',
         tags: ['plante', 'nature'],
         position,
@@ -3398,7 +3455,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     } else {
       newEntity = {
         id,
-        name: `Entité #${count}`,
+        name: 'Entité',
         type,
         tags: [type],
         position,
@@ -4162,7 +4219,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     }));
   },
 
-  triggerKeyEvent: (keyName, phase = 'down') => {
+  triggerKeyEvent: (keyName, phase = 'down', keyCode) => {
     if (get().appMode !== 'play') return;
     const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
     const now = Date.now();
@@ -4170,16 +4227,25 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     const kbRules = rules.filter((r) => r.enabled && r.trigger.type === 'keyboard');
     if (kbRules.length === 0) return;
 
+    const normalizedInput = keyName === ' ' ? 'space' : keyName.toLowerCase();
+    const normalizedInputCode = (keyCode || '').toLowerCase();
+
     kbRules.forEach((rule) => {
       const targetKey = rule.trigger.keyName || 'Space';
+      const targetNorm = targetKey.toLowerCase();
+      const targetCodeNorm = (rule.trigger.keyCode || '').toLowerCase();
       const isKeyMatch =
         targetKey === 'any' ||
-        targetKey.toLowerCase() === keyName.toLowerCase() ||
-        (targetKey === 'Space' && (keyName === ' ' || keyName === 'Space')) ||
-        (targetKey === 'ArrowUp' && keyName === 'ArrowUp') ||
-        (targetKey === 'ArrowDown' && keyName === 'ArrowDown') ||
-        (targetKey === 'ArrowLeft' && keyName === 'ArrowLeft') ||
-        (targetKey === 'ArrowRight' && keyName === 'ArrowRight');
+        targetNorm === normalizedInput ||
+        (targetKey === 'Space' && (keyName === ' ' || keyName === 'Space' || keyCode === 'Space')) ||
+        (targetKey === 'Escape' && (keyName === 'Escape' || keyName === 'Esc' || keyCode === 'Escape')) ||
+        (targetKey === 'Enter' && (keyName === 'Enter' || keyCode === 'Enter' || keyCode === 'NumpadEnter')) ||
+        (targetKey === 'Backspace' && (keyName === 'Backspace' || keyCode === 'Backspace')) ||
+        (targetKey === 'Tab' && (keyName === 'Tab' || keyCode === 'Tab')) ||
+        (targetKey === 'Shift' && (keyName === 'Shift' || keyCode === 'ShiftLeft' || keyCode === 'ShiftRight')) ||
+        (targetKey === 'Control' && (keyName === 'Control' || keyCode === 'ControlLeft' || keyCode === 'ControlRight')) ||
+        (targetKey === 'Alt' && (keyName === 'Alt' || keyCode === 'AltLeft' || keyCode === 'AltRight')) ||
+        (targetCodeNorm !== '' && normalizedInputCode !== '' && targetCodeNorm === normalizedInputCode);
 
       if (!isKeyMatch) return;
 
@@ -4562,6 +4628,54 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     });
   },
 
+  triggerCameraFollowEvent: (targetEntityId) => {
+    if (get().appMode !== 'play') return;
+    const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
+    const subject = entities[targetEntityId];
+    if (!subject) return;
+
+    const now = Date.now();
+    const camRules = rules.filter((r) => r.enabled && r.trigger.type === 'camera_follow');
+    if (camRules.length === 0) return;
+
+    camRules.forEach((rule) => {
+      if (
+        !matchesEntityFilter(
+          subject,
+          rule.trigger.subjectMode,
+          rule.trigger.subjectId,
+          rule.trigger.subjectType,
+          rule.trigger.subjectTag
+        )
+      ) {
+        return;
+      }
+      if (
+        rule.trigger.subjectStateId &&
+        rule.trigger.subjectStateId !== '' &&
+        subject.currentStateId !== rule.trigger.subjectStateId
+      ) {
+        return;
+      }
+      const cooldownKey = `cam_follow_${rule.id}_${subject.id}`;
+      if (!canRuleFireWithGate(rule, now, 60, { cooldownKey })) return;
+      recordRuleFired(rule, now, { cooldownKey });
+
+      executeRuleActions(rule.actions, {
+        subject,
+        eventPosition: {
+          x: Math.round(subject.position.x + subject.size.width / 2),
+          y: Math.round(subject.position.y + subject.size.height / 2),
+        },
+        allEntities: entities,
+        updateEntityState,
+        updateEntityDetails,
+        deleteEntity,
+        spawnEntity,
+      });
+    });
+  },
+
   evaluateRules: () => {
     get().evaluateRulesWithTemp();
   },
@@ -4667,11 +4781,20 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
               );
 
               if (matchAAsSubject && matchBAsTarget) {
+                const dirMatch1 =
+                  !isColliding ||
+                  checkDirectionalCollisionSide({
+                    subject: tempA,
+                    target: tempB,
+                    sideFilter: rule.trigger.collisionSide,
+                    sideTarget: rule.trigger.collisionSideTarget,
+                    requireDownward: rule.trigger.collisionRequireDownward,
+                  });
                 handleCollisionPair(
                   rule,
                   tempA,
                   tempB,
-                  isColliding,
+                  isColliding && dirMatch1,
                   nextCollisions,
                   activeCollisions,
                   now,
@@ -4702,11 +4825,20 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
               );
 
               if (matchBAsSubject && matchAAsTarget && entA.id !== entB.id) {
+                const dirMatch2 =
+                  !isColliding ||
+                  checkDirectionalCollisionSide({
+                    subject: tempB,
+                    target: tempA,
+                    sideFilter: rule.trigger.collisionSide,
+                    sideTarget: rule.trigger.collisionSideTarget,
+                    requireDownward: rule.trigger.collisionRequireDownward,
+                  });
                 handleCollisionPair(
                   rule,
                   tempB,
                   tempA,
-                  isColliding,
+                  isColliding && dirMatch2,
                   nextCollisions,
                   activeCollisions,
                   now,
@@ -4788,11 +4920,35 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
                   lastCollisionContacts[cKey] = hit.contactPoint;
                 }
 
+                let dirMatchLayer = true;
+                if (
+                  hit.colliding &&
+                  hit.contactPoint &&
+                  ((rule.trigger.collisionSide && rule.trigger.collisionSide !== 'any') ||
+                    rule.trigger.collisionRequireDownward)
+                ) {
+                  const contactTargetProxy: Entity = {
+                    ...layerProxy,
+                    position: {
+                      x: hit.contactPoint.x - 2,
+                      y: hit.contactPoint.y - 2,
+                    },
+                    size: { width: 4, height: 4 },
+                  };
+                  dirMatchLayer = checkDirectionalCollisionSide({
+                    subject: tempEnt,
+                    target: contactTargetProxy,
+                    sideFilter: rule.trigger.collisionSide,
+                    sideTarget: rule.trigger.collisionSideTarget,
+                    requireDownward: rule.trigger.collisionRequireDownward,
+                  });
+                }
+
                 handleCollisionPair(
                   rule,
                   tempEnt,
                   layerProxy,
-                  hit.colliding,
+                  hit.colliding && dirMatchLayer,
                   nextCollisions,
                   activeCollisions,
                   now,
@@ -4885,12 +5041,17 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       });
     });
 
-    // 5. Règles de Bords de Scène / Canvas (Calibrées sur le collider réel et sceneBounds en direct)
+    // 5. Règles de Bords de Scène / Canvas (Monde complet ou Cadre visible Viewport)
     const boundaryRules = rules.filter((r) => r.enabled && r.trigger.type === 'boundary');
     const edgeTol = 2;
+    const viewportBoundsRect = getPlayVisibleViewportRect(sceneBounds || { width: 800, height: 500 });
+    const worldBoundsRect = { x: 0, y: 0, width: sceneW, height: sceneH };
 
     boundaryRules.forEach((rule) => {
       const edge = rule.trigger.boundaryEdge || 'any';
+      const activeBoundsRect =
+        rule.trigger.boundarySpace === 'viewport' ? viewportBoundsRect : worldBoundsRect;
+
       allEntitiesList.forEach((subject) => {
         if (!matchesEntityFilter(subject, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)) return;
 
@@ -4900,25 +5061,28 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         const subjPos = effectivePositions?.[subject.id] ?? subject.position;
         const effectiveSubject = subjPos === subject.position ? subject : { ...subject, position: subjPos };
         const wb = getEntityWorldColliderBounds(effectiveSubject);
-        const hitLeft = wb.x <= edgeTol;
-        const hitRight = wb.x + wb.width >= sceneW - edgeTol;
-        const hitTop = wb.y <= edgeTol;
-        const hitBottom = wb.y + wb.height >= sceneH - edgeTol;
-
-        let hitEdge = false;
-        if (edge === 'left' && hitLeft) hitEdge = true;
-        if (edge === 'right' && hitRight) hitEdge = true;
-        if (edge === 'top' && hitTop) hitEdge = true;
-        if (edge === 'bottom' && hitBottom) hitEdge = true;
-        if (edge === 'any' && (hitLeft || hitRight || hitTop || hitBottom)) hitEdge = true;
+        const { hitLeft, hitRight, hitTop, hitBottom, hitEdge } = computeBoundaryHitEdges(
+          wb,
+          activeBoundsRect,
+          edge,
+          edgeTol
+        );
 
         const boundKey = `bound_${rule.id}_${subject.id}`;
         if (hitEdge) {
           if (canRuleFireWithGate(rule, now, RULE_COOLDOWN_MS, { cooldownKey: boundKey, edgeKey: boundKey, useEdgeGating: true })) {
             recordRuleFired(rule, now, { cooldownKey: boundKey, edgeKey: boundKey });
             const boundaryPt: Position = {
-              x: hitLeft && (edge === 'left' || edge === 'any') ? 0 : hitRight && (edge === 'right' || edge === 'any') ? sceneW : Math.round(wb.centerX),
-              y: hitTop && (edge === 'top' || edge === 'any') ? 0 : hitBottom && (edge === 'bottom' || edge === 'any') ? sceneH : Math.round(wb.centerY),
+              x: hitLeft && (edge === 'left' || edge === 'any')
+                ? Math.round(activeBoundsRect.x)
+                : hitRight && (edge === 'right' || edge === 'any')
+                ? Math.round(activeBoundsRect.x + activeBoundsRect.width)
+                : Math.round(wb.centerX),
+              y: hitTop && (edge === 'top' || edge === 'any')
+                ? Math.round(activeBoundsRect.y)
+                : hitBottom && (edge === 'bottom' || edge === 'any')
+                ? Math.round(activeBoundsRect.y + activeBoundsRect.height)
+                : Math.round(wb.centerY),
             };
             executeRuleActions(rule.actions, {
               subject: effectiveSubject,

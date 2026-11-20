@@ -94,3 +94,11 @@
   - **Espace Monde Unifié pour la Physique & Conversions Pointeur** : Les murs Matter.js, le culling viewport (`isEntityVisibleInCameraViewport`), le spawn aléatoire et les règles `boundary` utilisent `resolveWorldBounds(sceneBounds, camera)`, tandis que `screenToWorldPoint` / `worldToScreenPoint` assurent une précision au pixel près des clics, drags, colliders tournés et captures sur canvas même sous zoom et pan.
   - **Rétrocompatibilité par défaut** : Toute scène sans configuration explicite reste en `worldMode: 'viewport'` (`camera: (0, 0, zoom=1)`), les calques de fond créés restent à `parallaxFactor: 0` (fixes) et les calques décor/entités à `1`, garantissant un comportement strictement identique aux projets existants.
 
+## ADR-014 : Collisions Directionnelles Carrées, `rotate_drag` Pur & Transition Push par Instantané
+- **Date :** 2026-11-20
+- **Contexte :** Enrichir le gameplay plateforme/arcade et l'ergonomie sans régression (détection de face sur collision carrée, plateformes traversables par le bas, cadran rotatif au drag, transition de scène *Push* poussant réellement l'ancienne scène).
+- **Décisions :**
+  - **Solveurs purs isolés (`patrolSolver.ts`, `rotateDragSolver.ts`, `collisionHelpers.ts`)** : Conserver toute la logique mathématique de patrouille (1D symétrique/aller simple, waypoints, sondage du vide `detectLedgesAheadFromSolids`), de cadran rotatif au drag (circulaire déplié sans saut `±180°`, linéaire X/Y, ressort/crans) et de détection directionnelle AABB (`detectSquareCollisionSide` par profondeur de pénétration et pré-positionnement) en fonctions pures testables hors Matter.js.
+  - **Cache d'instantané DOM léger (`transitionSnapshotCache.ts`)** : Capturer une vignette/instantané visuel de la scène sortante juste avant `changeSceneInPlay` afin que les transitions `push_left / push_right / push_up / push_down` animent simultanément la scène sortante poussée et la scène entrante sans maintenir deux instances du moteur physique en parallèle.
+  - **Identification interne stable, libellés propres** : Les IDs internes restent inchangés tandis que la création et les sélecteurs n'ajoutent plus de suffixe `#N` automatique ni n'exposent de types techniques bruts (`custom_*`) dans l'interface.
+

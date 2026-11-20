@@ -9,6 +9,7 @@ import {
   Heart,
   Move,
   Repeat,
+  RotateCw,
   Shield,
   Shuffle,
   SlidersHorizontal,
@@ -35,6 +36,7 @@ import {
   ParticleEmitterBehaviorConfig,
   PatrolBehaviorConfig,
   PhysicsBehaviorConfig,
+  RotateDragBehaviorConfig,
   SliderBehaviorConfig,
   StrokeWiggleBehaviorConfig,
   WanderingBehaviorConfig,
@@ -297,6 +299,33 @@ export function createDefaultBehaviorConfig(type: BehaviorType, entity: Entity):
         outputMax: 100,
         showTrackInPlay: true,
       } as SliderBehaviorConfig;
+    case 'rotate_drag':
+      return {
+        id: generateBehaviorId('rotate_drag'),
+        type: 'rotate_drag',
+        enabled: true,
+        gestureMode: 'circular',
+        dragMode: 'physics_spring',
+        sensitivity: 0.85,
+        dragStiffness: 240,
+        dragDamping: 16,
+        inertiaDamping: 4,
+        limitRange: true,
+        minAngle: -135,
+        maxAngle: 135,
+        boundaryBounce: 0.3,
+        steps: 0,
+        stepAngleDeg: 30,
+        stepMode: 'magnetic',
+        magneticStrength: 140,
+        returnMode: 'none',
+        restAngle: 0,
+        returnStiffness: 140,
+        returnDamping: 12,
+        outputMin: 0,
+        outputMax: 100,
+        showDialInPlay: true,
+      } as RotateDragBehaviorConfig;
   }
 }
 
@@ -338,6 +367,8 @@ export function getBehaviorIcon(type: BehaviorType): React.ReactNode {
       return <Waves className="w-4 h-4 text-cyan-600" />;
     case 'slider':
       return <SlidersHorizontal className="w-4 h-4 text-sky-600" />;
+    case 'rotate_drag':
+      return <RotateCw className="w-4 h-4 text-amber-600" />;
   }
 }
 
@@ -379,5 +410,7 @@ export function getBehaviorTitle(type: BehaviorType): string {
       return 'Wiggle des Traits (Ligne Vivante)';
     case 'slider':
       return 'Slider & Glissière Contrainte';
+    case 'rotate_drag':
+      return 'Cadran Rotatif au Drag (Volant)';
   }
 }

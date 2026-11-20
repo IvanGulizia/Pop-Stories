@@ -105,7 +105,8 @@ export type BehaviorType =
   | 'health'
   | 'jiggle'
   | 'stroke_wiggle'
-  | 'slider';
+  | 'slider'
+  | 'rotate_drag';
 
 export interface BaseBehaviorConfig {
   id: string;
@@ -124,6 +125,7 @@ export interface PhysicsBehaviorConfig extends BaseBehaviorConfig {
   isTrigger?: boolean;   // false = solide avec rebond/blocage physique, true = trigger/fantôme
   isStatic?: boolean;    // true = obstacle fixe infranchissable
   freezeRotation?: boolean; // Rigidbody2D Freeze Rotation (empêche la rotation sous les chocs)
+  oneWayPlatform?: boolean; // Plateforme traversable par le bas (atterrissage uniquement par le haut)
 }
 
 export interface AutoDestroyBehaviorConfig extends BaseBehaviorConfig {
@@ -207,16 +209,37 @@ export interface MoveToBehaviorConfig extends BaseBehaviorConfig {
   flipInvert?: boolean;
 }
 
+export type PatrolMode = 'symmetric' | 'one_way_return' | 'waypoints';
+export type PatrolWaypointLoopMode = 'ping_pong' | 'loop';
+
+export interface PatrolWaypoint {
+  id: string;
+  mode?: 'position' | 'entity';
+  x: number;
+  y: number;
+  entityId?: EntityId;
+  pauseDuration?: number;
+  pauseSec?: number;
+}
+
 export interface PatrolBehaviorConfig extends BaseBehaviorConfig {
   type: 'patrol';
   axis: 'horizontal' | 'vertical';
   range: number;       // px, default 120
   speed: number;       // px/s, default 100
   pauseDuration: number; // seconds, default 0.5
+  pauseAtEnds?: number;  // seconds at each end (optional alias)
   acceleration?: number; // 0.05..1 (réactivité aux demi-tours)
   damping?: number;      // 0..0.99 (inertie en pause)
   flipOnMove?: boolean;
   flipInvert?: boolean;
+  patrolMode?: PatrolMode;                // 'symmetric' [-range, +range], 'one_way_return' [0, +range], 'waypoints'
+  waypoints?: PatrolWaypoint[];
+  waypointLoopMode?: PatrolWaypointLoopMode; // 'ping_pong' | 'loop'
+  turnOnWall?: boolean;                   // Demi-tour sur collision mur/obstacle
+  detectLedges?: boolean;                 // Détection du vide / bord de plateforme
+  ledgeCheckDepth?: number;               // Profondeur de sonde vers le bas en px (défaut 28)
+  initialDirection?: 1 | -1;              // Sens initial (défaut 1)
 }
 
 export interface WanderingBehaviorConfig extends BaseBehaviorConfig {
@@ -263,6 +286,7 @@ export interface BoundaryBehaviorConfig extends BaseBehaviorConfig {
   type: 'boundary_behavior';
   mode: 'bounce' | 'wrap' | 'clamp';
   bounciness?: number; // 0..1, default 0.8
+  boundarySpace?: 'world' | 'viewport'; // 'world' = niveau complet (défaut), 'viewport' = cadre visible caméra
 }
 
 export type ParticleShape = 'circle' | 'square' | 'spark' | 'star' | 'custom';
@@ -325,8 +349,18 @@ export interface HealthBehaviorConfig extends BaseBehaviorConfig {
   recoverStateId?: StateId;
   knockbackForce?: number;
   showHealthBar?: boolean;
-  onDeath: 'destroy' | 'change_state' | 'none';
+  vulnerableTop?: boolean;           // défaut true (false = immunisé par le haut, style Goomba)
+  vulnerableBottom?: boolean;        // défaut true
+  vulnerableLeft?: boolean;          // défaut true
+  vulnerableRight?: boolean;         // défaut true
+  immuneTopWhenFalling?: boolean;    // si true, immunisé en haut quand l'attaquant descend (vy > 0)
+  onDeath: 'destroy' | 'change_state' | 'none' | 'restart_scene' | 'change_scene';
   deathStateId?: StateId;
+  deathDelaySec?: number;            // délai en secondes avant reload/change_scene (défaut 0)
+  deathTargetSceneId?: string;       // scène cible si onDeath === 'change_scene'
+  deathSceneTransition?: SceneTransitionType;
+  deathSceneTransitionDuration?: number;
+  disableControlsOnDeath?: boolean;  // bloque contrôles/colliders durant le délai de mort (défaut true)
 }
 
 export interface InteractivePuppetDragOverRule {
@@ -415,7 +449,8 @@ export type EntityBehavior =
   | HealthBehaviorConfig
   | JiggleBehaviorConfig
   | StrokeWiggleBehaviorConfig
-  | SliderBehaviorConfig;
+  | SliderBehaviorConfig
+  | RotateDragBehaviorConfig;
 
 export interface EntityPivot {
   x: number; // normalisé 0..1 (0.5 = centre horizontal)
@@ -486,6 +521,39 @@ export interface SliderBehaviorConfig extends BaseBehaviorConfig {
   outputMin?: number;        // Borne min de sortie (défaut 0 en 1D, -1 en 2D)
   outputMax?: number;        // Borne max de sortie (défaut 100 en 1D, 1 en 2D)
   showTrackInPlay?: boolean; // Afficher le rail / zone de glissière en Mode Play (défaut true)
+}
+
+export type RotateDragGestureMode = 'circular' | 'linear_x' | 'linear_y';
+export type RotateDragBehaviorMode = 'direct' | 'physics_spring';
+export type RotateDragStepMode = 'strict' | 'magnetic';
+export type RotateDragReturnMode = 'none' | 'spring_return';
+
+export interface RotateDragBehaviorConfig extends BaseBehaviorConfig {
+  type: 'rotate_drag';
+  gestureMode: RotateDragGestureMode;   // 'circular' | 'linear_x' | 'linear_y'
+  dragMode: RotateDragBehaviorMode;     // 'direct' | 'physics_spring'
+  sensitivity?: number;                 // Degrés par pixel en mode linéaire (défaut 0.85)
+  dragStiffness?: number;               // Raideur ressort curseur (défaut 240)
+  dragDamping?: number;                 // Amortissement en mode physique (défaut 16)
+  inertiaDamping?: number;              // Freinage en roue libre après relâchement (défaut 4)
+  limitRange?: boolean;                 // Activer butées min/max en degrés
+  minAngle?: number;                    // Butée min en degrés (défaut -135)
+  maxAngle?: number;                    // Butée max en degrés (défaut 135)
+  boundaryBounce?: number;              // Rebond sur les butées 0..0.95 (défaut 0.3)
+  steps?: number;                       // Nombre de crans (0 = continu, >=2 = N crans dans la plage, sinon stepAngleDeg)
+  stepAngleDeg?: number;                // Pas en degrés si rotation libre infinie (défaut 30)
+  stepMode?: RotateDragStepMode;        // 'strict' | 'magnetic'
+  magneticStrength?: number;            // Force d'aimantation vers les crans (défaut 140)
+  returnMode?: RotateDragReturnMode;    // 'none' | 'spring_return'
+  restAngle?: number;                   // Angle de repos en degrés (défaut 0)
+  returnStiffness?: number;             // Raideur du ressort de retour (défaut 140)
+  returnDamping?: number;               // Amortissement du ressort de retour (défaut 12)
+  outputAngleVariable?: string;         // Variable écrite : angle courant en degrés
+  outputNormalizedVariable?: string;    // Variable écrite : 0..1 (si borné) ou tours
+  outputStepVariable?: string;          // Variable écrite : index du cran courant
+  outputMin?: number;                   // Borne min mappée (défaut 0)
+  outputMax?: number;                   // Borne max mappée (défaut 100)
+  showDialInPlay?: boolean;             // Afficher le cadran/arc repère en Play (défaut true)
 }
 
 export type BehaviorOverride = {
@@ -619,7 +687,8 @@ export type TriggerType =
   | 'proximity'
   | 'boundary'
   | 'variable'
-  | 'joint_break';
+  | 'joint_break'
+  | 'camera_follow';
 
 export type TriggerPhase =
   | 'click'             // Clic complet (sans drag)
@@ -642,9 +711,11 @@ export type TriggerPhase =
   | 'state_enter'       // Passage à un état
   | 'proximity_enter'   // Approche / Proximité
   | 'boundary_hit'      // Contact bord de scène
-  | 'joint_break';      // Rupture d'un joint d'attachement
+  | 'joint_break'       // Rupture d'un joint d'attachement
+  | 'camera_follow';    // La caméra commence à suivre une entité
 
 export type SelectionMode = 'type' | 'tag' | 'instance' | 'any';
+export type CollisionSideFilter = 'any' | 'top' | 'bottom' | 'left' | 'right' | 'horizontal' | 'vertical';
 
 export interface RuleTrigger {
   type: TriggerType;
@@ -653,7 +724,10 @@ export interface RuleTrigger {
   autoRevert?: boolean;   // Restauration automatique de l'état initial lors de la fin d'événement (Hover Exit, Mouse Up, Key Up, etc.)
   collisionExitMargin?: number;   // Marge d'hystérésis supplémentaire (px) exigée pour quitter la collision (anti-scintillement)
   collisionTriggerOnce?: boolean; // Si true, la collision ne se déclenche qu'une seule fois par paire pendant la session Play
-  
+  collisionSide?: CollisionSideFilter;       // Côté du contact (haut/bas/gauche/droite/horizontal/vertical)
+  collisionSideTarget?: 'subject' | 'target'; // Entité de référence du côté (défaut 'subject')
+  collisionRequireDownward?: boolean;        // Exiger une vitesse descendante du sujet (écrasement style Goomba)
+
   // Sujet (Qui déclenche)
   subjectMode?: SelectionMode; // 'type', 'tag' ou 'instance'
   subjectId?: EntityId;        // Si mode = 'instance'
@@ -673,13 +747,15 @@ export interface RuleTrigger {
   timerType?: 'once' | 'repeat'; // 'once' (après X sec) | 'repeat' (toutes les X sec)
 
   // Configuration Touche Clavier
-  keyName?: string;             // 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' | 'Space' | 'Enter' | 'a' | 'w' | 's' | 'd'
+  keyName?: string;             // 'ArrowUp' | 'Space' | 'Enter' | 'a' | 'F1' | 'Any' ...
+  keyCode?: string;             // optionnel : code physique (ex: 'Digit1')
 
   // Configuration Proximité / Distance
   proximityDistance?: number;   // pixels en rayon (ex: 60, 100)
 
-  // Configuration Bords de Scène
+  // Configuration Bords de Scène / Monde
   boundaryEdge?: 'any' | 'top' | 'bottom' | 'left' | 'right';
+  boundarySpace?: 'world' | 'viewport'; // 'world' = limites du niveau (défaut), 'viewport' = cadre visible caméra
 
   // Configuration Compteur / Variables
   variableName?: string;        // 'score' | 'slider_x' | ...
@@ -704,6 +780,10 @@ export type SceneTransitionType =
   | 'slide_right'
   | 'slide_up'
   | 'slide_down'
+  | 'push_left'
+  | 'push_right'
+  | 'push_up'
+  | 'push_down'
   | 'iris'
   | 'iris_white'
   | 'wipe_left'

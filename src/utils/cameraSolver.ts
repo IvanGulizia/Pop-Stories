@@ -84,6 +84,19 @@ export function resolveWorldBounds(viewportBounds: Size, camera?: SceneCameraCon
   return { width: ww, height: wh };
 }
 
+export function getVisibleWorldRect(
+  camera: SimpleCameraView,
+  viewport: Size
+): { x: number; y: number; width: number; height: number } {
+  const safeZoom = clampCameraZoom(camera.zoom);
+  return {
+    x: camera.x || 0,
+    y: camera.y || 0,
+    width: Math.max(100, viewport.width || 800) / safeZoom,
+    height: Math.max(100, viewport.height || 500) / safeZoom,
+  };
+}
+
 export function screenToWorldPoint(
   clientX: number,
   clientY: number,
@@ -175,6 +188,20 @@ export function resolveCameraFollowTarget(
     );
   }
   return null;
+}
+
+export function getActiveCameraFollowTarget(
+  entities: Record<string, Entity>,
+  config?: SceneCameraConfig,
+  followOverride?: CameraFollowTargetSpec | null
+): Entity | null {
+  const activeSpec: CameraFollowTargetSpec = followOverride || {
+    mode: config?.followMode || 'none',
+    entityId: config?.followEntityId,
+    entityType: config?.followEntityType,
+    tag: config?.followTag,
+  };
+  return resolveCameraFollowTarget(entities, activeSpec);
 }
 
 export function clampCameraPosition(

@@ -3,6 +3,7 @@ import { ArrowRight, ChevronRight } from 'lucide-react';
 import { WizardData } from './ruleBookTypes';
 import { useSceneStore, EMPTY_RECORD } from '../../store/useSceneStore';
 import { TriggerLimitsSection } from './TriggerLimitsSection';
+import { KeyboardKeySelector } from './KeyboardKeySelector';
 
 interface WizardStep1ConditionProps {
   activeWizard: WizardData;
@@ -52,43 +53,20 @@ export function WizardStep1Condition({
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
-          {[
-            { key: 'Space', label: "Barre d'Espace", icon: '🚀' },
-            { key: 'ArrowUp', label: 'Flèche Haut ⬆️', icon: '⬆️' },
-            { key: 'ArrowDown', label: 'Flèche Bas ⬇️', icon: '⬇️' },
-            { key: 'ArrowLeft', label: 'Flèche Gauche ⬅️', icon: '⬅️' },
-            { key: 'ArrowRight', label: 'Flèche Droite ➡️', icon: '➡️' },
-            { key: 'Enter', label: 'Touche Entrée ↩️', icon: '↩️' },
-            { key: 'z', label: 'Touche Z (Avancer)', icon: '⌨️' },
-            { key: 'q', label: 'Touche Q (Gauche)', icon: '⌨️' },
-            { key: 's', label: 'Touche S (Reculer)', icon: '⌨️' },
-            { key: 'd', label: 'Touche D (Droite)', icon: '⌨️' },
-            { key: 'any', label: 'N’importe quelle touche', icon: '🌟' },
-          ].map((k) => (
-            <button
-              key={k.key}
-              type="button"
-              onClick={() => {
-                setActiveWizard({
-                  ...activeWizard,
-                  triggerType: 'keyboard',
-                  keyName: k.key,
-                  step: 3,
-                  actionSubStep: 'main',
-                });
-              }}
-              className="p-4 bg-slate-50 hover:bg-indigo-50 border-2 border-slate-200 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-xs group active:scale-95"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-3xl shadow-2xs group-hover:scale-110 transition-transform">
-                {k.icon}
-              </div>
-              <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700 text-center">
-                {k.label}
-              </div>
-            </button>
-          ))}
-        </div>
+        <KeyboardKeySelector
+          keyName={activeWizard.keyName || 'Space'}
+          keyCode={activeWizard.keyCode}
+          onSelect={(kName, kCode) =>
+            setActiveWizard({
+              ...activeWizard,
+              triggerType: 'keyboard',
+              keyName: kName,
+              keyCode: kCode,
+              step: 3,
+              actionSubStep: 'main',
+            })
+          }
+        />
       </div>
     );
   }
@@ -158,26 +136,17 @@ export function WizardStep1Condition({
         {activeWizard.triggerType === 'keyboard' && (
           <div className="space-y-4">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Touche à détecter :</label>
-              <select
-                value={activeWizard.keyName || 'Space'}
-                onChange={(e) => setActiveWizard({ ...activeWizard, keyName: e.target.value })}
-                className="w-full text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2.5 outline-none cursor-pointer"
-              >
-                <option value="Space">Touche Espace (Spacebar)</option>
-                <option value="ArrowUp">↑ Flèche Haut</option>
-                <option value="ArrowDown">↓ Flèche Bas</option>
-                <option value="ArrowLeft">← Flèche Gauche</option>
-                <option value="ArrowRight">→ Flèche Droite</option>
-                <option value="Enter">Touche Entrée</option>
-                <option value="z">Touche Z</option>
-                <option value="q">Touche Q</option>
-                <option value="a">Touche A</option>
-                <option value="w">Touche W</option>
-                <option value="s">Touche S</option>
-                <option value="d">Touche D</option>
-                <option value="any">N'importe quelle touche</option>
-              </select>
+              <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                Touche à détecter (saisie directe ou liste complète) :
+              </label>
+              <KeyboardKeySelector
+                compact
+                keyName={activeWizard.keyName || 'Space'}
+                keyCode={activeWizard.keyCode}
+                onSelect={(kName, kCode) =>
+                  setActiveWizard({ ...activeWizard, keyName: kName, keyCode: kCode })
+                }
+              />
             </div>
 
             <div>
@@ -314,17 +283,46 @@ export function WizardStep1Condition({
           </div>
         )}
 
-        {/* 5. Bord de Scène */}
+        {/* 5. Bord de Scène / Cadre Caméra */}
         {activeWizard.triggerType === 'boundary' && (
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Bord de scène à contacter :</label>
+              <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                Référentiel des bords :
+              </label>
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveWizard({ ...activeWizard, boundarySpace: 'world' })}
+                  className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                    (activeWizard.boundarySpace || 'world') === 'world'
+                      ? 'bg-rose-50 border-rose-500 text-rose-800 shadow-2xs'
+                      : 'bg-white border-slate-200 text-slate-600'
+                  }`}
+                >
+                  🌍 Bords du Monde (Scène entière)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveWizard({ ...activeWizard, boundarySpace: 'viewport' })}
+                  className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                    activeWizard.boundarySpace === 'viewport'
+                      ? 'bg-rose-50 border-rose-500 text-rose-800 shadow-2xs'
+                      : 'bg-white border-slate-200 text-slate-600'
+                  }`}
+                >
+                  🖼️ Bords du Cadre (Caméra visible)
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-700 block mb-1">Bord à contacter :</label>
               <select
                 value={activeWizard.boundaryEdge || 'any'}
                 onChange={(e) => setActiveWizard({ ...activeWizard, boundaryEdge: e.target.value as any })}
                 className="w-full text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2.5 outline-none cursor-pointer"
               >
-                <option value="any">N'importe quel bord</option>
+                <option value="any">N&apos;importe quel bord</option>
                 <option value="top">Bord Haut</option>
                 <option value="bottom">Bord Bas</option>
                 <option value="left">Bord Gauche</option>
@@ -334,9 +332,59 @@ export function WizardStep1Condition({
           </div>
         )}
 
-        {/* 6. Collision anti-boucle */}
+        {/* 6. Collision directionnelle & anti-boucle */}
         {activeWizard.triggerType === 'collision' && (
           <div className="space-y-3 bg-indigo-50/60 p-4 rounded-2xl border border-indigo-200/80">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label className="text-[11px] font-bold text-indigo-900 block mb-1">
+                  Côté de contact :
+                </label>
+                <select
+                  value={activeWizard.collisionSide || 'any'}
+                  onChange={(e) =>
+                    setActiveWizard({ ...activeWizard, collisionSide: e.target.value as any })
+                  }
+                  className="w-full text-xs font-bold bg-white text-slate-900 border border-indigo-200 rounded-xl px-2.5 py-2 outline-none cursor-pointer"
+                >
+                  <option value="any">Tous les côtés</option>
+                  <option value="top">↑ Par le Haut</option>
+                  <option value="bottom">↓ Par le Bas</option>
+                  <option value="left">← Par la Gauche</option>
+                  <option value="right">→ Par la Droite</option>
+                  <option value="horizontal">↔ Horizontal (Gauche/Droite)</option>
+                  <option value="vertical">↕ Vertical (Haut/Bas)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-indigo-900 block mb-1">
+                  Face mesurée sur :
+                </label>
+                <select
+                  value={activeWizard.collisionSideTarget || 'subject'}
+                  onChange={(e) =>
+                    setActiveWizard({ ...activeWizard, collisionSideTarget: e.target.value as any })
+                  }
+                  className="w-full text-xs font-bold bg-white text-slate-900 border border-indigo-200 rounded-xl px-2.5 py-2 outline-none cursor-pointer"
+                >
+                  <option value="subject">Le Sujet</option>
+                  <option value="target">La Cible</option>
+                </select>
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 text-xs font-bold text-indigo-900 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={Boolean(activeWizard.collisionRequireDownward)}
+                onChange={(e) =>
+                  setActiveWizard({ ...activeWizard, collisionRequireDownward: e.target.checked })
+                }
+                className="rounded border-indigo-300 text-indigo-600"
+              />
+              <span>Exiger un mouvement descendant (écrasement par le haut)</span>
+            </label>
+
             <label className="flex items-center justify-between gap-2 text-xs font-bold text-indigo-900">
               <span>Marge anti-rebond de sortie (px) :</span>
               <input
@@ -585,42 +633,82 @@ export function WizardStep1Condition({
           </button>
         </div>
 
-        {/* Options anti-boucle Collision */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-indigo-200/70">
-          <label className="flex items-center gap-2 text-[11px] font-bold text-indigo-900">
-            <span>Marge anti-rebond sortie :</span>
-            <input
-              type="number"
-              min={0}
-              max={60}
-              step={2}
-              value={activeWizard.collisionExitMargin ?? 10}
-              onChange={(e) =>
+        {/* Options directionnelles & anti-boucle Collision */}
+        <div className="space-y-2 pt-2 border-t border-indigo-200/70">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <label className="flex items-center gap-2 text-[11px] font-bold text-indigo-900">
+              <span>Marge anti-rebond sortie :</span>
+              <input
+                type="number"
+                min={0}
+                max={60}
+                step={2}
+                value={activeWizard.collisionExitMargin ?? 10}
+                onChange={(e) =>
+                  setActiveWizard({
+                    ...activeWizard,
+                    collisionExitMargin: Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)),
+                  })
+                }
+                className="w-14 px-2 py-1 text-center text-xs font-bold bg-white border border-indigo-200 rounded-lg outline-none focus:border-indigo-500"
+              />
+              <span className="text-[10px] text-indigo-600 font-normal">px</span>
+            </label>
+            <button
+              type="button"
+              onClick={() =>
                 setActiveWizard({
                   ...activeWizard,
-                  collisionExitMargin: Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)),
+                  collisionTriggerOnce: !activeWizard.collisionTriggerOnce,
                 })
               }
-              className="w-14 px-2 py-1 text-center text-xs font-bold bg-white border border-indigo-200 rounded-lg outline-none focus:border-indigo-500"
-            />
-            <span className="text-[10px] text-indigo-600 font-normal">px (évite les boucles si l'état change de taille)</span>
-          </label>
-          <button
-            type="button"
-            onClick={() =>
-              setActiveWizard({
-                ...activeWizard,
-                collisionTriggerOnce: !activeWizard.collisionTriggerOnce,
-              })
-            }
-            className={`px-3 py-1.5 rounded-xl text-[11px] font-black border transition-all cursor-pointer ${
-              activeWizard.collisionTriggerOnce
-                ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
-                : 'bg-white text-slate-700 border-indigo-200 hover:bg-indigo-100/60'
-            }`}
-          >
-            {activeWizard.collisionTriggerOnce ? '✓ 1 seule fois par paire' : '1× par paire (Optionnel)'}
-          </button>
+              className={`px-3 py-1.5 rounded-xl text-[11px] font-black border transition-all cursor-pointer ${
+                activeWizard.collisionTriggerOnce
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                  : 'bg-white text-slate-700 border-indigo-200 hover:bg-indigo-100/60'
+              }`}
+            >
+              {activeWizard.collisionTriggerOnce ? '✓ 1 seule fois par paire' : '1× par paire (Optionnel)'}
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={activeWizard.collisionSide || 'any'}
+              onChange={(e) =>
+                setActiveWizard({ ...activeWizard, collisionSide: e.target.value as any })
+              }
+              className="px-2.5 py-1 text-[11px] font-bold bg-white border border-indigo-200 rounded-lg text-slate-800 outline-none cursor-pointer"
+            >
+              <option value="any">Côté : Tous</option>
+              <option value="top">↑ Haut</option>
+              <option value="bottom">↓ Bas</option>
+              <option value="left">← Gauche</option>
+              <option value="right">→ Droite</option>
+              <option value="horizontal">↔ Horizontal</option>
+              <option value="vertical">↕ Vertical</option>
+            </select>
+            <select
+              value={activeWizard.collisionSideTarget || 'subject'}
+              onChange={(e) =>
+                setActiveWizard({ ...activeWizard, collisionSideTarget: e.target.value as any })
+              }
+              className="px-2.5 py-1 text-[11px] font-bold bg-white border border-indigo-200 rounded-lg text-slate-800 outline-none cursor-pointer"
+            >
+              <option value="subject">Mesuré sur : Sujet</option>
+              <option value="target">Mesuré sur : Cible</option>
+            </select>
+            <label className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-900 cursor-pointer ml-auto">
+              <input
+                type="checkbox"
+                checked={Boolean(activeWizard.collisionRequireDownward)}
+                onChange={(e) =>
+                  setActiveWizard({ ...activeWizard, collisionRequireDownward: e.target.checked })
+                }
+                className="rounded border-indigo-300 text-indigo-600"
+              />
+              <span>Chute requise (stomp)</span>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -985,7 +1073,7 @@ export function WizardStep1Condition({
         </div>
 
         <div className="bg-rose-50/50 p-3.5 rounded-2xl border border-rose-200 space-y-2">
-          <div className="text-xs font-black uppercase text-rose-800">🖼️ Bords du Canvas</div>
+          <div className="text-xs font-black uppercase text-rose-800">🖼️ Bords (Monde / Cadre)</div>
           <button
             type="button"
             onClick={() => {
@@ -993,6 +1081,7 @@ export function WizardStep1Condition({
                 ...activeWizard,
                 triggerType: 'boundary',
                 boundaryEdge: 'any',
+                boundarySpace: activeWizard.boundarySpace || 'world',
                 actionSubStep: 'config_event_params',
               });
             }}
@@ -1000,8 +1089,8 @@ export function WizardStep1Condition({
           >
             <span className="text-xl">🖼️</span>
             <div>
-              <div className="text-xs font-black text-slate-900">Touche le Cadre</div>
-              <div className="text-[9px] text-slate-500">Définir le bord à contacter →</div>
+              <div className="text-xs font-black text-slate-900">Touche le Bord</div>
+              <div className="text-[9px] text-slate-500">Monde ou Cadre visible →</div>
             </div>
           </button>
         </div>
@@ -1031,7 +1120,7 @@ export function WizardStep1Condition({
           </button>
         </div>
 
-        <div className="bg-red-50/50 p-3.5 rounded-2xl border border-red-200 space-y-2 sm:col-span-2 lg:col-span-4">
+        <div className="bg-red-50/50 p-3.5 rounded-2xl border border-red-200 space-y-2 sm:col-span-2">
           <div className="text-xs font-black uppercase text-red-800">⛓️‍💥 Rupture de Joint (Break Joint)</div>
           <button
             type="button"
@@ -1052,7 +1141,34 @@ export function WizardStep1Condition({
             <div>
               <div className="text-xs font-black text-slate-900">Quand le joint casse (traction ou secousse)</div>
               <div className="text-[10px] text-slate-500">
-                Ex: feuille arrachée d'une branche, membre détaché — choisissez l'enfant concerné
+                Ex: feuille arrachée d&apos;une branche — choisissez l&apos;enfant concerné
+              </div>
+            </div>
+          </button>
+        </div>
+
+        <div className="bg-teal-50/50 p-3.5 rounded-2xl border border-teal-200 space-y-2 sm:col-span-2">
+          <div className="text-xs font-black uppercase text-teal-800">🎥 Caméra</div>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveWizard({
+                ...activeWizard,
+                triggerType: 'camera_follow',
+                triggerPhase: 'camera_follow',
+                step: 2,
+                objectPhase: 'subject',
+                subjectSubStep: 'choose_object',
+                actionSubStep: 'main',
+              });
+            }}
+            className="w-full p-2.5 bg-white hover:bg-teal-100/70 border border-teal-200 rounded-xl flex items-center gap-2.5 text-left cursor-pointer transition-all shadow-2xs group"
+          >
+            <span className="text-xl">🎥</span>
+            <div>
+              <div className="text-xs font-black text-slate-900">La caméra commence à suivre une entité</div>
+              <div className="text-[10px] text-slate-500">
+                Choisissez l&apos;entité (Sujet) à l&apos;étape 2
               </div>
             </div>
           </button>

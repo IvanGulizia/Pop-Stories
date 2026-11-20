@@ -31,7 +31,11 @@ import {
   Copy,
   Check,
   Camera,
+  Hand,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
+import { clampCameraZoom } from './utils/cameraSolver';
 
 export default function App() {
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
@@ -67,6 +71,11 @@ export default function App() {
   const duplicateScene = useSceneStore((state) => state.duplicateScene);
   const deleteScene = useSceneStore((state) => state.deleteScene);
   const setSceneBackgroundColor = useSceneStore((state) => state.setSceneBackgroundColor);
+  const editorCamera = useSceneStore((state) => state.editorCamera);
+  const setEditorCamera = useSceneStore((state) => state.setEditorCamera);
+  const resetEditorCamera = useSceneStore((state) => state.resetEditorCamera);
+  const editorPanToolActive = useSceneStore((state) => state.editorPanToolActive);
+  const setEditorPanToolActive = useSceneStore((state) => state.setEditorPanToolActive);
 
   // Main UI View States
   const [activeView, setActiveView] = useState<'canvas' | 'rules'>('canvas');
@@ -277,6 +286,7 @@ export default function App() {
         if (st.appMode === 'play') {
           st.setAppMode('edit');
         } else {
+          (document.activeElement as HTMLElement | null)?.blur?.();
           if (st.selectedLayerId) st.selectLayer(null);
           st.setAppMode('play');
           setActiveView('canvas');
@@ -350,12 +360,12 @@ export default function App() {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (e.repeat) return; // Ignore continuous auto-repeat key events
-      useSceneStore.getState().triggerKeyEvent(e.key, 'down');
+      useSceneStore.getState().triggerKeyEvent(e.key, 'down', e.code);
     };
     const handleKeyUp = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      useSceneStore.getState().triggerKeyEvent(e.key, 'up');
+      useSceneStore.getState().triggerKeyEvent(e.key, 'up', e.code);
     };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
@@ -502,6 +512,7 @@ export default function App() {
                 if (appMode === 'play') {
                   setAppMode('edit');
                 } else {
+                  (document.activeElement as HTMLElement | null)?.blur?.();
                   if (selectedLayerId) selectLayer(null);
                   setAppMode('play');
                   setActiveView('canvas');
@@ -859,6 +870,63 @@ export default function App() {
 
               {appMode === 'edit' && (
                 <div className="flex items-center gap-1.5 shrink-0">
+                  {/* Contrôles navigation caméra éditeur (Zoom / Main / Recentrer) */}
+                  <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-white border border-slate-200 rounded-xl text-[11px] font-bold text-slate-700">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditorCamera({ zoom: clampCameraZoom(editorCamera.zoom / 1.2) })
+                      }
+                      className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 cursor-pointer"
+                      title="Dézoomer l'éditeur"
+                    >
+                      <ZoomOut className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditorCamera({ zoom: 1 })}
+                      className="px-1 py-0.5 rounded-lg hover:bg-slate-100 font-mono text-[10px] tabular-nums min-w-[38px] text-center cursor-pointer"
+                      title="Réinitialiser le zoom à 100%"
+                    >
+                      {Math.round(editorCamera.zoom * 100)}%
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditorCamera({ zoom: clampCameraZoom(editorCamera.zoom * 1.2) })
+                      }
+                      className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 cursor-pointer"
+                      title="Zoomer l'éditeur"
+                    >
+                      <ZoomIn className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="w-px h-3.5 bg-slate-200 mx-0.5" />
+                    <button
+                      type="button"
+                      onClick={() => setEditorPanToolActive(!editorPanToolActive)}
+                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[10px] font-bold cursor-pointer transition-colors ${
+                        editorPanToolActive
+                          ? 'bg-sky-600 text-white shadow-2xs'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                      }`}
+                      title="Outil Main : déplacer la vue caméra (ou maintenir Espace / clic molette)"
+                    >
+                      <Hand className="w-3 h-3" />
+                      <span className="hidden md:inline">Main</span>
+                    </button>
+                    {(editorCamera.x !== 0 || editorCamera.y !== 0 || Math.abs(editorCamera.zoom - 1) > 0.01) && (
+                      <button
+                        type="button"
+                        onClick={() => resetEditorCamera()}
+                        className="flex items-center gap-1 px-1.5 py-0.5 ml-0.5 rounded-lg text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 cursor-pointer"
+                        title="Recentrer la vue caméra éditeur (0, 0 · 100%)"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span className="hidden lg:inline">Recentrer</span>
+                      </button>
+                    )}
+                  </div>
+
                   <button
                     type="button"
                     onClick={() => setIsCameraModalOpen(true)}

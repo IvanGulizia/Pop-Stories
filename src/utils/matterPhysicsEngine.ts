@@ -21,9 +21,11 @@ import {
   HealthBehaviorConfig,
   JiggleBehaviorConfig,
   SliderBehaviorConfig,
+  RotateDragBehaviorConfig,
   EntityPivot,
   GrabRotationMode,
   SceneLayer,
+  SceneTransitionType,
 } from '../types';
 import { getEntityColliderBounds, getEntityWorldColliderBounds, resolveColliderState } from './collider';
 import { emitParticlesBurst } from './particleSystem';
@@ -76,6 +78,21 @@ import {
   SliderTrackGeometry,
   stepSliderPhysics,
 } from './physics/sliderSolver';
+import {
+  RotateDragRuntimeState,
+  createRotateDragGrabState,
+  updateRotateDragPointerTarget,
+  stepRotateDragPhysics,
+} from './physics/rotateDragSolver';
+import {
+  PatrolRuntimeState,
+  stepPatrolBehavior,
+  detectLedgeAheadFromSolids,
+} from './physics/patrolSolver';
+import {
+  computeDirectionalCollisionSide,
+  shouldIgnoreOneWayCollision,
+} from '../store/collisionHelpers';
 
 export { getEffectiveBehaviors, isEntityDraggable };
 
@@ -90,7 +107,7 @@ const bodySignatures = new Map<string, string>();
 const colliderLayerBodyMap = new Map<string, Matter.Body[]>();
 const colliderLayerSignatures = new Map<string, string>();
 const boundaryBodies: Matter.Body[] = [];
-const patrolStates = new Map<string, { direction: 1 | -1; timer: number; initialPos: Position }>();
+const patrolStates = new Map<string, PatrolRuntimeState>();
 interface WanderingRuntimeState {
   origin: Position;
   targetPoint: Position | null;
@@ -133,6 +150,12 @@ export function stopKeyboardListening() {
 
 const activePhysicsCollisionPairs = new Set<string>();
 const activePhysicsCollisionContacts = new Map<string, Position>();
+const activePhysicsCollisionNormals = new Map<string, { nx: number; ny: number }>();
+const lastEntityVelocities = new Map<string, { vx: number; vy: number }>();
+const oneWayPlatformIds = new Set<string>();
+const oneWayPassThroughPairs = new Set<string>();
+const prevEntityBottoms = new Map<string, number>();
+const lateralWallHits = new Map<string, { left: boolean; right: boolean; up: boolean; down: boolean }>();
 const groundedEntityIds = new Set<string>();
 const jumpTrackers = new Map<string, { jumpsUsed: number; wasJumpPressed: boolean }>();
 const keyboardMoveInput = new Map<string, boolean>();
@@ -313,6 +336,8 @@ interface HealthRuntimeState {
   preHurtStateId?: string;
   hurtStateId?: string;
   dead: boolean;
+  deathActionTimer?: number;
+  deathActionDispatched?: boolean;
 }
 const healthRuntimeMap = new Map<string, HealthRuntimeState>();
 
@@ -370,6 +395,71 @@ const debugSliderTracks = new Map<
   string,
   { geom: SliderTrackGeometry; config: SliderBehaviorConfig; valueX: number; valueY: number; stepIndex: number }
 >();
+
+const rotateDragStates = new Map<string, RotateDragRuntimeState>();
+const lastRotateDragOutputValues = new Map<string, number>();
+const debugRotateDragTracks = new Map<
+  string,
+  {
+    pivotWorld: Position;
+    angleDeg: number;
+    baseAngleDeg: number;
+    config: RotateDragBehaviorConfig;
+    radius: number;
+    stepIndex: number;
+  }
+>();
+
+export function startRotateDragGrab(params: {
+  entityId: string;
+  pointerWorld: Position;
+  pivotWorld: Position;
+  currentRotationDeg: number;
+  config: RotateDragBehaviorConfig;
+}): boolean {
+  const { entityId, pointerWorld, pivotWorld, currentRotationDeg, config } = params;
+  const existing = rotateDragStates.get(entityId);
+  if (existing) {
+    const updated = createRotateDragGrabState({
+      currentAngleDeg: existing.angleDeg,
+      baseAngleDeg: existing.baseAngleDeg,
+      pivotWorld,
+      pointerWorld,
+      config,
+    });
+    updated.angularVel = existing.angularVel;
+    rotateDragStates.set(entityId, updated);
+    return true;
+  }
+  rotateDragStates.set(
+    entityId,
+    createRotateDragGrabState({
+      currentAngleDeg: 0,
+      baseAngleDeg: currentRotationDeg,
+      pivotWorld,
+      pointerWorld,
+      config,
+    })
+  );
+  return true;
+}
+
+export function updateRotateDragGrabTarget(
+  entityId: string,
+  pointerWorld: Position,
+  pivotWorld: Position,
+  config: RotateDragBehaviorConfig
+): void {
+  const st = rotateDragStates.get(entityId);
+  if (!st || !st.isGrabbed) return;
+  updateRotateDragPointerTarget(st, pointerWorld, pivotWorld, config);
+}
+
+export function endRotateDragGrab(entityId: string): void {
+  const st = rotateDragStates.get(entityId);
+  if (!st) return;
+  st.isGrabbed = false;
+}
 
 export function startSliderGrab(
   entityId: string,
@@ -542,6 +632,17 @@ export function getGizmoRuntimeDebugData(): {
   grabPins: Record<string, { target: Position; grabWorld: Position }>;
   jigglePivots: Record<string, { world: Position; angleDeg: number; restDeg: number; squashX: number; squashY: number }>;
   sliderTracks: Record<string, { geom: SliderTrackGeometry; config: SliderBehaviorConfig; valueX: number; valueY: number; stepIndex: number }>;
+  rotateDragTracks: Record<
+    string,
+    {
+      pivotWorld: Position;
+      angleDeg: number;
+      baseAngleDeg: number;
+      config: RotateDragBehaviorConfig;
+      radius: number;
+      stepIndex: number;
+    }
+  >;
 } {
   const wanderOrigins: Record<string, { origin: Position; targetPoint: Position | null }> = {};
   wanderingStates.forEach((v, k) => {
@@ -549,7 +650,7 @@ export function getGizmoRuntimeDebugData(): {
   });
   const patrolOrigins: Record<string, Position> = {};
   patrolStates.forEach((v, k) => {
-    patrolOrigins[k] = v.initialPos;
+    patrolOrigins[k] = v.originCenter;
   });
   const lookAtTargets: Record<string, Position> = {};
   debugLookAtTargets.forEach((v, k) => {
@@ -581,6 +682,20 @@ export function getGizmoRuntimeDebugData(): {
   debugSliderTracks.forEach((v, k) => {
     sliderTracks[k] = v;
   });
+  const rotateDragTracks: Record<
+    string,
+    {
+      pivotWorld: Position;
+      angleDeg: number;
+      baseAngleDeg: number;
+      config: RotateDragBehaviorConfig;
+      radius: number;
+      stepIndex: number;
+    }
+  > = {};
+  debugRotateDragTracks.forEach((v, k) => {
+    rotateDragTracks[k] = v;
+  });
   return {
     wanderOrigins,
     patrolOrigins,
@@ -590,6 +705,7 @@ export function getGizmoRuntimeDebugData(): {
     grabPins,
     jigglePivots,
     sliderTracks,
+    rotateDragTracks,
   };
 }
 
@@ -646,6 +762,38 @@ export function getPhysicsCollisionContact(idA: string, idB: string): Position |
   return activePhysicsCollisionContacts.get(`${idA}:::${idB}`);
 }
 
+export function getPhysicsCollisionContactInfo(
+  idA: string,
+  idB: string
+):
+  | {
+      contact?: Position;
+      nx: number;
+      ny: number;
+      vxA: number;
+      vyA: number;
+      vxB: number;
+      vyB: number;
+    }
+  | undefined {
+  const normal = activePhysicsCollisionNormals.get(`${idA}:::${idB}`);
+  const velA = lastEntityVelocities.get(idA) || { vx: 0, vy: 0 };
+  const velB = lastEntityVelocities.get(idB) || { vx: 0, vy: 0 };
+  const contact = activePhysicsCollisionContacts.get(`${idA}:::${idB}`);
+  if (!normal && !contact && !lastEntityVelocities.has(idA) && !lastEntityVelocities.has(idB)) {
+    return undefined;
+  }
+  return {
+    contact,
+    nx: normal?.nx ?? 0,
+    ny: normal?.ny ?? 0,
+    vxA: velA.vx,
+    vyA: velA.vy,
+    vxB: velB.vx,
+    vyB: velB.vy,
+  };
+}
+
 /**
  * Vérifie si une entité entre en contact avec un calque Collider de décor (via Matter.js ou géométrie exacte des segments).
  */
@@ -685,6 +833,12 @@ export function resetMatterPhysicsRuntime() {
   activeKeys.clear();
   activePhysicsCollisionPairs.clear();
   activePhysicsCollisionContacts.clear();
+  activePhysicsCollisionNormals.clear();
+  lastEntityVelocities.clear();
+  oneWayPlatformIds.clear();
+  oneWayPassThroughPairs.clear();
+  prevEntityBottoms.clear();
+  lateralWallHits.clear();
   groundedEntityIds.clear();
   jumpTrackers.clear();
   keyboardMoveInput.clear();
@@ -718,6 +872,9 @@ export function resetMatterPhysicsRuntime() {
   sliderStates.clear();
   lastSliderOutputValues.clear();
   debugSliderTracks.clear();
+  rotateDragStates.clear();
+  lastRotateDragOutputValues.clear();
+  debugRotateDragTracks.clear();
   nextNegativeGroupId = -100;
 }
 
@@ -870,6 +1027,12 @@ export interface PhysicsTickResult {
     breakPoint: Position;
     reason: 'force' | 'shake';
   }[];
+  healthDeathSceneAction?: {
+    action: 'restart_scene' | 'change_scene';
+    targetSceneId?: string;
+    transition?: SceneTransitionType;
+    duration?: number;
+  };
 }
 
 function computeLookAtRotationAndFlip(params: {
@@ -911,6 +1074,48 @@ function ensurePhysicsWorld(
 
     const getBodyLabel = (b: Matter.Body) => b.parent?.label || b.label;
 
+    const handleOneWayCheck = (pair: Matter.Pair): boolean => {
+      const idA = getBodyLabel(pair.bodyA);
+      const idB = getBodyLabel(pair.bodyB);
+      if (!idA || !idB) return false;
+      const isAOneWay = oneWayPlatformIds.has(idA);
+      const isBOneWay = oneWayPlatformIds.has(idB);
+      if (!isAOneWay && !isBOneWay) return false;
+      if (pair.bodyA.isSensor || pair.bodyB.isSensor) return false;
+
+      const platBody = isAOneWay ? pair.bodyA : pair.bodyB;
+      const moverBody = isAOneWay ? pair.bodyB : pair.bodyA;
+      const platId = isAOneWay ? idA : idB;
+      const moverId = isAOneWay ? idB : idA;
+      const pairKey = `${moverId}:::${platId}`;
+
+      const ignore = shouldIgnoreOneWayCollision({
+        entityBounds: {
+          x: moverBody.bounds.min.x,
+          y: moverBody.bounds.min.y,
+          width: Math.max(1, moverBody.bounds.max.x - moverBody.bounds.min.x),
+          height: Math.max(1, moverBody.bounds.max.y - moverBody.bounds.min.y),
+        },
+        platformBounds: {
+          x: platBody.bounds.min.x,
+          y: platBody.bounds.min.y,
+          width: Math.max(1, platBody.bounds.max.x - platBody.bounds.min.x),
+          height: Math.max(1, platBody.bounds.max.y - platBody.bounds.min.y),
+        },
+        entityVy: moverBody.velocity.y * 60,
+        prevEntityBottom: prevEntityBottoms.get(moverId),
+        wasPassingThrough: oneWayPassThroughPairs.has(pairKey),
+      });
+
+      if (ignore) {
+        pair.isActive = false;
+        oneWayPassThroughPairs.add(pairKey);
+        return true;
+      }
+      oneWayPassThroughPairs.delete(pairKey);
+      return false;
+    };
+
     const recordContactFromPair = (pair: Matter.Pair) => {
       const idA = getBodyLabel(pair.bodyA);
       const idB = getBodyLabel(pair.bodyB);
@@ -943,7 +1148,22 @@ function ensurePhysicsWorld(
       activePhysicsCollisionContacts.set(`${idA}:::${idB}`, pt);
       activePhysicsCollisionContacts.set(`${idB}:::${idA}`, pt);
 
-      // Détection précise du contact au sol (surfaces solides sous l'entité, jamais les capteurs ni les murs verticaux)
+      // Enregistrer la normale unitaire orientée de A vers B
+      const rawNormal = (pair as any).collision?.normal;
+      let nxAB = rawNormal?.x ?? 0;
+      let nyAB = rawNormal?.y ?? 0;
+      const dxAB = pair.bodyB.position.x - pair.bodyA.position.x;
+      const dyAB = pair.bodyB.position.y - pair.bodyA.position.y;
+      if (dxAB * nxAB + dyAB * nyAB < 0) {
+        nxAB = -nxAB;
+        nyAB = -nyAB;
+      }
+      if (Math.hypot(nxAB, nyAB) > 0.01) {
+        activePhysicsCollisionNormals.set(`${idA}:::${idB}`, { nx: nxAB, ny: nyAB });
+        activePhysicsCollisionNormals.set(`${idB}:::${idA}`, { nx: -nxAB, ny: -nyAB });
+      }
+
+      // Détection précise du contact au sol (surfaces solides sous l'entité) et des murs latéraux (pour Patrouille)
       const bodyA = pair.bodyA;
       const bodyB = pair.bodyB;
       if (!bodyA.isSensor && !bodyB.isSensor) {
@@ -962,12 +1182,36 @@ function ensurePhysicsWorld(
             }
           }
         }
+
+        // Enregistrement des contacts murs / obstacles solides (axe horizontal & vertical)
+        const recordWallHit = (entId: string, dirX: number, dirY: number) => {
+          if (entId.startsWith('boundary_') || entId.startsWith('layercol::')) return;
+          const hit = lateralWallHits.get(entId) || { left: false, right: false, up: false, down: false };
+          if (dirX > 0.65) hit.right = true;
+          if (dirX < -0.65) hit.left = true;
+          if (dirY > 0.65) hit.down = true;
+          if (dirY < -0.65) hit.up = true;
+          lateralWallHits.set(entId, hit);
+        };
+        if (idB === 'boundary_left') recordWallHit(idA, -1, 0);
+        else if (idB === 'boundary_right') recordWallHit(idA, 1, 0);
+        else if (idB === 'boundary_ceiling') recordWallHit(idA, 0, -1);
+        else if (idB === 'boundary_ground') recordWallHit(idA, 0, 1);
+        else if (idA === 'boundary_left') recordWallHit(idB, -1, 0);
+        else if (idA === 'boundary_right') recordWallHit(idB, 1, 0);
+        else if (idA === 'boundary_ceiling') recordWallHit(idB, 0, -1);
+        else if (idA === 'boundary_ground') recordWallHit(idB, 0, 1);
+        else {
+          if (bodyB.isStatic || idB.startsWith('layercol::')) recordWallHit(idA, nxAB, nyAB);
+          if (bodyA.isStatic || idA.startsWith('layercol::')) recordWallHit(idB, -nxAB, -nyAB);
+        }
       }
     };
 
     // Écouteur de collisions pour capture temps-réel et rebond calibré
     Matter.Events.on(engine, 'collisionStart', (event) => {
       event.pairs.forEach((pair) => {
+        if (handleOneWayCheck(pair)) return;
         const idA = getBodyLabel(pair.bodyA);
         const idB = getBodyLabel(pair.bodyB);
         recordContactFromPair(pair);
@@ -986,6 +1230,7 @@ function ensurePhysicsWorld(
 
     Matter.Events.on(engine, 'collisionActive', (event) => {
       event.pairs.forEach((pair) => {
+        if (handleOneWayCheck(pair)) return;
         recordContactFromPair(pair);
       });
     });
@@ -1010,6 +1255,10 @@ function ensurePhysicsWorld(
           activePhysicsCollisionPairs.delete(`${idB}:::${idA}`);
           activePhysicsCollisionContacts.delete(`${idA}:::${idB}`);
           activePhysicsCollisionContacts.delete(`${idB}:::${idA}`);
+          activePhysicsCollisionNormals.delete(`${idA}:::${idB}`);
+          activePhysicsCollisionNormals.delete(`${idB}:::${idA}`);
+          oneWayPassThroughPairs.delete(`${idA}:::${idB}`);
+          oneWayPassThroughPairs.delete(`${idB}:::${idA}`);
         }
       });
     });
@@ -1117,6 +1366,7 @@ function ensurePhysicsWorld(
 
     const physics = effectiveBehaviors.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
     const sliderBeh = effectiveBehaviors.find((b) => b.type === 'slider') as SliderBehaviorConfig | undefined;
+    const rotateDragBeh = effectiveBehaviors.find((b) => b.type === 'rotate_drag') as RotateDragBehaviorConfig | undefined;
     const boundary = effectiveBehaviors.find((b) => b.type === 'boundary_behavior') as BoundaryBehaviorConfig | undefined;
     const hasMovement = effectiveBehaviors.some((b) =>
       ['keyboard_control', 'constant_velocity', 'patrol', 'wandering', 'move_to', 'follow', 'flee'].includes(b.type)
@@ -1127,13 +1377,22 @@ function ensurePhysicsWorld(
       isAttachedChild &&
       (attachMode === 'physics_joint' || (attachMode === 'spring' && entity.parentOffset?.collideWithWorld === true));
 
+    // Enregistrement des plateformes traversables par le bas (one-way)
+    if (physics?.oneWayPlatform && physics?.isStatic && !physics?.isTrigger && colliderMode !== 'trigger_only') {
+      oneWayPlatformIds.add(entity.id);
+    } else {
+      oneWayPlatformIds.delete(entity.id);
+    }
+
     // RÈGLE D'OR : Sans composant physics explicite, l'objet n'a PAS de physique dynamique,
     // SAUF si l'enfant attaché demande explicitement un Joint Physique / collision monde,
     // ou s'il vient de rompre son joint cassable avec chute libre active.
-    // Un objet Slider contraint reste statique/cinématique pour ne pas tomber sous la gravité.
+    // Un objet Slider ou RotateDrag reste statique/cinématique pour ne pas tomber sous la gravité.
     const isBrokenDynamic = brokenJointDynamicIds.has(entity.id);
     let isStatic = true;
     if (sliderBeh && sliderBeh.enabled !== false && !isCollisionAttachedChild) {
+      isStatic = true;
+    } else if (rotateDragBeh && rotateDragBeh.enabled !== false && !isCollisionAttachedChild) {
       isStatic = true;
     } else if (isAttachedChild) {
       isStatic = !isCollisionAttachedChild;
@@ -1374,10 +1633,11 @@ export function stepMatterPhysics(params: {
   entities: Record<string, Entity>;
   deltaTime: number; // en secondes
   canvasBounds: { width: number; height: number };
+  viewportRect?: { x: number; y: number; width: number; height: number };
   mousePos?: { x: number; y: number } | null;
   colliderLayers?: SceneLayer[];
 }): PhysicsTickResult {
-  const { entities, deltaTime, canvasBounds, mousePos, colliderLayers = [] } = params;
+  const { entities, deltaTime, canvasBounds, viewportRect, mousePos, colliderLayers = [] } = params;
   const dt = Math.min(deltaTime, 0.05);
 
   const activeDragEntries = Object.entries(activeDragPositions);
@@ -1402,6 +1662,7 @@ export function stepMatterPhysics(params: {
   const variableUpdates: Record<string, number> = {};
   const brokenJointEvents: NonNullable<PhysicsTickResult['brokenJointEvents']> = [];
   const brokenJointIdSet = new Set<string>();
+  let healthDeathSceneAction: PhysicsTickResult['healthDeathSceneAction'];
   const entityList = Object.values(liveEntities);
   keyboardMoveInput.clear();
   keyboardHorizIntent.clear();
@@ -1411,6 +1672,21 @@ export function stepMatterPhysics(params: {
   debugGrabPins.clear();
   debugJiggleInfos.clear();
   debugSliderTracks.clear();
+  debugRotateDragTracks.clear();
+
+  // Pré-calcul des rectangles solides pour la détection du vide (Patrouille 2.0)
+  const solidRectsForLedge: Array<{ id: string; x: number; y: number; width: number; height: number }> = [];
+  for (const [bId, b] of bodyMap.entries()) {
+    if (b.isStatic && !b.isSensor) {
+      solidRectsForLedge.push({
+        id: bId,
+        x: b.bounds.min.x,
+        y: b.bounds.min.y,
+        width: Math.max(1, b.bounds.max.x - b.bounds.min.x),
+        height: Math.max(1, b.bounds.max.y - b.bounds.min.y),
+      });
+    }
+  }
 
   // Pré-passe : synchroniser / nettoyer les Matter.Constraints des enfants attachés avec collisions monde
   const topoPrepassEntities = sortEntitiesTopologically(liveEntities);
@@ -1664,7 +1940,9 @@ export function stepMatterPhysics(params: {
       continue;
     }
 
-    if (effectiveBehaviors.some((b) => b.type === 'slider' && b.enabled !== false)) {
+    if (
+      effectiveBehaviors.some((b) => (b.type === 'slider' || b.type === 'rotate_drag') && b.enabled !== false)
+    ) {
       continue;
     }
 
@@ -1733,8 +2011,14 @@ export function stepMatterPhysics(params: {
       }
     }
 
+    const healthCfg = effectiveBehaviors.find((b) => b.type === 'health') as HealthBehaviorConfig | undefined;
+    const healthRt = healthCfg ? healthRuntimeMap.get(entity.id) : undefined;
+    const controlsLockedByDeath = Boolean(
+      healthRt?.dead && healthCfg && healthCfg.enabled !== false && healthCfg.disableControlsOnDeath !== false
+    );
+
     // 3. Contrôles Joueur (Clavier)
-    if (keyboard) {
+    if (keyboard && !controlsLockedByDeath) {
       const layout = keyboard.layout || 'both';
       const allowArrows = layout === 'arrows' || layout === 'both';
       const allowWasd = layout === 'wasd' || layout === 'both';
@@ -1834,50 +2118,96 @@ export function stepMatterPhysics(params: {
       }
     }
 
-    // 4. Patrouille
-    if (patrol) {
+    // 4. Patrouille 2.0 (Symétrique, Aller simple, Multi-points, Murs & Vide)
+    if (patrol && !controlsLockedByDeath) {
       let patrolState = patrolStates.get(entity.id);
       if (!patrolState) {
-        patrolState = { direction: 1, timer: 0, initialPos: { ...entity.position } };
+        patrolState = {
+          originCenter: { x: body.position.x, y: body.position.y },
+          direction: 1,
+          timer: 0,
+          waypointIndex: 0,
+          waypointDir: 1,
+          wallTurnCooldown: 0,
+          ledgeTurnCooldown: 0,
+        };
         patrolStates.set(entity.id, patrolState);
       }
 
-      if (patrolState.timer > 0) {
-        patrolState.timer -= dt;
-        const dampStop = patrol.damping ?? 0;
+      const wallHit = lateralWallHits.get(entity.id);
+      let ledgeAhead = false;
+      if (patrol.detectLedges && patrol.axis === 'horizontal' && patrol.patrolMode !== 'waypoints') {
+        const bBounds = {
+          x: body.bounds.min.x,
+          y: body.bounds.min.y,
+          width: Math.max(1, body.bounds.max.x - body.bounds.min.x),
+          height: Math.max(1, body.bounds.max.y - body.bounds.min.y),
+          centerX: body.position.x,
+          centerY: body.position.y,
+          radius: Math.max(body.bounds.max.x - body.bounds.min.x, body.bounds.max.y - body.bounds.min.y) / 2,
+          colliderType: 'box' as const,
+        };
+        const filteredSolids = solidRectsForLedge.filter((r) => r.id !== entity.id);
+        const extraProbeFn =
+          colliderLayers.length > 0
+            ? (px: number, py: number) =>
+                colliderLayers.some((layer) => {
+                  if (layer.colliderIsTrigger) return false;
+                  const probeBounds = {
+                    x: px - 2,
+                    y: py - 2,
+                    width: 4,
+                    height: 4,
+                    centerX: px,
+                    centerY: py,
+                    radius: 2,
+                    colliderType: 'box' as const,
+                  };
+                  return checkEntityAgainstColliderLayer(probeBounds, entity.id, layer, canvasBounds, 2).colliding;
+                })
+            : undefined;
+        ledgeAhead = detectLedgeAheadFromSolids({
+          bounds: bBounds,
+          dirX: patrolState.direction,
+          checkDepth: patrol.ledgeCheckDepth ?? 28,
+          solidRects: filteredSolids,
+          sceneBounds: canvasBounds,
+          extraProbeFn,
+        });
+      }
+
+      const patrolConfigMapped: PatrolBehaviorConfig = {
+        ...patrol,
+        pauseAtEnds: patrol.pauseAtEnds ?? patrol.pauseDuration ?? 0.3,
+      };
+      const stepRes = stepPatrolBehavior({
+        state: patrolState,
+        currentCenter: { x: body.position.x, y: body.position.y },
+        config: patrolConfigMapped,
+        entities: liveEntities,
+        dt,
+        wallHit,
+        ledgeAhead,
+      });
+
+      const targetVx = stepRes.vx / 60;
+      const targetVy = stepRes.vy / 60;
+      const accel = patrol.acceleration;
+      const damp = patrol.damping ?? 0;
+
+      if (stepRes.turned) {
         Body.setVelocity(
           body,
-          patrol.axis === 'horizontal'
-            ? { x: body.velocity.x * dampStop, y: body.velocity.y }
-            : { x: body.velocity.x, y: body.velocity.y * dampStop }
+          stepRes.preserveVerticalVelocity
+            ? { x: body.velocity.x * damp, y: body.velocity.y }
+            : { x: body.velocity.x * damp, y: body.velocity.y * damp }
         );
       } else {
-        const origin = patrolState.initialPos;
-        const range = patrol.range ?? 120;
-        const speed = (patrol.speed ?? 100) / 60; // px/s -> px/frame
-        const pause = patrol.pauseDuration ?? 0.5;
-        const accel = patrol.acceleration;
-        const damp = patrol.damping ?? 0;
-
-        if (patrol.axis === 'horizontal') {
-          const nextVx = approachAxisVelocity(body.velocity.x, patrolState.direction * speed, accel, damp, 0);
-          Body.setVelocity(body, { x: nextVx, y: body.velocity.y });
-          const currentOffset = body.position.x - (origin.x + entity.size.width / 2);
-          if (Math.abs(currentOffset) >= range) {
-            patrolState.direction = currentOffset > 0 ? -1 : 1;
-            patrolState.timer = pause;
-            Body.setVelocity(body, { x: body.velocity.x * damp, y: body.velocity.y });
-          }
-        } else {
-          const nextVy = approachAxisVelocity(body.velocity.y, patrolState.direction * speed, accel, damp, 0);
-          Body.setVelocity(body, { x: body.velocity.x, y: nextVy });
-          const currentOffset = body.position.y - (origin.y + entity.size.height / 2);
-          if (Math.abs(currentOffset) >= range) {
-            patrolState.direction = currentOffset > 0 ? -1 : 1;
-            patrolState.timer = pause;
-            Body.setVelocity(body, { x: body.velocity.x, y: body.velocity.y * damp });
-          }
-        }
+        const nextVx = approachAxisVelocity(body.velocity.x, targetVx, accel, damp, 0);
+        const nextVy = stepRes.preserveVerticalVelocity
+          ? body.velocity.y
+          : approachAxisVelocity(body.velocity.y, targetVy, accel, damp, 0);
+        Body.setVelocity(body, { x: nextVx, y: nextVy });
       }
     }
 
@@ -2316,29 +2646,39 @@ export function stepMatterPhysics(params: {
       flipUpdates.set(entity.id, nextMoveFlip);
     }
 
-    // 8. Gestion des bords de scène spéciaux (Bounce pour sensors, Wrap, Clamp)
+    // 8. Gestion des bords de Monde ou de Cadre Visible (Bounce, Wrap, Clamp)
     if (boundary) {
       const mode = boundary.mode || 'bounce';
+      const space = boundary.boundarySpace || 'world';
+      const box =
+        space === 'viewport' && viewportRect
+          ? viewportRect
+          : { x: 0, y: 0, width: canvasBounds.width, height: canvasBounds.height };
+      const minBoxX = box.x;
+      const minBoxY = box.y;
+      const maxBoxX = box.x + box.width;
+      const maxBoxY = box.y + box.height;
+
       const halfW = Math.max(4, (body.bounds.max.x - body.bounds.min.x) / 2);
       const halfH = Math.max(4, (body.bounds.max.y - body.bounds.min.y) / 2);
-      if (mode === 'bounce' && body.isSensor) {
+      if (mode === 'bounce' && (body.isSensor || space === 'viewport')) {
         const bounceRest = boundary.bounciness ?? 0.8;
         let vx = body.velocity.x;
         let vy = body.velocity.y;
         let nx = body.position.x;
         let ny = body.position.y;
-        if (nx < halfW) {
-          nx = halfW;
+        if (nx < minBoxX + halfW) {
+          nx = minBoxX + halfW;
           vx = Math.abs(vx) * bounceRest;
-        } else if (nx > canvasBounds.width - halfW) {
-          nx = canvasBounds.width - halfW;
+        } else if (nx > maxBoxX - halfW) {
+          nx = maxBoxX - halfW;
           vx = -Math.abs(vx) * bounceRest;
         }
-        if (ny < halfH) {
-          ny = halfH;
+        if (ny < minBoxY + halfH) {
+          ny = minBoxY + halfH;
           vy = Math.abs(vy) * bounceRest;
-        } else if (ny > canvasBounds.height - halfH) {
-          ny = canvasBounds.height - halfH;
+        } else if (ny > maxBoxY - halfH) {
+          ny = maxBoxY - halfH;
           vy = -Math.abs(vy) * bounceRest;
         }
         if (nx !== body.position.x || ny !== body.position.y) {
@@ -2349,20 +2689,20 @@ export function stepMatterPhysics(params: {
         let newX = body.position.x;
         let newY = body.position.y;
 
-        if (body.position.x < -halfW) newX = canvasBounds.width + halfW;
-        else if (body.position.x > canvasBounds.width + halfW) newX = -halfW;
+        if (body.position.x < minBoxX - halfW) newX = maxBoxX + halfW;
+        else if (body.position.x > maxBoxX + halfW) newX = minBoxX - halfW;
 
-        if (body.position.y < -halfH) newY = canvasBounds.height + halfH;
-        else if (body.position.y > canvasBounds.height + halfH) newY = -halfH;
+        if (body.position.y < minBoxY - halfH) newY = maxBoxY + halfH;
+        else if (body.position.y > maxBoxY + halfH) newY = minBoxY - halfH;
 
         if (newX !== body.position.x || newY !== body.position.y) {
           Body.setPosition(body, { x: newX, y: newY });
         }
       } else if (mode === 'clamp') {
-        const minX = halfW;
-        const maxX = Math.max(minX, canvasBounds.width - halfW);
-        const minY = halfH;
-        const maxY = Math.max(minY, canvasBounds.height - halfH);
+        const minX = minBoxX + halfW;
+        const maxX = Math.max(minX, maxBoxX - halfW);
+        const minY = minBoxY + halfH;
+        const maxY = Math.max(minY, maxBoxY - halfH);
 
         const clampedX = Math.max(minX, Math.min(maxX, body.position.x));
         const clampedY = Math.max(minY, Math.min(maxY, body.position.y));
@@ -2383,6 +2723,13 @@ export function stepMatterPhysics(params: {
       });
     }
   }
+
+  // Mémoriser les pieds et vitesses avant Engine.update pour les plateformes traversables & collisions directionnelles
+  for (const [bId, b] of bodyMap.entries()) {
+    prevEntityBottoms.set(bId, b.bounds.max.y);
+    lastEntityVelocities.set(bId, { vx: b.velocity.x * 60, vy: b.velocity.y * 60 });
+  }
+  lateralWallHits.clear();
 
   // Tique d'itération physique du moteur Matter.js avec sous-pas <= 16.666 ms (évite le warning delta > 16.667 ms)
   const totalMs = dt * 1000;
@@ -3040,6 +3387,10 @@ export function stepMatterPhysics(params: {
           (b.type === 'wandering' && !!(b as WanderingBehaviorConfig).orientToMovement)
       );
 
+      const rotateDragBeh = effectiveBehaviors.find((b) => b.type === 'rotate_drag') as
+        | RotateDragBehaviorConfig
+        | undefined;
+
       if (sliderBeh && sliderBeh.enabled !== false) {
         const curCx = entity.position.x + entity.size.width / 2;
         const curCy = entity.position.y + entity.size.height / 2;
@@ -3098,9 +3449,75 @@ export function stepMatterPhysics(params: {
             variableUpdates[varKey] = nextVal;
           }
         }
+      } else if (rotateDragBeh && rotateDragBeh.enabled !== false) {
+        if (sliderStates.has(entity.id)) sliderStates.delete(entity.id);
+        const effPivot = resolveEffectivePivot(entity, currentState, rawPivotOverride, nextFlipX);
+        const pivotWorld = getPivotWorldPosition(entity.position, entity.size, effPivot);
+        let rdState = rotateDragStates.get(entity.id);
+        if (!rdState) {
+          rdState = {
+            baseAngleDeg: currentState?.rotation || 0,
+            angleDeg: 0,
+            angularVel: 0,
+            isGrabbed: false,
+            pivotWorld,
+            grabStartPointer: pivotWorld,
+            lastPointer: pivotWorld,
+            grabStartAngleDeg: 0,
+            lastPointerAngleDeg: 0,
+            targetAngleDeg: 0,
+          };
+          rotateDragStates.set(entity.id, rdState);
+        } else {
+          rdState.pivotWorld = pivotWorld;
+        }
+
+        const rdRes = stepRotateDragPhysics({ state: rdState, config: rotateDragBeh, dt });
+        newRot = Math.round((rdState.baseAngleDeg + rdRes.angleDeg) * 10) / 10;
+
+        if (Math.abs(newRot - (currentState?.rotation || 0)) > 0.05) {
+          pendingRotUpdate = newRot;
+        }
+
+        if (body) {
+          const offset = colliderOffsets.get(entity.id) || {
+            relCenterX: entity.size.width / 2,
+            relCenterY: entity.size.height / 2,
+          };
+          const worldCenter = getBodyWorldCenterFromPivot(
+            entity.position,
+            entity.size,
+            offset.relCenterX,
+            offset.relCenterY,
+            effPivot,
+            newRot
+          );
+          Body.setPosition(body, worldCenter);
+          Body.setAngle(body, (newRot * Math.PI) / 180);
+        }
+
+        debugRotateDragTracks.set(entity.id, {
+          pivotWorld,
+          angleDeg: rdRes.angleDeg,
+          baseAngleDeg: rdState.baseAngleDeg,
+          config: rotateDragBeh,
+          radius: Math.max(36, Math.min(entity.size.width, entity.size.height) * 0.65),
+          stepIndex: rdRes.outputs.stepIndex,
+        });
+
+        for (const [varKey, nextVal] of Object.entries(rdRes.outputs.updates)) {
+          const prevVal = lastRotateDragOutputValues.get(varKey);
+          if (prevVal === undefined || Math.abs(nextVal - prevVal) > 0.005) {
+            lastRotateDragOutputValues.set(varKey, nextVal);
+            variableUpdates[varKey] = nextVal;
+          }
+        }
       } else {
         if (sliderStates.has(entity.id)) {
           sliderStates.delete(entity.id);
+        }
+        if (rotateDragStates.has(entity.id)) {
+          rotateDragStates.delete(entity.id);
         }
 
         const isActivelyDragged = Boolean(activeDragPositions[entity.id]);
@@ -3901,6 +4318,20 @@ export function stepMatterPhysics(params: {
         }
       }
 
+      // Décompte différé de changement / redémarrage de scène après mort
+      if (rt.dead && !rt.deathActionDispatched && (health.onDeath === 'restart_scene' || health.onDeath === 'change_scene')) {
+        rt.deathActionTimer = Math.max(0, (rt.deathActionTimer ?? 0) - dt);
+        if (rt.deathActionTimer <= 0 && !healthDeathSceneAction) {
+          rt.deathActionDispatched = true;
+          healthDeathSceneAction = {
+            action: health.onDeath,
+            targetSceneId: health.deathTargetSceneId,
+            transition: health.deathSceneTransition || 'fade',
+            duration: health.deathSceneTransitionDuration ?? 0.45,
+          };
+        }
+      }
+
       if (!rt.dead && rt.invincibilityTimer <= 0 && health.damageTag) {
         const cleanTag = health.damageTag.toLowerCase().trim().replace(/^#/, '');
         if (cleanTag) {
@@ -3909,6 +4340,23 @@ export function stepMatterPhysics(params: {
             { ...entity, position: { x: newX, y: newY } },
             currentState
           );
+          const selfVy = body ? body.velocity.y * 60 : 0;
+
+          const isSideDamageAllowed = (
+            sideOnSelf: 'top' | 'bottom' | 'left' | 'right',
+            attackerVy: number
+          ): boolean => {
+            if (sideOnSelf === 'top' && health.vulnerableTop === false) return false;
+            if (sideOnSelf === 'bottom' && health.vulnerableBottom === false) return false;
+            if (sideOnSelf === 'left' && health.vulnerableLeft === false) return false;
+            if (sideOnSelf === 'right' && health.vulnerableRight === false) return false;
+            if (health.immuneTopWhenFalling) {
+              // Protège à la fois : (a) l'entité qui tombe sur un danger (pieds) et (b) une entité touchée par le haut par un objet qui tombe
+              if (sideOnSelf === 'bottom' && selfVy > 15) return false;
+              if (sideOnSelf === 'top' && attackerVy > 15) return false;
+            }
+            return true;
+          };
 
           // 1) Vérifier collision avec des entités portant le tag danger
           for (const other of entityList) {
@@ -3920,9 +4368,9 @@ export function stepMatterPhysics(params: {
               activePhysicsCollisionPairs.has(`${entity.id}:::${other.id}`) ||
               activePhysicsCollisionPairs.has(`${other.id}:::${entity.id}`);
 
+            const ob = getEntityWorldColliderBounds(other, other.states[other.currentStateId]);
             let colliding = hasPhysicsContact;
             if (!colliding) {
-              const ob = getEntityWorldColliderBounds(other, other.states[other.currentStateId]);
               if (worldBounds.colliderType === 'circle' && ob.colliderType === 'circle') {
                 const maxR = worldBounds.radius + ob.radius + 2;
                 colliding = Math.hypot(worldBounds.centerX - ob.centerX, worldBounds.centerY - ob.centerY) <= maxR;
@@ -3936,6 +4384,12 @@ export function stepMatterPhysics(params: {
             }
 
             if (colliding) {
+              const contactNormal = activePhysicsCollisionNormals.get(`${entity.id}:::${other.id}`) || null;
+              const sideOnSelf = computeDirectionalCollisionSide(worldBounds, ob, contactNormal);
+              const otherVel = lastEntityVelocities.get(other.id);
+              if (!isSideDamageAllowed(sideOnSelf, otherVel?.vy ?? 0)) {
+                continue;
+              }
               hitHazardCenter = {
                 x: other.position.x + other.size.width / 2,
                 y: other.position.y + other.size.height / 2,
@@ -3951,10 +4405,26 @@ export function stepMatterPhysics(params: {
               if (!lTags.includes(cleanTag)) continue;
               const check = checkEntityAgainstColliderLayer(worldBounds, entity.id, layer, canvasBounds, 2);
               if (check.colliding) {
-                hitHazardCenter = check.contactPoint || {
+                const pt = check.contactPoint || {
                   x: worldBounds.centerX,
                   y: worldBounds.centerY + 12,
                 };
+                const dx = pt.x - worldBounds.centerX;
+                const dy = pt.y - worldBounds.centerY;
+                const halfW = Math.max(1, worldBounds.width / 2);
+                const halfH = Math.max(1, worldBounds.height / 2);
+                const sideOnSelf: 'top' | 'bottom' | 'left' | 'right' =
+                  Math.abs(dy) / halfH >= Math.abs(dx) / halfW
+                    ? dy >= 0
+                      ? 'bottom'
+                      : 'top'
+                    : dx >= 0
+                    ? 'right'
+                    : 'left';
+                if (!isSideDamageAllowed(sideOnSelf, 0)) {
+                  continue;
+                }
+                hitHazardCenter = pt;
                 break;
               }
             }
@@ -3985,12 +4455,24 @@ export function stepMatterPhysics(params: {
               rt.dead = true;
               if (health.onDeath === 'destroy') {
                 entitiesToDestroy.push(entity.id);
-              } else if (
-                health.onDeath === 'change_state' &&
-                health.deathStateId &&
-                entity.states[health.deathStateId]
-              ) {
-                stateChanges[entity.id] = health.deathStateId;
+              } else {
+                if (health.deathStateId && entity.states[health.deathStateId]) {
+                  stateChanges[entity.id] = health.deathStateId;
+                }
+                if (health.onDeath === 'restart_scene' || health.onDeath === 'change_scene') {
+                  const delaySec = Math.max(0, health.deathDelaySec ?? 0);
+                  rt.deathActionTimer = delaySec;
+                  rt.deathActionDispatched = false;
+                  if (delaySec <= 0.01 && !healthDeathSceneAction) {
+                    rt.deathActionDispatched = true;
+                    healthDeathSceneAction = {
+                      action: health.onDeath,
+                      targetSceneId: health.deathTargetSceneId,
+                      transition: health.deathSceneTransition || 'fade',
+                      duration: health.deathSceneTransitionDuration ?? 0.45,
+                    };
+                  }
+                }
               }
             } else {
               rt.invincibilityTimer = Math.max(0.1, health.damageCooldown ?? 1.0);
@@ -4005,11 +4487,18 @@ export function stepMatterPhysics(params: {
       }
     }
 
+    const lockStateByDeath = Boolean(
+      health &&
+        health.enabled !== false &&
+        healthRuntimeMap.get(entity.id)?.dead &&
+        health.disableControlsOnDeath !== false
+    );
+
     // Cas 5 : Character Controller — Liaisons d'états visuels avec garde-fou non-écrasant
     const keyboardCtrl = effectiveBehaviors.find((b) => b.type === 'keyboard_control') as
       | KeyboardControlBehaviorConfig
       | undefined;
-    if (keyboardCtrl && keyboardCtrl.enabled !== false && keyboardCtrl.stateBindings && !stateChanges[entity.id] && body) {
+    if (!lockStateByDeath && keyboardCtrl && keyboardCtrl.enabled !== false && keyboardCtrl.stateBindings && !stateChanges[entity.id] && body) {
       const sb = keyboardCtrl.stateBindings;
       const boundIds = new Set(
         [sb.idleStateId, sb.moveStateId, sb.jumpStateId, sb.fallStateId, sb.landStateId].filter(
@@ -4120,13 +4609,13 @@ export function stepMatterPhysics(params: {
     }
 
     // Cas 6b : Appliquer la transition d'état de la Marionnette Interactive (si non déjà modifiée par Santé/Controller)
-    if (!stateChanges[entity.id] && puppetDesiredStateId && puppetDesiredStateId !== entity.currentStateId) {
+    if (!lockStateByDeath && !stateChanges[entity.id] && puppetDesiredStateId && puppetDesiredStateId !== entity.currentStateId) {
       stateChanges[entity.id] = puppetDesiredStateId;
     }
 
     // Cas 6c : États visuels de Peur / Conscience du curseur sur Flee (garde-fou actif)
     const fleeBeh = effectiveBehaviors.find((b) => b.type === 'flee') as FleeBehaviorConfig | undefined;
-    if (!stateChanges[entity.id] && fleeBeh && fleeBeh.enabled !== false && fleeBeh.stateBindings) {
+    if (!lockStateByDeath && !stateChanges[entity.id] && fleeBeh && fleeBeh.enabled !== false && fleeBeh.stateBindings) {
       const fsb = fleeBeh.stateBindings;
       const fBound = new Set(
         [fsb.calmStateId, fsb.scaredStateId].filter((sid): sid is string => Boolean(sid && entity.states[sid]))
@@ -4179,5 +4668,6 @@ export function stepMatterPhysics(params: {
     ...(Object.keys(stateChanges).length > 0 ? { stateChanges } : {}),
     ...(Object.keys(variableUpdates).length > 0 ? { variableUpdates } : {}),
     ...(brokenJointEvents.length > 0 ? { brokenJointEvents } : {}),
+    ...(healthDeathSceneAction ? { healthDeathSceneAction } : {}),
   };
 }

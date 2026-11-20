@@ -65,6 +65,26 @@ export function PhysicsBehaviorControls({
         />
       </div>
 
+      {/* Ligne 2.5: Plateforme traversable par le bas (One-Way) */}
+      {b.isStatic && !b.isTrigger && (
+        <div className="p-2 bg-emerald-50/50 rounded-xl border border-emerald-200 flex items-center justify-between">
+          <div>
+            <div className="font-bold text-emerald-900 text-xs">Plateforme traversable (One-Way)</div>
+            <div className="text-[10px] text-emerald-700/80">
+              {b.oneWayPlatform
+                ? 'On peut sauter à travers par le bas et atterrir dessus par le haut'
+                : 'Solide sur les 4 côtés (mur / sol plein)'}
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={b.oneWayPlatform === true}
+            onChange={(e) => update({ oneWayPlatform: e.target.checked })}
+            className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+          />
+        </div>
+      )}
+
       {/* Ligne 3: Gravité verticale (seulement si non statique) */}
       {!b.isStatic && (
         <div className="p-2 bg-white rounded-xl border border-slate-200">
@@ -779,8 +799,43 @@ export function BoundaryBehaviorControls({
   b: BoundaryBehaviorConfig;
   update: (partial: any) => void;
 }) {
+  const boundarySpace = b.boundarySpace || 'world';
   return (
     <div className="space-y-1.5">
+      {/* Ligne 0: Référentiel Monde vs Cadre visible */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+        <span className="font-bold text-slate-700 text-xs block">Limites de référence</span>
+        <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-lg">
+          <button
+            type="button"
+            onClick={() => update({ boundarySpace: 'world' })}
+            className={`py-1 px-2 rounded-md text-[10px] font-bold cursor-pointer transition-all ${
+              boundarySpace === 'world'
+                ? 'bg-teal-600 text-white shadow-2xs'
+                : 'text-slate-600 hover:bg-white/70'
+            }`}
+          >
+            🌍 Bords du Monde
+          </button>
+          <button
+            type="button"
+            onClick={() => update({ boundarySpace: 'viewport' })}
+            className={`py-1 px-2 rounded-md text-[10px] font-bold cursor-pointer transition-all ${
+              boundarySpace === 'viewport'
+                ? 'bg-teal-600 text-white shadow-2xs'
+                : 'text-slate-600 hover:bg-white/70'
+            }`}
+          >
+            🖼️ Cadre Visible (Écran)
+          </button>
+        </div>
+        <p className="text-[10px] text-slate-400 leading-tight">
+          {boundarySpace === 'viewport'
+            ? 'Suit les bords visibles de la caméra en direct (idéal pour garder un objet à l’écran).'
+            : 'Utilise les dimensions totales du niveau (Monde configuré sur la caméra).'}
+        </p>
+      </div>
+
       {/* Ligne 1: Comportement aux bords */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
         <span className="font-bold text-slate-700 text-xs">Comportement aux bords</span>
@@ -801,7 +856,9 @@ export function BoundaryBehaviorControls({
           <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
             <div>
               <span className="font-bold">Rebond sur les bords</span>
-              <span className="text-[10px] text-slate-400 block">Élasticité spécifique contre le cadre du canvas</span>
+              <span className="text-[10px] text-slate-400 block">
+                Élasticité contre {boundarySpace === 'viewport' ? 'le cadre visible' : 'les limites du monde'}
+              </span>
             </div>
             <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
               {Math.round((b.bounciness ?? 0.8) * 100)}%

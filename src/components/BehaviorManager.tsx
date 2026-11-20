@@ -31,6 +31,7 @@ import {
   ParticleEmitterBehaviorConfig,
   PatrolBehaviorConfig,
   PhysicsBehaviorConfig,
+  RotateDragBehaviorConfig,
   SliderBehaviorConfig,
   StrokeWiggleBehaviorConfig,
   WanderingBehaviorConfig,
@@ -64,6 +65,7 @@ import {
 } from './behaviors/MovementAndAIBehaviorControls';
 import { JiggleBehaviorControls } from './behaviors/JiggleBehaviorControls';
 import { SliderBehaviorControls } from './behaviors/SliderBehaviorControls';
+import { RotateDragBehaviorControls } from './behaviors/RotateDragBehaviorControls';
 import {
   HealthBehaviorControls,
   LookAtBehaviorControls,
@@ -669,7 +671,13 @@ function renderBehaviorControls({
         />
       );
     case 'patrol':
-      return <PatrolBehaviorControls b={{ ...behavior, ...(override || {}) } as PatrolBehaviorConfig} update={update} />;
+      return (
+        <PatrolBehaviorControls
+          b={{ ...behavior, ...(override || {}) } as PatrolBehaviorConfig}
+          update={update}
+          targetEntityOptions={targetEntityOptions}
+        />
+      );
     case 'wandering':
       return <WanderingBehaviorControls b={{ ...behavior, ...(override || {}) } as WanderingBehaviorConfig} update={update} />;
     case 'move_to':
@@ -743,5 +751,7 @@ function renderBehaviorControls({
       return <StrokeWiggleBehaviorControls b={{ ...behavior, ...(override || {}) } as StrokeWiggleBehaviorConfig} update={update} />;
     case 'slider':
       return <SliderBehaviorControls b={{ ...behavior, ...(override || {}) } as SliderBehaviorConfig} update={update} />;
+    case 'rotate_drag':
+      return <RotateDragBehaviorControls b={{ ...behavior, ...(override || {}) } as RotateDragBehaviorConfig} update={update} />;
   }
 }

@@ -10,6 +10,7 @@ import {
   Move,
   Plus,
   Repeat,
+  RotateCw,
   Shield,
   Shuffle,
   SlidersHorizontal,
@@ -101,9 +102,25 @@ export function AddBehaviorModal({ isOpen, onClose, onAddBehavior }: AddBehavior
                 <SlidersHorizontal className="w-4 h-4" />
               </div>
               <div>
-                <div className="font-bold text-slate-800 text-xs">Slider & Glissière Contrainte (Rail / Joystick)</div>
+                <div className="font-bold text-slate-800 text-xs">Slider &amp; Glissière Contrainte (Rail / Joystick)</div>
                 <div className="text-[11px] text-slate-500">
                   Rail 1D, zone 2D ou joystick élastique avec crans magnétiques et sortie vers Variables.
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onAddBehavior('rotate_drag')}
+              className="w-full p-2.5 rounded-2xl border border-amber-200 bg-amber-50/20 hover:border-amber-400 hover:bg-amber-50/60 flex items-center gap-3 transition-all text-left cursor-pointer group"
+            >
+              <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <RotateCw className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="font-bold text-slate-800 text-xs">Cadran Rotatif au Drag (Volant / Potentiomètre)</div>
+                <div className="text-[11px] text-slate-500">
+                  Rotation circulaire ou linéaire autour du pivot avec inertie, butées, crans et retour élastique.
                 </div>
               </div>
             </button>
@@ -112,7 +129,7 @@ export function AddBehaviorModal({ isOpen, onClose, onAddBehavior }: AddBehavior
           {/* Catégorie 2: Bords de scène */}
           <div className="space-y-1.5">
             <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
-              Bords de Scène
+              Bords (Monde &amp; Cadre Caméra)
             </span>
             <button
               type="button"
@@ -123,8 +140,8 @@ export function AddBehaviorModal({ isOpen, onClose, onAddBehavior }: AddBehavior
                 <Shield className="w-4 h-4" />
               </div>
               <div>
-                <div className="font-bold text-slate-800 text-xs">Gestion des Bords de Scène</div>
-                <div className="text-[11px] text-slate-500">Rebond élastique, téléportation (Wrap) ou butée infranchissable.</div>
+                <div className="font-bold text-slate-800 text-xs">Gestion des Bords (Monde / Cadre)</div>
+                <div className="text-[11px] text-slate-500">Rebond élastique, téléportation (Wrap) ou butée sur le Monde ou le Cadre visible.</div>
               </div>
             </button>
           </div>

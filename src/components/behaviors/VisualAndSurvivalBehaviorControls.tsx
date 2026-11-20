@@ -1,6 +1,6 @@
 import React from 'react';
 import { Dices, Paintbrush, Pencil, Sliders, X } from 'lucide-react';
-import { EMPTY_RECORD, useSceneStore } from '../../store/useSceneStore';
+import { EMPTY_LIST, EMPTY_RECORD, useSceneStore } from '../../store/useSceneStore';
 import {
   CustomParticlePreset,
   CustomParticleUsageMode,
@@ -10,8 +10,10 @@ import {
   LookAtBehaviorConfig,
   ParticleEmitterBehaviorConfig,
   ParticleShape,
+  SceneTransitionType,
   StrokeWiggleBehaviorConfig,
 } from '../../types';
+import { SCENE_TRANSITION_OPTIONS } from '../rulebook/ruleBookTypes';
 
 export function LookAtBehaviorControls({
   b,
@@ -741,6 +743,15 @@ export function HealthBehaviorControls({
   availableTags: string[];
   stateList: EntityState[];
 }) {
+  const scenes = useSceneStore((s) => s.scenes || EMPTY_LIST);
+  const activeSceneId = useSceneStore((s) => s.activeSceneId);
+
+  const vulTop = b.vulnerableTop !== false;
+  const vulBottom = b.vulnerableBottom !== false;
+  const vulLeft = b.vulnerableLeft !== false;
+  const vulRight = b.vulnerableRight !== false;
+  const onDeath = b.onDeath || 'destroy';
+
   return (
     <div className="space-y-1.5">
       {/* Points de vie max */}
@@ -781,6 +792,82 @@ export function HealthBehaviorControls({
             <option key={t} value={t} />
           ))}
         </datalist>
+      </div>
+
+      {/* Côtés vulnérables / immunisés (style Goomba) */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
+        <div>
+          <span className="font-bold text-slate-700 text-xs block">Côtés vulnérables aux dégâts</span>
+          <span className="text-[10px] text-slate-400">
+            Décochez un côté pour le rendre immunisé (ex : décochez Haut pour écraser un ennemi)
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-1 max-w-[210px] mx-auto">
+          <div />
+          <button
+            type="button"
+            onClick={() => update({ vulnerableTop: !vulTop })}
+            className={`py-1 px-1.5 rounded-lg text-[10px] font-bold border cursor-pointer transition-all ${
+              vulTop
+                ? 'bg-rose-50 border-rose-300 text-rose-800'
+                : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+            }`}
+          >
+            {vulTop ? '↑ Haut (Vuln.)' : '🛡️ Haut'}
+          </button>
+          <div />
+          <button
+            type="button"
+            onClick={() => update({ vulnerableLeft: !vulLeft })}
+            className={`py-1 px-1.5 rounded-lg text-[10px] font-bold border cursor-pointer transition-all ${
+              vulLeft
+                ? 'bg-rose-50 border-rose-300 text-rose-800'
+                : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+            }`}
+          >
+            {vulLeft ? '← Gauche' : '🛡️ Gauche'}
+          </button>
+          <div className="flex items-center justify-center text-[10px] font-black text-slate-400">
+            {vulTop && vulBottom && vulLeft && vulRight ? '4/4' : '🛡️'}
+          </div>
+          <button
+            type="button"
+            onClick={() => update({ vulnerableRight: !vulRight })}
+            className={`py-1 px-1.5 rounded-lg text-[10px] font-bold border cursor-pointer transition-all ${
+              vulRight
+                ? 'bg-rose-50 border-rose-300 text-rose-800'
+                : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+            }`}
+          >
+            {vulRight ? 'Droite →' : '🛡️ Droite'}
+          </button>
+          <div />
+          <button
+            type="button"
+            onClick={() => update({ vulnerableBottom: !vulBottom })}
+            className={`py-1 px-1.5 rounded-lg text-[10px] font-bold border cursor-pointer transition-all ${
+              vulBottom
+                ? 'bg-rose-50 border-rose-300 text-rose-800'
+                : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+            }`}
+          >
+            {vulBottom ? '↓ Bas' : '🛡️ Bas'}
+          </button>
+          <div />
+        </div>
+
+        <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+          <div>
+            <div className="font-bold text-slate-700 text-[11px]">Immunisé en haut si saut descendant</div>
+            <div className="text-[9px] text-slate-400">Bloque le dégât quand on retombe sur la cible (vy &gt; 0)</div>
+          </div>
+          <input
+            type="checkbox"
+            checked={Boolean(b.immuneTopWhenFalling)}
+            onChange={(e) => update({ immuneTopWhenFalling: e.target.checked })}
+            className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+          />
+        </div>
       </div>
 
       {/* Durée d'invincibilité */}
@@ -864,36 +951,123 @@ export function HealthBehaviorControls({
       )}
 
       {/* Action à 0 PV */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-        <span className="font-bold text-slate-700 text-xs">Quand PV = 0</span>
-        <select
-          value={b.onDeath || 'destroy'}
-          onChange={(e) => update({ onDeath: e.target.value as any })}
-          className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-        >
-          <option value="destroy">Détruire l'entité</option>
-          <option value="change_state">Passer à un état (Mort)</option>
-          <option value="none">Ne rien faire (0 PV)</option>
-        </select>
-      </div>
-
-      {b.onDeath === 'change_state' && (
-        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-          <span className="font-bold text-slate-700 text-xs">État « Mort / K.O. »</span>
+      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-bold text-slate-700 text-xs">Quand PV = 0</span>
           <select
-            value={b.deathStateId || ''}
-            onChange={(e) => update({ deathStateId: e.target.value || undefined })}
-            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[140px]"
+            value={onDeath}
+            onChange={(e) => update({ onDeath: e.target.value as any })}
+            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[175px]"
           >
-            <option value="">-- Choisir --</option>
-            {stateList.map((st) => (
-              <option key={st.id} value={st.id}>
-                {st.name}
-              </option>
-            ))}
+            <option value="destroy">Détruire l'entité</option>
+            <option value="change_state">Passer à un état (Mort)</option>
+            <option value="restart_scene">Recharger la scène actuelle</option>
+            <option value="change_scene">Aller à une autre scène</option>
+            <option value="none">Ne rien faire (0 PV)</option>
           </select>
         </div>
-      )}
+
+        {(onDeath === 'change_state' || onDeath === 'restart_scene' || onDeath === 'change_scene') && (
+          <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+            <span className="font-bold text-slate-700 text-[11px]">
+              {onDeath === 'change_state' ? 'État « Mort / K.O. »' : 'État animation Mort (optionnel)'}
+            </span>
+            <select
+              value={b.deathStateId || ''}
+              onChange={(e) => update({ deathStateId: e.target.value || undefined })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[140px]"
+            >
+              <option value="">-- Aucun --</option>
+              {stateList.map((st) => (
+                <option key={st.id} value={st.id}>
+                  {st.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {(onDeath === 'restart_scene' || onDeath === 'change_scene') && (
+          <div className="space-y-2 pt-1.5 border-t border-slate-100">
+            {onDeath === 'change_scene' && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold text-slate-700 text-[11px]">Scène cible</span>
+                <select
+                  value={b.deathTargetSceneId || scenes.find((s) => s.id !== activeSceneId)?.id || scenes[0]?.id || ''}
+                  onChange={(e) => update({ deathTargetSceneId: e.target.value || undefined })}
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[160px]"
+                >
+                  {scenes.map((sc) => (
+                    <option key={sc.id} value={sc.id}>
+                      {sc.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div>
+              <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
+                <span className="font-bold">Délai avant transition (anim. Mort)</span>
+                <span className="font-mono font-bold text-rose-600">
+                  {(b.deathDelaySec ?? 0).toFixed(2)}s
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="5"
+                step="0.1"
+                value={b.deathDelaySec ?? 0}
+                onChange={(e) => update({ deathDelaySec: parseFloat(e.target.value) || 0 })}
+                className="w-full accent-rose-500 cursor-pointer"
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-bold text-slate-700 text-[11px]">Bloquer les contrôles pendant le délai</div>
+                <div className="text-[9px] text-slate-400">Empêche de bouger durant l'animation de mort</div>
+              </div>
+              <input
+                type="checkbox"
+                checked={b.disableControlsOnDeath !== false}
+                onChange={(e) => update({ disableControlsOnDeath: e.target.checked })}
+                className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
+              />
+            </div>
+
+            <div className="grid grid-cols-[1fr_76px] gap-1.5 items-end">
+              <div>
+                <label className="text-[10px] font-bold text-slate-600 block mb-0.5">Transition de scène</label>
+                <select
+                  value={b.deathSceneTransition || 'fade'}
+                  onChange={(e) => update({ deathSceneTransition: e.target.value as SceneTransitionType })}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800"
+                >
+                  {SCENE_TRANSITION_OPTIONS.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-600 block mb-0.5">Durée (s)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="3"
+                  step="0.05"
+                  value={b.deathSceneTransitionDuration ?? 0.45}
+                  onChange={(e) => update({ deathSceneTransitionDuration: parseFloat(e.target.value) || 0 })}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-slate-800"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Afficher barre / cœurs en jeu */}
       <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">

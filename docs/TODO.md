@@ -27,6 +27,13 @@
 - [x] **12 Transitions de Scènes** : Ajout de *Fondu au blanc* (`fade_white`), *Glissé haut/bas*, *Iris blanc*, *Balayage*, *Rideau* et *Zoom + Fondu*.
 - [x] **Caméra 2D, Monde Étendu, Zoom, Screen Shake & Parallaxe** : Config par scène (`SceneCameraModal`), suivi smooth/deadzone/bornes, HUD navigation Édition, `parallaxFactor` actif sur les calques décor, particules/pointeur/physique en espace monde et action RuleBook `camera_action`.
 
+## Complété récemment — Vague Intermédiaire Ergonomie & Gameplay (Phase 10.38)
+- [x] **HUD Caméra en barre supérieure + Auto-focus Canvas au Play + Noms propres sans `#N` ni IDs bruts**.
+- [x] **Monde vs Cadre (`boundarySpace`) + Transitions `push_left / push_right / push_up / push_down`**.
+- [x] **Patrol 2.0 (`patrolSolver.ts`)** : Correctif aller-retour symétrique, aller simple, multi-points (coordonnées/entités), demi-tour sur mur & détection du vide (`detectLedges`).
+- [x] **Collisions directionnelles carrées** : Filtres `RuleBook`, vulnérabilité par face & immunité stomp (`Health`), et `oneWayPlatform`.
+- [x] **Comportement `rotate_drag` (`rotateDragSolver.ts`)**, **Santé = 0 PV → Scène** (avec délai), **Capture clavier live**, **Calques fermés/colorés par défaut** et **Déclencheur + Action rapide `camera_follow`**.
+
 ## En Pause / Planifié pour plus tard (Corde Élastique & Vague 2B)
 - [ ] **Comportement `corde` / Corde élastique + Line Renderer SVG** :
   - Contrainte physique souple (distance max / élasticité, tirage vers le bas avec résistance pour interrupteur/lampe ou balancement).

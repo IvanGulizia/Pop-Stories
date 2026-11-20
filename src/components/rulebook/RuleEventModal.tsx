@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, X, Check } from 'lucide-react';
 import { ActiveModal, EntityOption } from './ruleBookTypes';
 import { useSceneStore, EMPTY_RECORD } from '../../store/useSceneStore';
 import { TriggerLimitsSection } from './TriggerLimitsSection';
+import { KeyboardKeySelector } from './KeyboardKeySelector';
 
 interface RuleEventModalProps {
   activeModal: Extract<NonNullable<ActiveModal>, { type: 'event' }>;
@@ -97,60 +98,27 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
         {modalSubStep === 'key_picker' ? (
           <div className="space-y-4">
             <div className="text-xs font-bold text-slate-600">
-              Choisissez la touche du clavier qui déclenche cette règle :
+              Choisissez ou capturez directement la touche du clavier qui déclenche cette règle :
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {[
-                { key: 'Space', label: "Barre d'Espace", icon: '🚀' },
-                { key: 'ArrowUp', label: 'Flèche Haut ⬆️', icon: '⬆️' },
-                { key: 'ArrowDown', label: 'Flèche Bas ⬇️', icon: '⬇️' },
-                { key: 'ArrowLeft', label: 'Flèche Gauche ⬅️', icon: '⬅️' },
-                { key: 'ArrowRight', label: 'Flèche Droite ➡️', icon: '➡️' },
-                { key: 'Enter', label: 'Touche Entrée ↩️', icon: '↩️' },
-                { key: 'z', label: 'Touche Z (Avancer)', icon: '⌨️' },
-                { key: 'q', label: 'Touche Q (Gauche)', icon: '⌨️' },
-                { key: 's', label: 'Touche S (Reculer)', icon: '⌨️' },
-                { key: 'd', label: 'Touche D (Droite)', icon: '⌨️' },
-                { key: 'a', label: 'Touche A', icon: '⌨️' },
-                { key: 'w', label: 'Touche W', icon: '⌨️' },
-                { key: 'any', label: 'N’importe quelle touche', icon: '🌟' },
-              ].map((k) => {
-                const isSelected =
-                  (activeModal.keyName || rule.trigger.keyName) === k.key && modalTriggerType === 'keyboard';
-                return (
-                  <button
-                    key={k.key}
-                    type="button"
-                    onClick={() => {
-                      setActiveModal({
-                        ...activeModal,
-                        triggerType: 'keyboard',
-                        keyName: k.key,
-                        triggerPhase:
-                          modalTriggerPhase === 'up' || modalTriggerPhase === 'key_up' ? 'up' : 'down',
-                        subStep: 'config_event_params',
-                      });
-                    }}
-                    className={`p-3.5 border-2 rounded-2xl flex items-center gap-3 cursor-pointer transition-all shadow-2xs group text-left ${
-                      isSelected
-                        ? 'bg-indigo-50 border-indigo-500'
-                        : 'bg-slate-50 hover:bg-indigo-50 border-slate-200 hover:border-indigo-500'
-                    }`}
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl shrink-0 group-hover:scale-110 transition-transform">
-                      {k.icon}
-                    </div>
-                    <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700">
-                      {k.label}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            <KeyboardKeySelector
+              keyName={activeModal.keyName || rule.trigger.keyName || 'Space'}
+              keyCode={activeModal.keyCode ?? rule.trigger.keyCode}
+              onSelect={(kName, kCode) =>
+                setActiveModal({
+                  ...activeModal,
+                  triggerType: 'keyboard',
+                  keyName: kName,
+                  keyCode: kCode,
+                  triggerPhase:
+                    modalTriggerPhase === 'up' || modalTriggerPhase === 'key_up' ? 'up' : 'down',
+                  subStep: 'config_event_params',
+                })
+              }
+            />
           </div>
         ) : modalSubStep === 'config_event_params' ? (
           <div className="bg-slate-50/90 p-5 rounded-3xl border border-slate-200/90 space-y-5 max-w-xl mx-auto shadow-xs">
-            {['click', 'hover', 'drag', 'state_change', 'joint_break'].includes(modalTriggerType) && (
+            {['click', 'hover', 'drag', 'state_change', 'joint_break', 'camera_follow'].includes(modalTriggerType) && (
               <div className="bg-white border border-slate-200 rounded-2xl p-3 text-xs text-slate-600 font-medium">
                 Configurez la fréquence, les délais d'activation ou l'auto-remise pour cet événement ({modalTriggerType}).
               </div>
@@ -215,35 +183,17 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
             {modalTriggerType === 'keyboard' && (
               <div className="space-y-4">
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-bold text-slate-700">Touche à détecter :</label>
-                    <button
-                      type="button"
-                      onClick={() => setActiveModal({ ...activeModal, subStep: 'key_picker' })}
-                      className="text-[11px] font-bold text-indigo-600 hover:underline cursor-pointer"
-                    >
-                      Vue grille de touches →
-                    </button>
-                  </div>
-                  <select
-                    value={activeModal.keyName || 'Space'}
-                    onChange={(e) => setActiveModal({ ...activeModal, keyName: e.target.value })}
-                    className="w-full text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2.5 outline-none cursor-pointer"
-                  >
-                    <option value="Space">Touche Espace (Spacebar)</option>
-                    <option value="ArrowUp">↑ Flèche Haut</option>
-                    <option value="ArrowDown">↓ Flèche Bas</option>
-                    <option value="ArrowLeft">← Flèche Gauche</option>
-                    <option value="ArrowRight">→ Flèche Droite</option>
-                    <option value="Enter">Touche Entrée</option>
-                    <option value="a">Touche A</option>
-                    <option value="w">Touche W</option>
-                    <option value="s">Touche S</option>
-                    <option value="d">Touche D</option>
-                    <option value="z">Touche Z</option>
-                    <option value="q">Touche Q</option>
-                    <option value="any">N'importe quelle touche</option>
-                  </select>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Touche à détecter (saisie directe ou liste complète) :
+                  </label>
+                  <KeyboardKeySelector
+                    compact
+                    keyName={activeModal.keyName || 'Space'}
+                    keyCode={activeModal.keyCode}
+                    onSelect={(kName, kCode) =>
+                      setActiveModal({ ...activeModal, keyName: kName, keyCode: kCode })
+                    }
+                  />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1">
@@ -392,23 +342,114 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
               </div>
             )}
 
-            {/* 5. Bord de Scène */}
+            {/* 5. Bord de Scène / Cadre Caméra */}
             {modalTriggerType === 'boundary' && (
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
-                  Bord de scène à contacter :
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Référentiel des bords :
+                  </label>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal({ ...activeModal, boundarySpace: 'world' })}
+                      className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                        (activeModal.boundarySpace || 'world') === 'world'
+                          ? 'bg-rose-50 border-rose-500 text-rose-800 shadow-2xs'
+                          : 'bg-white border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      🌍 Bords du Monde (Scène entière)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal({ ...activeModal, boundarySpace: 'viewport' })}
+                      className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                        activeModal.boundarySpace === 'viewport'
+                          ? 'bg-rose-50 border-rose-500 text-rose-800 shadow-2xs'
+                          : 'bg-white border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      🖼️ Bords du Cadre (Caméra visible)
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    Bord à contacter :
+                  </label>
+                  <select
+                    value={activeModal.boundaryEdge || 'any'}
+                    onChange={(e) => setActiveModal({ ...activeModal, boundaryEdge: e.target.value as any })}
+                    className="w-full text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2.5 outline-none cursor-pointer"
+                  >
+                    <option value="any">N&apos;importe quel bord</option>
+                    <option value="top">Bord Haut</option>
+                    <option value="bottom">Bord Bas</option>
+                    <option value="left">Bord Gauche</option>
+                    <option value="right">Bord Droit</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* 5b. Détection directionnelle & anti-rebond de Collision */}
+            {modalTriggerType === 'collision' && (
+              <div className="space-y-3 bg-indigo-50/70 p-3.5 rounded-2xl border border-indigo-200">
+                <div className="text-xs font-black text-indigo-900">
+                  🧭 Direction &amp; Stabilité de Collision
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[11px] font-bold text-indigo-900 block mb-1">
+                      Côté de contact :
+                    </label>
+                    <select
+                      value={activeModal.collisionSide || 'any'}
+                      onChange={(e) =>
+                        setActiveModal({ ...activeModal, collisionSide: e.target.value as any })
+                      }
+                      className="w-full text-xs font-bold bg-white text-slate-900 border border-indigo-200 rounded-xl px-2.5 py-2 outline-none cursor-pointer"
+                    >
+                      <option value="any">Tous les côtés</option>
+                      <option value="top">↑ Par le Haut</option>
+                      <option value="bottom">↓ Par le Bas</option>
+                      <option value="left">← Par la Gauche</option>
+                      <option value="right">→ Par la Droite</option>
+                      <option value="horizontal">↔ Horizontal (Gauche ou Droite)</option>
+                      <option value="vertical">↕ Vertical (Haut ou Bas)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-indigo-900 block mb-1">
+                      Face mesurée sur :
+                    </label>
+                    <select
+                      value={activeModal.collisionSideTarget || 'subject'}
+                      onChange={(e) =>
+                        setActiveModal({ ...activeModal, collisionSideTarget: e.target.value as any })
+                      }
+                      className="w-full text-xs font-bold bg-white text-slate-900 border border-indigo-200 rounded-xl px-2.5 py-2 outline-none cursor-pointer"
+                    >
+                      <option value="subject">Le Sujet (ex. pied du joueur)</option>
+                      <option value="target">La Cible (ex. tête du Goomba)</option>
+                    </select>
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-xs font-bold text-indigo-900 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(activeModal.collisionRequireDownward)}
+                    onChange={(e) =>
+                      setActiveModal({
+                        ...activeModal,
+                        collisionRequireDownward: e.target.checked,
+                      })
+                    }
+                    className="rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span>Exiger un mouvement descendant (écrasement par le haut)</span>
                 </label>
-                <select
-                  value={activeModal.boundaryEdge || 'any'}
-                  onChange={(e) => setActiveModal({ ...activeModal, boundaryEdge: e.target.value as any })}
-                  className="w-full text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2.5 outline-none cursor-pointer"
-                >
-                  <option value="any">N'importe quel bord</option>
-                  <option value="top">Bord Haut</option>
-                  <option value="bottom">Bord Bas</option>
-                  <option value="left">Bord Gauche</option>
-                  <option value="right">Bord Droit</option>
-                </select>
               </div>
             )}
 
@@ -471,8 +512,13 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                   timerInterval: activeModal.timerInterval,
                   timerType: activeModal.timerType,
                   keyName: activeModal.keyName,
+                  keyCode: activeModal.keyCode,
                   proximityDistance: activeModal.proximityDistance,
                   boundaryEdge: activeModal.boundaryEdge,
+                  boundarySpace: activeModal.boundarySpace,
+                  collisionSide: activeModal.collisionSide,
+                  collisionSideTarget: activeModal.collisionSideTarget,
+                  collisionRequireDownward: activeModal.collisionRequireDownward,
                   variableName: (activeModal.variableName || 'score').trim() || 'score',
                   variableOperator: activeModal.variableOperator || '>=',
                   variableValue: activeModal.variableValue ?? 5,
@@ -568,48 +614,99 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                 </button>
               </div>
 
-              {/* Options avancées anti-boucle & stabilité collision */}
-              <div className="mt-2 pt-2.5 border-t border-indigo-200/70 flex flex-wrap items-center justify-between gap-2.5">
-                <label className="flex items-center gap-2 text-[11px] font-bold text-indigo-900">
-                  <span>Marge séparation (anti-boucle) :</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={60}
-                    step={2}
-                    value={rule.trigger.collisionExitMargin ?? 10}
-                    onChange={(e) =>
+              {/* Options avancées directionnelles, anti-boucle & stabilité collision */}
+              <div className="mt-2 pt-2.5 border-t border-indigo-200/70 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2.5">
+                  <label className="flex items-center gap-2 text-[11px] font-bold text-indigo-900">
+                    <span>Marge séparation (anti-boucle) :</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={60}
+                      step={2}
+                      value={rule.trigger.collisionExitMargin ?? 10}
+                      onChange={(e) =>
+                        updateRule(rule.id, {
+                          trigger: {
+                            ...rule.trigger,
+                            collisionExitMargin: Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)),
+                          },
+                        })
+                      }
+                      className="w-14 px-2 py-1 text-center text-xs font-bold bg-white border border-indigo-200 rounded-lg outline-none focus:border-indigo-500"
+                    />
+                    <span className="text-[10px] font-normal text-indigo-700">px</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
                       updateRule(rule.id, {
                         trigger: {
                           ...rule.trigger,
-                          collisionExitMargin: Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)),
+                          collisionTriggerOnce: !rule.trigger.collisionTriggerOnce,
                         },
                       })
                     }
-                    className="w-14 px-2 py-1 text-center text-xs font-bold bg-white border border-indigo-200 rounded-lg outline-none focus:border-indigo-500"
-                  />
-                  <span className="text-[10px] font-normal text-indigo-700">px</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() =>
-                    updateRule(rule.id, {
-                      trigger: {
-                        ...rule.trigger,
-                        collisionTriggerOnce: !rule.trigger.collisionTriggerOnce,
-                      },
-                    })
-                  }
-                  className={`px-3 py-1.5 rounded-xl text-[11px] font-black border transition-all cursor-pointer ${
-                    rule.trigger.collisionTriggerOnce
-                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
-                      : 'bg-white text-slate-700 border-indigo-200 hover:bg-indigo-100/60'
-                  }`}
-                >
-                  {rule.trigger.collisionTriggerOnce
-                    ? '✓ Déclencher 1 seule fois par paire'
-                    : '1× seule fois par paire'}
-                </button>
+                    className={`px-3 py-1.5 rounded-xl text-[11px] font-black border transition-all cursor-pointer ${
+                      rule.trigger.collisionTriggerOnce
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                        : 'bg-white text-slate-700 border-indigo-200 hover:bg-indigo-100/60'
+                    }`}
+                  >
+                    {rule.trigger.collisionTriggerOnce
+                      ? '✓ Déclencher 1 seule fois par paire'
+                      : '1× seule fois par paire'}
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={rule.trigger.collisionSide || 'any'}
+                    onChange={(e) =>
+                      updateRule(rule.id, {
+                        trigger: { ...rule.trigger, collisionSide: e.target.value as any },
+                      })
+                    }
+                    className="px-2 py-1 text-[11px] font-bold bg-white border border-indigo-200 rounded-lg text-slate-800 outline-none cursor-pointer"
+                    title="Filtrer le côté du contact (collider carré)"
+                  >
+                    <option value="any">Côté : Tous</option>
+                    <option value="top">↑ Haut</option>
+                    <option value="bottom">↓ Bas</option>
+                    <option value="left">← Gauche</option>
+                    <option value="right">→ Droite</option>
+                    <option value="horizontal">↔ Horizontal</option>
+                    <option value="vertical">↕ Vertical</option>
+                  </select>
+                  <select
+                    value={rule.trigger.collisionSideTarget || 'subject'}
+                    onChange={(e) =>
+                      updateRule(rule.id, {
+                        trigger: { ...rule.trigger, collisionSideTarget: e.target.value as any },
+                      })
+                    }
+                    className="px-2 py-1 text-[11px] font-bold bg-white border border-indigo-200 rounded-lg text-slate-800 outline-none cursor-pointer"
+                  >
+                    <option value="subject">Mesuré sur : Sujet</option>
+                    <option value="target">Mesuré sur : Cible</option>
+                  </select>
+                  <label className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-900 cursor-pointer ml-auto">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(rule.trigger.collisionRequireDownward)}
+                      onChange={(e) =>
+                        updateRule(rule.id, {
+                          trigger: {
+                            ...rule.trigger,
+                            collisionRequireDownward: e.target.checked,
+                          },
+                        })
+                      }
+                      className="rounded border-indigo-300 text-indigo-600"
+                    />
+                    <span>Chute requise (stomp)</span>
+                  </label>
+                </div>
               </div>
             </div>
 
@@ -845,7 +942,7 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
               </div>
 
               <div className="bg-rose-50/50 p-3 rounded-2xl border border-rose-200 space-y-1.5">
-                <div className="text-[11px] font-black uppercase text-rose-800">🖼️ Bords du Canvas</div>
+                <div className="text-[11px] font-black uppercase text-rose-800">🖼️ Bords (Monde / Cadre)</div>
                 <button
                   type="button"
                   onClick={() =>
@@ -853,6 +950,7 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                       ...activeModal,
                       triggerType: 'boundary',
                       boundaryEdge: activeModal.boundaryEdge ?? 'any',
+                      boundarySpace: activeModal.boundarySpace ?? 'world',
                       subStep: 'config_event_params',
                     })
                   }
@@ -860,8 +958,8 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                 >
                   <span className="text-lg">🖼️</span>
                   <div>
-                    <div className="text-xs font-black text-slate-900">Touche le Cadre</div>
-                    <div className="text-[9px] text-slate-500">Choisir le bord →</div>
+                    <div className="text-xs font-black text-slate-900">Touche le Bord</div>
+                    <div className="text-[9px] text-slate-500">Monde ou Cadre visible →</div>
                   </div>
                 </button>
               </div>
@@ -891,7 +989,7 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                 </button>
               </div>
 
-              <div className="bg-red-50/50 p-3 rounded-2xl border border-red-200 space-y-1.5 sm:col-span-2 lg:col-span-4">
+              <div className="bg-red-50/50 p-3 rounded-2xl border border-red-200 space-y-1.5 sm:col-span-2">
                 <div className="text-[11px] font-black uppercase text-red-800">⛓️‍💥 Rupture de Joint</div>
                 <button
                   type="button"
@@ -901,7 +999,22 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                   <span className="text-lg">⛓️‍💥</span>
                   <div>
                     <div className="text-xs font-black text-slate-900">Quand le joint casse</div>
-                    <div className="text-[9px] text-slate-500">Traction excessive ou secousses (Break Joint)</div>
+                    <div className="text-[9px] text-slate-500">Traction excessive ou secousses</div>
+                  </div>
+                </button>
+              </div>
+
+              <div className="bg-teal-50/50 p-3 rounded-2xl border border-teal-200 space-y-1.5 sm:col-span-2">
+                <div className="text-[11px] font-black uppercase text-teal-800">🎥 Caméra</div>
+                <button
+                  type="button"
+                  onClick={() => applyEventTrigger({ type: 'camera_follow', phase: 'camera_follow' })}
+                  className="w-full p-2 bg-white hover:bg-teal-100/70 border border-teal-200 rounded-xl flex items-center gap-2 text-left cursor-pointer transition-all shadow-2xs"
+                >
+                  <span className="text-lg">🎥</span>
+                  <div>
+                    <div className="text-xs font-black text-slate-900">Caméra suit une entité</div>
+                    <div className="text-[9px] text-slate-500">Déclenché quand la cible suivie change</div>
                   </div>
                 </button>
               </div>

@@ -252,7 +252,7 @@ export function SceneCameraModal({ onClose }: SceneCameraModalProps) {
                   <option value="">-- Choisir une entité --</option>
                   {entityList.map((ent) => (
                     <option key={ent.id} value={ent.id}>
-                      {ent.name} ({ent.type})
+                      {ent.name}
                     </option>
                   ))}
                 </select>
@@ -272,11 +272,20 @@ export function SceneCameraModal({ onClose }: SceneCameraModalProps) {
                   className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-300"
                 >
                   <option value="">-- Choisir un type --</option>
-                  {uniqueTypes.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
+                  {uniqueTypes.map((t) => {
+                    const matchEnt = entityList.find((e) => e.type === t);
+                    const friendlyLabel =
+                      t === 'apple'
+                        ? 'Pomme'
+                        : t === 'plant'
+                        ? 'Plante'
+                        : matchEnt?.name || t;
+                    return (
+                      <option key={t} value={t}>
+                        {friendlyLabel}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
             )}

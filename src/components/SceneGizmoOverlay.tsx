@@ -13,6 +13,7 @@ import {
   PatrolBehaviorConfig,
   PhysicsBehaviorConfig,
   Position,
+  RotateDragBehaviorConfig,
   SliderBehaviorConfig,
   WanderingBehaviorConfig,
 } from '../types';
@@ -23,6 +24,8 @@ import {
   getEffectiveBehaviors,
   getGizmoRuntimeDebugData,
 } from '../utils/matterPhysicsEngine';
+import { resolvePatrolWaypoints } from '../utils/physics/patrolSolver';
+import { getRotateDragBounds, hasRotateDragSteps } from '../utils/physics/rotateDragSolver';
 import { getSliderTrackGeometry } from '../utils/physics/sliderSolver';
 import {
   getParentAnchorWorldPosition,
@@ -752,41 +755,105 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
             | undefined;
           if (patrol) {
             const pOrigPos = runtimeDebug?.patrolOrigins[entity.id];
-            const origin = pOrigPos
-              ? { x: pOrigPos.x + entity.size.width / 2, y: pOrigPos.y + entity.size.height / 2 }
-              : center;
-            const range = Math.max(10, patrol.range ?? 120);
-            const isVert = patrol.axis === 'vertical';
-            const x1 = isVert ? origin.x : origin.x - range;
-            const y1 = isVert ? origin.y - range : origin.y;
-            const x2 = isVert ? origin.x : origin.x + range;
-            const y2 = isVert ? origin.y + range : origin.y;
-            elements.push(
-              <g key={`ai-patrol-${entity.id}`}>
-                <line
-                  x1={x1}
-                  y1={y1}
-                  x2={x2}
-                  y2={y2}
-                  stroke="#f43f5e"
-                  strokeWidth="1.75"
-                  strokeDasharray="5 3"
-                  strokeOpacity={0.85}
-                />
-                {isVert ? (
-                  <>
-                    <line x1={x1 - 7} y1={y1} x2={x1 + 7} y2={y1} stroke="#f43f5e" strokeWidth="2" />
-                    <line x1={x2 - 7} y1={y2} x2={x2 + 7} y2={y2} stroke="#f43f5e" strokeWidth="2" />
-                  </>
-                ) : (
-                  <>
-                    <line x1={x1} y1={y1 - 7} x2={x1} y2={y1 + 7} stroke="#f43f5e" strokeWidth="2" />
-                    <line x1={x2} y1={y2 - 7} x2={x2} y2={y2 + 7} stroke="#f43f5e" strokeWidth="2" />
-                  </>
-                )}
-                <circle cx={origin.x} cy={origin.y} r={3} fill="#f43f5e" />
-              </g>
-            );
+            const origin = pOrigPos || center;
+            const patrolMode = patrol.patrolMode || 'symmetric';
+
+            if (patrolMode === 'waypoints') {
+              const pts = resolvePatrolWaypoints(origin, patrol, entities);
+              const polyStr = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+              const isLoop = patrol.waypointLoopMode === 'loop' && pts.length >= 2;
+              elements.push(
+                <g key={`ai-patrol-${entity.id}`}>
+                  {pts.length >= 2 && (
+                    <polyline
+                      points={polyStr}
+                      fill="none"
+                      stroke="#f43f5e"
+                      strokeWidth="1.75"
+                      strokeDasharray="5 3"
+                      strokeOpacity={0.85}
+                    />
+                  )}
+                  {isLoop && (
+                    <line
+                      x1={pts[pts.length - 1].x}
+                      y1={pts[pts.length - 1].y}
+                      x2={pts[0].x}
+                      y2={pts[0].y}
+                      stroke="#fb7185"
+                      strokeWidth="1.5"
+                      strokeDasharray="3 4"
+                      markerEnd="url(#gizmo-arrow-rose)"
+                    />
+                  )}
+                  {pts.map((pt, idx) => (
+                    <g key={`wp-${idx}`} transform={`translate(${pt.x}, ${pt.y})`}>
+                      <circle cx={0} cy={0} r={7.5} fill="#f43f5e" stroke="#ffffff" strokeWidth="1.4" />
+                      <text
+                        x={0}
+                        y={3}
+                        textAnchor="middle"
+                        fill="#ffffff"
+                        fontSize="8.5"
+                        fontFamily="monospace"
+                        fontWeight="800"
+                      >
+                        {idx + 1}
+                      </text>
+                    </g>
+                  ))}
+                  {pts.length === 1 && (
+                    <line
+                      x1={center.x}
+                      y1={center.y}
+                      x2={pts[0].x}
+                      y2={pts[0].y}
+                      stroke="#f43f5e"
+                      strokeWidth="1.5"
+                      strokeDasharray="4 3"
+                      markerEnd="url(#gizmo-arrow-rose)"
+                    />
+                  )}
+                </g>
+              );
+            } else {
+              const range = Math.max(10, patrol.range ?? 120);
+              const isVert = patrol.axis === 'vertical';
+              const isOneWay = patrolMode === 'one_way_return';
+              const minOff = isOneWay ? 0 : -range;
+              const maxOff = range;
+              const x1 = isVert ? origin.x : origin.x + minOff;
+              const y1 = isVert ? origin.y + minOff : origin.y;
+              const x2 = isVert ? origin.x : origin.x + maxOff;
+              const y2 = isVert ? origin.y + maxOff : origin.y;
+              elements.push(
+                <g key={`ai-patrol-${entity.id}`}>
+                  <line
+                    x1={x1}
+                    y1={y1}
+                    x2={x2}
+                    y2={y2}
+                    stroke="#f43f5e"
+                    strokeWidth="1.75"
+                    strokeDasharray="5 3"
+                    strokeOpacity={0.85}
+                    markerEnd={isOneWay ? 'url(#gizmo-arrow-rose)' : undefined}
+                  />
+                  {isVert ? (
+                    <>
+                      <line x1={x1 - 7} y1={y1} x2={x1 + 7} y2={y1} stroke="#f43f5e" strokeWidth="2" />
+                      <line x1={x2 - 7} y1={y2} x2={x2 + 7} y2={y2} stroke="#f43f5e" strokeWidth="2" />
+                    </>
+                  ) : (
+                    <>
+                      <line x1={x1} y1={y1 - 7} x2={x1} y2={y1 + 7} stroke="#f43f5e" strokeWidth="2" />
+                      <line x1={x2} y1={y2 - 7} x2={x2} y2={y2 + 7} stroke="#f43f5e" strokeWidth="2" />
+                    </>
+                  )}
+                  <circle cx={origin.x} cy={origin.y} r={3.5} fill="#ffffff" stroke="#f43f5e" strokeWidth="1.8" />
+                </g>
+              );
+            }
           }
 
           const flee = effective.find((b) => b.type === 'flee') as FleeBehaviorConfig | undefined;
@@ -1970,6 +2037,178 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
                     fontWeight="700"
                   >
                     {badgeLabel}
+                  </text>
+                </g>
+              )}
+            </g>
+          );
+        })}
+
+      {/* 10. GIZMOS CADRANS ROTATIFS AU DRAG (ROTATE_DRAG) */}
+      {showSliders &&
+        targetEntities.map((entity) => {
+          const currentState = entity.states[entity.currentStateId];
+          const effective = getEffectiveBehaviors(entity, currentState);
+          const rotDrag = effective.find((b) => b.type === 'rotate_drag') as
+            | RotateDragBehaviorConfig
+            | undefined;
+          if (!rotDrag) return null;
+
+          const rtRot = isPlayMode ? runtimeDebug?.rotateDragTracks?.[entity.id] : undefined;
+          const effPivot = resolveEffectivePivot(entity, currentState);
+          const pivotWorld =
+            rtRot?.pivotWorld || getPivotWorldPosition(entity.position, entity.size, effPivot);
+          const radius =
+            rtRot?.radius || Math.max(28, Math.round(Math.max(entity.size.width, entity.size.height) * 0.58));
+          const baseAngleDeg = rtRot?.baseAngleDeg ?? (currentState?.rotation ?? 0);
+          const currentAngleDeg = rtRot ? rtRot.angleDeg : 0;
+          const { limitRange, minAngle, maxAngle } = getRotateDragBounds(rotDrag);
+
+          const startScreenDeg = minAngle + baseAngleDeg - 90;
+          const endScreenDeg = maxAngle + baseAngleDeg - 90;
+          const needleRad = degToRad(currentAngleDeg + baseAngleDeg - 90);
+          const needleX = pivotWorld.x + Math.cos(needleRad) * radius;
+          const needleY = pivotWorld.y + Math.sin(needleRad) * radius;
+
+          const stepsActive = hasRotateDragSteps(rotDrag);
+          const stepsCount = Math.max(0, Math.round(rotDrag.steps ?? 0));
+          const tickAnglesDeg: number[] = [];
+          if (stepsActive) {
+            if (limitRange && stepsCount >= 2) {
+              for (let i = 0; i < stepsCount; i++) {
+                tickAnglesDeg.push(minAngle + (i / (stepsCount - 1)) * (maxAngle - minAngle));
+              }
+            } else if (stepsCount >= 2) {
+              for (let i = 0; i < stepsCount; i++) {
+                tickAnglesDeg.push((i / stepsCount) * 360);
+              }
+            } else if (!limitRange && (rotDrag.stepAngleDeg ?? 0) >= 2) {
+              const sp = Math.max(2, rotDrag.stepAngleDeg ?? 30);
+              for (let a = 0; a < 360; a += sp) {
+                tickAnglesDeg.push(a);
+              }
+            }
+          }
+
+          const restRad = degToRad((rotDrag.restAngle ?? 0) + baseAngleDeg - 90);
+          const minRad = degToRad(startScreenDeg);
+          const maxRad = degToRad(endScreenDeg);
+
+          return (
+            <g key={`gizmo-rotate-drag-${entity.id}`}>
+              {limitRange ? (
+                <>
+                  <path
+                    d={buildArcSectorPath(
+                      pivotWorld.x,
+                      pivotWorld.y,
+                      radius,
+                      startScreenDeg,
+                      endScreenDeg
+                    )}
+                    fill="rgba(14, 165, 233, 0.09)"
+                    stroke="#0ea5e9"
+                    strokeWidth="1.5"
+                    strokeDasharray="5 3"
+                  />
+                  {/* Butées min / max */}
+                  <line
+                    x1={pivotWorld.x + Math.cos(minRad) * (radius - 7)}
+                    y1={pivotWorld.y + Math.sin(minRad) * (radius - 7)}
+                    x2={pivotWorld.x + Math.cos(minRad) * (radius + 7)}
+                    y2={pivotWorld.y + Math.sin(minRad) * (radius + 7)}
+                    stroke="#0284c7"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                  />
+                  <line
+                    x1={pivotWorld.x + Math.cos(maxRad) * (radius - 7)}
+                    y1={pivotWorld.y + Math.sin(maxRad) * (radius - 7)}
+                    x2={pivotWorld.x + Math.cos(maxRad) * (radius + 7)}
+                    y2={pivotWorld.y + Math.sin(maxRad) * (radius + 7)}
+                    stroke="#0284c7"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                  />
+                </>
+              ) : (
+                <circle
+                  cx={pivotWorld.x}
+                  cy={pivotWorld.y}
+                  r={radius}
+                  fill="rgba(14, 165, 233, 0.06)"
+                  stroke="#0ea5e9"
+                  strokeWidth="1.5"
+                  strokeDasharray="5 4"
+                />
+              )}
+
+              {/* Crans */}
+              {tickAnglesDeg.map((deg, idx) => {
+                const rad = degToRad(deg + baseAngleDeg - 90);
+                return (
+                  <line
+                    key={idx}
+                    x1={pivotWorld.x + Math.cos(rad) * (radius - 4.5)}
+                    y1={pivotWorld.y + Math.sin(rad) * (radius - 4.5)}
+                    x2={pivotWorld.x + Math.cos(rad) * (radius + 4.5)}
+                    y2={pivotWorld.y + Math.sin(rad) * (radius + 4.5)}
+                    stroke="#0369a1"
+                    strokeWidth="1.5"
+                  />
+                );
+              })}
+
+              {/* Position de repos (spring_return) */}
+              {rotDrag.returnMode === 'spring_return' && (
+                <circle
+                  cx={pivotWorld.x + Math.cos(restRad) * radius}
+                  cy={pivotWorld.y + Math.sin(restRad) * radius}
+                  r={4.5}
+                  fill="#ffffff"
+                  stroke="#0284c7"
+                  strokeWidth="2"
+                />
+              )}
+
+              {/* Aiguille d'angle courant */}
+              <line
+                x1={pivotWorld.x}
+                y1={pivotWorld.y}
+                x2={needleX}
+                y2={needleY}
+                stroke="#0284c7"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+              />
+              <circle cx={pivotWorld.x} cy={pivotWorld.y} r={4} fill="#0ea5e9" stroke="#ffffff" strokeWidth="1.4" />
+              <circle cx={needleX} cy={needleY} r={3.5} fill="#0284c7" stroke="#ffffff" strokeWidth="1.2" />
+
+              {(isPlayMode || selectedEntityId === entity.id) && (
+                <g transform={`translate(${pivotWorld.x}, ${pivotWorld.y - radius - 12})`}>
+                  <rect
+                    x={-48}
+                    y={-10}
+                    width={96}
+                    height={14}
+                    rx={4}
+                    fill="#0369a1"
+                    fillOpacity={0.92}
+                  />
+                  <text
+                    x={0}
+                    y={0}
+                    textAnchor="middle"
+                    fill="#ffffff"
+                    fontSize="8.5"
+                    fontFamily="monospace"
+                    fontWeight="700"
+                  >
+                    {rtRot
+                      ? `${Math.round(currentAngleDeg)}°${stepsActive ? ` [#${rtRot.stepIndex}]` : ''}`
+                      : limitRange
+                      ? `Cadran ${minAngle}°..${maxAngle}°`
+                      : `Cadran 360°`}
                   </text>
                 </g>
               )}

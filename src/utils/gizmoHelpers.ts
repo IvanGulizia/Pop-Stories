@@ -83,8 +83,8 @@ export const GIZMO_CATEGORY_LIST: GizmoCategoryMeta[] = [
   },
   {
     id: 'sliders',
-    label: 'Sliders & Glissières',
-    description: 'Rails 1D, zones 2D (boîte/disque), crans et position de rappel',
+    label: 'Sliders & Cadrans Rotatifs',
+    description: 'Rails 1D, zones 2D, crans, rappels élastiques et cadrans rotatifs au drag',
     colorClass: 'text-sky-700',
     dotColor: '#0ea5e9',
   },

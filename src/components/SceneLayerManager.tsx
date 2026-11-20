@@ -92,21 +92,31 @@ export function SceneLayerManager(_props: SceneLayerManagerProps) {
               key={group.id}
               className={`rounded-2xl border transition-all overflow-hidden ${
                 isBackground
-                  ? 'bg-sky-50/40 border-sky-200/80'
+                  ? 'bg-sky-50/85 border-sky-300/90'
                   : isColliderGroup
-                  ? 'bg-orange-50/40 border-orange-200/80'
+                  ? 'bg-orange-50/85 border-orange-300/90'
                   : isForeground
-                  ? 'bg-amber-50/40 border-amber-200/80'
-                  : 'bg-slate-50/70 border-slate-200'
+                  ? 'bg-emerald-50/85 border-emerald-300/90'
+                  : 'bg-violet-50/60 border-violet-200/90'
               }`}
             >
               {/* En-tête du groupe */}
-              <div className="p-2 sm:p-2.5 flex items-center justify-between gap-2 bg-white/70">
+              <div
+                className={`p-2 sm:p-2.5 flex items-center justify-between gap-2 ${
+                  isBackground
+                    ? 'bg-sky-100/65'
+                    : isColliderGroup
+                    ? 'bg-orange-100/65'
+                    : isForeground
+                    ? 'bg-emerald-100/65'
+                    : 'bg-violet-100/50'
+                }`}
+              >
                 <div className="flex items-center gap-1.5 min-w-0">
                   <button
                     type="button"
                     onClick={() => toggleLayerGroupCollapse(group.id)}
-                    className="p-0.5 text-slate-500 hover:text-slate-800 rounded cursor-pointer shrink-0"
+                    className="p-0.5 text-slate-600 hover:text-slate-900 rounded cursor-pointer shrink-0"
                   >
                     {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                   </button>
@@ -116,16 +126,40 @@ export function SceneLayerManager(_props: SceneLayerManagerProps) {
                   ) : (
                     <Folder
                       className={`w-3.5 h-3.5 shrink-0 ${
-                        isBackground ? 'text-sky-600' : isForeground ? 'text-amber-600' : 'text-slate-500'
+                        isBackground
+                          ? 'text-sky-600'
+                          : isForeground
+                          ? 'text-emerald-600'
+                          : 'text-violet-600'
                       }`}
                     />
                   )}
 
-                  <span className="text-xs font-bold text-slate-800 truncate">
+                  <span
+                    className={`text-xs font-bold truncate ${
+                      isBackground
+                        ? 'text-sky-950'
+                        : isColliderGroup
+                        ? 'text-orange-950'
+                        : isForeground
+                        ? 'text-emerald-950'
+                        : 'text-violet-950'
+                    }`}
+                  >
                     {group.name}
                   </span>
 
-                  <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded-full">
+                  <span
+                    className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
+                      isBackground
+                        ? 'bg-sky-200/80 text-sky-900'
+                        : isColliderGroup
+                        ? 'bg-orange-200/80 text-orange-900'
+                        : isForeground
+                        ? 'bg-emerald-200/80 text-emerald-900'
+                        : 'bg-violet-200/80 text-violet-900'
+                    }`}
+                  >
                     {group.layers.length}
                   </span>
                 </div>

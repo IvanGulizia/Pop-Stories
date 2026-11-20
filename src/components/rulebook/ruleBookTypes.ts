@@ -13,6 +13,7 @@ import {
   CustomParticleUsageMode,
   SceneTransitionType,
   CameraFollowMode,
+  CollisionSideFilter,
 } from '../../types';
 
 export const SCENE_TRANSITION_OPTIONS: {
@@ -26,6 +27,10 @@ export const SCENE_TRANSITION_OPTIONS: {
   { id: 'slide_right', label: '➡️ Glissement droite', shortLabel: 'Glissé →' },
   { id: 'slide_up', label: '⬆️ Glissement haut', shortLabel: 'Glissé ↑' },
   { id: 'slide_down', label: '⬇️ Glissement bas', shortLabel: 'Glissé ↓' },
+  { id: 'push_left', label: '⬅️ Poussée gauche (Push)', shortLabel: 'Push ←' },
+  { id: 'push_right', label: '➡️ Poussée droite (Push)', shortLabel: 'Push →' },
+  { id: 'push_up', label: '⬆️ Poussée haut (Push)', shortLabel: 'Push ↑' },
+  { id: 'push_down', label: '⬇️ Poussée bas (Push)', shortLabel: 'Push ↓' },
   { id: 'iris', label: '🎯 Iris (noir)', shortLabel: 'Iris noir' },
   { id: 'iris_white', label: '⚪ Iris (blanc)', shortLabel: 'Iris blanc' },
   { id: 'wipe_left', label: '🧹 Balayage', shortLabel: 'Balayage' },
@@ -67,8 +72,13 @@ export type ActiveModal =
       timerInterval?: number;
       timerType?: 'once' | 'repeat';
       keyName?: string;
+      keyCode?: string;
       proximityDistance?: number;
       boundaryEdge?: 'any' | 'top' | 'bottom' | 'left' | 'right';
+      boundarySpace?: 'world' | 'viewport';
+      collisionSide?: CollisionSideFilter;
+      collisionSideTarget?: 'subject' | 'target';
+      collisionRequireDownward?: boolean;
       variableName?: string;
       variableOperator?: '>=' | '==' | '<=' | '>' | '<' | '!=';
       variableValue?: number;
@@ -296,8 +306,13 @@ export interface WizardData {
   timerInterval?: number;
   timerType?: 'once' | 'repeat';
   keyName?: string;
+  keyCode?: string;
   proximityDistance?: number;
   boundaryEdge?: 'any' | 'top' | 'bottom' | 'left' | 'right';
+  boundarySpace?: 'world' | 'viewport';
+  collisionSide?: CollisionSideFilter;
+  collisionSideTarget?: 'subject' | 'target';
+  collisionRequireDownward?: boolean;
   variableName?: string;
   variableOperator?: '>=' | '==' | '<=' | '>' | '<' | '!=';
   variableValue?: number;

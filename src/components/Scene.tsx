@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { MotionConfig } from 'motion/react';
 import { useSceneStore, EMPTY_LIST, EMPTY_RECORD } from '../store/useSceneStore';
-import { SliderBehaviorConfig, VectorPath } from '../types';
+import { RotateDragBehaviorConfig, SliderBehaviorConfig, VectorPath } from '../types';
 import { Apple } from './Apple';
 import { Plant } from './Plant';
 import { CustomShape } from './CustomShape';
@@ -20,10 +20,6 @@ import {
   X,
   Lock,
   Crosshair,
-  Hand,
-  ZoomIn,
-  ZoomOut,
-  RotateCcw,
 } from 'lucide-react';
 import { ParticleCanvasOverlay } from './ParticleCanvasOverlay';
 import { SceneGizmoOverlay } from './SceneGizmoOverlay';
@@ -35,7 +31,13 @@ import {
   resolveWorldBounds,
   screenToWorldPoint,
 } from '../utils/cameraSolver';
-import { getActiveCameraView, stepPlayCameraRuntime } from '../utils/cameraRuntime';
+import {
+  consumePlayCameraFollowChange,
+  getActiveCameraView,
+  getPlayVisibleViewportRect,
+  stepPlayCameraRuntime,
+} from '../utils/cameraRuntime';
+import { getTransitionSnapshot } from '../utils/transitionSnapshotCache';
 import {
   stepMatterPhysics,
   startKeyboardListening,
@@ -44,6 +46,8 @@ import {
   getGizmoRuntimeDebugData,
 } from '../utils/matterPhysicsEngine';
 import { getSliderTrackGeometry } from '../utils/physics/sliderSolver';
+import { getRotateDragBounds } from '../utils/physics/rotateDragSolver';
+import { getPivotWorldPosition, resolveEffectivePivot } from '../utils/physics/pivotHelpers';
 import { applyBucketFill } from '../utils/floodFill';
 import {
   generateRoundedRectPath,
@@ -86,12 +90,11 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const cameraConfig = useSceneStore((state) => state.camera || DEFAULT_SCENE_CAMERA_CONFIG);
   const editorCamera = useSceneStore((state) => state.editorCamera);
   const setEditorCamera = useSceneStore((state) => state.setEditorCamera);
-  const resetEditorCamera = useSceneStore((state) => state.resetEditorCamera);
+  const isPanToolActive = useSceneStore((state) => state.editorPanToolActive);
   const sceneBounds = useSceneStore((state) => state.sceneBounds);
   const activeSceneTransition = useSceneStore((state) => state.activeSceneTransition);
   const [transitionEngaged, setTransitionEngaged] = useState(false);
 
-  const [isPanToolActive, setIsPanToolActive] = useState(false);
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
 
@@ -255,6 +258,19 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
     };
   }, [setSceneBounds, ratio]);
 
+  // Focus automatique du canvas au passage en mode Play (contrôles clavier immédiats sans clic requis)
+  useEffect(() => {
+    if (!isPlayMode) return;
+    const raf = window.requestAnimationFrame(() => {
+      const active = document.activeElement as HTMLElement | null;
+      if (active && active !== canvasContainerRef.current && typeof active.blur === 'function') {
+        active.blur();
+      }
+      canvasContainerRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [isPlayMode]);
+
   // Boucle de simulation physique Matter.js & Caméra 2D en mode Play (60 FPS)
   useEffect(() => {
     if (!isPlayMode) {
@@ -308,10 +324,12 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
               (l.vectorPaths?.length || 0) > 0
           )
         );
+        const liveViewportRect = getPlayVisibleViewportRect(viewportSize);
         const result = stepMatterPhysics({
           entities: currentEntities,
           deltaTime,
           canvasBounds: liveWorldBounds,
+          viewportRect: liveViewportRect,
           mousePos: mousePosRef.current,
           colliderLayers: activeColliderLayers,
         });
@@ -337,6 +355,21 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           result.entitiesToDestroy.forEach((id) => deleteEntity(id));
         }
 
+        // Action de scène automatique sur Santé = 0 PV (recharger ou changer de scène)
+        if (result.healthDeathSceneAction) {
+          const act = result.healthDeathSceneAction;
+          const store = useSceneStore.getState();
+          if (act.action === 'restart_scene') {
+            store.restartSceneInPlay(act.transition || 'fade', act.duration ?? 0.45);
+          } else if (act.action === 'change_scene' && act.targetSceneId) {
+            store.changeSceneInPlay(
+              act.targetSceneId,
+              act.transition || 'fade',
+              act.duration ?? 0.45
+            );
+          }
+        }
+
         // Rupture dynamique des joints cassables (détachement runtime Play + déclenchement événement joint_break)
         if (result.brokenJointEvents && result.brokenJointEvents.length > 0) {
           const { detachEntity, triggerJointBreak } = useSceneStore.getState();
@@ -354,6 +387,11 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           viewportSize,
           latestState.camera
         );
+
+        const followedTargetId = consumePlayCameraFollowChange();
+        if (followedTargetId) {
+          useSceneStore.getState().triggerCameraFollowEvent(followedTargetId);
+        }
 
         if (shakeWrapperRef.current) {
           const hasShake =
@@ -572,6 +610,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
       <div
         id="scene-canvas-container"
         ref={canvasContainerRef}
+        tabIndex={0}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         onWheel={handleContainerWheel}
@@ -594,7 +633,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           mouseScreenPosRef.current = null;
           mousePosRef.current = null;
         }}
-        className={`relative overflow-hidden select-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-all duration-300 ${
+        className={`relative overflow-hidden select-none outline-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-all duration-300 ${
           isCustomCursorActive
             ? 'atelier-cursor-hidden'
             : isPanning
@@ -610,6 +649,28 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           ...getAspectRatioStyle(),
         }}
       >
+        {/* ENVELOPPE DE CAPTURE STAGE (Transitions Push + Scène active) */}
+        <div
+          id="scene-stage-capture"
+          className="absolute inset-0 overflow-hidden"
+          style={(() => {
+            if (activeSceneTransition && activeSceneTransition.type.startsWith('push_')) {
+              const totalMs = Math.max(80, Math.round((activeSceneTransition.duration || 0.45) * 1000));
+              const tType = activeSceneTransition.type;
+              let startTransform = 'translate3d(0, 0, 0)';
+              if (tType === 'push_left') startTransform = 'translate3d(100%, 0, 0)';
+              else if (tType === 'push_right') startTransform = 'translate3d(-100%, 0, 0)';
+              else if (tType === 'push_up') startTransform = 'translate3d(0, 100%, 0)';
+              else if (tType === 'push_down') startTransform = 'translate3d(0, -100%, 0)';
+              return {
+                backgroundColor,
+                transform: transitionEngaged ? 'translate3d(0, 0, 0)' : startTransform,
+                transition: transitionEngaged ? `transform ${totalMs}ms ease-in-out` : 'none',
+              };
+            }
+            return { backgroundColor };
+          })()}
+        >
         {/* ENVELOPPE SCREEN SHAKE & VUE CAMÉRA */}
         <div
           ref={shakeWrapperRef}
@@ -851,6 +912,107 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
               );
             })()}
 
+            {/* 1.8b. CADRANS DE ROTATION AU DRAG EN MODE PLAY (z-6) */}
+            {isPlayMode && (() => {
+              const rtRotateTracks = getGizmoRuntimeDebugData().rotateDragTracks;
+              const rotateEntities = Object.values(entities).filter((ent) => {
+                if (!ent || ent.visible === false || ent.parentId) return false;
+                const st = ent.states[ent.currentStateId];
+                const rb = getEffectiveBehaviors(ent, st).find(
+                  (b): b is RotateDragBehaviorConfig => b.type === 'rotate_drag' && b.enabled !== false
+                );
+                return Boolean(rb && rb.showDialInPlay !== false);
+              });
+              if (rotateEntities.length === 0) return null;
+              return (
+                <svg className="absolute inset-0 w-full h-full pointer-events-none z-6 overflow-visible">
+                  {rotateEntities.map((ent) => {
+                    const st = ent.states[ent.currentStateId];
+                    const rb = getEffectiveBehaviors(ent, st).find(
+                      (b): b is RotateDragBehaviorConfig => b.type === 'rotate_drag' && b.enabled !== false
+                    )!;
+                    const rt = rtRotateTracks[ent.id];
+                    const effPivot = resolveEffectivePivot(ent, st);
+                    const pivotWorld =
+                      rt?.pivotWorld || getPivotWorldPosition(ent.position, ent.size, effPivot);
+                    const radius =
+                      rt?.radius || Math.max(28, Math.round(Math.max(ent.size.width, ent.size.height) * 0.56));
+                    const { limitRange, minAngle, maxAngle } = getRotateDragBounds(rb);
+                    const baseAngleDeg = rt?.baseAngleDeg ?? (st?.rotation ?? 0);
+                    const startA = ((minAngle + baseAngleDeg - 90) * Math.PI) / 180;
+                    const endA = ((maxAngle + baseAngleDeg - 90) * Math.PI) / 180;
+                    const restAngle = rb.restAngle ?? 0;
+                    const restRad = ((restAngle + baseAngleDeg - 90) * Math.PI) / 180;
+                    const steps = Math.max(0, Math.round(rb.steps ?? 0));
+                    const stepTicks = steps >= 2
+                      ? Array.from({ length: steps }).map((_, idx) => {
+                          const t = limitRange ? idx / (steps - 1) : idx / steps;
+                          const deg = limitRange
+                            ? minAngle + t * (maxAngle - minAngle)
+                            : t * 360;
+                          const rad = ((deg + baseAngleDeg - 90) * Math.PI) / 180;
+                          return {
+                            x1: pivotWorld.x + Math.cos(rad) * (radius - 5),
+                            y1: pivotWorld.y + Math.sin(rad) * (radius - 5),
+                            x2: pivotWorld.x + Math.cos(rad) * (radius + 5),
+                            y2: pivotWorld.y + Math.sin(rad) * (radius + 5),
+                          };
+                        })
+                      : [];
+                    const spanDeg = Math.abs(maxAngle - minAngle);
+                    const largeArc = spanDeg > 180 ? 1 : 0;
+                    const arcD =
+                      limitRange && spanDeg < 359
+                        ? `M ${pivotWorld.x + Math.cos(startA) * radius} ${pivotWorld.y + Math.sin(startA) * radius} A ${radius} ${radius} 0 ${largeArc} 1 ${pivotWorld.x + Math.cos(endA) * radius} ${pivotWorld.y + Math.sin(endA) * radius}`
+                        : null;
+                    return (
+                      <g key={`play-rot-${ent.id}`}>
+                        {arcD ? (
+                          <path
+                            d={arcD}
+                            fill="none"
+                            stroke="rgba(148,163,184,0.45)"
+                            strokeWidth={6}
+                            strokeLinecap="round"
+                          />
+                        ) : (
+                          <circle
+                            cx={pivotWorld.x}
+                            cy={pivotWorld.y}
+                            r={radius}
+                            fill="none"
+                            stroke="rgba(148,163,184,0.35)"
+                            strokeWidth={4}
+                            strokeDasharray="6 4"
+                          />
+                        )}
+                        {stepTicks.map((tk, idx) => (
+                          <line
+                            key={idx}
+                            x1={tk.x1}
+                            y1={tk.y1}
+                            x2={tk.x2}
+                            y2={tk.y2}
+                            stroke="rgba(71,85,105,0.6)"
+                            strokeWidth={1.75}
+                            strokeLinecap="round"
+                          />
+                        ))}
+                        {rb.returnMode === 'spring_return' && (
+                          <circle
+                            cx={pivotWorld.x + Math.cos(restRad) * radius}
+                            cy={pivotWorld.y + Math.sin(restRad) * radius}
+                            r={4}
+                            fill="rgba(14,165,233,0.8)"
+                          />
+                        )}
+                      </g>
+                    );
+                  })}
+                </svg>
+              );
+            })()}
+
             {/* 2. RENDU DES ENTITÉS SELON entityOrder (z-index layering: 10 à 30) */}
             <MotionConfig transformPagePoint={worldTransformPagePoint}>
               {(() => {
@@ -1018,6 +1180,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
               );
             })}
           </div>
+        </div>
         </div>
 
         {/* 4. OVERLAY DE DESSIN EN DIRECT SUR SCÈNE (QUAND UN CALQUE DÉCOR EST SÉLECTIONNÉ) */}
@@ -1508,74 +1671,26 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           );
         })()}
 
-        {/* 7.5. HUD COMPACT DE NAVIGATION CAMÉRA EN MODE ÉDITION */}
-        {!isPlayMode && !spawnCanvasPick && !jointCanvasPick && !selectedLayerId && (
-          <div
-            data-camera-hud="true"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-            className="absolute bottom-2.5 right-2.5 z-[49] flex items-center gap-1 px-2 py-1 bg-white/92 backdrop-blur-md border border-slate-200/90 rounded-2xl shadow-md text-[11px] font-bold text-slate-700"
-          >
-            <button
-              type="button"
-              onClick={() =>
-                setEditorCamera({ zoom: clampCameraZoom(editorCamera.zoom / 1.2) })
-              }
-              className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 cursor-pointer"
-              title="Dézoomer l'éditeur"
-            >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setEditorCamera({ zoom: 1 })}
-              className="px-1.5 py-0.5 rounded-lg hover:bg-slate-100 font-mono text-[10px] tabular-nums min-w-[42px] text-center cursor-pointer"
-              title="Réinitialiser le zoom à 100%"
-            >
-              {Math.round(editorCamera.zoom * 100)}%
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                setEditorCamera({ zoom: clampCameraZoom(editorCamera.zoom * 1.2) })
-              }
-              className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 cursor-pointer"
-              title="Zoomer l'éditeur"
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
-            </button>
-            <div className="w-px h-4 bg-slate-200 mx-0.5" />
-            <button
-              type="button"
-              onClick={() => setIsPanToolActive((v) => !v)}
-              className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-bold cursor-pointer transition-colors ${
-                isPanToolActive || isSpacePressed
-                  ? 'bg-sky-600 text-white shadow-2xs'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-              }`}
-              title="Déplacer la vue caméra (maintenir Espace ou clic molette)"
-            >
-              <Hand className="w-3 h-3" />
-              <span className="hidden sm:inline">Main</span>
-            </button>
-            {(editorCamera.x !== 0 || editorCamera.y !== 0 || Math.abs(editorCamera.zoom - 1) > 0.01) && (
-              <button
-                type="button"
-                onClick={() => resetEditorCamera()}
-                className="flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 cursor-pointer"
-                title="Recentrer la vue caméra éditeur (0, 0 · 100%)"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span className="hidden sm:inline">Recentrer</span>
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* 8. RIDEAU DE TRANSITION INTER-SCÈNES (Mode Play) */}
+        {/* 8. RIDEAU & SNAPSHOT PUSH DE TRANSITION INTER-SCÈNES (Mode Play) */}
         {activeSceneTransition && activeSceneTransition.type !== 'none' && (() => {
-          const { type, phase, duration } = activeSceneTransition;
+          const { type, phase, duration, outgoingSnapshotKey } = activeSceneTransition;
           const ms = Math.max(50, Math.round((duration || 0.45) * 500));
+
+          if (type.startsWith('push_')) {
+            const totalMs = Math.max(80, Math.round((duration || 0.45) * 1000));
+            let endTransform = 'translate3d(0, 0, 0)';
+            if (type === 'push_left') endTransform = 'translate3d(-100%, 0, 0)';
+            else if (type === 'push_right') endTransform = 'translate3d(100%, 0, 0)';
+            else if (type === 'push_up') endTransform = 'translate3d(0, -100%, 0)';
+            else if (type === 'push_down') endTransform = 'translate3d(0, 100%, 0)';
+            return (
+              <OutgoingPushSnapshotOverlay
+                snapshotKey={outgoingSnapshotKey}
+                transform={transitionEngaged ? endTransform : 'translate3d(0, 0, 0)'}
+                transition={transitionEngaged ? `transform ${totalMs}ms ease-in-out` : 'none'}
+              />
+            );
+          }
 
           if (type === 'iris' || type === 'iris_white') {
             const openHole = phase === 'out' ? !transitionEngaged : transitionEngaged;
@@ -1718,6 +1833,40 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         })()}
       </div>
     </div>
+  );
+}
+
+function OutgoingPushSnapshotOverlay({
+  snapshotKey,
+  transform,
+  transition,
+}: {
+  snapshotKey?: string;
+  transform: string;
+  transition: string;
+}) {
+  const hostRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    host.innerHTML = '';
+    if (!snapshotKey) return;
+    const snap = getTransitionSnapshot(snapshotKey);
+    if (snap) {
+      host.style.backgroundColor = snap.backgroundColor;
+      snap.node.style.transform = 'none';
+      snap.node.style.transition = 'none';
+      host.appendChild(snap.node);
+    }
+  }, [snapshotKey]);
+
+  return (
+    <div
+      ref={hostRef}
+      className="absolute inset-0 z-[58] pointer-events-none overflow-hidden"
+      style={{ transform, transition }}
+    />
   );
 }
 

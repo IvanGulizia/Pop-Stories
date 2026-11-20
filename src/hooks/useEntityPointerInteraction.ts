@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useDragControls, useMotionValue } from 'motion/react';
-import { Entity, EntityState, HealthBehaviorConfig } from '../types';
+import { Entity, EntityState, HealthBehaviorConfig, RotateDragBehaviorConfig } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
 import {
   EntityHitTestContext,
@@ -28,10 +28,13 @@ import {
   setEntityRuntimeVelocity,
   setPuppetGrabPivot,
   startPhysicsGrab,
+  startRotateDragGrab,
   startSliderGrab,
   syncEntityDragPosition,
   updatePhysicsGrabTarget,
+  updateRotateDragGrabTarget,
   updateSliderGrabTarget,
+  endRotateDragGrab,
   endSliderGrab,
 } from '../utils/matterPhysicsEngine';
 import {
@@ -105,6 +108,7 @@ export function useEntityPointerInteraction({
   const {
     canDrag: canDragFromBehavior,
     hasSlider,
+    hasRotateDrag,
     throwable,
     maxThrowSpeed,
   } = isEntityDraggable(entity, currentState);
@@ -213,6 +217,8 @@ export function useEntityPointerInteraction({
         physicsGrabCleanupRef.current = null;
       }
       endPhysicsGrab(entity.id, false);
+      endSliderGrab(entity.id);
+      endRotateDragGrab(entity.id);
       releasePuppetGrabHold(entity.id);
       setActiveDragPosition(entity.id, null);
       if (hoveredTargetIdRef.current && hoveredTargetIdRef.current !== entity.id) {
@@ -714,6 +720,121 @@ export function useEntityPointerInteraction({
           window.addEventListener('pointerup', handleSliderUp);
           window.addEventListener('pointercancel', handleSliderUp);
           return;
+        }
+      }
+
+      // Mode 0b : Cadran Rotatif au Drag (rotate_drag)
+      if (canDragTarget && liveDragInfo.hasRotateDrag && pt) {
+        const rotateDragCfg = getEffectiveBehaviors(liveTarget, liveTargetState).find(
+          (b): b is RotateDragBehaviorConfig => b.type === 'rotate_drag' && b.enabled !== false
+        );
+        if (rotateDragCfg) {
+          const effPivot = resolveEffectivePivot(liveTarget, liveTargetState);
+          const pivotWorld = getPivotWorldPosition(liveTarget.position, liveTarget.size, effPivot);
+          const curRotDeg = liveTargetState?.rotation ?? 0;
+          const started = startRotateDragGrab({
+            entityId: liveTarget.id,
+            pointerWorld: pt,
+            pivotWorld,
+            currentRotationDeg: curRotDeg,
+            config: rotateDragCfg,
+          });
+          if (started) {
+            if (physicsGrabCleanupRef.current) {
+              physicsGrabCleanupRef.current();
+              physicsGrabCleanupRef.current = null;
+            }
+            isPhysicsGrabbingRef.current = true;
+            lastDragEvalTimeRef.current = 0;
+            notifyEntityDragLifecycle(liveTarget.id, 'start', liveTarget.position);
+            setIsDragging(true);
+            setCursorState('drag');
+
+            const downClientX = e.clientX;
+            const downClientY = e.clientY;
+
+            const handleRotateDragMove = (moveEv: PointerEvent) => {
+              if (Math.hypot(moveEv.clientX - downClientX, moveEv.clientY - downClientY) > 4) {
+                hasMovedBeyondDragThresholdRef.current = true;
+              }
+              const movePt = getSceneEventPosition(moveEv.clientX, moveEv.clientY);
+              if (movePt) {
+                const freshTarget = useSceneStore.getState().entities[liveTarget.id] || liveTarget;
+                const freshState = freshTarget.states[freshTarget.currentStateId] || liveTargetState;
+                const freshPivot = getPivotWorldPosition(
+                  freshTarget.position,
+                  freshTarget.size,
+                  resolveEffectivePivot(freshTarget, freshState)
+                );
+                updateRotateDragGrabTarget(liveTarget.id, movePt, freshPivot, rotateDragCfg);
+              }
+              notifyEntityDragLifecycle(
+                liveTarget.id,
+                'move',
+                undefined,
+                hasMovedBeyondDragThresholdRef.current
+              );
+              setCursorState('drag');
+            };
+
+            const cleanupRotateDragListeners = () => {
+              window.removeEventListener('pointermove', handleRotateDragMove);
+              window.removeEventListener('pointerup', handleRotateDragUp);
+              window.removeEventListener('pointercancel', handleRotateDragUp);
+            };
+
+            const handleRotateDragUp = (upEv: PointerEvent) => {
+              cleanupRotateDragListeners();
+              physicsGrabCleanupRef.current = null;
+              isPhysicsGrabbingRef.current = false;
+              lastDragEndTimeRef.current = performance.now();
+              upHandledForPointerRef.current = true;
+
+              endRotateDragGrab(liveTarget.id);
+              notifyEntityDragLifecycle(
+                liveTarget.id,
+                'end',
+                undefined,
+                hasMovedBeyondDragThresholdRef.current
+              );
+              evaluateRulesWithTemp();
+
+              const latestTarget =
+                useSceneStore.getState().entities[liveTarget.id] || liveTarget;
+              const upPt = getSceneEventPosition(upEv.clientX, upEv.clientY);
+              const duration = Date.now() - (pointerDownTimeRef.current || 0);
+              const dist = Math.hypot(upEv.clientX - downClientX, upEv.clientY - downClientY);
+              const isPureClick =
+                !hasMovedBeyondDragThresholdRef.current && dist < 6 && duration < 700;
+
+              if (isPureClick) {
+                lastHandledClickTimeRef.current = Date.now();
+                selectEntity(liveTarget.id);
+                triggerPointerEvent(liveTarget.id, 'click', upPt);
+                triggerPointerEvent(liveTarget.id, 'mouse_up', upPt);
+              } else {
+                triggerPointerEvent(liveTarget.id, 'mouse_up', upPt);
+                if (hasMovedBeyondDragThresholdRef.current) {
+                  triggerDragRelease(liveTarget.id, upPt);
+                }
+              }
+
+              setIsDragging(false);
+              setCursorState('release');
+              setTimeout(() => {
+                hasMovedBeyondDragThresholdRef.current = false;
+                if (!isDraggingRef.current && !isPhysicsGrabbingRef.current) {
+                  setCursorState(getHoverStateFor(latestTarget));
+                }
+              }, 120);
+            };
+
+            physicsGrabCleanupRef.current = cleanupRotateDragListeners;
+            window.addEventListener('pointermove', handleRotateDragMove);
+            window.addEventListener('pointerup', handleRotateDragUp);
+            window.addEventListener('pointercancel', handleRotateDragUp);
+            return;
+          }
         }
       }
 
