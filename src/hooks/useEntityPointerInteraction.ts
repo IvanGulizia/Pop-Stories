@@ -103,6 +103,15 @@ export function useEntityPointerInteraction({
   const { setCursorState, setIsDragging } = useAppCursor();
 
   const isSelected = selectedEntityId === entity.id;
+  const isSameTypeSibling = useSceneStore(
+    (state) =>
+      state.appMode !== 'play' &&
+      Boolean(
+        state.selectedEntityId &&
+          state.selectedEntityId !== entity.id &&
+          state.entities[state.selectedEntityId]?.type === entity.type
+      )
+  );
   const currentState: EntityState = entity.states[entity.currentStateId] || fallbackState;
 
   const {
@@ -1134,6 +1143,7 @@ export function useEntityPointerInteraction({
     showCanvasLabels,
     enableHoverScaleAnimation,
     isSelected,
+    isSameTypeSibling,
     currentState,
     canDragFromBehavior,
     hasSlider,

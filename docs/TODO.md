@@ -1,5 +1,26 @@
 # Backlog & Suivi Technique (`TODO`)
 
+## Vague Intermédiaire 2 (Sous-phases A → D)
+- [x] **Sous-phase A — Quick Wins UI, Ergonomie & Santé** :
+  - `HealthBehaviorConfig.blinkOnDamage` (désactivé par défaut) + création/dessin 1-clic des états Santé (`Blessé` / `Mort`)
+  - Suppression de la barre flottante sur le canvas en dessin de calque + bouton `Valider` et actions contextuelles dans `DrawingToolsPanel`
+  - Renommage inline par instance (`SceneHierarchyList`) + halo discret entre instances du même modèle (`EntitySiblingHalo`)
+  - Duplication indépendante d'entité dans la galerie (`duplicateCustomArchetype`)
+- [ ] **Sous-phase B — Saisie numérique libre, Impulsion, Désactivation complète & Parenting/État** :
+  - Saisie numérique libre sans garde-fou au clic (avec accès à `0`, décimales fines et valeurs élevées ex. ressort angulaire > 400)
+  - Bouton **Désactiver/Activer** séparé de *Masquer/Afficher* (+ action RuleBook)
+  - Action RuleBook `apply_impulse` (Force / Impulsion paramétrable)
+  - Paramétrage du parentage/joint dans l'action RuleBook *Parenter* + override `parentOffset` par État
+- [ ] **Sous-phase C — Studio Particules Avancé, Collection & Spawn Relatif** :
+  - Ranges aléatoires Min/Max, mono-couleur vs dégradé, durée d'émetteur finie, bursts et formes d'émission
+  - Collection locale de particules (projet + inter-projets IndexedDB)
+  - Spawn particules relatif à une entité / point local / point d'impact
+- [ ] **Sous-phase D — Ratio Caméra Play (sans bandes noires), Tri Cartes d'Action & Snap/Aimant** :
+  - Ratio caméra dédié au Play avec cadrage en Édition sans bandes noires
+  - Drag & drop de réorganisation des cartes d'actions individuelles dans une règle (`RuleBook`)
+  - Comportement Snap / Aimant + événements/actions compagnons (`on_snap`, `snap_to`, `unsnap`)
+- [ ] **Décision en attente (#17)** : Modèle *Prefab vs Instance séparée* pour la modification des doublons sur scène.
+
 ## En cours / Récent
 - [x] Système global de Gizmos sur scène (`SceneGizmoOverlay`) + section Settings dédiée
 - [x] Hitbox : mode physique (`default` / `trigger_only` / `disabled`) + délégation de clic/drag au parent + `ignorePointer`

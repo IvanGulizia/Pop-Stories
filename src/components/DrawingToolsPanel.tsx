@@ -23,6 +23,10 @@ import {
   X,
   Grid,
   Magnet,
+  Check,
+  Copy,
+  Layers,
+  Lock,
 } from 'lucide-react';
 
 interface DrawingToolsPanelProps {
@@ -35,6 +39,7 @@ interface DrawingToolsPanelProps {
 }
 
 export function DrawingToolsPanel({
+  onClose,
   onUndo,
   onRedo,
   canUndo,
@@ -42,6 +47,8 @@ export function DrawingToolsPanel({
   onClearLayer,
 }: DrawingToolsPanelProps) {
   const selectedLayerId = useSceneStore((state) => state.selectedLayerId);
+  const selectLayer = useSceneStore((state) => state.selectLayer);
+  const layerDrawingActions = useSceneStore((state) => state.layerDrawingActions);
   const layerGroups = useSceneStore((state) => state.layerGroups || EMPTY_LIST);
   const drawingTool = useSceneStore((state) => state.drawingTool);
   const drawingStrokeColor = useSceneStore((state) => state.drawingStrokeColor);
@@ -126,8 +133,119 @@ export function DrawingToolsPanel({
     { id: 'eraser_stroke', shortLabel: 'Objet', title: 'Gomme Trait (Efface la forme entière)', icon: Scissors, activeClass: 'bg-rose-600 text-white shadow-2xs' },
   ];
 
+  const handleFinishLayerDrawing = () => {
+    if (onClose) onClose();
+    else selectLayer(null);
+  };
+
+  const activeLayerActions =
+    activeLayer && layerDrawingActions && layerDrawingActions.layerId === activeLayer.id
+      ? layerDrawingActions
+      : null;
+
   return (
     <div id="drawing-tools-panel" className="space-y-3.5 flex flex-col h-full text-slate-800 select-none">
+      {/* En-tête du calque actif + bouton Valider / Terminer */}
+      {activeLayer && (
+        <div
+          className={`p-2.5 rounded-2xl border flex items-center justify-between gap-2 ${
+            isColliderLayer
+              ? 'bg-orange-50/80 border-orange-200/90'
+              : 'bg-indigo-50/70 border-indigo-200/80'
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {isColliderLayer ? (
+              <Shield className="w-4 h-4 text-orange-600 shrink-0" />
+            ) : (
+              <Layers className="w-4 h-4 text-indigo-600 shrink-0" />
+            )}
+            <div className="min-w-0">
+              <div className="text-xs font-extrabold text-slate-800 truncate">{activeLayer.name}</div>
+              {activeLayer.locked ? (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700">
+                  <Lock className="w-2.5 h-2.5" /> Calque verrouillé
+                </span>
+              ) : (
+                <span className="text-[10px] text-slate-500">
+                  {isColliderLayer ? 'Calque collider' : 'Calque de décor'}
+                </span>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleFinishLayerDrawing}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer transition-colors shrink-0 active:scale-95"
+            title="Valider et quitter le dessin sur ce calque (Échap)"
+          >
+            <Check className="w-3.5 h-3.5" />
+            <span>Valider</span>
+          </button>
+        </div>
+      )}
+
+      {/* Actions contextuelles Polyligne / Sélection */}
+      {activeLayerActions &&
+        ((drawingTool === 'polyline' && activeLayerActions.polyPointsCount > 0) ||
+          (drawingTool === 'select' && activeLayerActions.selectedCount > 0 && !activeLayer?.locked)) && (
+          <div className="p-2 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between gap-2">
+            {drawingTool === 'polyline' && activeLayerActions.polyPointsCount > 0 ? (
+              <>
+                <span className="text-[11px] font-bold text-slate-600">
+                  Polyligne ({activeLayerActions.polyPointsCount} pts)
+                </span>
+                <div className="flex items-center gap-1">
+                  {activeLayerActions.polyPointsCount >= 2 && (
+                    <button
+                      type="button"
+                      onClick={() => activeLayerActions.finishPolyline(false)}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                      title="Valider la polyligne ouverte (Entrée)"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Terminer tracé</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => activeLayerActions.cancelPolyline()}
+                    className="p-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 cursor-pointer"
+                    title="Annuler le tracé en cours"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <span className="text-[11px] font-bold text-slate-600">
+                  {activeLayerActions.selectedCount} tracé{activeLayerActions.selectedCount > 1 ? 's' : ''} sélectionné{activeLayerActions.selectedCount > 1 ? 's' : ''}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => activeLayerActions.duplicateSelected()}
+                    title="Dupliquer la sélection (Cmd/Ctrl+D)"
+                    className="flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 cursor-pointer"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Dupliquer</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => activeLayerActions.deleteSelected()}
+                    title="Supprimer la sélection (Suppr)"
+                    className="flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-semibold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
       {/* Barre rapide en haut : Annuler / Rétablir / Vider */}
       {(onUndo || onRedo || onClearLayer) && (
         <div className="grid grid-cols-3 gap-1.5">

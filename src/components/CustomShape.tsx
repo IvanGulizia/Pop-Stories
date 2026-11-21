@@ -6,7 +6,7 @@ import { useEntityPointerInteraction } from '../hooks/useEntityPointerInteractio
 import { resolveEffectivePivot } from '../utils/physics/pivotHelpers';
 import { getEffectiveBehaviors } from '../utils/physics/behaviorResolution';
 import { buildWiggledPathVariants } from '../utils/strokeWiggle';
-import { EntitySelectionOverlay } from './EntitySelectionOverlay';
+import { EntitySelectionOverlay, EntitySiblingHalo } from './EntitySelectionOverlay';
 
 interface CustomShapeProps {
   entity: Entity;
@@ -19,6 +19,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
     showCanvasLabels,
     enableHoverScaleAnimation,
     isSelected,
+    isSameTypeSibling,
     currentState,
     canDragFromBehavior,
     hasSlider,
@@ -221,6 +222,9 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
       {/* Hitbox interactive délimitée strictement par le collider vert */}
       <div {...hitboxProps} />
 
+      {/* Halo discret pour les instances partageant le même modèle */}
+      {isSameTypeSibling && appMode !== 'play' && <EntitySiblingHalo colliderType={colliderType} />}
+
       {/* Anneau de sélection, rotation directe et poignée de redimensionnement */}
       {isSelected && appMode !== 'play' && (
         <EntitySelectionOverlay
@@ -267,7 +271,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
       {/* Visuel personnalisé : Vectoriel SVG, Image, Icône ou Forme SVG par défaut */}
       <div
         className={`relative w-full h-full flex items-center justify-center ${
-          runtimeHealth?.isInvincible ? 'animate-pulse opacity-65' : ''
+          runtimeHealth?.isInvincible && healthConfig?.blinkOnDamage === true ? 'animate-pulse opacity-65' : ''
         }`}
         style={{ transform: entity.flipX ? 'scaleX(-1)' : undefined }}
       >

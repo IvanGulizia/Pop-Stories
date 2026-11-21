@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
+  Pencil,
 } from 'lucide-react';
 import { Entity, SceneLayer, SceneLayerGroup } from '../types';
 import { isEntityDraggable } from '../utils/matterPhysicsEngine';
@@ -40,6 +41,8 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
   const [dragOverTarget, setDragOverTarget] = useState<{ id: string; position: DropPosition } | null>(null);
   const [dragOverRootZone, setDragOverRootZone] = useState(false);
   const [collapsedParentIds, setCollapsedParentIds] = useState<Record<string, boolean>>({});
+  const [renamingEntityId, setRenamingEntityId] = useState<string | null>(null);
+  const [tempEntityName, setTempEntityName] = useState('');
 
   const order = entityOrder && entityOrder.length > 0 ? entityOrder : Object.keys(entities);
   const allKeys = Array.from(new Set([...order, ...Object.keys(entities)]));
@@ -216,11 +219,50 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                 <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center p-0.5 shrink-0 border border-slate-200/70 overflow-hidden">
                   <EntityMiniPreview entity={entity} type={entity.type} size={28} />
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <p className="text-xs font-bold text-slate-800 truncate leading-snug">
-                      {entity.name}
-                    </p>
+                    {renamingEntityId === entity.id ? (
+                      <input
+                        type="text"
+                        value={tempEntityName}
+                        onChange={(e) => setTempEntityName(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const clean = tempEntityName.trim();
+                            if (clean) {
+                              updateEntityDetails(entity.id, { name: clean }, { instanceOnly: true });
+                            }
+                            setRenamingEntityId(null);
+                          } else if (e.key === 'Escape') {
+                            setRenamingEntityId(null);
+                          }
+                        }}
+                        onBlur={() => {
+                          const clean = tempEntityName.trim();
+                          if (clean) {
+                            updateEntityDetails(entity.id, { name: clean }, { instanceOnly: true });
+                          }
+                          setRenamingEntityId(null);
+                        }}
+                        onFocus={(e) => e.target.select()}
+                        autoFocus
+                        className="text-xs font-bold text-slate-800 bg-white border border-indigo-400 rounded-md px-1.5 py-0.5 outline-none w-full min-w-[70px] shadow-2xs ring-1 ring-indigo-500/30"
+                      />
+                    ) : (
+                      <p
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          setRenamingEntityId(entity.id);
+                          setTempEntityName(entity.name);
+                        }}
+                        title="Double-cliquez pour renommer cette instance"
+                        className="text-xs font-bold text-slate-800 truncate leading-snug cursor-text"
+                      >
+                        {entity.name}
+                      </p>
+                    )}
                     {hasChildren && (
                       <span
                         className="text-[9px] font-extrabold px-1.5 py-0.2 bg-indigo-100 text-indigo-700 rounded-full shrink-0"
@@ -252,8 +294,20 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                 </div>
               </div>
 
-              {/* Actions primaires : masquer/afficher, détacher (si enfant), dupliquer et supprimer */}
+              {/* Actions primaires : renommer, masquer/afficher, détacher (si enfant), dupliquer et supprimer */}
               <div className={`flex items-center gap-0.5 shrink-0 transition-opacity ${!isVisible ? 'opacity-100' : 'opacity-70 group-hover:opacity-100'}`}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRenamingEntityId(entity.id);
+                    setTempEntityName(entity.name);
+                  }}
+                  className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                  title="Renommer cette instance sur la scène"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
                 <button
                   type="button"
                   onClick={(e) => {

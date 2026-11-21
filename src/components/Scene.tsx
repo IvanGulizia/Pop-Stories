@@ -8,17 +8,8 @@ import { CustomShape } from './CustomShape';
 import {
   Sparkles,
   Paintbrush,
-  Undo2,
-  Redo2,
-  Trash2,
-  Grid,
   Magnet,
-  Check,
-  Copy,
-  Shield,
-  Layers,
   X,
-  Lock,
   Crosshair,
 } from 'lucide-react';
 import { ParticleCanvasOverlay } from './ParticleCanvasOverlay';
@@ -1899,14 +1890,8 @@ function DirectCanvasDrawingOverlay({
   const fillColorId = useSceneStore((state) => state.drawingFillColorId);
   const strokeWidth = useSceneStore((state) => state.drawingStrokeWidth);
   const drawingShowGrid = useSceneStore((state) => state.drawingShowGrid);
-  const setDrawingShowGrid = useSceneStore((state) => state.setDrawingShowGrid);
   const drawingSnapToGrid = useSceneStore((state) => state.drawingSnapToGrid);
-  const setDrawingSnapToGrid = useSceneStore((state) => state.setDrawingSnapToGrid);
-  const undoScene = useSceneStore((state) => state.undoScene);
-  const redoScene = useSceneStore((state) => state.redoScene);
-  const canUndo = useSceneStore((state) => state.sceneUndoStack.length > 0);
-  const canRedo = useSceneStore((state) => state.sceneRedoStack.length > 0);
-  const selectLayer = useSceneStore((state) => state.selectLayer);
+  const setLayerDrawingActions = useSceneStore((state) => state.setLayerDrawingActions);
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [points, setPoints] = useState<{ x: number; y: number }[]>([]);
@@ -2082,6 +2067,30 @@ function DirectCanvasDrawingOverlay({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selectedIds, layer.locked, drawingTool, polyPoints, deleteSelectedPaths, duplicateSelectedPaths, finishPolyline]);
+
+  useEffect(() => {
+    setLayerDrawingActions({
+      layerId: layer.id,
+      polyPointsCount: polyPoints.length,
+      selectedCount: selectedIds.length,
+      finishPolyline,
+      cancelPolyline: () => setPolyPoints([]),
+      duplicateSelected: duplicateSelectedPaths,
+      deleteSelected: deleteSelectedPaths,
+    });
+  }, [
+    layer.id,
+    polyPoints.length,
+    selectedIds.length,
+    finishPolyline,
+    duplicateSelectedPaths,
+    deleteSelectedPaths,
+    setLayerDrawingActions,
+  ]);
+
+  useEffect(() => {
+    return () => setLayerDrawingActions(null);
+  }, [setLayerDrawingActions]);
 
   const existingPaths: VectorPath[] = layer.vectorPaths || [];
   const selectedPaths = existingPaths.filter((p) => selectedIds.includes(p.id));
@@ -2598,173 +2607,6 @@ function DirectCanvasDrawingOverlay({
       className="absolute inset-0 z-50 flex flex-col items-center justify-center"
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Barre flottante unifiée du calque en haut du canvas */}
-      <div
-        data-layer-drawing-keep="true"
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => e.stopPropagation()}
-        className="absolute top-2.5 left-1/2 -translate-x-1/2 z-50 max-w-[96%] flex flex-wrap items-center justify-center gap-1.5 px-2.5 py-1.5 bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl shadow-lg"
-      >
-        {/* Badge calque */}
-        <div
-          className={`flex items-center gap-1.5 px-2 py-1 rounded-xl text-[11px] font-bold ${
-            isColliderLayer
-              ? 'bg-orange-50 text-orange-700 border border-orange-200/80'
-              : 'bg-indigo-50 text-indigo-700 border border-indigo-200/80'
-          }`}
-        >
-          {isColliderLayer ? (
-            <Shield className="w-3.5 h-3.5 shrink-0" />
-          ) : (
-            <Layers className="w-3.5 h-3.5 shrink-0" />
-          )}
-          <span className="truncate max-w-[110px]">{layer.name}</span>
-          {layer.locked && (
-            <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-md">
-              <Lock className="w-2.5 h-2.5" />
-              Verrouillé
-            </span>
-          )}
-        </div>
-
-        <div className="w-px h-5 bg-slate-200" />
-
-        {/* Annuler / Rétablir / Vider */}
-        <button
-          type="button"
-          onClick={() => undoScene()}
-          disabled={!canUndo}
-          title="Annuler (Cmd/Ctrl+Z)"
-          className="flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer transition-colors"
-        >
-          <Undo2 className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Annuler</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => redoScene()}
-          disabled={!canRedo}
-          title="Rétablir (Cmd/Ctrl+Shift+Z)"
-          className="flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer transition-colors"
-        >
-          <Redo2 className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Rétablir</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            if (layer.locked) return;
-            latestPathsRef.current = [];
-            onUpdatePaths([]);
-            setSelectedIds([]);
-            setPolyPoints([]);
-          }}
-          disabled={layer.locked || existingPaths.length === 0}
-          title="Vider ce calque"
-          className="flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-semibold bg-rose-50 hover:bg-rose-100 text-rose-700 disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer transition-colors"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          <span className="hidden md:inline">Vider</span>
-        </button>
-
-        <div className="w-px h-5 bg-slate-200" />
-
-        {/* Grille & Snap */}
-        <button
-          type="button"
-          onClick={() => setDrawingShowGrid(!drawingShowGrid)}
-          title="Afficher la grille de dessin"
-          className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-semibold cursor-pointer transition-colors ${
-            drawingShowGrid
-              ? 'bg-indigo-600 text-white shadow-xs'
-              : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-          }`}
-        >
-          <Grid className="w-3.5 h-3.5" />
-          <span className="hidden md:inline">Grille</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setDrawingSnapToGrid(!drawingSnapToGrid)}
-          title="Magnétisme sur la grille"
-          className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-semibold cursor-pointer transition-colors ${
-            drawingSnapToGrid
-              ? 'bg-indigo-600 text-white shadow-xs'
-              : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-          }`}
-        >
-          <Magnet className="w-3.5 h-3.5" />
-          <span className="hidden md:inline">Snap</span>
-        </button>
-
-        {/* Actions contextuelles Polyligne */}
-        {drawingTool === 'polyline' && polyPoints.length > 0 && (
-          <>
-            <div className="w-px h-5 bg-slate-200" />
-            {polyPoints.length >= 2 && (
-              <button
-                type="button"
-                onClick={() => finishPolyline(false)}
-                className="flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
-                title="Valider la polyligne ouverte (Entrée)"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>Valider</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setPolyPoints([])}
-              className="p-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 cursor-pointer"
-              title="Annuler le tracé en cours"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </>
-        )}
-
-        {/* Actions contextuelles Sélection */}
-        {drawingTool === 'select' && selectedIds.length > 0 && !layer.locked && (
-          <>
-            <div className="w-px h-5 bg-slate-200" />
-            <button
-              type="button"
-              onClick={duplicateSelectedPaths}
-              title="Dupliquer la sélection (Cmd/Ctrl+D)"
-              className="flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 cursor-pointer"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Dupliquer</span>
-            </button>
-            <button
-              type="button"
-              onClick={deleteSelectedPaths}
-              title="Supprimer la sélection (Suppr)"
-              className="flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-semibold bg-rose-50 hover:bg-rose-100 text-rose-700 cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>({selectedIds.length})</span>
-            </button>
-          </>
-        )}
-
-        <div className="w-px h-5 bg-slate-200" />
-
-        {/* Terminer */}
-        <button
-          type="button"
-          onClick={() => selectLayer(null)}
-          className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer transition-colors"
-          title="Terminer le dessin sur ce calque (Échap)"
-        >
-          <Check className="w-3.5 h-3.5" />
-          <span>Terminer</span>
-        </button>
-      </div>
-
       {/* SVG Canvas Interactive Surface (adapté caméra & parallaxe) */}
       <div
         className={isLegacyOrFixed ? 'absolute inset-0 overflow-visible' : 'absolute left-0 top-0 overflow-visible'}

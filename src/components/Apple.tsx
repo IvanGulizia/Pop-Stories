@@ -2,7 +2,7 @@ import { motion } from 'motion/react';
 import { Entity } from '../types';
 import { useEntityPointerInteraction } from '../hooks/useEntityPointerInteraction';
 import { resolveEffectivePivot } from '../utils/physics/pivotHelpers';
-import { EntitySelectionOverlay } from './EntitySelectionOverlay';
+import { EntitySelectionOverlay, EntitySiblingHalo } from './EntitySelectionOverlay';
 
 interface AppleProps {
   entity: Entity;
@@ -15,6 +15,7 @@ export function Apple({ entity, style }: AppleProps) {
     showCanvasLabels,
     enableHoverScaleAnimation,
     isSelected,
+    isSameTypeSibling,
     currentState,
     canDragFromBehavior,
     hasSlider,
@@ -94,6 +95,9 @@ export function Apple({ entity, style }: AppleProps) {
       {/* Hitbox interactive délimitée par le collider vert */}
       <div {...hitboxProps} />
 
+      {/* Halo discret pour les instances partageant le même modèle */}
+      {isSameTypeSibling && appMode !== 'play' && <EntitySiblingHalo colliderType={colliderType} />}
+
       {/* Selection Ring, Rotation & Resize Handles */}
       {isSelected && appMode !== 'play' && (
         <EntitySelectionOverlay
@@ -130,7 +134,7 @@ export function Apple({ entity, style }: AppleProps) {
 
       <div
         className={`relative w-full h-full flex items-center justify-center ${
-          runtimeHealth?.isInvincible ? 'animate-pulse opacity-65' : ''
+          runtimeHealth?.isInvincible && healthConfig?.blinkOnDamage === true ? 'animate-pulse opacity-65' : ''
         }`}
         style={{ transform: entity.flipX ? 'scaleX(-1)' : undefined }}
       >

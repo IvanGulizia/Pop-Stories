@@ -18,6 +18,7 @@ import {
   ChevronRight,
   MapPin,
   X,
+  Copy,
 } from 'lucide-react';
 import { EntityType, Entity } from '../types';
 
@@ -40,6 +41,7 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
   const entities = useSceneStore((state) => state.entities);
   const customArchetypes = useSceneStore((state) => state.customArchetypes || EMPTY_RECORD);
   const localEntityCollection = useSceneStore((state) => state.localEntityCollection || EMPTY_RECORD);
+  const duplicateCustomArchetype = useSceneStore((state) => state.duplicateCustomArchetype);
   const deleteCustomArchetype = useSceneStore((state) => state.deleteCustomArchetype);
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
   const selectEntity = useSceneStore((state) => state.selectEntity);
@@ -437,6 +439,21 @@ export function EntityGallery({ onOpenCreateModal }: EntityGalleryProps) {
                     }
                   >
                     <Bookmark className="w-3.5 h-3.5" fill={isSavedInCollection ? 'currentColor' : 'none'} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const createdType = duplicateCustomArchetype(item.type);
+                      if (createdType) {
+                        notify('Nouvelle entité indépendante créée !');
+                      }
+                    }}
+                    className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                    title="Dupliquer pour créer une nouvelle entité indépendante (sans lien)"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
                   </button>
 
                   <button

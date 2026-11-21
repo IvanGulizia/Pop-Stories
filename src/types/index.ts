@@ -376,6 +376,7 @@ export interface HealthBehaviorConfig extends BaseBehaviorConfig {
   maxHp: number;
   damageTag?: string;
   damageCooldown?: number;
+  blinkOnDamage?: boolean;           // effet d'opacité / clignotement pendant l'invincibilité (désactivé par défaut)
   hurtStateId?: StateId;
   recoverStateId?: StateId;
   knockbackForce?: number;

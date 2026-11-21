@@ -74,3 +74,13 @@ export function EntitySelectionOverlay({
     </>
   );
 }
+
+export function EntitySiblingHalo({ colliderType }: { colliderType: ColliderType }) {
+  return (
+    <div
+      className={`absolute -inset-1.5 ${
+        colliderType === 'circle' ? 'rounded-full' : 'rounded-2xl'
+      } border border-sky-400/80 border-dashed bg-sky-400/5 shadow-[0_0_12px_rgba(56,189,248,0.28)] pointer-events-none transition-opacity`}
+    />
+  );
+}

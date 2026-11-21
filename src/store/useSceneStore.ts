@@ -366,6 +366,26 @@ interface SceneState {
   setDrawingStrokeWidth: (width: number) => void;
   setDrawingShowGrid: (show: boolean) => void;
   setDrawingSnapToGrid: (snap: boolean) => void;
+  layerDrawingActions: {
+    layerId: string;
+    polyPointsCount: number;
+    selectedCount: number;
+    finishPolyline: (close?: boolean) => void;
+    cancelPolyline: () => void;
+    duplicateSelected: () => void;
+    deleteSelected: () => void;
+  } | null;
+  setLayerDrawingActions: (
+    actions: {
+      layerId: string;
+      polyPointsCount: number;
+      selectedCount: number;
+      finishPolyline: (close?: boolean) => void;
+      cancelPolyline: () => void;
+      duplicateSelected: () => void;
+      deleteSelected: () => void;
+    } | null
+  ) => void;
 
   // Interactive live canvas coordinate picker for Rule SpawnLocationPicker
   spawnCanvasPick: {
@@ -439,7 +459,11 @@ interface SceneState {
   updateEntityPosition: (id: EntityId, position: Position) => void;
   updateEntitySize: (id: EntityId, size: Size) => void;
   updateEntityState: (id: EntityId, stateId: StateId) => void;
-  updateEntityDetails: (id: EntityId, partial: Partial<Entity>) => void;
+  updateEntityDetails: (
+    id: EntityId,
+    partial: Partial<Entity>,
+    options?: { instanceOnly?: boolean }
+  ) => void;
   addTagToEntity: (id: EntityId, tag: string) => void;
   removeTagFromEntity: (id: EntityId, tag: string) => void;
   updateStateProperties: (entityId: EntityId, stateId: StateId, partial: Partial<EntityState>) => void;
@@ -492,6 +516,7 @@ interface SceneState {
     frameRate?: number;
     animationLoop?: AnimationLoopMode;
   }) => void;
+  duplicateCustomArchetype: (sourceType: string) => string;
   deleteCustomArchetype: (type: string) => void;
   spawnEntity: (params: {
     type: EntityType;
@@ -1418,6 +1443,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   setDrawingStrokeWidth: (width) => set({ drawingStrokeWidth: width }),
   setDrawingShowGrid: (show) => set({ drawingShowGrid: show }),
   setDrawingSnapToGrid: (snap) => set({ drawingSnapToGrid: snap }),
+  layerDrawingActions: null,
+  setLayerDrawingActions: (actions) => set({ layerDrawingActions: actions }),
 
   spawnCanvasPick: null,
   spawnCanvasPickResult: null,
@@ -1812,6 +1839,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     set({
       selectedLayerId: layerId,
       selectedEntityId: layerId ? null : get().selectedEntityId,
+      ...(layerId ? {} : { layerDrawingActions: null }),
     });
   },
 
@@ -2243,8 +2271,20 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     });
   },
 
-  updateEntityDetails: (id, partial) => {
+  updateEntityDetails: (id, partial, options) => {
     set((state) => {
+      if (options?.instanceOnly && state.entities[id]) {
+        return {
+          entities: {
+            ...state.entities,
+            [id]: {
+              ...state.entities[id],
+              ...partial,
+            },
+          },
+        };
+      }
+
       const entity = findTargetEntityOrArchetype(state, id);
 
       if (!entity) return state;
@@ -3345,6 +3385,158 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     if (get().appMode === 'play' && !getIsEvaluatingRules()) {
       get().evaluateRules();
     }
+  },
+
+  duplicateCustomArchetype: (sourceType: string) => {
+    const cur = get();
+    const representativeEntity = Object.values(cur.entities).find((e) => e.type === sourceType);
+    let source: Entity | undefined = cur.customArchetypes[sourceType] || representativeEntity;
+
+    if (!source) {
+      if (sourceType === 'apple') {
+        source = {
+          id: 'apple',
+          name: 'Pomme',
+          type: 'apple',
+          tags: ['nourriture', 'fruit'],
+          position: { x: 0, y: 0 },
+          size: { width: 256, height: 256 },
+          currentStateId: 'default',
+          isDraggable: false,
+          states: {
+            default: { id: 'default', name: 'Normal', color: '#ef4444', scale: 1, rotation: 0 },
+            croquee: { id: 'croquee', name: 'Croquée', color: '#dc2626', scale: 0.85, rotation: -12 },
+          },
+        };
+      } else if (sourceType === 'plant') {
+        source = {
+          id: 'plant',
+          name: 'Plante',
+          type: 'plant',
+          tags: ['plante', 'nature'],
+          position: { x: 0, y: 0 },
+          size: { width: 256, height: 256 },
+          currentStateId: 'pousse',
+          isDraggable: false,
+          states: {
+            pousse: {
+              id: 'pousse',
+              name: 'Pousse',
+              color: '#22c55e',
+              scale: 0.9,
+              rotation: 0,
+              stemHeight: 40,
+              flowerColor: '#8b5cf6',
+              flowerPetals: 0,
+            },
+            fleur: {
+              id: 'fleur',
+              name: 'Fleurie',
+              color: '#15803d',
+              scale: 1.1,
+              rotation: 0,
+              stemHeight: 75,
+              flowerColor: '#ec4899',
+              flowerPetals: 6,
+            },
+          },
+        };
+      }
+    }
+
+    if (!source) return '';
+    if (cur.appMode === 'edit') {
+      cur.pushSceneHistory();
+    }
+
+    const newType = `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+    const cloned: Entity = JSON.parse(JSON.stringify(source));
+    delete cloned.parentId;
+    delete cloned.parentOffset;
+
+    const existingNames = new Set([
+      ...Object.values(cur.customArchetypes).map((a) => a.name.toLowerCase()),
+      ...Object.values(cur.entities).map((e) => e.name.toLowerCase()),
+    ]);
+    const cleanBase =
+      (source.name || 'Entité').replace(/\s*\(Copie(?:\s+\d+)?\)$/i, '').trim() || 'Entité';
+    let copyName = `${cleanBase} (Copie)`;
+    let idx = 2;
+    while (existingNames.has(copyName.toLowerCase())) {
+      copyName = `${cleanBase} (Copie ${idx})`;
+      idx += 1;
+    }
+
+    // Si on duplique une entité intégrée sans vectorPaths ('apple' ou 'plant'), générer un rendu vectoriel propre
+    if (
+      (sourceType === 'apple' || sourceType === 'plant') &&
+      Object.values(cloned.states).every((s) => !s.vectorPaths || s.vectorPaths.length === 0)
+    ) {
+      Object.values(cloned.states).forEach((s) => {
+        if (sourceType === 'apple') {
+          s.vectorPaths = [
+            {
+              id: `path-apple-${s.id}`,
+              d: 'M 100 54 C 128 42 154 68 150 108 C 146 146 120 166 100 160 C 80 166 54 146 50 108 C 46 68 72 42 100 54 Z',
+              stroke: '#7f1d1d',
+              strokeWidth: 4,
+              fill: s.color || '#ef4444',
+            },
+            {
+              id: `path-apple-leaf-${s.id}`,
+              d: 'M 104 46 C 118 28 140 32 134 48 C 126 56 112 54 104 46 Z',
+              stroke: '#15803d',
+              strokeWidth: 3,
+              fill: '#22c55e',
+            },
+          ];
+        } else {
+          s.vectorPaths = [
+            {
+              id: `path-plant-pot-${s.id}`,
+              d: 'M 65 130 L 135 130 L 125 170 L 75 170 Z',
+              stroke: '#78350f',
+              strokeWidth: 4,
+              fill: '#92400e',
+            },
+            {
+              id: `path-plant-stem-${s.id}`,
+              d: 'M 100 130 L 100 72 M 100 104 Q 72 86 68 104 Q 82 114 100 104 M 100 94 Q 128 76 132 94 Q 118 104 100 94',
+              stroke: s.color || '#16a34a',
+              strokeWidth: 6,
+              fill: s.color || '#22c55e',
+            },
+          ];
+        }
+      });
+    }
+
+    const independentArchetype: Entity = {
+      ...cloned,
+      id: newType,
+      type: newType,
+      name: copyName,
+      position: { x: 0, y: 0 },
+    };
+
+    set((state) => ({
+      customArchetypes: {
+        ...state.customArchetypes,
+        [newType]: independentArchetype,
+      },
+      entityGroups: (state.entityGroups || []).map((g) => {
+        if (!g.entityTypes.includes(sourceType)) return g;
+        const nextTypes = [...g.entityTypes];
+        const srcIdx = nextTypes.indexOf(sourceType);
+        nextTypes.splice(srcIdx + 1, 0, newType);
+        return { ...g, entityTypes: nextTypes };
+      }),
+      selectedEntityId: newType,
+      selectedLayerId: null,
+      pendingCatalogSpawnType: null,
+    }));
+
+    return newType;
   },
 
   deleteCustomArchetype: (type: string) => {

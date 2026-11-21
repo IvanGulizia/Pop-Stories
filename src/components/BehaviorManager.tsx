@@ -807,6 +807,8 @@ function renderBehaviorControls({
           update={update}
           availableTags={availableTags}
           stateList={stateList}
+          onQuickCreateState={onQuickCreateState}
+          onEditStateDrawing={onEditStateDrawing}
         />
       );
     case 'jiggle':

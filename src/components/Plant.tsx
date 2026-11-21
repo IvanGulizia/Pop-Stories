@@ -2,7 +2,7 @@ import { motion } from 'motion/react';
 import { Entity } from '../types';
 import { useEntityPointerInteraction } from '../hooks/useEntityPointerInteraction';
 import { resolveEffectivePivot } from '../utils/physics/pivotHelpers';
-import { EntitySelectionOverlay } from './EntitySelectionOverlay';
+import { EntitySelectionOverlay, EntitySiblingHalo } from './EntitySelectionOverlay';
 
 interface PlantProps {
   entity: Entity;
@@ -15,6 +15,7 @@ export function Plant({ entity, style }: PlantProps) {
     showCanvasLabels,
     enableHoverScaleAnimation,
     isSelected,
+    isSameTypeSibling,
     currentState,
     hasSlider,
     canDrag,
@@ -103,6 +104,9 @@ export function Plant({ entity, style }: PlantProps) {
       {/* Hitbox interactive délimitée strictement par le collider vert */}
       <div {...hitboxProps} />
 
+      {/* Halo discret pour les instances partageant le même modèle */}
+      {isSameTypeSibling && appMode !== 'play' && <EntitySiblingHalo colliderType={colliderType} />}
+
       {/* Anneau de sélection, rotation directe & poignée de redimensionnement */}
       {isSelected && appMode !== 'play' && (
         <EntitySelectionOverlay
@@ -139,7 +143,7 @@ export function Plant({ entity, style }: PlantProps) {
 
       <div
         className={`relative w-full h-full flex items-end justify-center ${
-          runtimeHealth?.isInvincible ? 'animate-pulse opacity-65' : ''
+          runtimeHealth?.isInvincible && healthConfig?.blinkOnDamage === true ? 'animate-pulse opacity-65' : ''
         }`}
         style={{ transform: entity.flipX ? 'scaleX(-1)' : undefined }}
       >

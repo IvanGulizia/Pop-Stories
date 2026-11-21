@@ -1,5 +1,5 @@
 import React from 'react';
-import { Dices, Paintbrush, Pencil, Sliders, X } from 'lucide-react';
+import { Dices, Paintbrush, Pencil, Plus, Sliders, X } from 'lucide-react';
 import { EMPTY_LIST, EMPTY_RECORD, useSceneStore } from '../../store/useSceneStore';
 import {
   CustomParticlePreset,
@@ -737,11 +737,15 @@ export function HealthBehaviorControls({
   update,
   availableTags,
   stateList,
+  onQuickCreateState,
+  onEditStateDrawing,
 }: {
   b: HealthBehaviorConfig;
   update: (partial: any) => void;
   availableTags: string[];
   stateList: EntityState[];
+  onQuickCreateState?: (suggestedName: string, folderName?: string) => string;
+  onEditStateDrawing?: (stateId: string) => void;
 }) {
   const scenes = useSceneStore((s) => s.scenes || EMPTY_LIST);
   const activeSceneId = useSceneStore((s) => s.activeSceneId);
@@ -870,23 +874,37 @@ export function HealthBehaviorControls({
         </div>
       </div>
 
-      {/* Durée d'invincibilité */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200">
-        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-          <span className="font-bold">Invincibilité après choc</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {(b.damageCooldown ?? 1.0).toFixed(1)} s
-          </span>
+      {/* Durée d'invincibilité & effet visuel optionnel */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
+        <div>
+          <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+            <span className="font-bold">Invincibilité après choc</span>
+            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
+              {(b.damageCooldown ?? 1.0).toFixed(1)} s
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0.2"
+            max="4.0"
+            step="0.1"
+            value={b.damageCooldown ?? 1.0}
+            onChange={(e) => update({ damageCooldown: parseFloat(e.target.value) })}
+            className="w-full accent-indigo-600"
+          />
         </div>
-        <input
-          type="range"
-          min="0.2"
-          max="4.0"
-          step="0.1"
-          value={b.damageCooldown ?? 1.0}
-          onChange={(e) => update({ damageCooldown: parseFloat(e.target.value) })}
-          className="w-full accent-indigo-600"
-        />
+        <div className="flex items-center justify-between pt-1.5 border-t border-slate-100">
+          <div>
+            <div className="font-bold text-slate-700 text-[11px]">Clignotement d'opacité aux dégâts</div>
+            <div className="text-[9px] text-slate-400">Désactivé par défaut (activer pour un clignotement auto)</div>
+          </div>
+          <input
+            type="checkbox"
+            checked={b.blinkOnDamage === true}
+            onChange={(e) => update({ blinkOnDamage: e.target.checked })}
+            className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+          />
+        </div>
       </div>
 
       {/* Recul (Knockback) */}
@@ -910,43 +928,80 @@ export function HealthBehaviorControls({
 
       {/* État Blessé temporaire */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-        <div>
+        <div className="min-w-0 flex-1">
           <span className="font-bold text-slate-700 text-xs block">État « Blessé » (Optionnel)</span>
           <span className="text-[10px] text-slate-400">Protégé par le garde-fou pendant l'invincibilité</span>
         </div>
-        <select
-          value={b.hurtStateId || ''}
-          onChange={(e) => update({ hurtStateId: e.target.value || undefined })}
-          className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[140px]"
-        >
-          <option value="">-- Aucun --</option>
-          {stateList.map((st) => (
-            <option key={st.id} value={st.id}>
-              {st.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* État de retour après blessure */}
-      {b.hurtStateId && (
-        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-          <div>
-            <span className="font-bold text-slate-700 text-xs block">Retour après blessure</span>
-            <span className="text-[10px] text-slate-400">Redonne la main au contrôleur</span>
-          </div>
+        <div className="flex items-center gap-1 shrink-0">
           <select
-            value={b.recoverStateId || ''}
-            onChange={(e) => update({ recoverStateId: e.target.value || undefined })}
-            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[140px]"
+            value={b.hurtStateId || ''}
+            onChange={(e) => update({ hurtStateId: e.target.value || undefined })}
+            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[125px]"
           >
-            <option value="">État précédent (auto)</option>
+            <option value="">-- Aucun --</option>
             {stateList.map((st) => (
               <option key={st.id} value={st.id}>
                 {st.name}
               </option>
             ))}
           </select>
+          {onQuickCreateState && (
+            <button
+              type="button"
+              onClick={() => {
+                const createdId = onQuickCreateState('Blessé', 'Santé');
+                if (createdId) update({ hurtStateId: createdId });
+              }}
+              className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg cursor-pointer"
+              title="Créer et lier l'état « Blessé »"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {b.hurtStateId && onEditStateDrawing && (
+            <button
+              type="button"
+              onClick={() => onEditStateDrawing(b.hurtStateId!)}
+              className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+              title="Dessiner l'état « Blessé »"
+            >
+              <Paintbrush className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* État de retour après blessure */}
+      {b.hurtStateId && (
+        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <span className="font-bold text-slate-700 text-xs block">Retour après blessure</span>
+            <span className="text-[10px] text-slate-400">Redonne la main au contrôleur</span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <select
+              value={b.recoverStateId || ''}
+              onChange={(e) => update({ recoverStateId: e.target.value || undefined })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[125px]"
+            >
+              <option value="">État précédent (auto)</option>
+              {stateList.map((st) => (
+                <option key={st.id} value={st.id}>
+                  {st.name}
+                </option>
+              ))}
+            </select>
+            {b.recoverStateId && onEditStateDrawing && (
+              <button
+                type="button"
+                onClick={() => onEditStateDrawing(b.recoverStateId!)}
+                className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+                title="Dessiner cet état"
+              >
+                <Paintbrush className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -969,21 +1024,46 @@ export function HealthBehaviorControls({
 
         {(onDeath === 'change_state' || onDeath === 'restart_scene' || onDeath === 'change_scene') && (
           <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
-            <span className="font-bold text-slate-700 text-[11px]">
+            <span className="font-bold text-slate-700 text-[11px] min-w-0 truncate">
               {onDeath === 'change_state' ? 'État « Mort / K.O. »' : 'État animation Mort (optionnel)'}
             </span>
-            <select
-              value={b.deathStateId || ''}
-              onChange={(e) => update({ deathStateId: e.target.value || undefined })}
-              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[140px]"
-            >
-              <option value="">-- Aucun --</option>
-              {stateList.map((st) => (
-                <option key={st.id} value={st.id}>
-                  {st.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-1 shrink-0">
+              <select
+                value={b.deathStateId || ''}
+                onChange={(e) => update({ deathStateId: e.target.value || undefined })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[125px]"
+              >
+                <option value="">-- Aucun --</option>
+                {stateList.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    {st.name}
+                  </option>
+                ))}
+              </select>
+              {onQuickCreateState && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const createdId = onQuickCreateState('Mort', 'Santé');
+                    if (createdId) update({ deathStateId: createdId });
+                  }}
+                  className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg cursor-pointer"
+                  title="Créer et lier l'état « Mort »"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {b.deathStateId && onEditStateDrawing && (
+                <button
+                  type="button"
+                  onClick={() => onEditStateDrawing(b.deathStateId!)}
+                  className="p-1 bg-slate-50 hover:bg-indigo-100 text-indigo-700 border border-slate-200 rounded-lg cursor-pointer"
+                  title="Dessiner l'état « Mort »"
+                >
+                  <Paintbrush className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         )}
 

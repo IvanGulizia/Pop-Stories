@@ -1,3 +1,21 @@
+## [Phase 10.41 — Sous-phase A] - 2026-11-21
+### Ajouté & Amélioré (Quick Wins UI, Ergonomie & Santé)
+- **Clignotement dégâts optionnel (`HealthBehaviorConfig.blinkOnDamage`, défaut `false`)** : Désactivation par défaut de l'effet `animate-pulse opacity-65` pendant l'invincibilité (`CustomShape.tsx`, `Apple.tsx`, `Plant.tsx`), réactivable par case à cocher dans `HealthBehaviorControls`.
+- **Création & dessin 1-clic des états Santé (`VisualAndSurvivalBehaviorControls.tsx`, `BehaviorManager.tsx`)** : Boutons `+` (création dans le dossier `Santé`) et `Pinceau` pour `hurtStateId`, `recoverStateId` et `deathStateId`.
+- **Dessin de calque épuré (`Scene.tsx`, `DrawingToolsPanel.tsx`, `useSceneStore.ts`)** : Suppression de la barre flottante au-dessus du canvas et déplacement du bouton **Valider**, de l'en-tête du calque actif et des actions Polyligne / Sélection dans le panneau droit.
+- **Identification des doublons (`SceneHierarchyList.tsx`, `EntitySelectionOverlay.tsx`, `useEntityPointerInteraction.ts`, `useSceneStore.ts`)** : Renommage inline par instance (`instanceOnly: true`) via bouton crayon ou double-clic + halo discret bleu ciel (`EntitySiblingHalo`) reliant visuellement les instances du même modèle en Édition.
+- **Duplication d'entité indépendante (`EntityGallery.tsx`, `useSceneStore.ts`)** : Action `duplicateCustomArchetype` créant un nouveau modèle autonome sans lien ultérieur avec l'original (y compris depuis les modèles intégrés) + tests Vitest dédiés (`src/__tests__/subphaseA_quickWins.test.ts`).
+
+## [Phase 10.40] - 2026-11-21
+### Ajouté & Amélioré (États IA, Sol/Plateforme, Arrivée sur Cible & Coordination Marionnette)
+- **`stateBindings` sur `patrol`, `wandering` et `follow` (`types/index.ts`, `matterPhysicsEngine.ts`, `BehaviorSharedControls.tsx`, `MovementAndAIBehaviorControls.tsx`)** : Liaisons optionnelles d'états visuels (*Repos*, *Marche*, *Demi-tour* + `turnDuration`, *Saut*, *Chute* + `minFallHeight`) avec garde-fou non-écrasant préservant les états externes ou RuleBook.
+- **Compatibilité Sol / Gravité / Plateforme (`wanderingAndFollowSolver.ts`, `patrolSolver.ts`, `matterPhysicsEngine.ts`, `BehaviorManager.tsx`, `MovementAndAIBehaviorControls.tsx`)** :
+  - `wandering` : Mode `horizontal` (*Au sol / Plateforme*) conservant `vy`, options `turnOnWall` et `detectLedges` (`ledgeCheckDepth`).
+  - `patrol` : Option `movementSpace: 'free_2d' | 'grounded'` pour `waypoints` avec `detectLedges`.
+  - `follow` : Option `movementSpace: 'free_2d' | 'grounded'` (poursuite X en `constant_speed` et `spring`), `autoJump` paramétrable (`jumpForce`, `jumpCooldown`, `jumpHeightThreshold`, `jumpOnWall`) et assistant 1-clic *Activer Physique au sol (Gravité + Rotation figée)* dans les trois panneaux.
+- **Déclencheur `target_arrived` & Finitions `attach_to_parent` / `detach_parent` (`useSceneStore.ts`, `ruleExecutionEngine.ts`, `Scene.tsx`, `RuleBook.tsx`, `components/rulebook/*`)** : Événement sur front montant avec hystérésis pour `follow` et `move_to` ; options `attachKeepCurrentOffset`, `attachDisableCollisions` (`disableCollisionsWhileAttached`) et `detachImpulseSpeed` / `detachImpulseAngle`.
+- **Coordination Option A Locomotion ↔ Marionnette (`wanderingAndFollowSolver.ts`, `InteractivePuppetControls.tsx`, `matterPhysicsEngine.ts`)** : Solveur unifié `resolveLocomotionAndPuppetState` avec option `allowInterruptLocomotion` sur *Marionnette Interactive* et suite Vitest dédiée (`src/__tests__/movementStatesAndArrival.test.ts`).
+
 ## [Phase 10.39] - 2026-11-20
 ### Corrigé & Ajouté
 - **Événements Clavier RuleBook (`WizardStep1Condition.tsx`, `RuleEventModal.tsx`, `useSceneStore.ts`, `App.tsx`)** : Normalisation de `triggerPhase` sur `'down' | 'up'` lors du choix *Touche de Clavier* (correctif du bug bloquant où `'enter'` restait enregistré), compatibilité ascendante dans `triggerKeyEvent`, distinction lettres AZERTY/QWERTY (`e.key`) vs touches physiques `Digit*`/spéciales (`e.code`), déclenchement fiable de plusieurs règles sur la même touche et exécution des actions globales même sans entité sur la scène.
