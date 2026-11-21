@@ -36,6 +36,7 @@ import {
   computeJointRestWorldDeg,
   resolveJointLimits,
 } from '../utils/physics/jointAngularSolver';
+import { resolveEffectiveParentOffset } from '../store/parentingHelpers';
 
 interface SceneGizmoOverlayProps {
   mousePosRef: React.MutableRefObject<{ x: number; y: number } | null>;
@@ -120,7 +121,7 @@ function computeResolvedParentRotation(
     return { baseRot: 0, effectiveFlip: Boolean(entity.flipX) };
   }
 
-  const offset = entity.parentOffset || {
+  const offset = resolveEffectiveParentOffset(entity) || {
     x: 0,
     y: 0,
     rotationOffset: 0,
@@ -225,11 +226,14 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
   const allIds = Array.from(new Set([...order, ...Object.keys(entities)]));
   const allEntities = allIds
     .map((id) => entities[id])
-    .filter((e): e is Entity => Boolean(e) && e.visible !== false);
+    .filter((e): e is Entity => Boolean(e) && e.visible !== false && !(isPlayMode && e.disabled));
 
   const filterOnlySelected = resolvedSettings.onlySelected;
   const targetEntities = filterOnlySelected
-    ? selectedEntityId && entities[selectedEntityId] && entities[selectedEntityId].visible !== false
+    ? selectedEntityId &&
+      entities[selectedEntityId] &&
+      entities[selectedEntityId].visible !== false &&
+      !(isPlayMode && entities[selectedEntityId].disabled)
       ? [entities[selectedEntityId]]
       : []
     : allEntities;
@@ -371,7 +375,13 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
       {showHierarchy && (
         <>
           {allEntities.map((child) => {
-            if (!child.parentId || !entities[child.parentId] || entities[child.parentId].visible === false) return null;
+            if (
+              !child.parentId ||
+              !entities[child.parentId] ||
+              entities[child.parentId].visible === false ||
+              (isPlayMode && entities[child.parentId].disabled)
+            )
+              return null;
             if (
               filterOnlySelected &&
               selectedEntityId !== child.id &&
@@ -396,8 +406,9 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
             const midY = (pPivot.y + cPivot.y) / 2;
             const showDelta =
               selectedEntityId === child.id || selectedEntityId === parent.id;
-            const dx = Math.round(child.parentOffset?.x ?? cPivot.x - pPivot.x);
-            const dy = Math.round(child.parentOffset?.y ?? cPivot.y - pPivot.y);
+            const effChildOffset = resolveEffectiveParentOffset(child, cState);
+            const dx = Math.round(effChildOffset?.x ?? cPivot.x - pPivot.x);
+            const dy = Math.round(effChildOffset?.y ?? cPivot.y - pPivot.y);
 
             return (
               <g key={`gizmo-hier-${child.id}`}>
@@ -1088,7 +1099,7 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
             const pRot = (pState?.rotation ?? 0) + (isPlayMode ? parent.runtimeTilt || 0 : 0);
             const pFlip = Boolean(parent.flipX);
             const pCenter = getEntityCenter(parent);
-            const offset = entity.parentOffset || { x: 0, y: 0 };
+            const offset = resolveEffectiveParentOffset(entity, currentState) || { x: 0, y: 0 };
             const lx = offset.inheritFlip !== false && pFlip ? -offset.x : offset.x;
             const ly = offset.y;
             const pRad = offset.inheritRotation !== false ? degToRad(pRot) : 0;
@@ -1385,7 +1396,7 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
         <>
           {/* A. Liens Parents -> Enfants en mode Ressort ou Joint Physique */}
           {allEntities.map((child) => {
-            if (!child.parentId || !entities[child.parentId]) return null;
+            if (!child.parentId || !entities[child.parentId] || (isPlayMode && entities[child.parentId].disabled)) return null;
             if (
               filterOnlySelected &&
               selectedEntityId !== child.id &&
@@ -1393,13 +1404,14 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
             ) {
               return null;
             }
-            const mode = child.parentOffset?.attachmentMode || 'rigid';
-            if (mode !== 'spring' && mode !== 'physics_joint') return null;
-
             const parent = entities[child.parentId];
             const pState = parent.states[parent.currentStateId];
             const cState = child.states[child.currentStateId];
-            const offset = child.parentOffset || { x: 0, y: 0 };
+            const effOffset = resolveEffectiveParentOffset(child, cState);
+            const mode = effOffset?.attachmentMode || 'rigid';
+            if (mode !== 'spring' && mode !== 'physics_joint') return null;
+
+            const offset = effOffset || { x: 0, y: 0 };
             const pEffPivot = resolveEffectivePivot(parent, pState);
             const pRot =
               (pState?.rotation ?? 0) +
@@ -1441,12 +1453,12 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
               isJoint && (selectedEntityId === child.id || selectedEntityId === parent.id || isPlayMode);
             const restWorldDeg = isJoint
               ? computeJointRestWorldDeg({
-                  offset: child.parentOffset,
+                  offset: effOffset,
                   parentRotDeg: pRot,
                   parentFlipX: pFlip,
                 })
               : 0;
-            const limits = isJoint ? resolveJointLimits(child.parentOffset) : null;
+            const limits = isJoint ? resolveJointLimits(effOffset) : null;
             const leverDx = (0.5 - childEffPivot.x) * child.size.width;
             const leverDy = (0.5 - childEffPivot.y) * child.size.height;
             const leverDist = Math.hypot(leverDx, leverDy);
@@ -1457,7 +1469,7 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
               40,
               Math.min(86, leverDist > 6 ? leverDist + 14 : Math.max(child.size.width, child.size.height) * 0.55)
             );
-            const initAngleOffset = child.parentOffset?.jointInitialAngleOffset ?? 0;
+            const initAngleOffset = effOffset?.jointInitialAngleOffset ?? 0;
             const showStartRay = isJoint && !isPlayMode && Math.abs(initAngleOffset) > 0.5;
             const startWorldDeg = centerRestDeg + initAngleOffset;
 
@@ -1514,7 +1526,7 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
                   </>
                 )}
 
-                {showJointArcs && (limits?.enabled || (child.parentOffset?.jointAngularStiffness ?? 0) > 0 || showStartRay) && (
+                {showJointArcs && (limits?.enabled || (effOffset?.jointAngularStiffness ?? 0) > 0 || showStartRay) && (
                   <line
                     x1={targetAnchor.x}
                     y1={targetAnchor.y}
@@ -1548,7 +1560,7 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
                   </>
                 )}
 
-                {maxDist > 0 && (
+                {maxDist > 0 ? (
                   <circle
                     cx={targetAnchor.x}
                     cy={targetAnchor.y}
@@ -1559,7 +1571,17 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
                     strokeDasharray="4 4"
                     strokeOpacity={0.65}
                   />
-                )}
+                ) : effOffset?.springLimitMaxDistance ? (
+                  <circle
+                    cx={targetAnchor.x}
+                    cy={targetAnchor.y}
+                    r={5}
+                    fill={isJoint ? 'rgba(14, 165, 233, 0.14)' : 'rgba(139, 92, 246, 0.14)'}
+                    stroke={strokeColor}
+                    strokeWidth="1.5"
+                    strokeOpacity={0.85}
+                  />
+                ) : null}
                 {(() => {
                   const stress = isPlayMode ? (runtimeDebug?.jointStressRatios?.[child.id] ?? 0) : 0;
                   const effectiveStroke =

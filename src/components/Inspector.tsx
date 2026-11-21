@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useSceneStore, EMPTY_RECORD } from '../store/useSceneStore';
-import { Entity, EntityPivot, EntityState, ParentAttachmentMode } from '../types';
+import { Entity, EntityPivot, EntityState } from '../types';
 import {
   Sparkles,
   Plus,
@@ -22,11 +22,14 @@ import {
   RotateCcw,
   Eye,
   EyeOff,
+  Power,
 } from 'lucide-react';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { OnionStateOption } from './DrawingCanvas';
 import { BehaviorManager } from './BehaviorManager';
 import { DEFAULT_PIVOT, resolveRawPivot, sanitizePivot } from '../utils/physics/pivotHelpers';
+import { EditableNumericValue } from './shared/EditableNumericValue';
+import { ParentOffsetFieldsEditor } from './shared/ParentOffsetFieldsEditor';
 
 const INSPECTOR_PIVOT_PRESETS: { label: string; x: number; y: number }[] = [
   { label: 'Haut-Gauche', x: 0, y: 0 },
@@ -255,6 +258,28 @@ export function Inspector() {
               <button
                 type="button"
                 onClick={() =>
+                  updateEntityDetails(
+                    selectedEntity.id,
+                    { disabled: !selectedEntity.disabled },
+                    { instanceOnly: true }
+                  )
+                }
+                className={`p-1.5 rounded-xl transition-colors cursor-pointer ${
+                  selectedEntity.disabled
+                    ? 'text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200'
+                    : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
+                }`}
+                title={
+                  selectedEntity.disabled
+                    ? 'Activer cet objet (participe à nouveau au jeu)'
+                    : 'Désactiver cet objet (inactif et invisible en mode Play)'
+                }
+              >
+                <Power className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() =>
                   updateEntityDetails(selectedEntity.id, {
                     visible: selectedEntity.visible === false,
                   })
@@ -267,7 +292,7 @@ export function Inspector() {
                 title={
                   selectedEntity.visible === false
                     ? 'Afficher cet objet sur la scène'
-                    : 'Masquer cet objet sur la scène'
+                    : 'Masquer visuellement cet objet (reste actif en jeu)'
                 }
               >
                 {selectedEntity.visible === false ? (
@@ -303,6 +328,21 @@ export function Inspector() {
             />
           </div>
         </div>
+
+        {selectedEntity.disabled && (
+          <div className="flex items-center justify-between gap-2 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl px-2.5 py-1.5 text-[11px] font-semibold">
+            <span>Objet désactivé (ignoré en mode Play)</span>
+            <button
+              type="button"
+              onClick={() =>
+                updateEntityDetails(selectedEntity.id, { disabled: false }, { instanceOnly: true })
+              }
+              className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-white hover:bg-rose-100 border border-rose-200 text-rose-700 cursor-pointer shrink-0"
+            >
+              Réactiver
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Tags */}
@@ -412,43 +452,37 @@ export function Inspector() {
                   </div>
 
                   <div className="flex-1 grid grid-cols-2 gap-1.5 items-center">
-                    <label className="flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]">
+                    <div className="flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]">
                       <span className="font-bold text-slate-500">X</span>
-                      <input
-                        type="number"
-                        min={-50}
-                        max={150}
-                        step={5}
-                        value={Math.round(activePivot.x * 100)}
-                        onChange={(e) =>
+                      <EditableNumericValue
+                        value={Math.round(activePivot.x * 1000) / 10}
+                        unit="%"
+                        precision={1}
+                        onChange={(v) =>
                           applyPivot({
                             ...activePivot,
-                            x: (parseFloat(e.target.value) || 0) / 100,
+                            x: v / 100,
                           })
                         }
-                        className="w-11 bg-transparent font-mono font-bold text-right text-slate-800 outline-none"
+                        className="font-mono font-bold text-slate-800 hover:text-fuchsia-700 hover:bg-fuchsia-50 px-1 rounded cursor-text tabular-nums"
                       />
-                      <span className="text-slate-400">%</span>
-                    </label>
+                    </div>
 
-                    <label className="flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]">
+                    <div className="flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]">
                       <span className="font-bold text-slate-500">Y</span>
-                      <input
-                        type="number"
-                        min={-50}
-                        max={150}
-                        step={5}
-                        value={Math.round(activePivot.y * 100)}
-                        onChange={(e) =>
+                      <EditableNumericValue
+                        value={Math.round(activePivot.y * 1000) / 10}
+                        unit="%"
+                        precision={1}
+                        onChange={(v) =>
                           applyPivot({
                             ...activePivot,
-                            y: (parseFloat(e.target.value) || 0) / 100,
+                            y: v / 100,
                           })
                         }
-                        className="w-11 bg-transparent font-mono font-bold text-right text-slate-800 outline-none"
+                        className="font-mono font-bold text-slate-800 hover:text-fuchsia-700 hover:bg-fuchsia-50 px-1 rounded cursor-text tabular-nums"
                       />
-                      <span className="text-slate-400">%</span>
-                    </label>
+                    </div>
 
                     <button
                       type="button"
@@ -641,551 +675,120 @@ export function Inspector() {
                   {/* Ligne 2 : Décalage X */}
                   <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
                     <span className="font-bold text-slate-700 text-xs">Décalage relatif X</span>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        value={Math.round(offset.x)}
-                        onChange={(e) =>
-                          updateEntityParentOffset(selectedEntity.id, {
-                            x: parseFloat(e.target.value) || 0,
-                          })
-                        }
-                        className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono tabular-nums font-bold text-xs text-right text-slate-800"
-                      />
-                      <span className="text-slate-400 text-xs">px</span>
-                    </div>
+                    <EditableNumericValue
+                      value={offset.x}
+                      unit="px"
+                      precision={1}
+                      onChange={(v) => updateEntityParentOffset(selectedEntity.id, { x: v })}
+                      className="bg-slate-50 hover:bg-indigo-50 border border-slate-300 rounded-lg px-2 py-1 font-mono tabular-nums font-bold text-xs text-slate-800 cursor-text"
+                    />
                   </div>
 
                   {/* Ligne 3 : Décalage Y */}
                   <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
                     <span className="font-bold text-slate-700 text-xs">Décalage relatif Y</span>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        value={Math.round(offset.y)}
-                        onChange={(e) =>
-                          updateEntityParentOffset(selectedEntity.id, {
-                            y: parseFloat(e.target.value) || 0,
-                          })
-                        }
-                        className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono tabular-nums font-bold text-xs text-right text-slate-800"
-                      />
-                      <span className="text-slate-400 text-xs">px</span>
-                    </div>
+                    <EditableNumericValue
+                      value={offset.y}
+                      unit="px"
+                      precision={1}
+                      onChange={(v) => updateEntityParentOffset(selectedEntity.id, { y: v })}
+                      className="bg-slate-50 hover:bg-indigo-50 border border-slate-300 rounded-lg px-2 py-1 font-mono tabular-nums font-bold text-xs text-slate-800 cursor-text"
+                    />
                   </div>
 
                   {/* Ligne 4 : Angle relatif */}
                   <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
                     <span className="font-bold text-slate-700 text-xs">Angle relatif</span>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        value={Math.round(offset.rotationOffset ?? 0)}
-                        onChange={(e) =>
-                          updateEntityParentOffset(selectedEntity.id, {
-                            rotationOffset: parseFloat(e.target.value) || 0,
-                          })
-                        }
-                        className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono tabular-nums font-bold text-xs text-right text-slate-800"
-                      />
-                      <span className="text-slate-400 text-xs">°</span>
-                    </div>
-                  </div>
-
-                  {/* Ligne 5 : Hériter de la rotation */}
-                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-slate-700 text-xs">Suivre la rotation du parent</div>
-                      <div className="text-[10px] text-slate-400">Orbite et pivote avec « {activeParent.name} »</div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={offset.inheritRotation !== false}
-                      onChange={(e) =>
-                        updateEntityParentOffset(selectedEntity.id, {
-                          inheritRotation: e.target.checked,
-                        })
+                    <EditableNumericValue
+                      value={offset.rotationOffset ?? 0}
+                      unit="°"
+                      precision={1}
+                      onChange={(v) =>
+                        updateEntityParentOffset(selectedEntity.id, { rotationOffset: v })
                       }
-                      className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+                      className="bg-slate-50 hover:bg-indigo-50 border border-slate-300 rounded-lg px-2 py-1 font-mono tabular-nums font-bold text-xs text-slate-800 cursor-text"
                     />
                   </div>
 
-                  {/* Ligne 6 : Hériter du Flip horizontal */}
-                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-slate-700 text-xs">Suivre le Flip horizontal</div>
-                      <div className="text-[10px] text-slate-400">Inverse le côté et le dessin quand le parent se retourne</div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={offset.inheritFlip !== false}
-                      onChange={(e) =>
-                        updateEntityParentOffset(selectedEntity.id, {
-                          inheritFlip: e.target.checked,
-                        })
-                      }
-                      className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
-                    />
-                  </div>
+                  {/* Paramètres partagés du mode d'attache, ressort & joint */}
+                  <ParentOffsetFieldsEditor
+                    offset={offset}
+                    parentName={activeParent.name}
+                    onChange={(patch) => updateEntityParentOffset(selectedEntity.id, patch)}
+                  />
 
-                  {/* Ligne 7 : Mode d'attachement (Rigide, Ressort, Joint Physique) */}
-                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                    <span className="font-bold text-slate-700 text-xs">Mode d'attache</span>
-                    <select
-                      value={offset.attachmentMode || 'rigid'}
-                      onChange={(e) =>
-                        updateEntityParentOffset(selectedEntity.id, {
-                          attachmentMode: e.target.value as ParentAttachmentMode,
-                        })
-                      }
-                      className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[180px]"
-                    >
-                      <option value="rigid">Rigide (Soudé)</option>
-                      <option value="spring">Ressort / Damping élastique</option>
-                      <option value="physics_joint">Joint Physique (Pendule)</option>
-                    </select>
-                  </div>
-
-                  {(offset.attachmentMode === 'spring' || offset.attachmentMode === 'physics_joint') && (
-                    <div className="p-2 bg-indigo-50/40 rounded-xl border border-indigo-200 space-y-2">
-                      <div>
-                        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-                          <span className="font-bold">
-                            {offset.attachmentMode === 'physics_joint'
-                              ? "Rigidité du point d'attache"
-                              : 'Raideur du ressort'}
-                          </span>
-                          <span className="font-mono tabular-nums font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap shrink-0">
-                            {Math.round(offset.springStiffness ?? 160)}
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min="20"
-                          max="500"
-                          step="10"
-                          value={offset.springStiffness ?? 160}
-                          onChange={(e) =>
-                            updateEntityParentOffset(selectedEntity.id, {
-                              springStiffness: parseFloat(e.target.value),
-                            })
-                          }
-                          className="w-full accent-indigo-600"
-                        />
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-                          <span className="font-bold">
-                            {offset.attachmentMode === 'physics_joint'
-                              ? 'Amortissement linéaire'
-                              : 'Amortissement (Damping)'}
-                          </span>
-                          <span className="font-mono tabular-nums font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap shrink-0">
-                            {(offset.springDamping ?? 12).toFixed(1)}
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min="1"
-                          max="40"
-                          step="0.5"
-                          value={offset.springDamping ?? 12}
-                          onChange={(e) =>
-                            updateEntityParentOffset(selectedEntity.id, {
-                              springDamping: parseFloat(e.target.value),
-                            })
-                          }
-                          className="w-full accent-indigo-600"
-                        />
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-                          <span className="font-bold">Distance max (Laisse)</span>
-                          <span className="font-mono tabular-nums font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap shrink-0">
-                            {(offset.springMaxDistance ?? 0) > 0
-                              ? `${Math.round(offset.springMaxDistance!)} px`
-                              : 'Libre'}
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0"
-                          max="350"
-                          step="10"
-                          value={offset.springMaxDistance ?? 0}
-                          onChange={(e) =>
-                            updateEntityParentOffset(selectedEntity.id, {
-                              springMaxDistance: parseFloat(e.target.value),
-                            })
-                          }
-                          className="w-full accent-indigo-600"
-                        />
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-                          <span className="font-bold">Pesanteur locale</span>
-                          <span className="font-mono tabular-nums font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap shrink-0">
-                            {Math.round(
-                              offset.springGravity ?? (offset.attachmentMode === 'physics_joint' ? 400 : 0)
-                            )}{' '}
-                            px/s²
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min="-200"
-                          max="800"
-                          step="20"
-                          value={offset.springGravity ?? (offset.attachmentMode === 'physics_joint' ? 400 : 0)}
-                          onChange={(e) =>
-                            updateEntityParentOffset(selectedEntity.id, {
-                              springGravity: parseFloat(e.target.value),
-                            })
-                          }
-                          className="w-full accent-indigo-600"
-                        />
-                      </div>
-
-                      {offset.attachmentMode === 'physics_joint' && (
-                        <div className="p-2 bg-sky-50/70 rounded-xl border border-sky-200 space-y-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <div>
-                              <div className="font-bold text-sky-900 text-xs">
-                                Contraintes & Ressort du Joint
-                              </div>
-                              <div className="text-[10px] text-sky-700/80">
-                                Butées angulaires, freinage doux et rappel ressort
-                              </div>
-                            </div>
-                            <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 cursor-pointer whitespace-nowrap shrink-0">
-                              <input
-                                type="checkbox"
-                                checked={Boolean(offset.jointEnableAngleLimits)}
-                                onChange={(e) =>
-                                  updateEntityParentOffset(selectedEntity.id, {
-                                    jointEnableAngleLimits: e.target.checked,
-                                    jointMinAngle: offset.jointMinAngle ?? -75,
-                                    jointMaxAngle: offset.jointMaxAngle ?? 75,
-                                    jointBrakeAngle: offset.jointBrakeAngle ?? 20,
-                                    jointBrakeStrength: offset.jointBrakeStrength ?? 75,
-                                  })
-                                }
-                                className="w-4 h-4 accent-sky-600 rounded cursor-pointer"
-                              />
-                              <span>Limiter l'angle</span>
-                            </label>
-                          </div>
-
-                          {offset.jointEnableAngleLimits && (
-                            <div className="space-y-2 pt-1 border-t border-sky-200/70">
-                              <div className="grid grid-cols-2 gap-2">
-                                <div>
-                                  <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
-                                    <span className="font-bold">Angle min</span>
-                                    <span className="font-mono tabular-nums font-bold text-sky-700">
-                                      {Math.round(offset.jointMinAngle ?? -75)}°
-                                    </span>
-                                  </div>
-                                  <input
-                                    type="range"
-                                    min="-179"
-                                    max={Math.round(offset.jointMaxAngle ?? 75)}
-                                    step="1"
-                                    value={Math.min(
-                                      offset.jointMinAngle ?? -75,
-                                      offset.jointMaxAngle ?? 75
-                                    )}
-                                    onChange={(e) =>
-                                      updateEntityParentOffset(selectedEntity.id, {
-                                        jointMinAngle: parseFloat(e.target.value),
-                                      })
-                                    }
-                                    className="w-full accent-sky-600"
-                                  />
-                                </div>
-
-                                <div>
-                                  <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
-                                    <span className="font-bold">Angle max</span>
-                                    <span className="font-mono tabular-nums font-bold text-sky-700">
-                                      +{Math.round(offset.jointMaxAngle ?? 75)}°
-                                    </span>
-                                  </div>
-                                  <input
-                                    type="range"
-                                    min={Math.round(offset.jointMinAngle ?? -75)}
-                                    max="179"
-                                    step="1"
-                                    value={Math.max(
-                                      offset.jointMaxAngle ?? 75,
-                                      offset.jointMinAngle ?? -75
-                                    )}
-                                    onChange={(e) =>
-                                      updateEntityParentOffset(selectedEntity.id, {
-                                        jointMaxAngle: parseFloat(e.target.value),
-                                      })
-                                    }
-                                    className="w-full accent-sky-600"
-                                  />
-                                </div>
-                              </div>
-
-                              <div>
-                                <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
-                                  <span className="font-bold">2e angle : Zone de freinage</span>
-                                  <span className="font-mono tabular-nums font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded whitespace-nowrap shrink-0">
-                                    {(offset.jointBrakeAngle ?? 20) > 0
-                                      ? `${Math.round(offset.jointBrakeAngle ?? 20)}°`
-                                      : 'Désactivé'}
-                                  </span>
-                                </div>
-                                <input
-                                  type="range"
-                                  min="0"
-                                  max="90"
-                                  step="1"
-                                  value={offset.jointBrakeAngle ?? 20}
-                                  onChange={(e) =>
-                                    updateEntityParentOffset(selectedEntity.id, {
-                                      jointBrakeAngle: parseFloat(e.target.value),
-                                    })
-                                  }
-                                  className="w-full accent-amber-500"
-                                />
-                              </div>
-
-                              {(offset.jointBrakeAngle ?? 20) > 0 && (
-                                <div>
-                                  <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
-                                    <span className="font-bold">Force de freinage</span>
-                                    <span className="font-mono tabular-nums font-bold text-amber-700">
-                                      {Math.round(offset.jointBrakeStrength ?? 75)}%
-                                    </span>
-                                  </div>
-                                  <input
-                                    type="range"
-                                    min="0"
-                                    max="100"
-                                    step="5"
-                                    value={offset.jointBrakeStrength ?? 75}
-                                    onChange={(e) =>
-                                      updateEntityParentOffset(selectedEntity.id, {
-                                        jointBrakeStrength: parseFloat(e.target.value),
-                                      })
-                                    }
-                                    className="w-full accent-amber-500"
-                                  />
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          <div className="pt-1 border-t border-sky-200/70 space-y-2">
-                            <div>
-                              <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
-                                <span className="font-bold">Angle de départ (Play)</span>
-                                <span className="font-mono tabular-nums font-bold text-sky-700">
-                                  {(offset.jointInitialAngleOffset ?? 0) > 0 ? '+' : ''}
-                                  {Math.round(offset.jointInitialAngleOffset ?? 0)}°
-                                </span>
-                              </div>
-                              <input
-                                type="range"
-                                min="-180"
-                                max="180"
-                                step="1"
-                                value={offset.jointInitialAngleOffset ?? 0}
-                                onChange={(e) =>
-                                  updateEntityParentOffset(selectedEntity.id, {
-                                    jointInitialAngleOffset: parseFloat(e.target.value),
-                                  })
-                                }
-                                className="w-full accent-sky-600"
-                              />
-                            </div>
-
-                            <div>
-                              <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
-                                <span className="font-bold">Ressort angulaire (Rappel)</span>
-                                <span className="font-mono tabular-nums font-bold text-sky-700 bg-sky-100 px-1.5 py-0.5 rounded whitespace-nowrap shrink-0">
-                                  {(offset.jointAngularStiffness ?? 0) > 0
-                                    ? Math.round(offset.jointAngularStiffness!)
-                                    : 'Libre'}
-                                </span>
-                              </div>
-                              <input
-                                type="range"
-                                min="0"
-                                max="400"
-                                step="5"
-                                value={offset.jointAngularStiffness ?? 0}
-                                onChange={(e) =>
-                                  updateEntityParentOffset(selectedEntity.id, {
-                                    jointAngularStiffness: parseFloat(e.target.value),
-                                  })
-                                }
-                                className="w-full accent-sky-600"
-                              />
-                            </div>
-
-                            <div>
-                              <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
-                                <span className="font-bold">Amortissement angulaire</span>
-                                <span className="font-mono tabular-nums font-bold text-sky-700">
-                                  {(offset.jointAngularDamping ?? 3).toFixed(1)}
-                                </span>
-                              </div>
-                              <input
-                                type="range"
-                                min="0"
-                                max="25"
-                                step="0.5"
-                                value={offset.jointAngularDamping ?? 3}
-                                onChange={(e) =>
-                                  updateEntityParentOffset(selectedEntity.id, {
-                                    jointAngularDamping: parseFloat(e.target.value),
-                                  })
-                                }
-                                className="w-full accent-sky-600"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="pt-1 border-t border-indigo-200/60 flex items-center justify-between gap-2">
-                        <div>
-                          <div className="font-bold text-slate-700 text-xs">
-                            Collisions avec murs, sols & objets
-                          </div>
-                          <div className="text-[10px] text-slate-500">
-                            {offset.attachmentMode === 'physics_joint'
-                              ? 'Actif par défaut en Joint Physique (désactiver pour passer en capteur libre)'
-                              : 'Active la réponse physique avec le décor sans heurter le parent'}
-                          </div>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={
-                            offset.attachmentMode === 'physics_joint'
-                              ? offset.collideWithWorld !== false
-                              : Boolean(offset.collideWithWorld)
-                          }
-                          onChange={(e) =>
-                            updateEntityParentOffset(selectedEntity.id, {
-                              collideWithWorld: e.target.checked,
-                            })
-                          }
-                          className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
-                        />
-                      </div>
-
-                      {/* Rupture du Joint (Break Joint) */}
-                      <div className="p-2 bg-rose-50/70 rounded-xl border border-rose-200 space-y-2">
+                  {/* Surcharge de parenting spécifique à l'état actif */}
+                  {(() => {
+                    const curState = selectedEntity.states[selectedEntity.currentStateId];
+                    if (!curState) return null;
+                    const hasParentOverride = Boolean(curState.parentOffsetOverride);
+                    const mergedStateOffset = {
+                      ...offset,
+                      ...(curState.parentOffsetOverride || {}),
+                    };
+                    return (
+                      <div className="p-2 bg-violet-50/50 rounded-xl border border-violet-200 space-y-2 mt-1.5">
                         <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <div className="font-bold text-rose-900 text-xs">
-                              Rupture du Joint (Break Joint)
+                          <div className="min-w-0">
+                            <div className="font-bold text-violet-950 text-xs truncate">
+                              Surcharger dans l'état « {curState.name} »
                             </div>
-                            <div className="text-[10px] text-rose-700/80">
-                              Se détache si on tire trop fort ou secoue vivement (événement Règles)
+                            <div className="text-[10px] text-violet-800/75">
+                              Modifie décalage, mode d'attache ou joint uniquement quand cet état est actif
                             </div>
                           </div>
-                          <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 cursor-pointer whitespace-nowrap shrink-0">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(offset.jointBreakable)}
-                              onChange={(e) =>
-                                updateEntityParentOffset(selectedEntity.id, {
-                                  jointBreakable: e.target.checked,
-                                  jointBreakForce: offset.jointBreakForce ?? 240,
-                                  jointBreakShakeThreshold: offset.jointBreakShakeThreshold ?? 100,
-                                  jointBreakFallWithGravity:
-                                    offset.jointBreakFallWithGravity ?? true,
+                          <input
+                            type="checkbox"
+                            checked={hasParentOverride}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                updateStateProperties(selectedEntity.id, curState.id, {
+                                  parentOffsetOverride: {
+                                    attachmentMode: offset.attachmentMode || 'rigid',
+                                  },
+                                });
+                              } else {
+                                updateStateProperties(selectedEntity.id, curState.id, {
+                                  parentOffsetOverride: undefined,
+                                });
+                              }
+                            }}
+                            className="w-4 h-4 accent-violet-600 rounded cursor-pointer shrink-0"
+                          />
+                        </div>
+
+                        {hasParentOverride && (
+                          <div className="space-y-1.5 pt-1 border-t border-violet-200/70">
+                            <ParentOffsetFieldsEditor
+                              offset={mergedStateOffset}
+                              parentName={activeParent.name}
+                              showOffsets={true}
+                              compact={true}
+                              onChange={(patch) =>
+                                updateStateProperties(selectedEntity.id, curState.id, {
+                                  parentOffsetOverride: {
+                                    ...(curState.parentOffsetOverride || {}),
+                                    ...patch,
+                                  },
                                 })
                               }
-                              className="w-4 h-4 accent-rose-600 rounded cursor-pointer"
                             />
-                            <span>Cassable</span>
-                          </label>
-                        </div>
-
-                        {offset.jointBreakable && (
-                          <div className="space-y-2 pt-1 border-t border-rose-200/70">
-                            <div>
-                              <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
-                                <span className="font-bold">Résistance à l'arrachement</span>
-                                <span className="font-mono tabular-nums font-bold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded whitespace-nowrap shrink-0">
-                                  {Math.round(offset.jointBreakForce ?? 240)}
-                                </span>
-                              </div>
-                              <input
-                                type="range"
-                                min="50"
-                                max="800"
-                                step="10"
-                                value={offset.jointBreakForce ?? 240}
-                                onChange={(e) =>
-                                  updateEntityParentOffset(selectedEntity.id, {
-                                    jointBreakForce: parseFloat(e.target.value),
-                                  })
-                                }
-                                className="w-full accent-rose-600"
-                              />
-                            </div>
-
-                            <div>
-                              <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
-                                <span className="font-bold">Tolérance aux secousses</span>
-                                <span className="font-mono tabular-nums font-bold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded whitespace-nowrap shrink-0">
-                                  {(offset.jointBreakShakeThreshold ?? 100) > 0
-                                    ? Math.round(offset.jointBreakShakeThreshold ?? 100)
-                                    : 'Désactivé'}
-                                </span>
-                              </div>
-                              <input
-                                type="range"
-                                min="0"
-                                max="300"
-                                step="10"
-                                value={offset.jointBreakShakeThreshold ?? 100}
-                                onChange={(e) =>
-                                  updateEntityParentOffset(selectedEntity.id, {
-                                    jointBreakShakeThreshold: parseFloat(e.target.value),
-                                  })
-                                }
-                                className="w-full accent-rose-600"
-                              />
-                            </div>
-
-                            <div className="flex items-center justify-between gap-2 pt-0.5">
-                              <div>
-                                <div className="font-bold text-slate-700 text-[11px]">
-                                  Tomber librement après rupture
-                                </div>
-                                <div className="text-[10px] text-slate-500">
-                                  Active la gravité et les rebonds dès que le joint casse
-                                </div>
-                              </div>
-                              <input
-                                type="checkbox"
-                                checked={offset.jointBreakFallWithGravity !== false}
-                                onChange={(e) =>
-                                  updateEntityParentOffset(selectedEntity.id, {
-                                    jointBreakFallWithGravity: e.target.checked,
-                                  })
-                                }
-                                className="w-4 h-4 accent-rose-600 rounded cursor-pointer shrink-0"
-                              />
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateStateProperties(selectedEntity.id, curState.id, {
+                                  parentOffsetOverride: undefined,
+                                })
+                              }
+                              className="w-full py-1 px-2 text-[10px] font-bold text-slate-600 hover:text-rose-700 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                            >
+                              <RotateCcw className="w-3 h-3" /> Réinitialiser la surcharge de cet état
+                            </button>
                           </div>
                         )}
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </>
               )}
             </div>

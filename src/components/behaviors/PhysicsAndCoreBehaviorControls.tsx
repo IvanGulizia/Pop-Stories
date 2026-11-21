@@ -11,6 +11,7 @@ import {
 } from '../../types';
 import { FlipControls, InertiaControls } from './BehaviorSharedControls';
 import { GrabPhysicsControls } from './GrabPhysicsControls';
+import { EditableNumericValue } from '../shared/EditableNumericValue';
 
 export function DraggableBehaviorControls({
   b,
@@ -90,16 +91,20 @@ export function PhysicsBehaviorControls({
         <div className="p-2 bg-white rounded-xl border border-slate-200">
           <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
             <span className="font-bold">Gravité verticale</span>
-            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-              {b.gravity ?? 400} px/s²
-            </span>
+            <EditableNumericValue
+              value={b.gravity ?? 400}
+              unit="px/s²"
+              precision={1}
+              onChange={(v) => update({ gravity: v })}
+              className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+            />
           </div>
           <input
             type="range"
             min="-2000"
             max="2000"
             step="50"
-            value={b.gravity ?? 400}
+            value={Math.max(-2000, Math.min(2000, b.gravity ?? 400))}
             onChange={(e) => update({ gravity: parseFloat(e.target.value) })}
             className="w-full accent-indigo-600"
           />
@@ -113,16 +118,20 @@ export function PhysicsBehaviorControls({
             <span className="font-bold">Rebond (Restitution)</span>
             <span className="text-[10px] text-slate-400 block">Élasticité du choc avec les autres objets</span>
           </div>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {Math.round((b.bounce ?? 0.4) * 100)}%
-          </span>
+          <EditableNumericValue
+            value={Math.round((b.bounce ?? 0.4) * 1000) / 10}
+            unit="%"
+            precision={1}
+            onChange={(v) => update({ bounce: v / 100 })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+          />
         </div>
         <input
           type="range"
           min="0"
           max="1.2"
           step="0.05"
-          value={b.bounce ?? 0.4}
+          value={Math.max(0, Math.min(1.2, b.bounce ?? 0.4))}
           onChange={(e) => update({ bounce: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -137,16 +146,20 @@ export function PhysicsBehaviorControls({
               0 = Glace (glisse) • 0.6+ = Accroche &amp; fait rouler les balles
             </span>
           </div>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {Math.round((b.friction ?? 0.6) * 100)}%
-          </span>
+          <EditableNumericValue
+            value={Math.round((b.friction ?? 0.6) * 1000) / 10}
+            unit="%"
+            precision={1}
+            onChange={(v) => update({ friction: v / 100 })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+          />
         </div>
         <input
           type="range"
           min="0"
           max="1"
           step="0.05"
-          value={b.friction ?? 0.6}
+          value={Math.max(0, Math.min(1, b.friction ?? 0.6))}
           onChange={(e) => update({ friction: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -162,16 +175,19 @@ export function PhysicsBehaviorControls({
                 0 = Vide spatial (aucun freinage) • 0.05+ = Freinage fort
               </span>
             </div>
-            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-              {(b.frictionAir ?? 0.015).toFixed(3)}
-            </span>
+            <EditableNumericValue
+              value={b.frictionAir ?? 0.015}
+              precision={4}
+              onChange={(v) => update({ frictionAir: v })}
+              className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+            />
           </div>
           <input
             type="range"
             min="0"
             max="0.25"
             step="0.005"
-            value={b.frictionAir ?? 0.015}
+            value={Math.max(0, Math.min(0.25, b.frictionAir ?? 0.015))}
             onChange={(e) => update({ frictionAir: parseFloat(e.target.value) })}
             className="w-full accent-indigo-600"
           />
@@ -186,16 +202,20 @@ export function PhysicsBehaviorControls({
               <span className="font-bold">Masse</span>
               <span className="text-[10px] text-slate-400 block">Influence la résistance aux chocs</span>
             </div>
-            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-              {b.mass ?? 1} kg
-            </span>
+            <EditableNumericValue
+              value={b.mass ?? 1}
+              unit="kg"
+              precision={2}
+              onChange={(v) => update({ mass: v })}
+              className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+            />
           </div>
           <input
             type="range"
             min="0.1"
             max="50"
             step="0.1"
-            value={b.mass ?? 1}
+            value={Math.max(0.1, Math.min(50, b.mass ?? 1))}
             onChange={(e) => update({ mass: parseFloat(e.target.value) })}
             className="w-full accent-indigo-600"
           />
@@ -243,16 +263,20 @@ export function AutoDestroyBehaviorControls({
             <span className="font-bold">Durée de vie (Délai)</span>
             <span className="text-[10px] text-slate-400 block">Délai avant suppression automatique</span>
           </div>
-          <span className="font-mono font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.delay ?? 3} s
-          </span>
+          <EditableNumericValue
+            value={b.delay ?? 3}
+            unit="s"
+            precision={2}
+            onChange={(v) => update({ delay: v })}
+            className="font-mono font-bold text-orange-600 bg-orange-50 hover:bg-orange-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+          />
         </div>
         <input
           type="range"
           min="0.2"
           max="20"
           step="0.2"
-          value={b.delay ?? 3}
+          value={Math.max(0.2, Math.min(20, b.delay ?? 3))}
           onChange={(e) => update({ delay: parseFloat(e.target.value) })}
           className="w-full accent-orange-600"
         />
@@ -276,15 +300,13 @@ export function ConstantVelocityBehaviorControls({
           <span className="font-bold text-slate-700 text-xs block">Vitesse horizontale X</span>
           <span className="text-[10px] text-slate-400">Négatif = gauche, Positif = droite</span>
         </div>
-        <div className="flex items-center gap-1">
-          <input
-            type="number"
-            value={b.vx}
-            onChange={(e) => update({ vx: parseFloat(e.target.value) || 0 })}
-            className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
-          />
-          <span className="text-slate-400 text-xs">px/s</span>
-        </div>
+        <EditableNumericValue
+          value={b.vx}
+          unit="px/s"
+          precision={2}
+          onChange={(v) => update({ vx: v })}
+          className="bg-slate-50 hover:bg-indigo-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-slate-800 cursor-text tabular-nums"
+        />
       </div>
 
       {/* Ligne 2: Vitesse Y */}
@@ -293,31 +315,33 @@ export function ConstantVelocityBehaviorControls({
           <span className="font-bold text-slate-700 text-xs block">Vitesse verticale Y</span>
           <span className="text-[10px] text-slate-400">Négatif = haut, Positif = bas</span>
         </div>
-        <div className="flex items-center gap-1">
-          <input
-            type="number"
-            value={b.vy}
-            onChange={(e) => update({ vy: parseFloat(e.target.value) || 0 })}
-            className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
-          />
-          <span className="text-slate-400 text-xs">px/s</span>
-        </div>
+        <EditableNumericValue
+          value={b.vy}
+          unit="px/s"
+          precision={2}
+          onChange={(v) => update({ vy: v })}
+          className="bg-slate-50 hover:bg-indigo-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-slate-800 cursor-text tabular-nums"
+        />
       </div>
 
       {/* Ligne 3: Rotation continue */}
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Rotation continue</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.angularVelocity || 0} °/s
-          </span>
+          <EditableNumericValue
+            value={b.angularVelocity || 0}
+            unit="°/s"
+            precision={1}
+            onChange={(v) => update({ angularVelocity: v })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+          />
         </div>
         <input
           type="range"
           min="-360"
           max="360"
           step="10"
-          value={b.angularVelocity || 0}
+          value={Math.max(-360, Math.min(360, b.angularVelocity || 0))}
           onChange={(e) => update({ angularVelocity: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -421,16 +445,20 @@ export function KeyboardControlBehaviorControls({
             <div className="p-2 bg-white rounded-xl border border-slate-200">
               <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
                 <span className="font-bold">Nombre de sauts max</span>
-                <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-                  {b.maxJumps ?? 1} {(b.maxJumps ?? 1) > 1 ? 'sauts' : 'saut'}
-                </span>
+                <EditableNumericValue
+                  value={b.maxJumps ?? 1}
+                  displayText={`${b.maxJumps ?? 1} ${(b.maxJumps ?? 1) > 1 ? 'sauts' : 'saut'}`}
+                  precision={0}
+                  onChange={(v) => update({ maxJumps: Math.round(v) })}
+                  className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="1"
                 max="10"
                 step="1"
-                value={b.maxJumps ?? 1}
+                value={Math.max(1, Math.min(10, b.maxJumps ?? 1))}
                 onChange={(e) => update({ maxJumps: parseInt(e.target.value, 10) || 1 })}
                 className="w-full accent-indigo-600 h-1.5"
               />
@@ -446,16 +474,20 @@ export function KeyboardControlBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Vitesse de course</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.speed} px/s
-          </span>
+          <EditableNumericValue
+            value={b.speed}
+            unit="px/s"
+            precision={1}
+            onChange={(v) => update({ speed: v })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+          />
         </div>
         <input
           type="range"
           min="50"
           max="500"
           step="10"
-          value={b.speed}
+          value={Math.max(50, Math.min(500, b.speed))}
           onChange={(e) => update({ speed: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -466,16 +498,20 @@ export function KeyboardControlBehaviorControls({
         <div className="p-2 bg-white rounded-xl border border-slate-200">
           <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
             <span className="font-bold">Impulsion de saut</span>
-            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-              {b.jumpForce || 450} px/s
-            </span>
+            <EditableNumericValue
+              value={b.jumpForce ?? 450}
+              unit="px/s"
+              precision={1}
+              onChange={(v) => update({ jumpForce: v })}
+              className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+            />
           </div>
           <input
             type="range"
             min="200"
             max="800"
             step="25"
-            value={b.jumpForce || 450}
+            value={Math.max(200, Math.min(800, b.jumpForce ?? 450))}
             onChange={(e) => update({ jumpForce: parseFloat(e.target.value) })}
             className="w-full accent-indigo-600"
           />
@@ -738,7 +774,7 @@ export function KeyboardControlBehaviorControls({
                       min="0.05"
                       max="0.6"
                       step="0.05"
-                      value={b.stateBindings?.landDuration ?? 0.15}
+                      value={Math.max(0.05, Math.min(0.6, b.stateBindings?.landDuration ?? 0.15))}
                       onChange={(e) =>
                         update({
                           stateBindings: {
@@ -749,9 +785,20 @@ export function KeyboardControlBehaviorControls({
                       }
                       className="flex-1 accent-indigo-600"
                     />
-                    <span className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded shrink-0">
-                      {(b.stateBindings?.landDuration ?? 0.15).toFixed(2)}s
-                    </span>
+                    <EditableNumericValue
+                      value={b.stateBindings?.landDuration ?? 0.15}
+                      unit="s"
+                      precision={2}
+                      onChange={(v) =>
+                        update({
+                          stateBindings: {
+                            ...(b.stateBindings || {}),
+                            landDuration: v,
+                          },
+                        })
+                      }
+                      className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded shrink-0 cursor-text tabular-nums"
+                    />
                   </div>
                 )}
               </div>
@@ -760,16 +807,27 @@ export function KeyboardControlBehaviorControls({
               <div className="bg-white p-1.5 rounded-lg border border-indigo-100 space-y-1">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[11px] font-bold text-slate-700">Hauteur min. chute (Fall / Land)</span>
-                  <span className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">
-                    {b.stateBindings?.minFallHeight ?? 20} px
-                  </span>
+                  <EditableNumericValue
+                    value={b.stateBindings?.minFallHeight ?? 20}
+                    unit="px"
+                    precision={1}
+                    onChange={(v) =>
+                      update({
+                        stateBindings: {
+                          ...(b.stateBindings || {}),
+                          minFallHeight: v,
+                        },
+                      })
+                    }
+                    className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded cursor-text tabular-nums"
+                  />
                 </div>
                 <input
                   type="range"
                   min="0"
                   max="160"
                   step="2"
-                  value={b.stateBindings?.minFallHeight ?? 20}
+                  value={Math.max(0, Math.min(160, b.stateBindings?.minFallHeight ?? 20))}
                   onChange={(e) =>
                     update({
                       stateBindings: {
@@ -860,16 +918,20 @@ export function BoundaryBehaviorControls({
                 Élasticité contre {boundarySpace === 'viewport' ? 'le cadre visible' : 'les limites du monde'}
               </span>
             </div>
-            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-              {Math.round((b.bounciness ?? 0.8) * 100)}%
-            </span>
+            <EditableNumericValue
+              value={Math.round((b.bounciness ?? 0.8) * 1000) / 10}
+              unit="%"
+              precision={1}
+              onChange={(v) => update({ bounciness: v / 100 })}
+              className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+            />
           </div>
           <input
             type="range"
             min="0"
             max="1"
             step="0.05"
-            value={b.bounciness ?? 0.8}
+            value={Math.max(0, Math.min(1, b.bounciness ?? 0.8))}
             onChange={(e) => update({ bounciness: parseFloat(e.target.value) })}
             className="w-full accent-indigo-600"
           />

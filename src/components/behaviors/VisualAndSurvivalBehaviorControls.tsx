@@ -14,6 +14,7 @@ import {
   StrokeWiggleBehaviorConfig,
 } from '../../types';
 import { SCENE_TRANSITION_OPTIONS } from '../rulebook/ruleBookTypes';
+import { EditableNumericValue } from '../shared/EditableNumericValue';
 
 export function LookAtBehaviorControls({
   b,
@@ -203,17 +204,24 @@ export function LookAtBehaviorControls({
               <div className="pt-1 border-t border-slate-100">
                 <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
                   <span className="font-semibold">Zone morte flip (Anti-scintillement)</span>
-                  <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[10px]">
-                    {b.flipDeadzone ?? 12} px
-                  </span>
+                  <EditableNumericValue
+                    value={b.flipDeadzone ?? 12}
+                    unit="px"
+                    precision={0}
+                    onChange={(val) => update({ flipDeadzone: val })}
+                    className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[10px]"
+                  />
                 </div>
                 <input
                   type="range"
                   min="0"
                   max="40"
                   step="2"
-                  value={b.flipDeadzone ?? 12}
-                  onChange={(e) => update({ flipDeadzone: parseInt(e.target.value, 10) || 0 })}
+                  value={Math.max(0, Math.min(40, b.flipDeadzone ?? 12))}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (Number.isFinite(v)) update({ flipDeadzone: v });
+                  }}
                   className="w-full accent-indigo-600 h-1.5"
                 />
               </div>
@@ -224,16 +232,20 @@ export function LookAtBehaviorControls({
           <div className="p-2 bg-white rounded-xl border border-slate-200">
             <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
               <span className="font-bold">Décalage d'angle</span>
-              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-                {b.rotationOffset || 0}°
-              </span>
+              <EditableNumericValue
+                value={b.rotationOffset || 0}
+                unit="°"
+                precision={0}
+                onChange={(val) => update({ rotationOffset: val })}
+                className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+              />
             </div>
             <input
               type="range"
               min="-180"
               max="180"
               step="5"
-              value={b.rotationOffset || 0}
+              value={Math.max(-180, Math.min(180, b.rotationOffset || 0))}
               onChange={(e) => update({ rotationOffset: parseFloat(e.target.value) })}
               className="w-full accent-indigo-600"
             />
@@ -248,16 +260,21 @@ export function LookAtBehaviorControls({
                   Empêche une tête de faire un tour complet à l'envers
                 </span>
               </div>
-              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px] shrink-0">
-                {isFreeCone ? 'Libre 360°' : `±${maxAngleVal}°`}
-              </span>
+              <EditableNumericValue
+                value={maxAngleVal}
+                unit="°"
+                precision={0}
+                displayText={isFreeCone ? 'Libre 360°' : `±${maxAngleVal}°`}
+                onChange={(val) => update({ maxAngle: val })}
+                className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px] shrink-0"
+              />
             </div>
             <input
               type="range"
               min="0"
               max="180"
               step="5"
-              value={maxAngleVal}
+              value={Math.max(0, Math.min(180, maxAngleVal))}
               onChange={(e) => update({ maxAngle: parseFloat(e.target.value) })}
               className="w-full accent-indigo-600"
             />
@@ -274,16 +291,20 @@ export function LookAtBehaviorControls({
                   Amplitude de glissement gauche/droite de la pupille
                 </span>
               </div>
-              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-                {rx} px
-              </span>
+              <EditableNumericValue
+                value={rx}
+                unit="px"
+                precision={0}
+                onChange={(val) => update({ orbitRadius: val })}
+                className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+              />
             </div>
             <input
               type="range"
               min="1"
               max="50"
               step="1"
-              value={rx}
+              value={Math.max(1, Math.min(50, rx))}
               onChange={(e) => update({ orbitRadius: parseFloat(e.target.value) })}
               className="w-full accent-indigo-600"
             />
@@ -298,16 +319,20 @@ export function LookAtBehaviorControls({
                   Amplitude haut/bas (utile pour des yeux ovales)
                 </span>
               </div>
-              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-                {ry} px
-              </span>
+              <EditableNumericValue
+                value={ry}
+                unit="px"
+                precision={0}
+                onChange={(val) => update({ orbitRadiusY: val })}
+                className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+              />
             </div>
             <input
               type="range"
               min="1"
               max="50"
               step="1"
-              value={ry}
+              value={Math.max(1, Math.min(50, ry))}
               onChange={(e) => update({ orbitRadiusY: parseFloat(e.target.value) })}
               className="w-full accent-indigo-600"
             />
@@ -328,16 +353,20 @@ export function LookAtBehaviorControls({
                 : '0 = instantané, sinon vitesse de pivot'}
             </span>
           </div>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.smoothSpeed || 0} °/s
-          </span>
+          <EditableNumericValue
+            value={b.smoothSpeed || 0}
+            unit="°/s"
+            precision={0}
+            onChange={(val) => update({ smoothSpeed: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="0"
           max="720"
           step="30"
-          value={b.smoothSpeed || 0}
+          value={Math.max(0, Math.min(720, b.smoothSpeed || 0))}
           onChange={(e) => update({ smoothSpeed: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -544,16 +573,20 @@ export function ParticleEmitterBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Débit d'émission</span>
-          <span className="font-mono font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.rate ?? 14} part/s
-          </span>
+          <EditableNumericValue
+            value={b.rate ?? 14}
+            unit="part/s"
+            precision={0}
+            onChange={(val) => update({ rate: val })}
+            className="font-mono font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="1"
           max="40"
           step="1"
-          value={b.rate ?? 14}
+          value={Math.max(1, Math.min(40, b.rate ?? 14))}
           onChange={(e) => update({ rate: parseInt(e.target.value, 10) })}
           className="w-full accent-amber-500"
         />
@@ -591,16 +624,20 @@ export function ParticleEmitterBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Vitesse d'éjection</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.speed ?? 140} px/s
-          </span>
+          <EditableNumericValue
+            value={b.speed ?? 140}
+            unit="px/s"
+            precision={0}
+            onChange={(val) => update({ speed: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="10"
           max="500"
           step="10"
-          value={b.speed ?? 140}
+          value={Math.max(10, Math.min(500, b.speed ?? 140))}
           onChange={(e) => update({ speed: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -610,16 +647,20 @@ export function ParticleEmitterBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Taille des particules</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.size ?? 6} px
-          </span>
+          <EditableNumericValue
+            value={b.size ?? 6}
+            unit="px"
+            precision={0}
+            onChange={(val) => update({ size: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="2"
           max="20"
           step="1"
-          value={b.size ?? 6}
+          value={Math.max(2, Math.min(20, b.size ?? 6))}
           onChange={(e) => update({ size: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -629,16 +670,20 @@ export function ParticleEmitterBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Durée de vie</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {(b.lifetime ?? 0.8).toFixed(1)} s
-          </span>
+          <EditableNumericValue
+            value={b.lifetime ?? 0.8}
+            unit="s"
+            precision={1}
+            onChange={(val) => update({ lifetime: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="0.2"
           max="3.0"
           step="0.1"
-          value={b.lifetime ?? 0.8}
+          value={Math.max(0.2, Math.min(3.0, b.lifetime ?? 0.8))}
           onChange={(e) => update({ lifetime: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -648,16 +693,20 @@ export function ParticleEmitterBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Gravité / Flottaison</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.gravity ?? 160} px/s²
-          </span>
+          <EditableNumericValue
+            value={b.gravity ?? 160}
+            unit="px/s²"
+            precision={0}
+            onChange={(val) => update({ gravity: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="-300"
           max="600"
           step="20"
-          value={b.gravity ?? 160}
+          value={Math.max(-300, Math.min(600, b.gravity ?? 160))}
           onChange={(e) => update({ gravity: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -667,16 +716,20 @@ export function ParticleEmitterBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Direction d'émission</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.angle ?? -90}°
-          </span>
+          <EditableNumericValue
+            value={b.angle ?? -90}
+            unit="°"
+            precision={0}
+            onChange={(val) => update({ angle: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="-180"
           max="180"
           step="5"
-          value={b.angle ?? -90}
+          value={Math.max(-180, Math.min(180, b.angle ?? -90))}
           onChange={(e) => update({ angle: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -686,16 +739,20 @@ export function ParticleEmitterBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Cône de dispersion</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.spread ?? 60}°
-          </span>
+          <EditableNumericValue
+            value={b.spread ?? 60}
+            unit="°"
+            precision={0}
+            onChange={(val) => update({ spread: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="5"
           max="360"
           step="5"
-          value={b.spread ?? 60}
+          value={Math.max(5, Math.min(360, b.spread ?? 60))}
           onChange={(e) => update({ spread: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -707,8 +764,12 @@ export function ParticleEmitterBehaviorControls({
         <div className="flex items-center gap-1">
           <input
             type="number"
+            step="any"
             value={b.offsetX ?? 0}
-            onChange={(e) => update({ offsetX: parseFloat(e.target.value) || 0 })}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value);
+              if (Number.isFinite(v)) update({ offsetX: v });
+            }}
             className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
           />
           <span className="text-slate-400 text-xs">px</span>
@@ -721,8 +782,12 @@ export function ParticleEmitterBehaviorControls({
         <div className="flex items-center gap-1">
           <input
             type="number"
+            step="any"
             value={b.offsetY ?? 0}
-            onChange={(e) => update({ offsetY: parseFloat(e.target.value) || 0 })}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value);
+              if (Number.isFinite(v)) update({ offsetY: v });
+            }}
             className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
           />
           <span className="text-slate-400 text-xs">px</span>
@@ -762,17 +827,24 @@ export function HealthBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Points de vie max (PV)</span>
-          <span className="font-mono font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.maxHp ?? 3} PV
-          </span>
+          <EditableNumericValue
+            value={b.maxHp ?? 3}
+            unit="PV"
+            precision={0}
+            onChange={(val) => update({ maxHp: val })}
+            className="font-mono font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="1"
           max="20"
           step="1"
-          value={b.maxHp ?? 3}
-          onChange={(e) => update({ maxHp: parseInt(e.target.value, 10) || 1 })}
+          value={Math.max(1, Math.min(20, b.maxHp ?? 3))}
+          onChange={(e) => {
+            const v = parseInt(e.target.value, 10);
+            if (Number.isFinite(v)) update({ maxHp: v });
+          }}
           className="w-full accent-rose-500"
         />
       </div>
@@ -879,16 +951,20 @@ export function HealthBehaviorControls({
         <div>
           <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
             <span className="font-bold">Invincibilité après choc</span>
-            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-              {(b.damageCooldown ?? 1.0).toFixed(1)} s
-            </span>
+            <EditableNumericValue
+              value={b.damageCooldown ?? 1.0}
+              unit="s"
+              precision={1}
+              onChange={(val) => update({ damageCooldown: val })}
+              className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+            />
           </div>
           <input
             type="range"
             min="0.2"
             max="4.0"
             step="0.1"
-            value={b.damageCooldown ?? 1.0}
+            value={Math.max(0.2, Math.min(4.0, b.damageCooldown ?? 1.0))}
             onChange={(e) => update({ damageCooldown: parseFloat(e.target.value) })}
             className="w-full accent-indigo-600"
           />
@@ -911,16 +987,20 @@ export function HealthBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Recul au choc (Knockback)</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.knockbackForce ?? 220} px/s
-          </span>
+          <EditableNumericValue
+            value={b.knockbackForce ?? 220}
+            unit="px/s"
+            precision={0}
+            onChange={(val) => update({ knockbackForce: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="0"
           max="600"
           step="20"
-          value={b.knockbackForce ?? 220}
+          value={Math.max(0, Math.min(600, b.knockbackForce ?? 220))}
           onChange={(e) => update({ knockbackForce: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -1089,17 +1169,24 @@ export function HealthBehaviorControls({
             <div>
               <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
                 <span className="font-bold">Délai avant transition (anim. Mort)</span>
-                <span className="font-mono font-bold text-rose-600">
-                  {(b.deathDelaySec ?? 0).toFixed(2)}s
-                </span>
+                <EditableNumericValue
+                  value={b.deathDelaySec ?? 0}
+                  unit="s"
+                  precision={2}
+                  onChange={(val) => update({ deathDelaySec: val })}
+                  className="font-mono font-bold text-rose-600"
+                />
               </div>
               <input
                 type="range"
                 min="0"
                 max="5"
                 step="0.1"
-                value={b.deathDelaySec ?? 0}
-                onChange={(e) => update({ deathDelaySec: parseFloat(e.target.value) || 0 })}
+                value={Math.max(0, Math.min(5, b.deathDelaySec ?? 0))}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v)) update({ deathDelaySec: v });
+                }}
                 className="w-full accent-rose-500 cursor-pointer"
               />
             </div>
@@ -1136,11 +1223,12 @@ export function HealthBehaviorControls({
                 <label className="text-[10px] font-bold text-slate-600 block mb-0.5">Durée (s)</label>
                 <input
                   type="number"
-                  min="0"
-                  max="3"
-                  step="0.05"
+                  step="any"
                   value={b.deathSceneTransitionDuration ?? 0.45}
-                  onChange={(e) => update({ deathSceneTransitionDuration: parseFloat(e.target.value) || 0 })}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (Number.isFinite(v)) update({ deathSceneTransitionDuration: v });
+                  }}
                   className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-slate-800"
                 />
               </div>
@@ -1184,16 +1272,19 @@ export function StrokeWiggleBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Amplitude du tremblement</span>
-          <span className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px]">
-            {(b.amplitude ?? 2.2).toFixed(1)}
-          </span>
+          <EditableNumericValue
+            value={b.amplitude ?? 2.2}
+            precision={1}
+            onChange={(val) => update({ amplitude: val })}
+            className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="0"
           max="15"
           step="0.2"
-          value={b.amplitude ?? 2.2}
+          value={Math.max(0, Math.min(15, b.amplitude ?? 2.2))}
           onChange={(e) => update({ amplitude: parseFloat(e.target.value) })}
           className="w-full accent-cyan-600 cursor-pointer"
         />
@@ -1206,16 +1297,20 @@ export function StrokeWiggleBehaviorControls({
             <span className="font-bold">Rythme (FPS)</span>
             <span className="text-[10px] text-slate-400 block">4–8 Hz recommandé pour un rendu crayonné naturel</span>
           </div>
-          <span className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px] shrink-0">
-            {b.fps ?? 6} Hz
-          </span>
+          <EditableNumericValue
+            value={b.fps ?? 6}
+            unit="Hz"
+            precision={0}
+            onChange={(val) => update({ fps: val })}
+            className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px] shrink-0"
+          />
         </div>
         <input
           type="range"
           min="1"
           max="24"
           step="1"
-          value={b.fps ?? 6}
+          value={Math.max(1, Math.min(24, b.fps ?? 6))}
           onChange={(e) => update({ fps: parseInt(e.target.value, 10) })}
           className="w-full accent-cyan-600 cursor-pointer"
         />
@@ -1225,16 +1320,20 @@ export function StrokeWiggleBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Variantes en boucle</span>
-          <span className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.frameCount ?? 4} tracés
-          </span>
+          <EditableNumericValue
+            value={b.frameCount ?? 4}
+            unit="tracés"
+            precision={0}
+            onChange={(val) => update({ frameCount: val })}
+            className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="2"
           max="6"
           step="1"
-          value={b.frameCount ?? 4}
+          value={Math.max(2, Math.min(6, b.frameCount ?? 4))}
           onChange={(e) => update({ frameCount: parseInt(e.target.value, 10) })}
           className="w-full accent-cyan-600 cursor-pointer"
         />
@@ -1277,18 +1376,28 @@ export function StrokeWiggleBehaviorControls({
         <div className="pt-1">
           <div className="flex justify-between items-center text-[11px] text-slate-600 mb-0.5">
             <span>Pas exact (px)</span>
-            <span className="font-mono font-bold text-cyan-700">
-              {hasCustomStep
-                ? `${b.segmentStep}px`
-                : `Auto (${(b.detail || 'medium') === 'low' ? 28 : (b.detail || 'medium') === 'high' ? 10 : 16}px)`}
-            </span>
+            <EditableNumericValue
+              value={b.segmentStep ?? ((b.detail || 'medium') === 'low' ? 28 : (b.detail || 'medium') === 'high' ? 10 : 16)}
+              unit="px"
+              precision={0}
+              displayText={
+                hasCustomStep
+                  ? `${b.segmentStep}px`
+                  : `Auto (${(b.detail || 'medium') === 'low' ? 28 : (b.detail || 'medium') === 'high' ? 10 : 16}px)`
+              }
+              onChange={(val) => update({ segmentStep: val })}
+              className="font-mono font-bold text-cyan-700"
+            />
           </div>
           <input
             type="range"
             min="6"
             max="48"
             step="2"
-            value={b.segmentStep ?? ((b.detail || 'medium') === 'low' ? 28 : (b.detail || 'medium') === 'high' ? 10 : 16)}
+            value={Math.max(
+              6,
+              Math.min(48, b.segmentStep ?? ((b.detail || 'medium') === 'low' ? 28 : (b.detail || 'medium') === 'high' ? 10 : 16))
+            )}
             onChange={(e) => update({ segmentStep: parseInt(e.target.value, 10) })}
             className="w-full accent-cyan-600 cursor-pointer"
           />
@@ -1300,16 +1409,20 @@ export function StrokeWiggleBehaviorControls({
         <div>
           <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
             <span className="font-bold">Échelle verticale (Y / X)</span>
-            <span className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px]">
-              ×{(b.verticalScale ?? 1).toFixed(1)}
-            </span>
+            <EditableNumericValue
+              value={b.verticalScale ?? 1}
+              precision={1}
+              displayText={`×${(b.verticalScale ?? 1).toFixed(1)}`}
+              onChange={(val) => update({ verticalScale: val })}
+              className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px]"
+            />
           </div>
           <input
             type="range"
             min="0"
             max="2"
             step="0.1"
-            value={b.verticalScale ?? 1}
+            value={Math.max(0, Math.min(2, b.verticalScale ?? 1))}
             onChange={(e) => update({ verticalScale: parseFloat(e.target.value) })}
             className="w-full accent-cyan-600 cursor-pointer"
           />
@@ -1321,16 +1434,20 @@ export function StrokeWiggleBehaviorControls({
               <span className="font-bold">Stabilité des extrémités</span>
               <span className="text-[10px] text-slate-400 block">Ancre les bouts sur les traits ouverts</span>
             </div>
-            <span className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px] shrink-0">
-              {Math.round((b.endpointStability ?? 0) * 100)}%
-            </span>
+            <EditableNumericValue
+              value={Math.round((b.endpointStability ?? 0) * 100)}
+              unit="%"
+              precision={0}
+              onChange={(pct) => update({ endpointStability: pct / 100 })}
+              className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px] shrink-0"
+            />
           </div>
           <input
             type="range"
             min="0"
             max="1"
             step="0.05"
-            value={b.endpointStability ?? 0}
+            value={Math.max(0, Math.min(1, b.endpointStability ?? 0))}
             onChange={(e) => update({ endpointStability: parseFloat(e.target.value) })}
             className="w-full accent-cyan-600 cursor-pointer"
           />
@@ -1340,9 +1457,13 @@ export function StrokeWiggleBehaviorControls({
           <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
             <span className="font-bold">Graine aléatoire (Seed)</span>
             <div className="flex items-center gap-1.5">
-              <span className="font-mono font-bold text-slate-600 text-[11px]">
-                #{b.seed ?? 0}
-              </span>
+              <EditableNumericValue
+                value={b.seed ?? 0}
+                precision={0}
+                displayText={`#${b.seed ?? 0}`}
+                onChange={(val) => update({ seed: val })}
+                className="font-mono font-bold text-slate-600 text-[11px]"
+              />
               <button
                 type="button"
                 onClick={() => update({ seed: Math.floor(Math.random() * 1000) })}
@@ -1358,7 +1479,7 @@ export function StrokeWiggleBehaviorControls({
             min="0"
             max="999"
             step="1"
-            value={b.seed ?? 0}
+            value={Math.max(0, Math.min(999, b.seed ?? 0))}
             onChange={(e) => update({ seed: parseInt(e.target.value, 10) })}
             className="w-full accent-cyan-600 cursor-pointer"
           />
@@ -1406,11 +1527,12 @@ export function StrokeWiggleBehaviorControls({
               </label>
               <input
                 type="number"
-                step="0.05"
+                step="any"
                 value={b.amplitudeVariableMultiplier ?? 0.1}
-                onChange={(e) =>
-                  update({ amplitudeVariableMultiplier: parseFloat(e.target.value) || 0 })
-                }
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v)) update({ amplitudeVariableMultiplier: v });
+                }}
                 className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-slate-800"
               />
             </div>
@@ -1436,11 +1558,12 @@ export function StrokeWiggleBehaviorControls({
               </label>
               <input
                 type="number"
-                step="0.1"
+                step="any"
                 value={b.fpsVariableMultiplier ?? 0.2}
-                onChange={(e) =>
-                  update({ fpsVariableMultiplier: parseFloat(e.target.value) || 0 })
-                }
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v)) update({ fpsVariableMultiplier: v });
+                }}
                 className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-slate-800"
               />
             </div>

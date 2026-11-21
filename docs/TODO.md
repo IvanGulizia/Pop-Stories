@@ -6,11 +6,11 @@
   - Suppression de la barre flottante sur le canvas en dessin de calque + bouton `Valider` et actions contextuelles dans `DrawingToolsPanel`
   - Renommage inline par instance (`SceneHierarchyList`) + halo discret entre instances du même modèle (`EntitySiblingHalo`)
   - Duplication indépendante d'entité dans la galerie (`duplicateCustomArchetype`)
-- [ ] **Sous-phase B — Saisie numérique libre, Impulsion, Désactivation complète & Parenting/État** :
-  - Saisie numérique libre sans garde-fou au clic (avec accès à `0`, décimales fines et valeurs élevées ex. ressort angulaire > 400)
-  - Bouton **Désactiver/Activer** séparé de *Masquer/Afficher* (+ action RuleBook)
-  - Action RuleBook `apply_impulse` (Force / Impulsion paramétrable)
-  - Paramétrage du parentage/joint dans l'action RuleBook *Parenter* + override `parentOffset` par État
+- [x] **Sous-phase B — Saisie numérique libre, Impulsion, Désactivation complète & Parenting/État** :
+  - Saisie numérique libre sans garde-fou au clic (avec accès à `0`, décimales fines et valeurs élevées ex. ressort angulaire > 400) + distinction `limitMaxDistance` `0 px` strict vs `Libre`
+  - Bouton **Désactiver/Activer** séparé de *Masquer/Afficher* (`Entity.disabled`) + action RuleBook `set_entity_enabled`
+  - Action RuleBook `apply_impulse` (Force / Impulsion paramétrable linéaire & angulaire)
+  - Paramétrage du parentage/joint dans l'action RuleBook *Parenter* (`AttachParentConfigEditor`) + override `parentOffsetOverride` par État (`resolveEffectiveParentOffset`)
 - [ ] **Sous-phase C — Studio Particules Avancé, Collection & Spawn Relatif** :
   - Ranges aléatoires Min/Max, mono-couleur vs dégradé, durée d'émetteur finie, bursts et formes d'émission
   - Collection locale de particules (projet + inter-projets IndexedDB)
@@ -19,7 +19,7 @@
   - Ratio caméra dédié au Play avec cadrage en Édition sans bandes noires
   - Drag & drop de réorganisation des cartes d'actions individuelles dans une règle (`RuleBook`)
   - Comportement Snap / Aimant + événements/actions compagnons (`on_snap`, `snap_to`, `unsnap`)
-- [ ] **Décision en attente (#17)** : Modèle *Prefab vs Instance séparée* pour la modification des doublons sur scène.
+- [ ] **Décision en attente (#17)** : Modèle *Prefab vs Instance séparée* pour la modification des doublons sur scène (piste privilégiée : Solution 2 — Prefab partagé + surcharge 1 niveau optionnelle, sans collision UX avec les overrides d'états).
 
 ## En cours / Récent
 - [x] Système global de Gizmos sur scène (`SceneGizmoOverlay`) + section Settings dédiée

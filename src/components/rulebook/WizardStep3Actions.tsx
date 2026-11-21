@@ -27,6 +27,10 @@ import {
   WizardData,
 } from './ruleBookTypes';
 import { CameraActionEditor } from './CameraActionEditor';
+import { AttachParentConfigEditor } from './AttachParentConfigEditor';
+import { ApplyImpulseConfigEditor } from './ApplyImpulseConfigEditor';
+import { SetEntityEnabledConfigEditor } from './SetEntityEnabledConfigEditor';
+import { EditableNumericValue } from '../shared/EditableNumericValue';
 import { useSceneStore, EMPTY_RECORD, EMPTY_LIST } from '../../store/useSceneStore';
 
 interface WizardStep3ActionsProps {
@@ -227,7 +231,64 @@ export function WizardStep3Actions({
                         </div>
                       </button>
 
-                      {/* 4. Détruire le Sujet */}
+                      {/* 4. Force / Impulsion Physique */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            actionSubStep: 'apply_impulse_picker',
+                            actionTargetMode: 'subject',
+                            impulseStrength: activeWizard.impulseStrength ?? 350,
+                            impulseApplyMode: activeWizard.impulseApplyMode || 'add',
+                            impulseDirectionMode: activeWizard.impulseDirectionMode || 'cardinal',
+                            impulseCardinal: activeWizard.impulseCardinal || 'up',
+                            impulseAngle: activeWizard.impulseAngle ?? -90,
+                            impulseAngular: activeWizard.impulseAngular ?? 0,
+                          });
+                        }}
+                        className="w-full p-3.5 bg-white hover:bg-orange-50/70 border-2 border-slate-200 hover:border-orange-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                      >
+                        <div className="w-11 h-11 rounded-xl bg-orange-100 text-orange-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                          💥
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-black text-slate-900 group-hover:text-orange-700 truncate">
+                            Force / Impulsion Physique
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                            Propulser, faire sauter ou tourner « {wizardSubjectName} »
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* 5. Activer / Désactiver le Sujet */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            actionSubStep: 'set_entity_enabled_picker',
+                            actionTargetMode: 'subject',
+                            enabledActionMode: activeWizard.enabledActionMode || 'disable',
+                          });
+                        }}
+                        className="w-full p-3.5 bg-white hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                      >
+                        <div className="w-11 h-11 rounded-xl bg-slate-200 text-slate-800 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                          ⏻
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-black text-slate-900 group-hover:text-slate-900 truncate">
+                            Activer / Désactiver le Sujet
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                            Masquer &amp; suspendre temporairement sans détruire
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* 6. Détruire le Sujet */}
                       <button
                         type="button"
                         onClick={() => {
@@ -334,6 +395,63 @@ export function WizardStep3Actions({
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Décaler ou propulser une entité →
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveWizard({
+                          ...activeWizard,
+                          actionSubStep: 'apply_impulse_picker',
+                          actionTargetMode: 'instance',
+                          actionTargetId: Object.keys(entities)[0] || '',
+                          impulseStrength: activeWizard.impulseStrength ?? 350,
+                          impulseApplyMode: activeWizard.impulseApplyMode || 'add',
+                          impulseDirectionMode: activeWizard.impulseDirectionMode || 'cardinal',
+                          impulseCardinal: activeWizard.impulseCardinal || 'up',
+                          impulseAngle: activeWizard.impulseAngle ?? -90,
+                          impulseAngular: activeWizard.impulseAngular ?? 0,
+                        })
+                      }
+                      className="w-full p-3.5 bg-white hover:bg-orange-50/70 border-2 border-slate-200 hover:border-orange-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-orange-100 text-orange-700 flex items-center justify-center text-lg shrink-0">
+                        💥
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-orange-700 truncate">
+                          Force / Impulsion Physique
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Propulser ou faire sauter un objet →
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveWizard({
+                          ...activeWizard,
+                          actionSubStep: 'set_entity_enabled_picker',
+                          actionTargetMode: 'instance',
+                          actionTargetId: Object.keys(entities)[0] || '',
+                          enabledActionMode: activeWizard.enabledActionMode || 'disable',
+                        })
+                      }
+                      className="w-full p-3.5 bg-white hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-slate-200 text-slate-800 flex items-center justify-center text-lg shrink-0">
+                        ⏻
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-slate-900 truncate">
+                          Activer / Désactiver un objet
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Faire apparaître / disparaître temporairement →
                         </div>
                       </div>
                     </button>
@@ -451,7 +569,65 @@ export function WizardStep3Actions({
                       </div>
                     </button>
 
-                    {/* 3. Détruire la Cible */}
+                    {/* 3. Force / Impulsion sur la Cible */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveWizard({
+                          ...activeWizard,
+                          actionSubStep: 'apply_impulse_picker',
+                          actionTargetMode: 'target',
+                          impulseStrength: activeWizard.impulseStrength ?? 350,
+                          impulseApplyMode: activeWizard.impulseApplyMode || 'add',
+                          impulseDirectionMode: activeWizard.impulseDirectionMode || 'away_target',
+                          impulseTargetMode: 'subject',
+                          impulseCardinal: activeWizard.impulseCardinal || 'up',
+                          impulseAngle: activeWizard.impulseAngle ?? -90,
+                          impulseAngular: activeWizard.impulseAngular ?? 0,
+                        });
+                      }}
+                      className="w-full p-3.5 bg-white hover:bg-orange-50/70 border-2 border-slate-200 hover:border-orange-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-orange-100 text-orange-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                        💥
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-orange-700 truncate">
+                          Force / Impulsion sur Cible
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Repousser ou projeter « {wizardTargetName} »
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* 4. Activer / Désactiver la Cible */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveWizard({
+                          ...activeWizard,
+                          actionSubStep: 'set_entity_enabled_picker',
+                          actionTargetMode: 'target',
+                          enabledActionMode: activeWizard.enabledActionMode || 'disable',
+                        });
+                      }}
+                      className="w-full p-3.5 bg-white hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-slate-200 text-slate-800 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                        ⏻
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-slate-900 truncate">
+                          Activer / Désactiver la Cible
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Désactiver temporairement « {wizardTargetName} »
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* 5. Détruire la Cible */}
                     <button
                       type="button"
                       onClick={() => {
@@ -799,10 +975,18 @@ export function WizardStep3Actions({
                       setActiveWizard({
                         ...activeWizard,
                         actionSubStep: 'attach_parent_picker',
-                        parentChildMode: 'subject',
+                        parentChildMode: isWizardGlobal ? 'instance' : 'subject',
+                        parentChildId: Object.keys(entities)[0] || '',
                         parentTargetMode: isCollision ? 'target' : 'entity',
                         parentEntityId: Object.keys(entities)[0] || '',
-                        parentOffset: { x: 0, y: 0, rotationOffset: 0, inheritRotation: true, inheritFlip: true },
+                        parentOffset: {
+                          x: 0,
+                          y: 0,
+                          rotationOffset: 0,
+                          inheritRotation: true,
+                          inheritFlip: true,
+                          attachmentMode: 'rigid',
+                        },
                       });
                     }}
                     className="w-full p-3.5 bg-white hover:bg-indigo-50/70 border-2 border-slate-200 hover:border-indigo-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -815,7 +999,7 @@ export function WizardStep3Actions({
                         Attacher à un Parent
                       </div>
                       <div className="text-[11px] text-slate-500 mt-0.5 truncate">
-                        Solidariser une entité (arme, accessoire)
+                        Solidariser, ressort ou joint physique configurable
                       </div>
                     </div>
                   </button>
@@ -827,7 +1011,7 @@ export function WizardStep3Actions({
                       setActiveWizard({
                         ...activeWizard,
                         actionSubStep: 'detach_parent_picker',
-                        actionTargetMode: 'subject',
+                        actionTargetMode: isWizardGlobal ? 'type' : 'subject',
                       });
                     }}
                     className="w-full p-3.5 bg-white hover:bg-rose-50/70 border-2 border-slate-200 hover:border-rose-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -841,6 +1025,65 @@ export function WizardStep3Actions({
                       </div>
                       <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                         Désolidariser en cours de partie
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* 8. Force / Impulsion sur une entité */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveWizard({
+                        ...activeWizard,
+                        actionSubStep: 'apply_impulse_picker',
+                        actionTargetMode: isWizardGlobal ? 'instance' : isCollision ? 'target' : 'subject',
+                        actionTargetId: Object.keys(entities)[0] || '',
+                        impulseStrength: activeWizard.impulseStrength ?? 350,
+                        impulseApplyMode: activeWizard.impulseApplyMode || 'add',
+                        impulseDirectionMode: activeWizard.impulseDirectionMode || 'cardinal',
+                        impulseCardinal: activeWizard.impulseCardinal || 'up',
+                        impulseAngle: activeWizard.impulseAngle ?? -90,
+                        impulseAngular: activeWizard.impulseAngular ?? 0,
+                      });
+                    }}
+                    className="w-full p-3.5 bg-white hover:bg-orange-50/70 border-2 border-slate-200 hover:border-orange-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-orange-100 text-orange-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                      💥
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-black text-slate-900 group-hover:text-orange-700 truncate">
+                        Force / Impulsion Physique
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                        Propulser ou appliquer un couple à n'importe quelle entité
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* 9. Activer / Désactiver une entité */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveWizard({
+                        ...activeWizard,
+                        actionSubStep: 'set_entity_enabled_picker',
+                        actionTargetMode: 'instance',
+                        actionTargetId: activeWizard.actionTargetId || Object.keys(entities)[0] || '',
+                        enabledActionMode: activeWizard.enabledActionMode || 'disable',
+                      });
+                    }}
+                    className="w-full p-3.5 bg-white hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-slate-200 text-slate-800 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                      ⏻
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-black text-slate-900 group-hover:text-slate-900 truncate">
+                        Activer / Désactiver une entité
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                        Faire apparaître ou disparaître temporairement une entité
                       </div>
                     </div>
                   </button>
@@ -1570,13 +1813,13 @@ export function WizardStep3Actions({
               <div className="flex items-center gap-1.5">
                 <input
                   type="number"
-                  min="0.1"
-                  max="60"
-                  step="0.1"
+                  step="any"
                   value={activeWizard.delayDuration ?? 1}
                   onChange={(e) => {
-                    const val = Math.max(0.1, Math.min(60, parseFloat(e.target.value) || 0.1));
-                    setActiveWizard({ ...activeWizard, delayDuration: Math.round(val * 10) / 10 });
+                    const val = parseFloat(e.target.value);
+                    if (Number.isFinite(val)) {
+                      setActiveWizard({ ...activeWizard, delayDuration: val });
+                    }
                   }}
                   className="w-20 px-2 py-1 text-center font-mono font-black text-sm bg-white border border-amber-400 rounded-lg shadow-2xs outline-none focus:ring-2 focus:ring-amber-400"
                 />
@@ -1589,10 +1832,12 @@ export function WizardStep3Actions({
               min="0.1"
               max="10.0"
               step="0.1"
-              value={activeWizard.delayDuration ?? 1}
+              value={Math.max(0.1, Math.min(10.0, activeWizard.delayDuration ?? 1))}
               onChange={(e) => {
-                const val = parseFloat(e.target.value) || 1;
-                setActiveWizard({ ...activeWizard, delayDuration: Math.round(val * 10) / 10 });
+                const val = parseFloat(e.target.value);
+                if (Number.isFinite(val)) {
+                  setActiveWizard({ ...activeWizard, delayDuration: Math.round(val * 10) / 10 });
+                }
               }}
               className="w-full accent-amber-500 cursor-pointer h-2 bg-slate-200 rounded-lg"
             />
@@ -1902,13 +2147,20 @@ export function WizardStep3Actions({
             })()}
 
             <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-700 text-xs">Nombre ({activeWizard.particleCount ?? 20})</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-700 text-xs">Nombre</span>
+                <EditableNumericValue
+                  value={activeWizard.particleCount ?? 20}
+                  precision={0}
+                  onChange={(v) => setActiveWizard({ ...activeWizard, particleCount: Math.round(v) })}
+                />
+              </div>
               <input
                 type="range"
                 min="4"
                 max="50"
                 step="2"
-                value={activeWizard.particleCount ?? 20}
+                value={Math.max(4, Math.min(50, activeWizard.particleCount ?? 20))}
                 onChange={(e) => setActiveWizard({ ...activeWizard, particleCount: parseInt(e.target.value, 10) })}
                 className="w-40 accent-amber-500"
               />
@@ -1933,39 +2185,62 @@ export function WizardStep3Actions({
             </div>
 
             <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-700 text-xs">Taille ({activeWizard.particleSize ?? 6} px)</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-700 text-xs">Taille</span>
+                <EditableNumericValue
+                  value={activeWizard.particleSize ?? 6}
+                  unit="px"
+                  precision={1}
+                  onChange={(v) => setActiveWizard({ ...activeWizard, particleSize: v })}
+                />
+              </div>
               <input
                 type="range"
                 min="2"
                 max="24"
                 step="1"
-                value={activeWizard.particleSize ?? 6}
+                value={Math.max(2, Math.min(24, activeWizard.particleSize ?? 6))}
                 onChange={(e) => setActiveWizard({ ...activeWizard, particleSize: parseFloat(e.target.value) })}
                 className="w-40 accent-indigo-600"
               />
             </div>
 
             <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-700 text-xs">Vitesse ({activeWizard.particleSpeed ?? 180} px/s)</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-700 text-xs">Vitesse</span>
+                <EditableNumericValue
+                  value={activeWizard.particleSpeed ?? 180}
+                  unit="px/s"
+                  precision={1}
+                  onChange={(v) => setActiveWizard({ ...activeWizard, particleSpeed: v })}
+                />
+              </div>
               <input
                 type="range"
                 min="40"
                 max="450"
                 step="10"
-                value={activeWizard.particleSpeed ?? 180}
+                value={Math.max(40, Math.min(450, activeWizard.particleSpeed ?? 180))}
                 onChange={(e) => setActiveWizard({ ...activeWizard, particleSpeed: parseFloat(e.target.value) })}
                 className="w-40 accent-indigo-600"
               />
             </div>
 
             <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-700 text-xs">Gravité ({activeWizard.particleGravity ?? 220})</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-700 text-xs">Gravité</span>
+                <EditableNumericValue
+                  value={activeWizard.particleGravity ?? 220}
+                  precision={1}
+                  onChange={(v) => setActiveWizard({ ...activeWizard, particleGravity: v })}
+                />
+              </div>
               <input
                 type="range"
                 min="-200"
                 max="500"
                 step="20"
-                value={activeWizard.particleGravity ?? 220}
+                value={Math.max(-200, Math.min(500, activeWizard.particleGravity ?? 220))}
                 onChange={(e) => setActiveWizard({ ...activeWizard, particleGravity: parseFloat(e.target.value) })}
                 className="w-40 accent-indigo-600"
               />
@@ -2025,209 +2300,91 @@ export function WizardStep3Actions({
         </div>
       )}
 
-      {/* Sous-étape Wizard : Attacher à un Parent */}
+      {/* Sous-étape Wizard : Attacher à un Parent (Configurable) */}
       {activeWizard.actionSubStep === 'attach_parent_picker' && (
-        <div className="space-y-4 max-w-xl mx-auto py-2">
-          <div className="space-y-1.5 bg-slate-50 p-3 rounded-2xl border border-slate-200">
-            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-700 text-xs">Objet enfant à attacher</span>
-              <select
-                value={activeWizard.parentChildMode || 'subject'}
-                onChange={(e) => setActiveWizard({ ...activeWizard, parentChildMode: e.target.value as any })}
-                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-              >
-                <option value="subject">Sujet</option>
-                {isWizardRelational && <option value="target">Cible touchée</option>}
-                <option value="last_spawned">Dernier objet créé</option>
-                <option value="tag">Par Tag (#tag)</option>
-              </select>
-            </div>
+        <AttachParentConfigEditor
+          draft={{
+            ...activeWizard,
+            parentChildId: activeWizard.parentChildId ?? activeWizard.actionTargetId,
+          }}
+          onPatch={(patch) =>
+            setActiveWizard({
+              ...activeWizard,
+              ...patch,
+              ...(patch.parentChildId !== undefined ? { actionTargetId: patch.parentChildId } : {}),
+            })
+          }
+          onConfirm={(actionData) => completeWizardWithAction(actionData)}
+          isRelational={isWizardRelational}
+          isGlobal={isWizardGlobal}
+          entities={entities}
+          availableEntityOptions={availableEntityOptions}
+          allProjectTags={allProjectTags}
+        />
+      )}
 
-            {activeWizard.parentChildMode === 'tag' && (
-              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">Tag enfant</span>
-                <input
-                  type="text"
-                  value={activeWizard.parentChildTag || ''}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, parentChildTag: e.target.value.replace(/^#/, '') })}
-                  placeholder="ex: arme"
-                  className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                />
-              </div>
-            )}
+      {/* Sous-étape Wizard : Force / Impulsion Physique */}
+      {activeWizard.actionSubStep === 'apply_impulse_picker' && (
+        <ApplyImpulseConfigEditor
+          draft={{
+            ...activeWizard,
+            targetMode: activeWizard.actionTargetMode,
+            targetId: activeWizard.actionTargetId,
+            targetType: activeWizard.actionTargetType,
+            targetTag: activeWizard.actionTargetTag,
+          }}
+          onPatch={(patch) => {
+            const { targetMode, targetId, targetType: tType, targetTag, ...rest } = patch;
+            setActiveWizard({
+              ...activeWizard,
+              ...rest,
+              ...(targetMode !== undefined ? { actionTargetMode: targetMode } : {}),
+              ...(targetId !== undefined ? { actionTargetId: targetId } : {}),
+              ...(tType !== undefined ? { actionTargetType: tType } : {}),
+              ...(targetTag !== undefined ? { actionTargetTag: targetTag } : {}),
+            });
+          }}
+          onConfirm={(actionData) => completeWizardWithAction(actionData)}
+          isRelational={isWizardRelational}
+          isGlobal={isWizardGlobal}
+          subjectType={activeWizard.subjectType}
+          targetType={activeWizard.targetType}
+          entities={entities}
+          availableEntityOptions={availableEntityOptions}
+          allProjectTags={allProjectTags}
+        />
+      )}
 
-            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-700 text-xs">Objet parent (Porteur)</span>
-              <select
-                value={activeWizard.parentTargetMode || (isWizardRelational ? 'target' : 'entity')}
-                onChange={(e) => setActiveWizard({ ...activeWizard, parentTargetMode: e.target.value as any })}
-                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-              >
-                <option value="subject">Sujet</option>
-                {isWizardRelational && <option value="target">Cible touchée</option>}
-                <option value="entity">Entité de la scène</option>
-                <option value="type">Par Type</option>
-                <option value="tag">Par Tag (#tag)</option>
-                <option value="last_spawned">Dernier objet créé</option>
-              </select>
-            </div>
-
-            {activeWizard.parentTargetMode === 'entity' && (
-              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">Choisir parent</span>
-                <select
-                  value={activeWizard.parentEntityId || Object.keys(entities)[0] || ''}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, parentEntityId: e.target.value })}
-                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                >
-                  {Object.values(entities).map((ent) => (
-                    <option key={ent.id} value={ent.id}>{ent.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {activeWizard.parentTargetMode === 'type' && (
-              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">Type parent</span>
-                <select
-                  value={activeWizard.parentEntityType || availableEntityOptions[0]?.type || ''}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, parentEntityType: e.target.value })}
-                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                >
-                  {availableEntityOptions.map((opt) => (
-                    <option key={opt.type} value={opt.type}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {activeWizard.parentTargetMode === 'tag' && (
-              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">Tag parent</span>
-                <input
-                  type="text"
-                  value={activeWizard.parentEntityTag || ''}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, parentEntityTag: e.target.value.replace(/^#/, '') })}
-                  placeholder="ex: joueur"
-                  className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                />
-              </div>
-            )}
-
-            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <div>
-                <span className="font-bold text-slate-700 text-xs block">Conserver le décalage actuel</span>
-                <span className="text-[10px] text-slate-400">
-                  Fige l’objet à sa position relative du moment (idéal pour attraper une balle en vol)
-                </span>
-              </div>
-              <input
-                type="checkbox"
-                checked={Boolean(activeWizard.attachKeepCurrentOffset)}
-                onChange={(e) => setActiveWizard({ ...activeWizard, attachKeepCurrentOffset: e.target.checked })}
-                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
-              />
-            </div>
-
-            {!activeWizard.attachKeepCurrentOffset && (
-              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">Décalage ΔX / ΔY (px)</span>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={activeWizard.parentOffset?.x ?? 0}
-                    onChange={(e) =>
-                      setActiveWizard({
-                        ...activeWizard,
-                        parentOffset: {
-                          x: parseFloat(e.target.value) || 0,
-                          y: activeWizard.parentOffset?.y ?? 0,
-                          inheritRotation: activeWizard.parentOffset?.inheritRotation ?? true,
-                          inheritFlip: activeWizard.parentOffset?.inheritFlip ?? true,
-                        },
-                      })
-                    }
-                    className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
-                  />
-                  <input
-                    type="number"
-                    value={activeWizard.parentOffset?.y ?? 0}
-                    onChange={(e) =>
-                      setActiveWizard({
-                        ...activeWizard,
-                        parentOffset: {
-                          x: activeWizard.parentOffset?.x ?? 0,
-                          y: parseFloat(e.target.value) || 0,
-                          inheritRotation: activeWizard.parentOffset?.inheritRotation ?? true,
-                          inheritFlip: activeWizard.parentOffset?.inheritFlip ?? true,
-                        },
-                      })
-                    }
-                    className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
-              <span className="font-bold text-slate-700 text-xs">Hériter rotation &amp; Flip du parent</span>
-              <input
-                type="checkbox"
-                checked={activeWizard.parentOffset?.inheritRotation !== false}
-                onChange={(e) =>
-                  setActiveWizard({
-                    ...activeWizard,
-                    parentOffset: {
-                      x: activeWizard.parentOffset?.x ?? 0,
-                      y: activeWizard.parentOffset?.y ?? 0,
-                      inheritRotation: e.target.checked,
-                      inheritFlip: e.target.checked,
-                    },
-                  })
-                }
-                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
-              />
-            </div>
-
-            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <div>
-                <span className="font-bold text-slate-700 text-xs block">Désactiver les collisions tant qu’attaché</span>
-                <span className="text-[10px] text-slate-400">
-                  Évite que l’objet porté ne bloque ou pousse le porteur
-                </span>
-              </div>
-              <input
-                type="checkbox"
-                checked={Boolean(activeWizard.attachDisableCollisions)}
-                onChange={(e) => setActiveWizard({ ...activeWizard, attachDisableCollisions: e.target.checked })}
-                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
-              />
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              completeWizardWithAction({
-                type: 'attach_to_parent',
-                targetMode: activeWizard.parentChildMode || 'subject',
-                targetTag: activeWizard.parentChildMode === 'tag' ? activeWizard.parentChildTag : undefined,
-                parentTargetMode: activeWizard.parentTargetMode || 'entity',
-                parentEntityId: activeWizard.parentTargetMode === 'entity' ? activeWizard.parentEntityId || Object.keys(entities)[0] : undefined,
-                parentEntityType: activeWizard.parentTargetMode === 'type' ? activeWizard.parentEntityType || availableEntityOptions[0]?.type : undefined,
-                parentEntityTag: activeWizard.parentTargetMode === 'tag' ? activeWizard.parentEntityTag : undefined,
-                parentOffset: activeWizard.parentOffset,
-                attachKeepCurrentOffset: Boolean(activeWizard.attachKeepCurrentOffset),
-                attachDisableCollisions: Boolean(activeWizard.attachDisableCollisions),
-              });
-            }}
-            className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
-          >
-            <Check className="w-4 h-4" />
-            <span>Valider l'attachement</span>
-          </button>
-        </div>
+      {/* Sous-étape Wizard : Activer / Désactiver une entité */}
+      {activeWizard.actionSubStep === 'set_entity_enabled_picker' && (
+        <SetEntityEnabledConfigEditor
+          draft={{
+            ...activeWizard,
+            targetMode: activeWizard.actionTargetMode,
+            targetId: activeWizard.actionTargetId,
+            targetType: activeWizard.actionTargetType,
+            targetTag: activeWizard.actionTargetTag,
+          }}
+          onPatch={(patch) => {
+            const { targetMode, targetId, targetType: tType, targetTag, ...rest } = patch;
+            setActiveWizard({
+              ...activeWizard,
+              ...rest,
+              ...(targetMode !== undefined ? { actionTargetMode: targetMode } : {}),
+              ...(targetId !== undefined ? { actionTargetId: targetId } : {}),
+              ...(tType !== undefined ? { actionTargetType: tType } : {}),
+              ...(targetTag !== undefined ? { actionTargetTag: targetTag } : {}),
+            });
+          }}
+          onConfirm={(actionData) => completeWizardWithAction(actionData)}
+          isRelational={isWizardRelational}
+          isGlobal={isWizardGlobal}
+          subjectType={activeWizard.subjectType}
+          targetType={activeWizard.targetType}
+          entities={entities}
+          availableEntityOptions={availableEntityOptions}
+          allProjectTags={allProjectTags}
+        />
       )}
 
       {/* Sous-étape Wizard : Détacher du Parent */}
@@ -2280,17 +2437,30 @@ export function WizardStep3Actions({
             <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-bold text-slate-700">Impulsion au détachement (Lancer)</span>
-                <span className="font-mono font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded text-[11px]">
-                  {(activeWizard.detachImpulseSpeed ?? 0) > 0 ? `${Math.round(activeWizard.detachImpulseSpeed!)} px/s` : 'Lâcher sur place'}
-                </span>
+                <EditableNumericValue
+                  value={activeWizard.detachImpulseSpeed ?? 0}
+                  precision={1}
+                  displayText={
+                    (activeWizard.detachImpulseSpeed ?? 0) > 0
+                      ? `${Math.round((activeWizard.detachImpulseSpeed ?? 0) * 10) / 10} px/s`
+                      : 'Lâcher sur place'
+                  }
+                  onChange={(v) => setActiveWizard({ ...activeWizard, detachImpulseSpeed: v })}
+                  className="font-mono font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="0"
                 max="900"
                 step="25"
-                value={activeWizard.detachImpulseSpeed ?? 0}
-                onChange={(e) => setActiveWizard({ ...activeWizard, detachImpulseSpeed: parseFloat(e.target.value) })}
+                value={Math.max(0, Math.min(900, activeWizard.detachImpulseSpeed ?? 0))}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v)) {
+                    setActiveWizard({ ...activeWizard, detachImpulseSpeed: v });
+                  }
+                }}
                 className="w-full accent-rose-600"
               />
               {(activeWizard.detachImpulseSpeed ?? 0) > 0 && (
@@ -2318,9 +2488,15 @@ export function WizardStep3Actions({
                     ))}
                     <input
                       type="number"
+                      step="any"
                       value={activeWizard.detachImpulseAngle ?? -45}
-                      onChange={(e) => setActiveWizard({ ...activeWizard, detachImpulseAngle: parseFloat(e.target.value) || 0 })}
-                      className="w-14 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px] font-mono text-right"
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          setActiveWizard({ ...activeWizard, detachImpulseAngle: v });
+                        }
+                      }}
+                      className="w-16 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px] font-mono text-right"
                     />
                   </div>
                 </div>
@@ -2403,15 +2579,26 @@ export function WizardStep3Actions({
                   min="1"
                   max="500"
                   step="5"
-                  value={activeWizard.moveDistance ?? 40}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, moveDistance: parseFloat(e.target.value) || 0 })}
+                  value={Math.max(1, Math.min(500, activeWizard.moveDistance ?? 40))}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (Number.isFinite(v)) {
+                      setActiveWizard({ ...activeWizard, moveDistance: v });
+                    }
+                  }}
                   className="w-32 accent-sky-600"
                 />
                 <input
                   type="number"
+                  step="any"
                   value={activeWizard.moveDistance ?? 40}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, moveDistance: parseFloat(e.target.value) || 0 })}
-                  className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (Number.isFinite(v)) {
+                      setActiveWizard({ ...activeWizard, moveDistance: v });
+                    }
+                  }}
+                  className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
                 />
               </div>
             </div>
@@ -2464,15 +2651,26 @@ export function WizardStep3Actions({
                     min="-180"
                     max="180"
                     step="5"
-                    value={activeWizard.moveAngle ?? 0}
-                    onChange={(e) => setActiveWizard({ ...activeWizard, moveAngle: parseFloat(e.target.value) || 0 })}
+                    value={Math.max(-180, Math.min(180, activeWizard.moveAngle ?? 0))}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        setActiveWizard({ ...activeWizard, moveAngle: v });
+                      }
+                    }}
                     className="w-32 accent-sky-600"
                   />
                   <input
                     type="number"
+                    step="any"
                     value={activeWizard.moveAngle ?? 0}
-                    onChange={(e) => setActiveWizard({ ...activeWizard, moveAngle: parseFloat(e.target.value) || 0 })}
-                    className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        setActiveWizard({ ...activeWizard, moveAngle: v });
+                      }
+                    }}
+                    className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
                   />
                 </div>
               </div>
@@ -2724,22 +2922,28 @@ export function WizardStep3Actions({
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs font-bold text-slate-700">Durée de transition :</label>
-                  <span className="text-xs font-mono font-black text-violet-700">
-                    {(activeWizard.sceneTransitionDuration ?? 0.45).toFixed(2)}s
-                  </span>
+                  <EditableNumericValue
+                    value={activeWizard.sceneTransitionDuration ?? 0.45}
+                    unit="s"
+                    precision={2}
+                    onChange={(v) =>
+                      setActiveWizard({ ...activeWizard, sceneTransitionDuration: v })
+                    }
+                    className="text-xs font-mono font-black text-violet-700 bg-violet-50 hover:bg-violet-100 px-1.5 py-0.5 rounded cursor-text tabular-nums"
+                  />
                 </div>
                 <input
                   type="range"
                   min={0.1}
                   max={2}
                   step={0.05}
-                  value={activeWizard.sceneTransitionDuration ?? 0.45}
-                  onChange={(e) =>
-                    setActiveWizard({
-                      ...activeWizard,
-                      sceneTransitionDuration: parseFloat(e.target.value) || 0.45,
-                    })
-                  }
+                  value={Math.max(0.1, Math.min(2, activeWizard.sceneTransitionDuration ?? 0.45))}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (Number.isFinite(v)) {
+                      setActiveWizard({ ...activeWizard, sceneTransitionDuration: v });
+                    }
+                  }}
                   className="w-full accent-violet-600 cursor-pointer"
                 />
               </div>

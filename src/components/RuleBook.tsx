@@ -168,6 +168,7 @@ export function RuleBook() {
         if (a.spawnReferenceTag) tagSet.add(a.spawnReferenceTag);
         if (a.particleOriginTag) tagSet.add(a.particleOriginTag);
         if (a.parentEntityTag) tagSet.add(a.parentEntityTag);
+        if (a.impulseTargetTag) tagSet.add(a.impulseTargetTag);
       });
     });
     return Array.from(tagSet).sort();
@@ -305,6 +306,10 @@ export function RuleBook() {
         ? 'choose_detach_parent'
         : act.type === 'move_entity'
         ? 'choose_move_entity'
+        : act.type === 'apply_impulse'
+        ? 'choose_apply_impulse'
+        : act.type === 'set_entity_enabled'
+        ? 'choose_set_entity_enabled'
         : act.type === 'set_variable'
         ? 'choose_variable_action'
         : act.type === 'change_scene'
@@ -320,6 +325,7 @@ export function RuleBook() {
       actionId: act.id,
       actionType: act.type,
       targetMode: act.targetMode || (isCollisionOrProx ? 'target' : 'subject'),
+      targetId: act.targetId,
       selectedTargetType: resolvedTargetType,
       targetTag: act.targetTag,
       pendingSpawnType: act.spawnEntityType || availableEntityOptions[0]?.type,
@@ -329,7 +335,7 @@ export function RuleBook() {
       toggleTargetStateId: act.toggleTargetStateId,
       toggleMode: act.toggleMode,
       subStep: overrideSubStep || defaultSubStep,
-      delayDuration: act.delayDuration || 1,
+      delayDuration: act.delayDuration ?? 1,
       particleOriginMode: act.particleOriginMode,
       particleOriginEntityId: act.particleOriginEntityId,
       particleOriginEntityType: act.particleOriginEntityType,
@@ -349,6 +355,7 @@ export function RuleBook() {
       particleSpread: act.particleSpread,
       particleAngle: act.particleAngle,
       parentChildMode: act.targetMode,
+      parentChildId: act.targetId,
       parentChildType: act.targetType,
       parentChildTag: act.targetTag,
       parentTargetMode: act.parentTargetMode,
@@ -369,6 +376,17 @@ export function RuleBook() {
       moveTargetEntityId: act.moveTargetEntityId,
       moveTargetEntityType: act.moveTargetEntityType,
       moveTargetTag: act.moveTargetTag,
+      impulseStrength: act.impulseStrength ?? 350,
+      impulseDirectionMode: act.impulseDirectionMode || 'cardinal',
+      impulseCardinal: act.impulseCardinal || 'up',
+      impulseAngle: act.impulseAngle ?? -90,
+      impulseApplyMode: act.impulseApplyMode || 'add',
+      impulseTargetMode: act.impulseTargetMode || (isCollisionOrProx ? 'target' : 'entity'),
+      impulseTargetEntityId: act.impulseTargetEntityId,
+      impulseTargetEntityType: act.impulseTargetEntityType,
+      impulseTargetTag: act.impulseTargetTag,
+      impulseAngular: act.impulseAngular ?? 0,
+      enabledActionMode: act.enabledActionMode || 'disable',
       variableName: act.variableName ?? 'score',
       variableOperation: act.variableOperation ?? 'set',
       variableValue: act.variableValue ?? 1,
@@ -1683,10 +1701,14 @@ export function RuleBook() {
                               <div className="mt-1 flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
                                 <input
                                   type="number"
-                                  min={0.5}
-                                  step={0.5}
-                                  value={rule.trigger.timerInterval || 2}
-                                  onChange={(e) => updateRule(rule.id, { trigger: { ...rule.trigger, timerInterval: Math.max(0.5, parseFloat(e.target.value) || 1) } })}
+                                  step="any"
+                                  value={rule.trigger.timerInterval ?? 2}
+                                  onChange={(e) => {
+                                    const v = parseFloat(e.target.value);
+                                    if (Number.isFinite(v)) {
+                                      updateRule(rule.id, { trigger: { ...rule.trigger, timerInterval: v } });
+                                    }
+                                  }}
                                   className="w-12 text-center text-[10px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none"
                                 />
                                 <span className="text-[9px] text-slate-400">sec</span>
@@ -1708,10 +1730,14 @@ export function RuleBook() {
                               <div className="mt-1 flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
                                 <input
                                   type="number"
-                                  min={10}
-                                  step={10}
-                                  value={rule.trigger.proximityDistance || 80}
-                                  onChange={(e) => updateRule(rule.id, { trigger: { ...rule.trigger, proximityDistance: Math.max(10, parseInt(e.target.value) || 50) } })}
+                                  step="any"
+                                  value={rule.trigger.proximityDistance ?? 80}
+                                  onChange={(e) => {
+                                    const v = parseFloat(e.target.value);
+                                    if (Number.isFinite(v)) {
+                                      updateRule(rule.id, { trigger: { ...rule.trigger, proximityDistance: v } });
+                                    }
+                                  }}
                                   className="w-14 text-center text-[10px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-1 py-0.5 outline-none"
                                 />
                                 <span className="text-[9px] text-slate-400">px</span>
@@ -1867,20 +1893,21 @@ export function RuleBook() {
                                 </select>
                                 <input
                                   type="number"
-                                  min={0}
-                                  max={60}
-                                  step={2}
+                                  step="any"
                                   value={rule.trigger.collisionExitMargin ?? 10}
-                                  onChange={(e) =>
-                                    updateRule(rule.id, {
-                                      trigger: {
-                                        ...rule.trigger,
-                                        collisionExitMargin: Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)),
-                                      },
-                                    })
-                                  }
+                                  onChange={(e) => {
+                                    const v = parseFloat(e.target.value);
+                                    if (Number.isFinite(v)) {
+                                      updateRule(rule.id, {
+                                        trigger: {
+                                          ...rule.trigger,
+                                          collisionExitMargin: v,
+                                        },
+                                      });
+                                    }
+                                  }}
                                   title="Marge anti-rebond de sortie (px)"
-                                  className="w-8 text-center text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-0.5 py-0.5 outline-none"
+                                  className="w-10 text-center text-[9px] font-bold bg-slate-800 text-amber-300 border border-slate-700 rounded px-0.5 py-0.5 outline-none"
                                 />
                                 <button
                                   type="button"
@@ -2216,6 +2243,13 @@ export function RuleBook() {
                             }${act.particleOriginMode === 'event_point' ? ' • Point exact' : ''}`;
                           } else if (act.type === 'attach_to_parent') {
                             actionBadge = 'Attacher Parent';
+                            const attMode = act.parentOffset?.attachmentMode;
+                            const modeTag =
+                              attMode === 'physics_joint'
+                                ? ' • Joint'
+                                : attMode === 'spring'
+                                ? ' • Ressort'
+                                : '';
                             actionDetail = `Lier à ${
                               act.parentTargetMode === 'subject'
                                 ? 'Sujet'
@@ -2228,7 +2262,7 @@ export function RuleBook() {
                                 : act.parentTargetMode === 'entity' && act.parentEntityId
                                 ? entities[act.parentEntityId]?.name || 'Entité'
                                 : act.parentEntityType || 'Parent'
-                            }${act.attachDisableCollisions ? ' • Sans collision' : ''}`;
+                            }${modeTag}${act.attachDisableCollisions ? ' • Sans collision' : ''}`;
                           } else if (act.type === 'detach_parent') {
                             actionBadge = 'Détacher Parent';
                             actionDetail =
@@ -2255,6 +2289,52 @@ export function RuleBook() {
                                 ? 'Bas ↓'
                                 : 'Droite →';
                             actionDetail = `${dist} px • ${dirTxt}`;
+                          } else if (act.type === 'apply_impulse') {
+                            actionBadge = 'Impulsion';
+                            const strength = Math.round(act.impulseStrength ?? 350);
+                            const dirTxt =
+                              act.impulseDirectionMode === 'angle'
+                                ? `${Math.round(act.impulseAngle ?? -90)}°`
+                                : act.impulseDirectionMode === 'facing'
+                                ? 'Regard'
+                                : act.impulseDirectionMode === 'toward_target'
+                                ? 'Vers cible'
+                                : act.impulseDirectionMode === 'away_target'
+                                ? 'Repousser'
+                                : act.impulseCardinal === 'left'
+                                ? '← Gauche'
+                                : act.impulseCardinal === 'right'
+                                ? '→ Droite'
+                                : act.impulseCardinal === 'down'
+                                ? '↓ Bas'
+                                : '↑ Haut';
+                            actionDetail = `${act.impulseApplyMode === 'set' ? '=' : '+'}${strength} px/s • ${dirTxt}`;
+                          } else if (act.type === 'set_entity_enabled') {
+                            actionBadge =
+                              act.enabledActionMode === 'enable'
+                                ? 'Activer Entité'
+                                : act.enabledActionMode === 'toggle'
+                                ? 'Basculer État'
+                                : 'Désactiver Entité';
+                            const targetTxt =
+                              act.targetMode === 'subject'
+                                ? 'Sujet'
+                                : act.targetMode === 'target'
+                                ? 'Cible'
+                                : act.targetMode === 'last_spawned'
+                                ? 'Dernier créé'
+                                : act.targetMode === 'instance' && act.targetId
+                                ? entities[act.targetId]?.name || 'Entité'
+                                : act.targetMode === 'tag' && act.targetTag
+                                ? `#${act.targetTag}`
+                                : getEntityObj(act.targetType)?.name || act.targetType || 'Objet';
+                            actionDetail = `${
+                              act.enabledActionMode === 'enable'
+                                ? 'Réactiver'
+                                : act.enabledActionMode === 'toggle'
+                                ? 'Basculer'
+                                : 'Désactiver'
+                            } ${targetTxt}`;
                           } else if (act.type === 'play_sound') {
                             actionBadge = 'Jouer Son';
                             actionDetail = customSound ? `Son vocal : ${customSound.name}` : act.soundType ? `Son ${act.soundType}` : 'Effet sonore';
@@ -2339,6 +2419,10 @@ export function RuleBook() {
                               ? 'choose_detach_parent'
                               : act.type === 'move_entity'
                               ? 'choose_move_entity'
+                              : act.type === 'apply_impulse'
+                              ? 'choose_apply_impulse'
+                              : act.type === 'set_entity_enabled'
+                              ? 'choose_set_entity_enabled'
                               : act.type === 'play_sound'
                               ? 'choose_sound'
                               : act.type === 'set_variable'
@@ -2415,6 +2499,14 @@ export function RuleBook() {
                                 ) : act.type === 'move_entity' ? (
                                   <div className="w-14 h-14 rounded-2xl bg-sky-50 border border-sky-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
                                     🏃
+                                  </div>
+                                ) : act.type === 'apply_impulse' ? (
+                                  <div className="w-14 h-14 rounded-2xl bg-orange-50 border border-orange-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                    💥
+                                  </div>
+                                ) : act.type === 'set_entity_enabled' ? (
+                                  <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-300 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                    ⏻
                                   </div>
                                 ) : act.type === 'add_score' ? (
                                   <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
@@ -2508,6 +2600,8 @@ export function RuleBook() {
                                       ? `Cible (${targetOpt?.label || 'Objet'})`
                                       : act.targetMode === 'last_spawned'
                                       ? '✨ Dernier objet créé'
+                                      : act.targetMode === 'instance' && act.targetId
+                                      ? entities[act.targetId]?.name || 'Entité'
                                       : act.targetMode === 'tag' && act.targetTag
                                       ? `🏷️ Tag #${act.targetTag}`
                                       : actEntity?.name || act.targetType || 'Autre Objet'}

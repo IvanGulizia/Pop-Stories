@@ -17,6 +17,7 @@ import {
   LocomotionStateBindingsCard,
   PhysicsGroundedHelperCard,
 } from './BehaviorSharedControls';
+import { EditableNumericValue } from '../shared/EditableNumericValue';
 
 export function PatrolBehaviorControls({
   b,
@@ -151,16 +152,20 @@ export function PatrolBehaviorControls({
           <div className="p-2 bg-white rounded-xl border border-slate-200">
             <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
               <span className="font-bold">Distance de patrouille</span>
-              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-                {b.range} px
-              </span>
+              <EditableNumericValue
+                value={b.range}
+                unit="px"
+                precision={0}
+                onChange={(val) => update({ range: val })}
+                className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+              />
             </div>
             <input
               type="range"
               min="20"
               max="600"
               step="10"
-              value={b.range}
+              value={Math.max(20, Math.min(600, b.range))}
               onChange={(e) => update({ range: parseFloat(e.target.value) })}
               className="w-full accent-indigo-600"
             />
@@ -247,8 +252,12 @@ export function PatrolBehaviorControls({
                         X
                         <input
                           type="number"
+                          step="any"
                           value={Math.round(wp.x)}
-                          onChange={(e) => updateWaypoint(idx, { x: parseFloat(e.target.value) || 0 })}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            if (Number.isFinite(v)) updateWaypoint(idx, { x: v });
+                          }}
                           className="w-full bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[11px] font-mono font-bold text-slate-800"
                         />
                       </label>
@@ -256,8 +265,12 @@ export function PatrolBehaviorControls({
                         Y
                         <input
                           type="number"
+                          step="any"
                           value={Math.round(wp.y)}
-                          onChange={(e) => updateWaypoint(idx, { y: parseFloat(e.target.value) || 0 })}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            if (Number.isFinite(v)) updateWaypoint(idx, { y: v });
+                          }}
                           className="w-full bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[11px] font-mono font-bold text-slate-800"
                         />
                       </label>
@@ -265,12 +278,13 @@ export function PatrolBehaviorControls({
                         Pause (s)
                         <input
                           type="number"
-                          min="0"
-                          step="0.1"
+                          step="any"
                           value={wp.pauseSec ?? wp.pauseDuration ?? 0}
                           onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
-                            updateWaypoint(idx, { pauseSec: val, pauseDuration: val });
+                            const val = parseFloat(e.target.value);
+                            if (Number.isFinite(val)) {
+                              updateWaypoint(idx, { pauseSec: val, pauseDuration: val });
+                            }
                           }}
                           className="w-full bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[11px] font-mono font-bold text-slate-800"
                         />
@@ -320,16 +334,20 @@ export function PatrolBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Vitesse de marche</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.speed} px/s
-          </span>
+          <EditableNumericValue
+            value={b.speed}
+            unit="px/s"
+            precision={0}
+            onChange={(val) => update({ speed: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="20"
           max="300"
           step="10"
-          value={b.speed}
+          value={Math.max(20, Math.min(300, b.speed))}
           onChange={(e) => update({ speed: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -341,13 +359,13 @@ export function PatrolBehaviorControls({
         <div className="flex items-center gap-1">
           <input
             type="number"
-            min="0"
-            max="10"
-            step="0.1"
+            step="any"
             value={pauseVal}
             onChange={(e) => {
-              const v = parseFloat(e.target.value) || 0;
-              update({ pauseDuration: v, pauseAtEnds: v });
+              const v = parseFloat(e.target.value);
+              if (Number.isFinite(v)) {
+                update({ pauseDuration: v, pauseAtEnds: v });
+              }
             }}
             className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
           />
@@ -389,14 +407,20 @@ export function PatrolBehaviorControls({
               <div>
                 <div className="flex justify-between items-center text-[11px] text-slate-700">
                   <span>Profondeur de sonde</span>
-                  <span className="font-mono font-bold text-blue-700">{b.ledgeCheckDepth ?? 28} px</span>
+                  <EditableNumericValue
+                    value={b.ledgeCheckDepth ?? 28}
+                    unit="px"
+                    precision={0}
+                    onChange={(val) => update({ ledgeCheckDepth: val })}
+                    className="font-mono font-bold text-blue-700"
+                  />
                 </div>
                 <input
                   type="range"
                   min="10"
                   max="80"
                   step="2"
-                  value={b.ledgeCheckDepth ?? 28}
+                  value={Math.max(10, Math.min(80, b.ledgeCheckDepth ?? 28))}
                   onChange={(e) => update({ ledgeCheckDepth: parseInt(e.target.value, 10) })}
                   className="w-full accent-blue-600 cursor-pointer"
                 />
@@ -499,16 +523,20 @@ export function WanderingBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Rayon de la zone</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.radius ?? 160} px
-          </span>
+          <EditableNumericValue
+            value={b.radius ?? 160}
+            unit="px"
+            precision={0}
+            onChange={(val) => update({ radius: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="40"
           max="600"
           step="10"
-          value={b.radius ?? 160}
+          value={Math.max(40, Math.min(600, b.radius ?? 160))}
           onChange={(e) => update({ radius: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -518,16 +546,20 @@ export function WanderingBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Vitesse de déplacement</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.speed ?? 90} px/s
-          </span>
+          <EditableNumericValue
+            value={b.speed ?? 90}
+            unit="px/s"
+            precision={0}
+            onChange={(val) => update({ speed: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="10"
           max="400"
           step="10"
-          value={b.speed ?? 90}
+          value={Math.max(10, Math.min(400, b.speed ?? 90))}
           onChange={(e) => update({ speed: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -546,16 +578,20 @@ export function WanderingBehaviorControls({
                 : 'Exploration naturelle équilibrée'}
             </span>
           </div>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.randomness ?? 65}%
-          </span>
+          <EditableNumericValue
+            value={b.randomness ?? 65}
+            unit="%"
+            precision={0}
+            onChange={(val) => update({ randomness: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="0"
           max="100"
           step="5"
-          value={b.randomness ?? 65}
+          value={Math.max(0, Math.min(100, b.randomness ?? 65))}
           onChange={(e) => update({ randomness: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -565,16 +601,20 @@ export function WanderingBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Intervalle de décision</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {(b.changeInterval ?? 1.5).toFixed(1)} s
-          </span>
+          <EditableNumericValue
+            value={b.changeInterval ?? 1.5}
+            unit="s"
+            precision={1}
+            onChange={(val) => update({ changeInterval: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="0.3"
           max="5"
           step="0.1"
-          value={b.changeInterval ?? 1.5}
+          value={Math.max(0.3, Math.min(5, b.changeInterval ?? 1.5))}
           onChange={(e) => update({ changeInterval: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -584,16 +624,20 @@ export function WanderingBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Pause aléatoire max</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {(b.pauseDuration ?? 0.8).toFixed(1)} s
-          </span>
+          <EditableNumericValue
+            value={b.pauseDuration ?? 0.8}
+            unit="s"
+            precision={1}
+            onChange={(val) => update({ pauseDuration: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="0"
           max="4"
           step="0.2"
-          value={b.pauseDuration ?? 0.8}
+          value={Math.max(0, Math.min(4, b.pauseDuration ?? 0.8))}
           onChange={(e) => update({ pauseDuration: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -648,14 +692,20 @@ export function WanderingBehaviorControls({
               <div>
                 <div className="flex justify-between items-center text-[11px] text-slate-700">
                   <span>Profondeur de sonde</span>
-                  <span className="font-mono font-bold text-indigo-700">{b.ledgeCheckDepth ?? 28} px</span>
+                  <EditableNumericValue
+                    value={b.ledgeCheckDepth ?? 28}
+                    unit="px"
+                    precision={0}
+                    onChange={(val) => update({ ledgeCheckDepth: val })}
+                    className="font-mono font-bold text-indigo-700"
+                  />
                 </div>
                 <input
                   type="range"
                   min="10"
                   max="80"
                   step="2"
-                  value={b.ledgeCheckDepth ?? 28}
+                  value={Math.max(10, Math.min(80, b.ledgeCheckDepth ?? 28))}
                   onChange={(e) => update({ ledgeCheckDepth: parseInt(e.target.value, 10) })}
                   className="w-full accent-indigo-600 cursor-pointer"
                 />
@@ -789,15 +839,19 @@ export function MoveToBehaviorControls({
             <span className="font-bold text-slate-700 text-xs">Coordonnée X cible</span>
             <input
               type="number"
+              step="any"
               value={b.targetPosition?.x ?? 100}
-              onChange={(e) =>
-                update({
-                  targetPosition: {
-                    x: parseFloat(e.target.value) || 0,
-                    y: b.targetPosition?.y ?? 100,
-                  },
-                })
-              }
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                if (Number.isFinite(v)) {
+                  update({
+                    targetPosition: {
+                      x: v,
+                      y: b.targetPosition?.y ?? 100,
+                    },
+                  });
+                }
+              }}
               className="w-24 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
             />
           </div>
@@ -805,15 +859,19 @@ export function MoveToBehaviorControls({
             <span className="font-bold text-slate-700 text-xs">Coordonnée Y cible</span>
             <input
               type="number"
+              step="any"
               value={b.targetPosition?.y ?? 100}
-              onChange={(e) =>
-                update({
-                  targetPosition: {
-                    x: b.targetPosition?.x ?? 100,
-                    y: parseFloat(e.target.value) || 0,
-                  },
-                })
-              }
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                if (Number.isFinite(v)) {
+                  update({
+                    targetPosition: {
+                      x: b.targetPosition?.x ?? 100,
+                      y: v,
+                    },
+                  });
+                }
+              }}
               className="w-24 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
             />
           </div>
@@ -824,16 +882,20 @@ export function MoveToBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Vitesse de ralliement</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.speed || 120} px/s
-          </span>
+          <EditableNumericValue
+            value={b.speed ?? 120}
+            unit="px/s"
+            precision={0}
+            onChange={(val) => update({ speed: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="10"
           max="600"
           step="10"
-          value={b.speed || 120}
+          value={Math.max(10, Math.min(600, b.speed ?? 120))}
           onChange={(e) => update({ speed: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -948,16 +1010,20 @@ export function FollowBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Distance minimale d'arrêt</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.minDistance} px
-          </span>
+          <EditableNumericValue
+            value={b.minDistance}
+            unit="px"
+            precision={0}
+            onChange={(val) => update({ minDistance: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="0"
           max="150"
           step="5"
-          value={b.minDistance}
+          value={Math.max(0, Math.min(150, b.minDistance))}
           onChange={(e) => update({ minDistance: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -981,16 +1047,19 @@ export function FollowBehaviorControls({
           <div>
             <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
               <span className="font-bold">Raideur du ressort</span>
-              <span className="font-mono font-bold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded text-[11px]">
-                {Math.round(b.springStiffness ?? 120)}
-              </span>
+              <EditableNumericValue
+                value={b.springStiffness ?? 120}
+                precision={0}
+                onChange={(val) => update({ springStiffness: val })}
+                className="font-mono font-bold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded text-[11px]"
+              />
             </div>
             <input
               type="range"
               min="20"
               max="450"
               step="10"
-              value={b.springStiffness ?? 120}
+              value={Math.max(20, Math.min(450, b.springStiffness ?? 120))}
               onChange={(e) => update({ springStiffness: parseFloat(e.target.value) })}
               className="w-full accent-violet-600"
             />
@@ -999,16 +1068,19 @@ export function FollowBehaviorControls({
           <div>
             <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
               <span className="font-bold">Amortissement (Damping)</span>
-              <span className="font-mono font-bold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded text-[11px]">
-                {(b.springDamping ?? 10).toFixed(1)}
-              </span>
+              <EditableNumericValue
+                value={b.springDamping ?? 10}
+                precision={1}
+                onChange={(val) => update({ springDamping: val })}
+                className="font-mono font-bold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded text-[11px]"
+              />
             </div>
             <input
               type="range"
               min="1"
               max="35"
               step="0.5"
-              value={b.springDamping ?? 10}
+              value={Math.max(1, Math.min(35, b.springDamping ?? 10))}
               onChange={(e) => update({ springDamping: parseFloat(e.target.value) })}
               className="w-full accent-violet-600"
             />
@@ -1017,16 +1089,21 @@ export function FollowBehaviorControls({
           <div>
             <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
               <span className="font-bold">Éloignement max (Laisse)</span>
-              <span className="font-mono font-bold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded text-[11px]">
-                {(b.springMaxDistance ?? 0) > 0 ? `${Math.round(b.springMaxDistance!)} px` : 'Libre'}
-              </span>
+              <EditableNumericValue
+                value={b.springMaxDistance ?? 0}
+                unit="px"
+                precision={0}
+                displayText={(b.springMaxDistance ?? 0) > 0 ? `${Math.round(b.springMaxDistance!)} px` : 'Libre'}
+                onChange={(val) => update({ springMaxDistance: val })}
+                className="font-mono font-bold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded text-[11px]"
+              />
             </div>
             <input
               type="range"
               min="0"
               max="400"
               step="10"
-              value={b.springMaxDistance ?? 0}
+              value={Math.max(0, Math.min(400, b.springMaxDistance ?? 0))}
               onChange={(e) => update({ springMaxDistance: parseFloat(e.target.value) })}
               className="w-full accent-violet-600"
             />
@@ -1038,16 +1115,20 @@ export function FollowBehaviorControls({
           <div className="p-2 bg-white rounded-xl border border-slate-200">
             <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
               <span className="font-bold">Vitesse de poursuite</span>
-              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-                {b.speed} px/s
-              </span>
+              <EditableNumericValue
+                value={b.speed}
+                unit="px/s"
+                precision={0}
+                onChange={(val) => update({ speed: val })}
+                className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+              />
             </div>
             <input
               type="range"
               min="30"
               max="400"
               step="10"
-              value={b.speed}
+              value={Math.max(30, Math.min(400, b.speed))}
               onChange={(e) => update({ speed: parseFloat(e.target.value) })}
               className="w-full accent-indigo-600"
             />
@@ -1097,14 +1178,20 @@ export function FollowBehaviorControls({
                 <div>
                   <div className="flex justify-between items-center text-[11px] text-slate-700">
                     <span className="font-bold">Force du saut</span>
-                    <span className="font-mono font-bold text-sky-700">{b.jumpForce ?? 420} px/s</span>
+                    <EditableNumericValue
+                      value={b.jumpForce ?? 420}
+                      unit="px/s"
+                      precision={0}
+                      onChange={(val) => update({ jumpForce: val })}
+                      className="font-mono font-bold text-sky-700"
+                    />
                   </div>
                   <input
                     type="range"
                     min="180"
                     max="800"
                     step="20"
-                    value={b.jumpForce ?? 420}
+                    value={Math.max(180, Math.min(800, b.jumpForce ?? 420))}
                     onChange={(e) => update({ jumpForce: parseFloat(e.target.value) })}
                     className="w-full accent-sky-600"
                   />
@@ -1113,14 +1200,20 @@ export function FollowBehaviorControls({
                 <div>
                   <div className="flex justify-between items-center text-[11px] text-slate-700">
                     <span className="font-bold">Délai min. entre 2 sauts</span>
-                    <span className="font-mono font-bold text-sky-700">{(b.jumpCooldown ?? 0.7).toFixed(2)} s</span>
+                    <EditableNumericValue
+                      value={b.jumpCooldown ?? 0.7}
+                      unit="s"
+                      precision={2}
+                      onChange={(val) => update({ jumpCooldown: val })}
+                      className="font-mono font-bold text-sky-700"
+                    />
                   </div>
                   <input
                     type="range"
                     min="0.2"
                     max="2.5"
                     step="0.05"
-                    value={b.jumpCooldown ?? 0.7}
+                    value={Math.max(0.2, Math.min(2.5, b.jumpCooldown ?? 0.7))}
                     onChange={(e) => update({ jumpCooldown: parseFloat(e.target.value) })}
                     className="w-full accent-sky-600"
                   />
@@ -1129,14 +1222,20 @@ export function FollowBehaviorControls({
                 <div>
                   <div className="flex justify-between items-center text-[11px] text-slate-700">
                     <span className="font-bold">Seuil hauteur cible</span>
-                    <span className="font-mono font-bold text-sky-700">{b.jumpHeightThreshold ?? 36} px</span>
+                    <EditableNumericValue
+                      value={b.jumpHeightThreshold ?? 36}
+                      unit="px"
+                      precision={0}
+                      onChange={(val) => update({ jumpHeightThreshold: val })}
+                      className="font-mono font-bold text-sky-700"
+                    />
                   </div>
                   <input
                     type="range"
                     min="12"
                     max="180"
                     step="4"
-                    value={b.jumpHeightThreshold ?? 36}
+                    value={Math.max(12, Math.min(180, b.jumpHeightThreshold ?? 36))}
                     onChange={(e) => update({ jumpHeightThreshold: parseInt(e.target.value, 10) })}
                     className="w-full accent-sky-600"
                   />
@@ -1299,16 +1398,21 @@ export function FleeBehaviorControls({
                 : `Fuit dès que la menace entre à moins de ${b.fleeRadius ?? 220} px`}
             </span>
           </div>
-          <span className="font-mono font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded text-[11px]">
-            {(b.fleeRadius ?? 220) === 0 ? '∞' : `${b.fleeRadius ?? 220} px`}
-          </span>
+          <EditableNumericValue
+            value={b.fleeRadius ?? 220}
+            unit="px"
+            precision={0}
+            displayText={(b.fleeRadius ?? 220) === 0 ? '∞' : `${b.fleeRadius ?? 220} px`}
+            onChange={(val) => update({ fleeRadius: val })}
+            className="font-mono font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="0"
           max="600"
           step="10"
-          value={b.fleeRadius ?? 220}
+          value={Math.max(0, Math.min(600, b.fleeRadius ?? 220))}
           onChange={(e) => update({ fleeRadius: parseFloat(e.target.value) })}
           className="w-full accent-rose-500"
         />
@@ -1325,16 +1429,20 @@ export function FleeBehaviorControls({
                 : 'Vitesse de recul lorsque la menace approche'}
             </span>
           </div>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {b.speed ?? 160} px/s
-          </span>
+          <EditableNumericValue
+            value={b.speed ?? 160}
+            unit="px/s"
+            precision={0}
+            onChange={(val) => update({ speed: val })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+          />
         </div>
         <input
           type="range"
           min="0"
           max="500"
           step="10"
-          value={b.speed ?? 160}
+          value={Math.max(0, Math.min(500, b.speed ?? 160))}
           onChange={(e) => update({ speed: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />

@@ -68,11 +68,14 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
   const dragBehavior = effective.find((b) => b.type === 'draggable') as DraggableBehaviorConfig | undefined;
   const physics = effective.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
 
-  const attachMode = entity.parentOffset?.attachmentMode || 'rigid';
+  const effectiveOffset = entity.parentId
+    ? { ...(entity.parentOffset || {}), ...(currentState?.parentOffsetOverride || {}) }
+    : undefined;
+  const attachMode = effectiveOffset?.attachmentMode || 'rigid';
   const isDynamicAttachedChild = Boolean(
     entity.parentId &&
       (attachMode === 'physics_joint' ||
-        (attachMode === 'spring' && entity.parentOffset?.collideWithWorld === true))
+        (attachMode === 'spring' && effectiveOffset?.collideWithWorld === true))
   );
 
   // Une entité a de la physique dynamique si Physics non-statique OU si c'est un enfant articulé en physics_joint / spring+monde

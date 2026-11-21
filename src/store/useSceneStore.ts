@@ -2221,7 +2221,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     if (didChangeState && get().appMode === 'play') {
       const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
       const subject = entities[id];
-      if (!subject) return;
+      if (!subject || subject.disabled) return;
       const now = Date.now();
       const stateRules = rules.filter(
         (r) =>
@@ -4445,7 +4445,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
       if (!isKeyMatch) return;
 
-      const allEnts = Object.values(entities);
+      const allEnts = Object.values(entities).filter((e) => !e.disabled);
       const subject = allEnts.find((e) =>
         matchesEntityFilter(e, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)
       ) || allEnts[0];
@@ -4500,7 +4500,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
     const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
     const subject = entities[entityId];
-    if (!subject) return;
+    if (!subject || subject.disabled) return;
 
     const now = Date.now();
     const isReleasePhase = phase === 'up' || phase === 'mouse_up' || phase === 'exit' || phase === 'hover_exit';
@@ -4627,10 +4627,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
     const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
     const subject = entities[subjectId];
-    if (!subject) return;
+    if (!subject || subject.disabled) return;
 
     const now = Date.now();
-    const allEntitiesList = Object.values(entities);
+    const allEntitiesList = Object.values(entities).filter((e) => !e.disabled);
     const subjectCenter = eventPosition || {
       x: subject.position.x + subject.size.width / 2,
       y: subject.position.y + subject.size.height / 2,
@@ -4709,7 +4709,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       );
 
       allEntitiesList.forEach((other) => {
-        if (other.id === subject.id) return;
+        if (other.id === subject.id || other.disabled) return;
         if (!checkCollision(subject, other)) return;
 
         const contactPt = getCollisionContactPoint(subject, other);
@@ -4765,7 +4765,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
     const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
     const subject = entities[childId];
-    if (!subject) return;
+    if (!subject || subject.disabled) return;
 
     const parent = entities[parentId];
     const resolvedPoint = breakPoint || {
@@ -4824,7 +4824,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     if (get().appMode !== 'play') return;
     const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
     const subject = entities[targetEntityId];
-    if (!subject) return;
+    if (!subject || subject.disabled) return;
 
     const now = Date.now();
     const camRules = rules.filter((r) => r.enabled && r.trigger.type === 'camera_follow');
@@ -4872,7 +4872,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     if (get().appMode !== 'play') return;
     const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
     const subject = entities[subjectId];
-    if (!subject) return;
+    if (!subject || subject.disabled) return;
 
     const target = targetEntityId ? entities[targetEntityId] : undefined;
     const resolvedPoint = eventPosition || {
@@ -4972,7 +4972,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           : undefined;
 
       const nextCollisions: Record<string, boolean> = { ...activeCollisions };
-      const allEntitiesList = Object.values(entities);
+      const allEntitiesList = Object.values(entities).filter((e) => !e.disabled);
       const now = Date.now();
       const worldBounds = resolveWorldBounds(sceneBounds || { width: 800, height: 500 }, camera);
       const sceneW = Math.max(100, worldBounds.width);
@@ -5255,7 +5255,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         }
         ruleCooldowns[cooldownKey] = now;
         recordRuleFired(rule, now, { cooldownKey });
-        const allEnts = Object.values(entities);
+        const allEnts = Object.values(entities).filter((e) => !e.disabled);
         const subject = allEnts.find((e) =>
           matchesEntityFilter(e, rule.trigger.subjectMode, rule.trigger.subjectId, rule.trigger.subjectType, rule.trigger.subjectTag)
         ) || allEnts[0];
@@ -5393,7 +5393,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           const cooldownKey = `var_${rule.id}`;
           if (canRuleFireWithGate(rule, now, 40, { cooldownKey })) {
             recordRuleFired(rule, now, { cooldownKey });
-            const allEnts = Object.values(entities);
+            const allEnts = Object.values(entities).filter((e) => !e.disabled);
             executeRuleActions(rule.actions, {
               subject: allEnts[0],
               allEntities: entities,
@@ -5421,7 +5421,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       if (satisfied) {
         if (canRuleFireWithGate(rule, now, RULE_COOLDOWN_MS * 2, { cooldownKey, edgeKey: rule.id, useEdgeGating: true })) {
           recordRuleFired(rule, now, { cooldownKey, edgeKey: rule.id });
-          const allEnts = Object.values(entities);
+          const allEnts = Object.values(entities).filter((e) => !e.disabled);
           executeRuleActions(rule.actions, {
             subject: allEnts[0],
             allEntities: entities,

@@ -188,7 +188,7 @@ export function computeBoundaryHitEdges(
 
 // Vérification de la collision avec support précis des Colliders (flipX + scale centrée) et écoute native Matter.js
 export function checkCollision(ent1: Entity, ent2: Entity, tolerancePx: number = 3): boolean {
-  if (ent1.colliderMode === 'disabled' || ent2.colliderMode === 'disabled') {
+  if (ent1.disabled || ent2.disabled || ent1.colliderMode === 'disabled' || ent2.colliderMode === 'disabled') {
     return false;
   }
 

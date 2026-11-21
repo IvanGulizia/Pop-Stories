@@ -106,6 +106,7 @@ import {
   computeDirectionalCollisionSide,
   shouldIgnoreOneWayCollision,
 } from '../store/collisionHelpers';
+import { resolveEffectiveParentOffset } from '../store/parentingHelpers';
 
 export { getEffectiveBehaviors, isEntityDraggable };
 
@@ -185,7 +186,10 @@ const controllerAirStates = new Map<
 >();
 const rebuildingBodyIds = new Set<string>();
 const activeDragPositions: Record<string, Position> = {};
-const pendingInitialVelocities = new Map<string, { vx: number; vy: number }>();
+const pendingInitialVelocities = new Map<
+  string,
+  { vx: number; vy: number; mode?: 'add' | 'set'; angularDegPerSec?: number }
+>();
 const impulseDrivenEntityIds = new Set<string>();
 const autoDestroyTimers = new Map<string, number>();
 const particleEmitterAccumulators = new Map<string, number>();
@@ -923,6 +927,62 @@ export function applyEntityMoveAction(
 }
 
 /**
+ * Applique une force / impulsion linéaire (px/s) et/ou angulaire (deg/s) à une entité.
+ * Si le corps est actuellement statique uniquement parce qu'il n'avait pas encore de comportement moteur
+ * (et n'est pas verrouillé isStatic par Physics), il est réveillé et basculé en dynamique immédiatement.
+ */
+export function applyEntityImpulseAction(
+  entityId: string,
+  vx: number,
+  vy: number,
+  mode: 'add' | 'set' = 'add',
+  angularDegPerSec: number = 0,
+  isExplicitStatic: boolean = false
+): boolean {
+  if (!Number.isFinite(vx) || !Number.isFinite(vy)) return false;
+  impulseDrivenEntityIds.add(entityId);
+
+  const body = bodyMap.get(entityId);
+  if (!body) {
+    pendingInitialVelocities.set(entityId, { vx, vy, mode, angularDegPerSec });
+    return false;
+  }
+
+  if (isExplicitStatic) {
+    return false;
+  }
+
+  if (body.isStatic) {
+    Body.setStatic(body, false);
+    const prevSig = bodySignatures.get(entityId);
+    if (prevSig) {
+      bodySignatures.set(entityId, prevSig.replace('_true_', '_false_'));
+    }
+  }
+
+  Matter.Sleeping.set(body, false);
+  const maxStepSpeed = 65; // 65 px/frame = 3900 px/s
+  const stepVx = vx / 60;
+  const stepVy = vy / 60;
+  let nextVx = mode === 'set' ? stepVx : body.velocity.x + stepVx;
+  let nextVy = mode === 'set' ? stepVy : body.velocity.y + stepVy;
+  const spd = Math.hypot(nextVx, nextVy);
+  if (spd > maxStepSpeed) {
+    nextVx = (nextVx / spd) * maxStepSpeed;
+    nextVy = (nextVy / spd) * maxStepSpeed;
+  }
+  Body.setVelocity(body, { x: nextVx, y: nextVy });
+
+  if (Number.isFinite(angularDegPerSec) && Math.abs(angularDegPerSec) > 0.01) {
+    const stepAng = ((angularDegPerSec / 60) * Math.PI) / 180;
+    const nextAng = mode === 'set' ? stepAng : Body.getAngularVelocity(body) + stepAng;
+    Body.setAngularVelocity(body, Math.max(-0.8, Math.min(0.8, nextAng)));
+  }
+
+  return true;
+}
+
+/**
  * Injecte instantanément une vitesse physique dans un corps Matter.js (ex: lancer à la souris)
  * vx et vy sont fournis en px/s et convertis rigoureusement en unités de pas Matter.js (~60Hz).
  */
@@ -1368,7 +1428,7 @@ function ensurePhysicsWorld(
   // Créer ou mettre à jour les corps existants
   for (const entity of entityList) {
     const colliderMode = entity.colliderMode || 'default';
-    if (colliderMode === 'disabled') {
+    if (colliderMode === 'disabled' || entity.disabled === true) {
       const existingConstraint = parentJointConstraints.get(entity.id);
       if (existingConstraint) {
         World.remove(engine.world, existingConstraint);
@@ -1397,11 +1457,13 @@ function ensurePhysicsWorld(
     const hasMovement = effectiveBehaviors.some((b) =>
       ['keyboard_control', 'constant_velocity', 'patrol', 'wandering', 'move_to', 'follow', 'flee'].includes(b.type)
     );
-    const isAttachedChild = !!(entity.parentId && entities[entity.parentId]);
-    const attachMode = entity.parentOffset?.attachmentMode || 'rigid';
+    const parentEntCheck = entity.parentId ? entities[entity.parentId] : undefined;
+    const isAttachedChild = !!(parentEntCheck && !parentEntCheck.disabled);
+    const effectiveOffset = resolveEffectiveParentOffset(entity, currentState);
+    const attachMode = effectiveOffset?.attachmentMode || 'rigid';
     const isCollisionAttachedChild =
       isAttachedChild &&
-      (attachMode === 'physics_joint' || (attachMode === 'spring' && entity.parentOffset?.collideWithWorld === true));
+      (attachMode === 'physics_joint' || (attachMode === 'spring' && effectiveOffset?.collideWithWorld === true));
 
     // Enregistrement des plateformes traversables par le bas (one-way)
     if (physics?.oneWayPlatform && physics?.isStatic && !physics?.isTrigger && colliderMode !== 'trigger_only') {
@@ -1432,7 +1494,7 @@ function ensurePhysicsWorld(
 
     const isSensor =
       colliderMode === 'trigger_only' ||
-      (isAttachedChild && entity.parentOffset?.disableCollisionsWhileAttached === true)
+      (isAttachedChild && effectiveOffset?.disableCollisionsWhileAttached === true)
         ? true
         : physics
         ? physics.isTrigger === true
@@ -1459,8 +1521,8 @@ function ensurePhysicsWorld(
     if (
       isAttachedChild &&
       attachMode === 'physics_joint' &&
-      entity.parentOffset?.jointInitialAngleOffset !== undefined &&
-      Math.abs(entity.parentOffset.jointInitialAngleOffset) > 0.01
+      effectiveOffset?.jointInitialAngleOffset !== undefined &&
+      Math.abs(effectiveOffset.jointInitialAngleOffset) > 0.01
     ) {
       const parentEnt = entities[entity.parentId!];
       const pState = parentEnt?.states[parentEnt.currentStateId];
@@ -1470,13 +1532,13 @@ function ensurePhysicsWorld(
           ? (pBody.angle * 180) / Math.PI
           : (pState?.rotation || 0) + (parentEnt?.runtimeTilt || 0) + (parentEnt?.runtimeJiggleAngle || 0);
       const restDeg = computeJointRestWorldDeg({
-        offset: entity.parentOffset,
+        offset: effectiveOffset,
         parentRotDeg: pRotDeg,
         parentFlipX: Boolean(parentEnt?.flipX),
       });
-      const inheritFlip = entity.parentOffset?.inheritFlip !== false;
+      const inheritFlip = effectiveOffset?.inheritFlip !== false;
       const flipSign = inheritFlip && parentEnt?.flipX ? -1 : 1;
-      initAngleDeg = restDeg + entity.parentOffset.jointInitialAngleOffset * flipSign;
+      initAngleDeg = restDeg + effectiveOffset.jointInitialAngleOffset * flipSign;
     }
 
     const bodyWorldInit = getBodyWorldCenterFromPivot(
@@ -1549,14 +1611,20 @@ function ensurePhysicsWorld(
       if (queuedVel) {
         pendingInitialVelocities.delete(entity.id);
         if (!isStatic) {
-          const maxStepSpeed = 25;
+          const maxStepSpeed = queuedVel.mode ? 65 : 25;
           const mvx = queuedVel.vx / 60;
           const mvy = queuedVel.vy / 60;
-          const spd = Math.hypot(mvx, mvy);
-          const fx = spd > maxStepSpeed ? (mvx / spd) * maxStepSpeed : mvx;
-          const fy = spd > maxStepSpeed ? (mvy / spd) * maxStepSpeed : mvy;
+          const nextVx = queuedVel.mode === 'add' ? body.velocity.x + mvx : mvx;
+          const nextVy = queuedVel.mode === 'add' ? body.velocity.y + mvy : mvy;
+          const spd = Math.hypot(nextVx, nextVy);
+          const fx = spd > maxStepSpeed ? (nextVx / spd) * maxStepSpeed : nextVx;
+          const fy = spd > maxStepSpeed ? (nextVy / spd) * maxStepSpeed : nextVy;
           Matter.Sleeping.set(body, false);
           Body.setVelocity(body, { x: fx, y: fy });
+          if (queuedVel.angularDegPerSec && Math.abs(queuedVel.angularDegPerSec) > 0.01) {
+            const stepAng = ((queuedVel.angularDegPerSec / 60) * Math.PI) / 180;
+            Body.setAngularVelocity(body, Math.max(-0.8, Math.min(0.8, stepAng)));
+          }
         }
       }
 
@@ -1601,14 +1669,20 @@ function ensurePhysicsWorld(
       if (queuedVel) {
         pendingInitialVelocities.delete(entity.id);
         if (!isStatic) {
-          const maxStepSpeed = 25;
+          const maxStepSpeed = queuedVel.mode ? 65 : 25;
           const mvx = queuedVel.vx / 60;
           const mvy = queuedVel.vy / 60;
-          const spd = Math.hypot(mvx, mvy);
-          const fx = spd > maxStepSpeed ? (mvx / spd) * maxStepSpeed : mvx;
-          const fy = spd > maxStepSpeed ? (mvy / spd) * maxStepSpeed : mvy;
+          const nextVx = queuedVel.mode === 'add' ? body.velocity.x + mvx : mvx;
+          const nextVy = queuedVel.mode === 'add' ? body.velocity.y + mvy : mvy;
+          const spd = Math.hypot(nextVx, nextVy);
+          const fx = spd > maxStepSpeed ? (nextVx / spd) * maxStepSpeed : nextVx;
+          const fy = spd > maxStepSpeed ? (nextVy / spd) * maxStepSpeed : nextVy;
           Matter.Sleeping.set(body, false);
           Body.setVelocity(body, { x: fx, y: fy });
+          if (queuedVel.angularDegPerSec && Math.abs(queuedVel.angularDegPerSec) > 0.01) {
+            const stepAng = ((queuedVel.angularDegPerSec / 60) * Math.PI) / 180;
+            Body.setAngularVelocity(body, Math.max(-0.8, Math.min(0.8, stepAng)));
+          }
         }
       }
     }
@@ -1779,10 +1853,13 @@ export function stepMatterPhysics(params: {
 
   for (const entity of topoPrepassEntities) {
     const parent = entity.parentId ? liveEntities[entity.parentId] : undefined;
-    const offset = entity.parentOffset;
+    const currentEntityState = entity.states[entity.currentStateId];
+    const offset = resolveEffectiveParentOffset(entity, currentEntityState);
     const attachMode = offset?.attachmentMode || 'rigid';
     const isCollisionAttached = Boolean(
-      parent &&
+      !entity.disabled &&
+        parent &&
+        !parent.disabled &&
         (attachMode === 'physics_joint' || (attachMode === 'spring' && offset?.collideWithWorld === true))
     );
     const body = bodyMap.get(entity.id);
@@ -1952,6 +2029,7 @@ export function stepMatterPhysics(params: {
   }
 
   for (const entity of entityList) {
+    if (entity.disabled) continue;
     const currentState = entity.states[entity.currentStateId];
     const effectiveBehaviors = getEffectiveBehaviors(entity, currentState);
     const body = bodyMap.get(entity.id);
@@ -2329,7 +2407,7 @@ export function stepMatterPhysics(params: {
       let minDistSq = Infinity;
 
       for (const candidate of Object.values(liveEntities)) {
-        if (candidate.id === entity.id) continue; // Ne pas se cibler soi-même
+        if (candidate.id === entity.id || candidate.disabled) continue; // Ne pas se cibler soi-même ou une entité désactivée
         if (mode === 'nearest_type') {
           if (!targetType || candidate.type !== targetType) continue;
         } else if (mode === 'nearest_tag') {
@@ -2367,7 +2445,7 @@ export function stepMatterPhysics(params: {
         hasValidTarget = true;
       } else if (moveTo.targetType === 'entity' && moveTo.targetEntityId) {
         const targetEntity = liveEntities[moveTo.targetEntityId];
-        if (targetEntity) {
+        if (targetEntity && !targetEntity.disabled) {
           targetX = targetEntity.position.x;
           targetY = targetEntity.position.y;
           hasValidTarget = true;
@@ -2453,7 +2531,7 @@ export function stepMatterPhysics(params: {
         hasValidTarget = true;
       } else if (follow.targetType === 'entity' && follow.targetEntityId) {
         const targetEntity = liveEntities[follow.targetEntityId];
-        if (targetEntity) {
+        if (targetEntity && !targetEntity.disabled) {
           const targetOffset = colliderOffsets.get(targetEntity.id) || { relCenterX: targetEntity.size.width / 2, relCenterY: targetEntity.size.height / 2 };
           targetX = targetEntity.position.x + targetOffset.relCenterX;
           targetY = targetEntity.position.y + targetOffset.relCenterY;
@@ -2751,7 +2829,7 @@ export function stepMatterPhysics(params: {
     }
 
     // Plafond de vitesse terminale pour éviter toute dérive physique incontrôlée
-    const maxVelocity = 30; // 30 px/frame = 1800 px/s
+    const maxVelocity = impulseDrivenEntityIds.has(entity.id) ? 65 : 30; // 30 px/frame (1800 px/s) ou 65 px/frame sous impulsion
     const currentSpeed = Math.hypot(body.velocity.x, body.velocity.y);
     if (currentSpeed > maxVelocity) {
       Body.setVelocity(body, {
@@ -3070,6 +3148,7 @@ export function stepMatterPhysics(params: {
   const resolvedTransforms = new Map<string, { position: Position; rotation: number; flipX: boolean }>();
 
   for (const entity of orderedEntities) {
+    if (entity.disabled) continue;
     const body = bodyMap.get(entity.id);
     const currentState = entity.states[entity.currentStateId];
     const effectiveBehaviors = getEffectiveBehaviors(entity, currentState);
@@ -3096,7 +3175,12 @@ export function stepMatterPhysics(params: {
 
     // Cas 1 : Entité enfant attachée à un parent (rigide, ressort élastique ou joint physique avec collisions)
     // Si son joint vient tout juste de rompre sur ce tick, passer immédiatement en entité indépendante
-    if (entity.parentId && liveEntities[entity.parentId] && !brokenJointIdSet.has(entity.id)) {
+    if (
+      entity.parentId &&
+      liveEntities[entity.parentId] &&
+      !liveEntities[entity.parentId].disabled &&
+      !brokenJointIdSet.has(entity.id)
+    ) {
       const parent = liveEntities[entity.parentId];
       const parentState = parent.states[parent.currentStateId];
       const parentTransform = resolvedTransforms.get(parent.id) || {
@@ -3121,7 +3205,13 @@ export function stepMatterPhysics(params: {
         parentTransform.flipX
       );
 
-      const offset = entity.parentOffset || { x: 0, y: 0, rotationOffset: 0, inheritRotation: true, inheritFlip: true };
+      const offset = resolveEffectiveParentOffset(entity, currentState) || {
+        x: 0,
+        y: 0,
+        rotationOffset: 0,
+        inheritRotation: true,
+        inheritFlip: true,
+      };
       const inheritRot = offset.inheritRotation !== false;
       const inheritFlip = offset.inheritFlip !== false;
 
@@ -3159,8 +3249,10 @@ export function stepMatterPhysics(params: {
         const currentRotDeg = isRotFrozen ? 0 : Math.round(((body.angle * 180) / Math.PI) * 10) / 10;
         newRot = currentRotDeg;
 
-        // Contrainte de laisse max éventuelle autour de l'ancre parent
+        // Contrainte de laisse max éventuelle autour de l'ancre parent (supporte 0 px strict via springLimitMaxDistance)
+        const limitMax = Boolean(offset.springLimitMaxDistance);
         const maxDist = offset.springMaxDistance ?? 0;
+        const hasMaxDist = limitMax ? maxDist >= 0 : maxDist > 0;
         const pivotOffsetLocal = {
           x: effPivot.x * entity.size.width - cOffset.relCenterX,
           y: effPivot.y * entity.size.height - cOffset.relCenterY,
@@ -3169,17 +3261,24 @@ export function stepMatterPhysics(params: {
         const curPivotWorldX = body.position.x + pivotRotOffset.x;
         const curPivotWorldY = body.position.y + pivotRotOffset.y;
 
-        if (maxDist > 0) {
-          const dpx = curPivotWorldX - targetAnchorX;
-          const dpy = curPivotWorldY - targetAnchorY;
-          const dist = Math.hypot(dpx, dpy);
-          if (dist > maxDist && dist > 0.001) {
-            const clampedPivotX = targetAnchorX + (dpx / dist) * maxDist;
-            const clampedPivotY = targetAnchorY + (dpy / dist) * maxDist;
+        if (hasMaxDist) {
+          if (maxDist <= 0.0001) {
             Body.setPosition(body, {
-              x: clampedPivotX - pivotRotOffset.x,
-              y: clampedPivotY - pivotRotOffset.y,
+              x: targetAnchorX - pivotRotOffset.x,
+              y: targetAnchorY - pivotRotOffset.y,
             });
+          } else {
+            const dpx = curPivotWorldX - targetAnchorX;
+            const dpy = curPivotWorldY - targetAnchorY;
+            const dist = Math.hypot(dpx, dpy);
+            if (dist > maxDist && dist > 0.001) {
+              const clampedPivotX = targetAnchorX + (dpx / dist) * maxDist;
+              const clampedPivotY = targetAnchorY + (dpy / dist) * maxDist;
+              Body.setPosition(body, {
+                x: clampedPivotX - pivotRotOffset.x,
+                y: clampedPivotY - pivotRotOffset.y,
+              });
+            }
           }
         }
 
@@ -3239,16 +3338,22 @@ export function stepMatterPhysics(params: {
           const activeChildDrag = activeDragPositions[entity.id];
           if (activeChildDrag) {
             let dragPivot = getPivotWorldPosition(activeChildDrag, entity.size, effPivot);
+            const limitMax = Boolean(offset.springLimitMaxDistance);
             const maxDist = offset.springMaxDistance ?? 0;
-            if (maxDist > 0) {
-              const ddx = dragPivot.x - targetAnchorX;
-              const ddy = dragPivot.y - targetAnchorY;
-              const dist = Math.hypot(ddx, ddy);
-              if (dist > maxDist && dist > 0.001) {
-                dragPivot = {
-                  x: targetAnchorX + (ddx / dist) * maxDist,
-                  y: targetAnchorY + (ddy / dist) * maxDist,
-                };
+            const hasMaxDist = limitMax ? maxDist >= 0 : maxDist > 0;
+            if (hasMaxDist) {
+              if (maxDist <= 0.0001) {
+                dragPivot = { x: targetAnchorX, y: targetAnchorY };
+              } else {
+                const ddx = dragPivot.x - targetAnchorX;
+                const ddy = dragPivot.y - targetAnchorY;
+                const dist = Math.hypot(ddx, ddy);
+                if (dist > maxDist && dist > 0.001) {
+                  dragPivot = {
+                    x: targetAnchorX + (ddx / dist) * maxDist,
+                    y: targetAnchorY + (ddy / dist) * maxDist,
+                  };
+                }
               }
             }
             spState.x = dragPivot.x;
@@ -3266,6 +3371,7 @@ export function stepMatterPhysics(params: {
               damping: offset.springDamping ?? 12,
               gravity: offset.springGravity ?? 0,
               maxDistance: offset.springMaxDistance ?? 0,
+              limitMaxDistance: Boolean(offset.springLimitMaxDistance),
               dt,
             });
             childAnchorX = spRes.x;
@@ -3966,7 +4072,7 @@ export function stepMatterPhysics(params: {
           const cleanTag = (rule.targetTag || '').toLowerCase().trim().replace(/^#/, '');
 
           for (const other of entityList) {
-            if (other.id === entity.id) continue;
+            if (other.id === entity.id || other.disabled) continue;
             const matchesTarget =
               (rule.targetMode === 'entity' && other.id === rule.targetEntityId) ||
               (rule.targetMode === 'type' && other.type === rule.targetEntityType) ||
@@ -4411,7 +4517,7 @@ export function stepMatterPhysics(params: {
 
           // 1) Vérifier collision avec des entités portant le tag danger
           for (const other of entityList) {
-            if (other.id === entity.id) continue;
+            if (other.id === entity.id || other.disabled) continue;
             const otherTags = (other.tags || []).map((t) => t.toLowerCase().trim().replace(/^#/, ''));
             if (!otherTags.includes(cleanTag)) continue;
 

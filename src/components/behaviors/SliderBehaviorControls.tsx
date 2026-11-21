@@ -7,6 +7,7 @@ import {
   SliderReturnMode,
   SliderStepMode,
 } from '../../types';
+import { EditableNumericValue } from '../shared/EditableNumericValue';
 
 export function SliderBehaviorControls({
   b,
@@ -63,16 +64,20 @@ export function SliderBehaviorControls({
             <div>
               <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
                 <span className="font-semibold">Longueur du rail</span>
-                <span className="font-mono font-bold text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded text-[11px]">
-                  {b.length ?? 220}px
-                </span>
+                <EditableNumericValue
+                  value={b.length ?? 220}
+                  unit="px"
+                  precision={1}
+                  onChange={(v) => update({ length: v })}
+                  className="font-mono font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="40"
                 max="800"
                 step="10"
-                value={b.length ?? 220}
+                value={Math.max(40, Math.min(800, b.length ?? 220))}
                 onChange={(e) => update({ length: parseInt(e.target.value, 10) })}
                 className="w-full accent-sky-600 cursor-pointer"
               />
@@ -104,9 +109,13 @@ export function SliderBehaviorControls({
                   >
                     90° Vert.
                   </button>
-                  <span className="font-mono font-bold text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded text-[11px]">
-                    {b.angle ?? 0}°
-                  </span>
+                  <EditableNumericValue
+                    value={b.angle ?? 0}
+                    unit="°"
+                    precision={1}
+                    onChange={(v) => update({ angle: v })}
+                    className="font-mono font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+                  />
                 </div>
               </div>
               <input
@@ -114,7 +123,7 @@ export function SliderBehaviorControls({
                 min="-180"
                 max="180"
                 step="5"
-                value={b.angle ?? 0}
+                value={Math.max(-180, Math.min(180, b.angle ?? 0))}
                 onChange={(e) => update({ angle: parseInt(e.target.value, 10) })}
                 className="w-full accent-sky-600 cursor-pointer"
               />
@@ -127,14 +136,20 @@ export function SliderBehaviorControls({
             <div>
               <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
                 <span className="font-semibold">Largeur</span>
-                <span className="font-mono font-bold text-sky-700 text-[11px]">{b.width ?? 180}px</span>
+                <EditableNumericValue
+                  value={b.width ?? 180}
+                  unit="px"
+                  precision={1}
+                  onChange={(v) => update({ width: v })}
+                  className="font-mono font-bold text-sky-700 hover:bg-sky-50 px-1 rounded text-[11px] cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="40"
                 max="600"
                 step="10"
-                value={b.width ?? 180}
+                value={Math.max(40, Math.min(600, b.width ?? 180))}
                 onChange={(e) => update({ width: parseInt(e.target.value, 10) })}
                 className="w-full accent-sky-600 cursor-pointer"
               />
@@ -142,14 +157,20 @@ export function SliderBehaviorControls({
             <div>
               <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
                 <span className="font-semibold">Hauteur</span>
-                <span className="font-mono font-bold text-sky-700 text-[11px]">{b.height ?? 180}px</span>
+                <EditableNumericValue
+                  value={b.height ?? 180}
+                  unit="px"
+                  precision={1}
+                  onChange={(v) => update({ height: v })}
+                  className="font-mono font-bold text-sky-700 hover:bg-sky-50 px-1 rounded text-[11px] cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="40"
                 max="600"
                 step="10"
-                value={b.height ?? 180}
+                value={Math.max(40, Math.min(600, b.height ?? 180))}
                 onChange={(e) => update({ height: parseInt(e.target.value, 10) })}
                 className="w-full accent-sky-600 cursor-pointer"
               />
@@ -161,16 +182,20 @@ export function SliderBehaviorControls({
           <div className="pt-1">
             <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
               <span className="font-semibold">Rayon de la zone</span>
-              <span className="font-mono font-bold text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded text-[11px]">
-                {b.radius ?? 90}px
-              </span>
+              <EditableNumericValue
+                value={b.radius ?? 90}
+                unit="px"
+                precision={1}
+                onChange={(v) => update({ radius: v })}
+                className="font-mono font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="20"
               max="350"
               step="5"
-              value={b.radius ?? 90}
+              value={Math.max(20, Math.min(350, b.radius ?? 90))}
               onChange={(e) => update({ radius: parseInt(e.target.value, 10) })}
               className="w-full accent-sky-600 cursor-pointer"
             />
@@ -205,31 +230,41 @@ export function SliderBehaviorControls({
           <div className="space-y-1.5 pt-0.5">
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <div className="flex justify-between text-[11px] text-slate-600">
+                <div className="flex justify-between items-center text-[11px] text-slate-600">
                   <span>Raideur</span>
-                  <span className="font-mono font-bold text-sky-700">{b.dragStiffness ?? 220}</span>
+                  <EditableNumericValue
+                    value={b.dragStiffness ?? 220}
+                    precision={1}
+                    onChange={(v) => update({ dragStiffness: v })}
+                    className="font-mono font-bold text-sky-700 hover:bg-sky-50 px-1 rounded cursor-text tabular-nums"
+                  />
                 </div>
                 <input
                   type="range"
                   min="40"
                   max="600"
                   step="10"
-                  value={b.dragStiffness ?? 220}
+                  value={Math.max(40, Math.min(600, b.dragStiffness ?? 220))}
                   onChange={(e) => update({ dragStiffness: parseInt(e.target.value, 10) })}
                   className="w-full accent-sky-600 cursor-pointer"
                 />
               </div>
               <div>
-                <div className="flex justify-between text-[11px] text-slate-600">
+                <div className="flex justify-between items-center text-[11px] text-slate-600">
                   <span>Amortissement</span>
-                  <span className="font-mono font-bold text-sky-700">{b.dragDamping ?? 16}</span>
+                  <EditableNumericValue
+                    value={b.dragDamping ?? 16}
+                    precision={1}
+                    onChange={(v) => update({ dragDamping: v })}
+                    className="font-mono font-bold text-sky-700 hover:bg-sky-50 px-1 rounded cursor-text tabular-nums"
+                  />
                 </div>
                 <input
                   type="range"
                   min="2"
                   max="40"
                   step="1"
-                  value={b.dragDamping ?? 16}
+                  value={Math.max(2, Math.min(40, b.dragDamping ?? 16))}
                   onChange={(e) => update({ dragDamping: parseInt(e.target.value, 10) })}
                   className="w-full accent-sky-600 cursor-pointer"
                 />
@@ -237,18 +272,22 @@ export function SliderBehaviorControls({
             </div>
 
             <div>
-              <div className="flex justify-between text-[11px] text-slate-600">
+              <div className="flex justify-between items-center text-[11px] text-slate-600">
                 <span>Rebond sur les butées</span>
-                <span className="font-mono font-bold text-sky-700">
-                  {Math.round((b.boundaryBounce ?? 0.35) * 100)}%
-                </span>
+                <EditableNumericValue
+                  value={Math.round((b.boundaryBounce ?? 0.35) * 1000) / 10}
+                  unit="%"
+                  precision={1}
+                  onChange={(v) => update({ boundaryBounce: v / 100 })}
+                  className="font-mono font-bold text-sky-700 hover:bg-sky-50 px-1 rounded cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="0"
                 max="0.95"
                 step="0.05"
-                value={b.boundaryBounce ?? 0.35}
+                value={Math.max(0, Math.min(0.95, b.boundaryBounce ?? 0.35))}
                 onChange={(e) => update({ boundaryBounce: parseFloat(e.target.value) })}
                 className="w-full accent-sky-600 cursor-pointer"
               />
@@ -261,9 +300,16 @@ export function SliderBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
         <div className="flex justify-between items-center">
           <span className="font-bold text-slate-700 text-xs">C. Crantage (Notches)</span>
-          <span className="font-mono font-bold text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded text-[11px]">
-            {stepsX < 2 ? 'Continu' : `${stepsX} crans`}
-          </span>
+          <EditableNumericValue
+            value={stepsX}
+            displayText={stepsX < 2 ? 'Continu' : `${stepsX} crans`}
+            precision={0}
+            onChange={(v) => {
+              const r = Math.max(0, Math.round(v));
+              update({ stepsX: r === 1 ? 2 : r });
+            }}
+            className="font-mono font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+          />
         </div>
 
         <input
@@ -271,7 +317,7 @@ export function SliderBehaviorControls({
           min="0"
           max="24"
           step="1"
-          value={stepsX}
+          value={Math.max(0, Math.min(24, stepsX))}
           onChange={(e) => {
             const val = parseInt(e.target.value, 10);
             update({ stepsX: val === 1 ? 2 : val });
@@ -281,18 +327,25 @@ export function SliderBehaviorControls({
 
         {geometryMode === 'rect_2d' && (
           <div>
-            <div className="flex justify-between text-[11px] text-slate-600">
+            <div className="flex justify-between items-center text-[11px] text-slate-600">
               <span>Crans sur Y</span>
-              <span className="font-mono font-bold text-sky-700">
-                {stepsY < 2 ? 'Continu' : `${stepsY} crans`}
-              </span>
+              <EditableNumericValue
+                value={stepsY}
+                displayText={stepsY < 2 ? 'Continu' : `${stepsY} crans`}
+                precision={0}
+                onChange={(v) => {
+                  const r = Math.max(0, Math.round(v));
+                  update({ stepsY: r === 1 ? 2 : r });
+                }}
+                className="font-mono font-bold text-sky-700 hover:bg-sky-50 px-1 rounded cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="0"
               max="24"
               step="1"
-              value={stepsY}
+              value={Math.max(0, Math.min(24, stepsY))}
               onChange={(e) => {
                 const val = parseInt(e.target.value, 10);
                 update({ stepsY: val === 1 ? 2 : val });
@@ -326,16 +379,21 @@ export function SliderBehaviorControls({
 
             {stepMode === 'magnetic' && (
               <div>
-                <div className="flex justify-between text-[11px] text-slate-600">
+                <div className="flex justify-between items-center text-[11px] text-slate-600">
                   <span>Force d'aimantation</span>
-                  <span className="font-mono font-bold text-sky-700">{b.magneticStrength ?? 140}</span>
+                  <EditableNumericValue
+                    value={b.magneticStrength ?? 140}
+                    precision={1}
+                    onChange={(v) => update({ magneticStrength: v })}
+                    className="font-mono font-bold text-sky-700 hover:bg-sky-50 px-1 rounded cursor-text tabular-nums"
+                  />
                 </div>
                 <input
                   type="range"
                   min="20"
                   max="400"
                   step="10"
-                  value={b.magneticStrength ?? 140}
+                  value={Math.max(20, Math.min(400, b.magneticStrength ?? 140))}
                   onChange={(e) => update({ magneticStrength: parseInt(e.target.value, 10) })}
                   className="w-full accent-sky-600 cursor-pointer"
                 />
@@ -372,18 +430,22 @@ export function SliderBehaviorControls({
           <div className="space-y-1.5 pt-0.5">
             {geometryMode === 'line_1d' && (
               <div>
-                <div className="flex justify-between text-[11px] text-slate-600">
+                <div className="flex justify-between items-center text-[11px] text-slate-600">
                   <span>Point de repos sur rail</span>
-                  <span className="font-mono font-bold text-sky-700">
-                    {Math.round((b.returnPosition ?? 0.5) * 100)}%
-                  </span>
+                  <EditableNumericValue
+                    value={Math.round((b.returnPosition ?? 0.5) * 1000) / 10}
+                    unit="%"
+                    precision={1}
+                    onChange={(v) => update({ returnPosition: v / 100 })}
+                    className="font-mono font-bold text-sky-700 hover:bg-sky-50 px-1 rounded cursor-text tabular-nums"
+                  />
                 </div>
                 <input
                   type="range"
                   min="0"
                   max="1"
                   step="0.05"
-                  value={b.returnPosition ?? 0.5}
+                  value={Math.max(0, Math.min(1, b.returnPosition ?? 0.5))}
                   onChange={(e) => update({ returnPosition: parseFloat(e.target.value) })}
                   className="w-full accent-sky-600 cursor-pointer"
                 />
@@ -391,31 +453,41 @@ export function SliderBehaviorControls({
             )}
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <div className="flex justify-between text-[11px] text-slate-600">
+                <div className="flex justify-between items-center text-[11px] text-slate-600">
                   <span>Raideur rappel</span>
-                  <span className="font-mono font-bold text-sky-700">{b.returnStiffness ?? 140}</span>
+                  <EditableNumericValue
+                    value={b.returnStiffness ?? 140}
+                    precision={1}
+                    onChange={(v) => update({ returnStiffness: v })}
+                    className="font-mono font-bold text-sky-700 hover:bg-sky-50 px-1 rounded cursor-text tabular-nums"
+                  />
                 </div>
                 <input
                   type="range"
                   min="20"
                   max="450"
                   step="10"
-                  value={b.returnStiffness ?? 140}
+                  value={Math.max(20, Math.min(450, b.returnStiffness ?? 140))}
                   onChange={(e) => update({ returnStiffness: parseInt(e.target.value, 10) })}
                   className="w-full accent-sky-600 cursor-pointer"
                 />
               </div>
               <div>
-                <div className="flex justify-between text-[11px] text-slate-600">
+                <div className="flex justify-between items-center text-[11px] text-slate-600">
                   <span>Amortissement</span>
-                  <span className="font-mono font-bold text-sky-700">{b.returnDamping ?? 12}</span>
+                  <EditableNumericValue
+                    value={b.returnDamping ?? 12}
+                    precision={1}
+                    onChange={(v) => update({ returnDamping: v })}
+                    className="font-mono font-bold text-sky-700 hover:bg-sky-50 px-1 rounded cursor-text tabular-nums"
+                  />
                 </div>
                 <input
                   type="range"
                   min="2"
                   max="35"
                   step="1"
-                  value={b.returnDamping ?? 12}
+                  value={Math.max(2, Math.min(35, b.returnDamping ?? 12))}
                   onChange={(e) => update({ returnDamping: parseInt(e.target.value, 10) })}
                   className="w-full accent-sky-600 cursor-pointer"
                 />
@@ -481,22 +553,22 @@ export function SliderBehaviorControls({
         </div>
 
         <div className="grid grid-cols-2 gap-1.5 pt-0.5">
-          <div>
-            <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Sortie Min</label>
-            <input
-              type="number"
+          <div className="flex items-center justify-between bg-slate-50 border border-slate-300 rounded-lg px-2 py-1">
+            <span className="text-[10px] font-bold text-slate-500">Sortie Min</span>
+            <EditableNumericValue
               value={b.outputMin ?? defaultMin}
-              onChange={(e) => update({ outputMin: parseFloat(e.target.value) || 0 })}
-              className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-slate-800"
+              precision={3}
+              onChange={(v) => update({ outputMin: v })}
+              className="text-xs font-mono font-bold text-slate-800 hover:bg-sky-50 px-1 rounded cursor-text tabular-nums"
             />
           </div>
-          <div>
-            <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Sortie Max</label>
-            <input
-              type="number"
+          <div className="flex items-center justify-between bg-slate-50 border border-slate-300 rounded-lg px-2 py-1">
+            <span className="text-[10px] font-bold text-slate-500">Sortie Max</span>
+            <EditableNumericValue
               value={b.outputMax ?? defaultMax}
-              onChange={(e) => update({ outputMax: parseFloat(e.target.value) || 0 })}
-              className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-slate-800"
+              precision={3}
+              onChange={(v) => update({ outputMax: v })}
+              className="text-xs font-mono font-bold text-slate-800 hover:bg-sky-50 px-1 rounded cursor-text tabular-nums"
             />
           </div>
         </div>

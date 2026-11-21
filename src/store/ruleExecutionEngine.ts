@@ -15,11 +15,14 @@ import {
   StateId,
 } from '../types';
 import {
+  applyEntityImpulseAction,
   applyEntityMoveAction,
   getActiveDragPositions,
+  getEffectiveBehaviors,
   queueEntityInitialVelocity,
   setActiveDragPosition,
 } from '../utils/matterPhysicsEngine';
+import { PhysicsBehaviorConfig } from '../types';
 import { emitParticlesBurst } from '../utils/particleSystem';
 import { soundSynth } from '../utils/sound';
 import { dispatchPlayCameraAction } from '../utils/cameraRuntime';
@@ -127,7 +130,11 @@ export interface RuleActionExecutionHelpers {
   eventPosition?: Position;
   allEntities: Record<EntityId, Entity>;
   updateEntityState: (id: EntityId, stateId: StateId) => void;
-  updateEntityDetails: (id: EntityId, partial: Partial<Entity>) => void;
+  updateEntityDetails: (
+    id: EntityId,
+    partial: Partial<Entity>,
+    options?: { instanceOnly?: boolean }
+  ) => void;
   deleteEntity: (id: EntityId) => void;
   spawnEntity: (params: {
     type: EntityType;
@@ -618,56 +625,69 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
     return;
   }
 
-  const targetEntities: Entity[] = [];
+  const rawTargets: Entity[] = [];
 
   const targetMode: ActionTargetMode = act.targetMode || 'subject';
 
   if (targetMode === 'subject' && helpers.subject) {
     const liveSubject = liveEntities[helpers.subject.id] || helpers.subject;
-    targetEntities.push(liveSubject);
+    rawTargets.push(liveSubject);
   } else if (targetMode === 'target') {
     if (helpers.target) {
       const liveTarget = liveEntities[helpers.target.id] || helpers.target;
-      targetEntities.push(liveTarget);
+      rawTargets.push(liveTarget);
     } else if (act.targetType) {
       Object.values(liveEntities).forEach((e) => {
-        if (e.type === act.targetType) targetEntities.push(e);
+        if (e.type === act.targetType) rawTargets.push(e);
       });
     } else if (helpers.subject) {
       // Pour les événements au clic (pas de collision/cible), fallback vers le sujet cliqué
       const liveSubject = liveEntities[helpers.subject.id] || helpers.subject;
-      targetEntities.push(liveSubject);
+      rawTargets.push(liveSubject);
     }
   } else if (targetMode === 'last_spawned') {
     if (lastSpawnedEntityId && liveEntities[lastSpawnedEntityId]) {
-      targetEntities.push(liveEntities[lastSpawnedEntityId]);
+      rawTargets.push(liveEntities[lastSpawnedEntityId]);
     }
   } else if (targetMode === 'instance' && act.targetId) {
     const e = liveEntities[act.targetId];
-    if (e) targetEntities.push(e);
+    if (e) rawTargets.push(e);
   } else if (targetMode === 'type' && act.targetType) {
     Object.values(liveEntities).forEach((e) => {
-      if (e.type === act.targetType) targetEntities.push(e);
+      if (e.type === act.targetType) rawTargets.push(e);
     });
   } else if (targetMode === 'tag' && act.targetTag) {
     const cleanTag = act.targetTag.toLowerCase().trim().replace(/^#/, '');
     Object.values(liveEntities).forEach((e) => {
-      if (e.tags?.includes(cleanTag)) targetEntities.push(e);
+      if (e.tags?.includes(cleanTag)) rawTargets.push(e);
     });
   } else if (act.targetType && act.targetType !== helpers.subject?.type) {
     // Si l'action cible explicitement un type d'entité distinct
     Object.values(liveEntities).forEach((e) => {
-      if (e.type === act.targetType) targetEntities.push(e);
+      if (e.type === act.targetType) rawTargets.push(e);
     });
   } else if (act.targetId) {
     // Fallback
     const e = liveEntities[act.targetId];
-    if (e) targetEntities.push(e);
+    if (e) rawTargets.push(e);
   }
+
+  const allowDisabledTargets = act.type === 'set_entity_enabled';
+  const targetEntities = allowDisabledTargets
+    ? rawTargets
+    : rawTargets.filter((e) => !e.disabled);
 
   targetEntities.forEach((entity) => {
     // Si un filtre d'état source est spécifié pour l'action, vérifier qu'elle y correspond
     if (act.onlyInStateId && act.onlyInStateId !== '' && entity.currentStateId !== act.onlyInStateId) {
+      return;
+    }
+
+    if (act.type === 'set_entity_enabled') {
+      const mode = act.enabledActionMode || 'disable';
+      const nextDisabled =
+        mode === 'enable' ? false : mode === 'disable' ? true : !Boolean(entity.disabled);
+      helpers.updateEntityDetails(entity.id, { disabled: nextDisabled }, { instanceOnly: true });
       return;
     }
 
@@ -685,21 +705,27 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
       );
       if (parentEnt && parentEnt.id !== entity.id) {
         const disableCollisions = act.attachDisableCollisions;
-        let resolvedOffset = act.parentOffset;
-        if (act.attachKeepCurrentOffset === true && freshSnap) {
-          const curChild = freshSnap.entities[entity.id] || entity;
-          const curParent = freshSnap.entities[parentEnt.id] || parentEnt;
-          resolvedOffset = computeRelativeParentOffset(curChild, curParent, curChild.parentOffset);
-          if (act.parentOffset?.attachmentMode) {
-            resolvedOffset.attachmentMode = act.parentOffset.attachmentMode;
-          }
+        let resolvedOffset = act.parentOffset ? { ...act.parentOffset } : undefined;
+        if (act.attachKeepCurrentOffset === true) {
+          const curChild = (freshSnap?.entities || liveEntities)[entity.id] || entity;
+          const curParent = (freshSnap?.entities || liveEntities)[parentEnt.id] || parentEnt;
+          const mergedPreset: ParentOffset | undefined =
+            curChild.parentOffset || act.parentOffset
+              ? {
+                  x: 0,
+                  y: 0,
+                  ...(curChild.parentOffset || {}),
+                  ...(act.parentOffset || {}),
+                }
+              : undefined;
+          resolvedOffset = computeRelativeParentOffset(curChild, curParent, mergedPreset);
         }
         if (disableCollisions !== undefined) {
           if (resolvedOffset) {
             resolvedOffset = { ...resolvedOffset, disableCollisionsWhileAttached: disableCollisions };
-          } else if (freshSnap) {
-            const curChild = freshSnap.entities[entity.id] || entity;
-            const curParent = freshSnap.entities[parentEnt.id] || parentEnt;
+          } else {
+            const curChild = (freshSnap?.entities || liveEntities)[entity.id] || entity;
+            const curParent = (freshSnap?.entities || liveEntities)[parentEnt.id] || parentEnt;
             resolvedOffset = {
               ...computeRelativeParentOffset(curChild, curParent, curChild.parentOffset),
               disableCollisionsWhileAttached: disableCollisions,
@@ -876,6 +902,72 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
             y: Math.round((entity.position.y + dy) * 10) / 10,
           });
         }
+      }
+    } else if (act.type === 'apply_impulse') {
+      const strength = act.impulseStrength ?? 350;
+      const dirMode = act.impulseDirectionMode || 'cardinal';
+      let vx = 0;
+      let vy = 0;
+
+      if (dirMode === 'cardinal') {
+        const card = act.impulseCardinal || 'up';
+        if (card === 'right') vx = strength;
+        else if (card === 'left') vx = -strength;
+        else if (card === 'up') vy = -strength;
+        else if (card === 'down') vy = strength;
+      } else if (dirMode === 'angle') {
+        const rad = ((act.impulseAngle ?? -90) * Math.PI) / 180;
+        vx = Math.cos(rad) * strength;
+        vy = Math.sin(rad) * strength;
+      } else if (dirMode === 'facing') {
+        const rot = entity.states[entity.currentStateId]?.rotation || 0;
+        const rad = (rot * Math.PI) / 180;
+        const sign = entity.flipX ? -1 : 1;
+        vx = Math.cos(rad) * strength * sign;
+        vy = Math.sin(rad) * strength * sign;
+      } else if (dirMode === 'toward_target' || dirMode === 'away_target') {
+        const ex = entity.position.x + entity.size.width / 2;
+        const ey = entity.position.y + entity.size.height / 2;
+        let rx: number | null = null;
+        let ry: number | null = null;
+        if (act.impulseTargetMode === 'mouse') {
+          if (helpers.eventPosition) {
+            rx = helpers.eventPosition.x;
+            ry = helpers.eventPosition.y;
+          }
+        } else {
+          const refMode = act.impulseTargetMode || (helpers.target ? 'target' : 'subject');
+          const ref = resolveEntityReference(
+            refMode,
+            act.impulseTargetEntityId,
+            act.impulseTargetEntityType,
+            act.impulseTargetTag,
+            helpers.subject,
+            helpers.target,
+            liveEntities,
+            lastSpawnedEntityId
+          );
+          if (ref && ref.id !== entity.id) {
+            rx = ref.position.x + ref.size.width / 2;
+            ry = ref.position.y + ref.size.height / 2;
+          }
+        }
+        if (rx !== null && ry !== null) {
+          const len = Math.hypot(rx - ex, ry - ey);
+          if (len > 0.001) {
+            const mult = dirMode === 'away_target' ? -1 : 1;
+            vx = ((rx - ex) / len) * strength * mult;
+            vy = ((ry - ey) / len) * strength * mult;
+          }
+        }
+      }
+
+      const ang = act.impulseAngular ?? 0;
+      if (vx !== 0 || vy !== 0 || ang !== 0 || (act.impulseApplyMode || 'add') === 'set') {
+        const effBehaviors = getEffectiveBehaviors(entity, entity.states[entity.currentStateId]);
+        const physicsCfg = effBehaviors.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
+        const isExplicitStatic = physicsCfg?.isStatic === true;
+        applyEntityImpulseAction(entity.id, vx, vy, act.impulseApplyMode || 'add', ang, isExplicitStatic);
       }
     } else if (act.type === 'delete_entity') {
       helpers.deleteEntity(entity.id);

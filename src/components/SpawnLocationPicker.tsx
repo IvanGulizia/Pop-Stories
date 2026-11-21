@@ -8,6 +8,7 @@ import {
 } from '../store/useSceneStore';
 import { clampSpawnRandomZone, getDefaultSpawnRandomZone } from '../utils/spawnHelpers';
 import { EntityMiniPreview } from './EntityMiniPreview';
+import { EditableNumericValue } from './shared/EditableNumericValue';
 import {
   MapPin,
   Target,
@@ -1057,8 +1058,14 @@ export function SpawnLocationPicker({
                   </label>
                   <input
                     type="number"
+                    step="any"
                     value={offset.x}
-                    onChange={(e) => setOffset({ ...offset, x: parseInt(e.target.value, 10) || 0 })}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        setOffset({ ...offset, x: v });
+                      }
+                    }}
                     className="w-full px-3 py-2 text-xs font-mono tabular-nums font-bold bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-none"
                   />
                 </div>
@@ -1068,8 +1075,14 @@ export function SpawnLocationPicker({
                   </label>
                   <input
                     type="number"
+                    step="any"
                     value={offset.y}
-                    onChange={(e) => setOffset({ ...offset, y: parseInt(e.target.value, 10) || 0 })}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        setOffset({ ...offset, y: v });
+                      }
+                    }}
                     className="w-full px-3 py-2 text-xs font-mono tabular-nums font-bold bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-none"
                   />
                 </div>
@@ -1286,15 +1299,14 @@ export function SpawnLocationPicker({
                   </label>
                   <input
                     type="number"
-                    min={0}
-                    max={boundsW}
+                    step="any"
                     value={absoluteCoords.x}
-                    onChange={(e) =>
-                      setAbsoluteCoords({
-                        ...absoluteCoords,
-                        x: Math.max(0, Math.min(boundsW, parseInt(e.target.value, 10) || 0)),
-                      })
-                    }
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        setAbsoluteCoords({ ...absoluteCoords, x: v });
+                      }
+                    }}
                     className="w-full px-3 py-1.5 text-xs font-mono tabular-nums font-bold bg-white border border-slate-300 rounded-xl focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
@@ -1304,15 +1316,14 @@ export function SpawnLocationPicker({
                   </label>
                   <input
                     type="number"
-                    min={0}
-                    max={boundsH}
+                    step="any"
                     value={absoluteCoords.y}
-                    onChange={(e) =>
-                      setAbsoluteCoords({
-                        ...absoluteCoords,
-                        y: Math.max(0, Math.min(boundsH, parseInt(e.target.value, 10) || 0)),
-                      })
-                    }
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        setAbsoluteCoords({ ...absoluteCoords, y: v });
+                      }
+                    }}
                     className="w-full px-3 py-1.5 text-xs font-mono tabular-nums font-bold bg-white border border-slate-300 rounded-xl focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
@@ -1545,17 +1556,14 @@ export function SpawnLocationPicker({
                       <label className="text-[10px] font-bold text-slate-600 block mb-1">X (px)</label>
                       <input
                         type="number"
-                        min={0}
-                        max={boundsW - 20}
+                        step="any"
                         value={randomZone.x}
-                        onChange={(e) =>
-                          setRandomZone(
-                            clampSpawnRandomZone(
-                              { ...randomZone, x: parseInt(e.target.value, 10) || 0 },
-                              { width: boundsW, height: boundsH }
-                            )
-                          )
-                        }
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (Number.isFinite(v)) {
+                            setRandomZone({ ...randomZone, x: v });
+                          }
+                        }}
                         className="w-full px-2.5 py-1.5 text-xs font-mono tabular-nums font-bold bg-white border border-slate-300 rounded-xl focus:border-purple-500 focus:outline-none"
                       />
                     </div>
@@ -1563,17 +1571,14 @@ export function SpawnLocationPicker({
                       <label className="text-[10px] font-bold text-slate-600 block mb-1">Y (px)</label>
                       <input
                         type="number"
-                        min={0}
-                        max={boundsH - 20}
+                        step="any"
                         value={randomZone.y}
-                        onChange={(e) =>
-                          setRandomZone(
-                            clampSpawnRandomZone(
-                              { ...randomZone, y: parseInt(e.target.value, 10) || 0 },
-                              { width: boundsW, height: boundsH }
-                            )
-                          )
-                        }
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (Number.isFinite(v)) {
+                            setRandomZone({ ...randomZone, y: v });
+                          }
+                        }}
                         className="w-full px-2.5 py-1.5 text-xs font-mono tabular-nums font-bold bg-white border border-slate-300 rounded-xl focus:border-purple-500 focus:outline-none"
                       />
                     </div>
@@ -1581,17 +1586,14 @@ export function SpawnLocationPicker({
                       <label className="text-[10px] font-bold text-slate-600 block mb-1">Largeur (px)</label>
                       <input
                         type="number"
-                        min={20}
-                        max={boundsW}
+                        step="any"
                         value={randomZone.width}
-                        onChange={(e) =>
-                          setRandomZone(
-                            clampSpawnRandomZone(
-                              { ...randomZone, width: parseInt(e.target.value, 10) || 20 },
-                              { width: boundsW, height: boundsH }
-                            )
-                          )
-                        }
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (Number.isFinite(v)) {
+                            setRandomZone({ ...randomZone, width: v });
+                          }
+                        }}
                         className="w-full px-2.5 py-1.5 text-xs font-mono tabular-nums font-bold bg-white border border-slate-300 rounded-xl focus:border-purple-500 focus:outline-none"
                       />
                     </div>
@@ -1599,17 +1601,14 @@ export function SpawnLocationPicker({
                       <label className="text-[10px] font-bold text-slate-600 block mb-1">Hauteur (px)</label>
                       <input
                         type="number"
-                        min={20}
-                        max={boundsH}
+                        step="any"
                         value={randomZone.height}
-                        onChange={(e) =>
-                          setRandomZone(
-                            clampSpawnRandomZone(
-                              { ...randomZone, height: parseInt(e.target.value, 10) || 20 },
-                              { width: boundsW, height: boundsH }
-                            )
-                          )
-                        }
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (Number.isFinite(v)) {
+                            setRandomZone({ ...randomZone, height: v });
+                          }
+                        }}
                         className="w-full px-2.5 py-1.5 text-xs font-mono tabular-nums font-bold bg-white border border-slate-300 rounded-xl focus:border-purple-500 focus:outline-none"
                       />
                     </div>
@@ -1680,17 +1679,25 @@ export function SpawnLocationPicker({
                     min={0}
                     max={1500}
                     step={10}
-                    value={Math.min(1500, impulseSpeed)}
-                    onChange={(e) => setImpulseSpeed(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                    value={Math.max(0, Math.min(1500, impulseSpeed))}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        setImpulseSpeed(v);
+                      }
+                    }}
                     className="flex-1 accent-orange-500 cursor-pointer"
                   />
                   <input
                     type="number"
-                    min={0}
-                    max={4000}
-                    step={10}
+                    step="any"
                     value={impulseSpeed}
-                    onChange={(e) => setImpulseSpeed(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        setImpulseSpeed(v);
+                      }
+                    }}
                     className="w-20 px-2 py-1 text-xs font-mono tabular-nums font-bold bg-white border border-slate-300 rounded-lg focus:border-orange-500 focus:outline-none"
                   />
                 </div>
@@ -1746,12 +1753,14 @@ export function SpawnLocationPicker({
                     <span className="text-[11px] font-bold text-slate-600">Angle :</span>
                     <input
                       type="number"
-                      min={-180}
-                      max={180}
+                      step="any"
                       value={impulseAngle}
                       onChange={(e) => {
-                        if (impulseSpeed === 0) setImpulseSpeed(400);
-                        setImpulseAngle(normalizeDeg(parseInt(e.target.value, 10) || 0));
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          if (impulseSpeed === 0) setImpulseSpeed(400);
+                          setImpulseAngle(v);
+                        }
                       }}
                       className="w-16 px-2 py-1 text-xs font-mono tabular-nums font-bold bg-white border border-slate-300 rounded-lg focus:border-orange-500 focus:outline-none"
                     />
@@ -1893,9 +1902,18 @@ export function SpawnLocationPicker({
                   <Sliders className="w-3.5 h-3.5 text-indigo-600" />
                   Multiplicateur d'échelle :
                 </span>
-                <span className="text-xs font-mono tabular-nums font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-200">
-                  {scaleMultiplier}x ({calculatedSpawnWidth}×{calculatedSpawnHeight}px)
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <EditableNumericValue
+                    value={scaleMultiplier}
+                    unit="x"
+                    precision={2}
+                    onChange={(v) => setScaleMultiplier(v)}
+                    className="text-xs font-mono tabular-nums font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 cursor-text"
+                  />
+                  <span className="text-[11px] font-mono tabular-nums text-slate-500">
+                    ({calculatedSpawnWidth}×{calculatedSpawnHeight}px)
+                  </span>
+                </div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -1925,15 +1943,14 @@ export function SpawnLocationPicker({
                   <label className="text-[11px] font-bold text-slate-600 block mb-1">Largeur (px) :</label>
                   <input
                     type="number"
-                    min={16}
-                    max={600}
+                    step="any"
                     value={customSize.width}
-                    onChange={(e) =>
-                      setCustomSize({
-                        ...customSize,
-                        width: Math.max(16, parseInt(e.target.value, 10) || 16),
-                      })
-                    }
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        setCustomSize({ ...customSize, width: v });
+                      }
+                    }}
                     className="w-full px-3 py-2 text-xs font-mono tabular-nums font-bold bg-white border border-slate-300 rounded-xl focus:border-purple-500 focus:outline-none"
                   />
                 </div>
@@ -1941,15 +1958,14 @@ export function SpawnLocationPicker({
                   <label className="text-[11px] font-bold text-slate-600 block mb-1">Hauteur (px) :</label>
                   <input
                     type="number"
-                    min={16}
-                    max={600}
+                    step="any"
                     value={customSize.height}
-                    onChange={(e) =>
-                      setCustomSize({
-                        ...customSize,
-                        height: Math.max(16, parseInt(e.target.value, 10) || 16),
-                      })
-                    }
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        setCustomSize({ ...customSize, height: v });
+                      }
+                    }}
                     className="w-full px-3 py-2 text-xs font-mono tabular-nums font-bold bg-white border border-slate-300 rounded-xl focus:border-purple-500 focus:outline-none"
                   />
                 </div>

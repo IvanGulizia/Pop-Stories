@@ -631,6 +631,8 @@ export interface EntityState {
   animationLoop?: AnimationLoopMode;
   // Surcharges de comportements par état
   behaviorOverrides?: Record<string, BehaviorOverride>;
+  // Surcharge optionnelle des paramètres d'attachement / joint physique pour cet état
+  parentOffsetOverride?: Partial<ParentOffset>;
   // Specific visual properties for drawing customization
   stemHeight?: number;
   flowerColor?: string;
@@ -648,7 +650,8 @@ export interface ParentOffset {
   attachmentMode?: ParentAttachmentMode; // défaut 'rigid'
   springStiffness?: number;   // Raideur du ressort (défaut 160)
   springDamping?: number;     // Amortissement (défaut 12)
-  springMaxDistance?: number; // Laisse max en px (0 = libre, >0 = contraint)
+  springMaxDistance?: number; // Laisse max en px (0 = libre sauf si springLimitMaxDistance === true)
+  springLimitMaxDistance?: boolean; // Si true, autorise explicitement une distance max stricte dès 0 px
   springGravity?: number;     // Chute/pesanteur locale sur l'enfant en px/s² (défaut 0)
   collideWithWorld?: boolean; // Collisionner avec murs, sols et objets externes
   // Point d'attache personnalisé côté enfant (posé directement sur le canvas)
@@ -687,7 +690,8 @@ export interface Entity {
   colliderMode?: EntityColliderMode;         // 'default' | 'trigger_only' | 'disabled' (désactive le collider physique/règles)
   pointerDelegation?: PointerDelegationMode; // 'self' | 'parent' | 'root_parent' (transmet clic/survol/drag en Play)
   ignorePointer?: boolean;                   // En Mode Play, rend la hitbox transparente à la souris (pointer-events: none)
-  visible?: boolean;                         // false = objet masqué sur le canvas de la scène (défaut true)
+  visible?: boolean;                         // false = objet masqué visuellement sur le canvas (conserve sa logique)
+  disabled?: boolean;                        // true = objet totalement désactivé en Play (rendu, physique, règles, pointeur)
   states: Record<StateId, EntityState>;
   icon?: string;
   drawingDataUrl?: string;
@@ -874,6 +878,8 @@ export type ActionType =
   | 'detach_parent'
   | 'emit_particles'
   | 'move_entity'
+  | 'apply_impulse'
+  | 'set_entity_enabled'
   | 'change_scene'
   | 'camera_action';
 
@@ -1022,6 +1028,21 @@ export interface RuleAction {
   moveTargetEntityId?: EntityId;
   moveTargetEntityType?: EntityType;
   moveTargetTag?: string;
+
+  // Champs pour 'apply_impulse' (Force / Impulsion physique en px/s)
+  impulseStrength?: number;
+  impulseDirectionMode?: 'cardinal' | 'angle' | 'facing' | 'toward_target' | 'away_target';
+  impulseCardinal?: 'up' | 'down' | 'left' | 'right';
+  impulseAngle?: number;
+  impulseApplyMode?: 'add' | 'set';
+  impulseTargetMode?: 'target' | 'subject' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'mouse';
+  impulseTargetEntityId?: EntityId;
+  impulseTargetEntityType?: EntityType;
+  impulseTargetTag?: string;
+  impulseAngular?: number;
+
+  // Champs pour 'set_entity_enabled' (Activer / Désactiver une entité en Play)
+  enabledActionMode?: 'enable' | 'disable' | 'toggle';
 
   // Champs pour 'play_sound'
   soundType?: 'pop' | 'bell' | 'laser' | 'bounce' | 'magic' | 'win';

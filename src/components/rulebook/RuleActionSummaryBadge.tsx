@@ -321,6 +321,8 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         ? 'Cible'
         : act.targetMode === 'last_spawned'
         ? 'Dernier créé'
+        : act.targetMode === 'instance' && act.targetId
+        ? entities[act.targetId]?.name || 'Entité'
         : act.targetMode === 'tag' && act.targetTag
         ? `#${act.targetTag}`
         : getEntityObj(act.targetType)?.name || 'Enfant';
@@ -336,6 +338,13 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         : act.parentTargetMode === 'entity' && act.parentEntityId
         ? entities[act.parentEntityId]?.name || 'Entité'
         : getEntityObj(act.parentEntityType)?.name || 'Parent';
+    const attMode = act.parentOffset?.attachmentMode;
+    const modeTag =
+      attMode === 'physics_joint'
+        ? ' • Joint'
+        : attMode === 'spring'
+        ? ' • Ressort'
+        : '';
     return (
       <div
         role={canJump ? 'button' : undefined}
@@ -350,7 +359,7 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         </div>
         <span className="text-xs truncate">{childLabel}</span>
         <span className="text-[10px] text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded font-medium truncate">
-          (➔ {parentLabel}{act.attachDisableCollisions ? ' • Sans collision' : ''})
+          (➔ {parentLabel}{modeTag}{act.attachDisableCollisions ? ' • Sans collision' : ''})
         </span>
       </div>
     );
@@ -432,6 +441,93 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         <span className="text-xs truncate">{targetLabel}</span>
         <span className="text-[10px] text-sky-700 bg-sky-50 px-1.5 py-0.2 rounded font-medium truncate">
           (+{dist}px {dirLabel})
+        </span>
+      </div>
+    );
+  }
+  if (act.type === 'apply_impulse') {
+    const targetLabel =
+      act.targetMode === 'subject'
+        ? 'Sujet'
+        : act.targetMode === 'target'
+        ? 'Cible'
+        : act.targetMode === 'last_spawned'
+        ? 'Dernier créé'
+        : act.targetMode === 'instance' && act.targetId
+        ? entities[act.targetId]?.name || 'Entité'
+        : act.targetMode === 'tag' && act.targetTag
+        ? `#${act.targetTag}`
+        : getEntityObj(act.targetType)?.name || 'Objet';
+    const strength = Math.round(act.impulseStrength ?? 350);
+    const dirLabel =
+      act.impulseDirectionMode === 'angle'
+        ? `${Math.round(act.impulseAngle ?? -90)}°`
+        : act.impulseDirectionMode === 'facing'
+        ? 'Regard'
+        : act.impulseDirectionMode === 'toward_target'
+        ? 'Vers cible'
+        : act.impulseDirectionMode === 'away_target'
+        ? 'Repousser'
+        : act.impulseCardinal === 'left'
+        ? '←'
+        : act.impulseCardinal === 'right'
+        ? '→'
+        : act.impulseCardinal === 'down'
+        ? '↓'
+        : '↑';
+    return (
+      <div
+        role={canJump ? 'button' : undefined}
+        tabIndex={canJump ? 0 : undefined}
+        onClick={canJump ? (e) => jumpSub(e, 'choose_apply_impulse') : undefined}
+        className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+          canJump ? 'hover:border-orange-400 hover:bg-orange-50/40 cursor-pointer transition-colors' : ''
+        }`}
+      >
+        <div className="w-5 h-5 rounded-md bg-orange-100 text-orange-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+          💥
+        </div>
+        <span className="text-xs truncate">{targetLabel}</span>
+        <span className="text-[10px] text-orange-700 bg-orange-50 px-1.5 py-0.2 rounded font-medium truncate">
+          ({act.impulseApplyMode === 'set' ? '=' : '+'}{strength}px/s {dirLabel})
+        </span>
+      </div>
+    );
+  }
+  if (act.type === 'set_entity_enabled') {
+    const targetLabel =
+      act.targetMode === 'subject'
+        ? 'Sujet'
+        : act.targetMode === 'target'
+        ? 'Cible'
+        : act.targetMode === 'last_spawned'
+        ? 'Dernier créé'
+        : act.targetMode === 'instance' && act.targetId
+        ? entities[act.targetId]?.name || 'Entité'
+        : act.targetMode === 'tag' && act.targetTag
+        ? `#${act.targetTag}`
+        : getEntityObj(act.targetType)?.name || 'Objet';
+    const modeLabel =
+      act.enabledActionMode === 'enable'
+        ? 'Activer'
+        : act.enabledActionMode === 'toggle'
+        ? 'Basculer'
+        : 'Désactiver';
+    return (
+      <div
+        role={canJump ? 'button' : undefined}
+        tabIndex={canJump ? 0 : undefined}
+        onClick={canJump ? (e) => jumpSub(e, 'choose_set_entity_enabled') : undefined}
+        className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+          canJump ? 'hover:border-slate-500 hover:bg-slate-100/70 cursor-pointer transition-colors' : ''
+        }`}
+      >
+        <div className="w-5 h-5 rounded-md bg-slate-200 text-slate-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+          ⏻
+        </div>
+        <span className="text-xs truncate">{targetLabel}</span>
+        <span className="text-[10px] text-slate-700 bg-slate-100 px-1.5 py-0.2 rounded font-medium truncate">
+          ({modeLabel})
         </span>
       </div>
     );

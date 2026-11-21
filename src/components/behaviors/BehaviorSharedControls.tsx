@@ -7,6 +7,7 @@ import {
   EntityBehavior,
   EntityState,
 } from '../../types';
+import { EditableNumericValue } from '../shared/EditableNumericValue';
 
 export interface BehaviorControlsBaseProps {
   behavior: EntityBehavior;
@@ -87,16 +88,20 @@ export function InertiaControls({
               {accelVal >= 0.95 ? 'Démarrage instantané' : accelVal <= 0.2 ? 'Montée lente et lourde' : 'Accélération progressive'}
             </span>
           </div>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {Math.round(accelVal * 100)}%
-          </span>
+          <EditableNumericValue
+            value={Math.round(accelVal * 1000) / 10}
+            unit="%"
+            precision={1}
+            onChange={(v) => update({ acceleration: v / 100 })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+          />
         </div>
         <input
           type="range"
           min="0.05"
           max="1"
           step="0.05"
-          value={accelVal}
+          value={Math.max(0.05, Math.min(1, accelVal))}
           onChange={(e) => update({ acceleration: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -110,16 +115,20 @@ export function InertiaControls({
               {dampVal <= 0.05 ? 'Arrêt sec immédiat' : dampVal >= 0.9 ? 'Longue glisse (effet patinoire / espace)' : 'Décélération amortie'}
             </span>
           </div>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {Math.round(dampVal * 100)}%
-          </span>
+          <EditableNumericValue
+            value={Math.round(dampVal * 1000) / 10}
+            unit="%"
+            precision={1}
+            onChange={(v) => update({ damping: v / 100 })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+          />
         </div>
         <input
           type="range"
           min="0"
           max="0.98"
           step="0.02"
-          value={dampVal}
+          value={Math.max(0, Math.min(0.98, dampVal))}
           onChange={(e) => update({ damping: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -271,13 +280,17 @@ export function LocomotionStateBindingsCard({
               min="0.05"
               max="0.6"
               step="0.05"
-              value={turnDuration ?? 0.15}
+              value={Math.max(0.05, Math.min(0.6, turnDuration ?? 0.15))}
               onChange={(e) => onChangeTurnDuration(parseFloat(e.target.value))}
               className="flex-1 accent-violet-600"
             />
-            <span className="text-[10px] font-mono font-bold text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded shrink-0">
-              {(turnDuration ?? 0.15).toFixed(2)}s
-            </span>
+            <EditableNumericValue
+              value={turnDuration ?? 0.15}
+              unit="s"
+              precision={2}
+              onChange={(v) => onChangeTurnDuration(v)}
+              className="text-[10px] font-mono font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 px-1.5 py-0.5 rounded shrink-0 cursor-text tabular-nums"
+            />
           </div>
         )}
 
@@ -285,16 +298,20 @@ export function LocomotionStateBindingsCard({
           <div className="bg-white p-1.5 rounded-lg border border-violet-100 space-y-1">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] font-bold text-slate-600">Hauteur min. avant Chute (Fall)</span>
-              <span className="text-[10px] font-mono font-bold text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded">
-                {minFallHeight ?? 20} px
-              </span>
+              <EditableNumericValue
+                value={minFallHeight ?? 20}
+                unit="px"
+                precision={1}
+                onChange={(v) => onChangeMinFallHeight(v)}
+                className="text-[10px] font-mono font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 px-1.5 py-0.5 rounded cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="0"
               max="160"
               step="2"
-              value={minFallHeight ?? 20}
+              value={Math.max(0, Math.min(160, minFallHeight ?? 20))}
               onChange={(e) => onChangeMinFallHeight(parseInt(e.target.value, 10) || 0)}
               className="w-full accent-violet-600 h-1.5"
             />

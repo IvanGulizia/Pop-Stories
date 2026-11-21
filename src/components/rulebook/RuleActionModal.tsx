@@ -28,6 +28,10 @@ import {
   SCENE_TRANSITION_OPTIONS,
 } from './ruleBookTypes';
 import { CameraActionEditor } from './CameraActionEditor';
+import { AttachParentConfigEditor } from './AttachParentConfigEditor';
+import { ApplyImpulseConfigEditor } from './ApplyImpulseConfigEditor';
+import { SetEntityEnabledConfigEditor } from './SetEntityEnabledConfigEditor';
+import { EditableNumericValue } from '../shared/EditableNumericValue';
 import { useSceneStore, EMPTY_RECORD, EMPTY_LIST } from '../../store/useSceneStore';
 
 interface RuleActionModalProps {
@@ -67,6 +71,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
   const scenes = useSceneStore((s) => s.scenes || EMPTY_LIST);
   const activeSceneId = useSceneStore((s) => s.activeSceneId);
   const variableNames = Array.from(new Set(['score', ...Object.keys(initialGameVariables)])).sort();
+  const isGlobal = ['timer', 'keyboard', 'variable'].includes(rule.trigger.type);
   const isCollision =
     rule.trigger.type === 'collision' ||
     rule.trigger.type === 'proximity' ||
@@ -285,7 +290,64 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                       </div>
                     </button>
 
-                    {/* 4. Détruire le Sujet */}
+                    {/* 4. Force / Impulsion Physique */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveModal({
+                          ...activeModal,
+                          subStep: 'choose_apply_impulse',
+                          targetMode: 'subject',
+                          impulseStrength: activeModal.impulseStrength ?? 350,
+                          impulseApplyMode: activeModal.impulseApplyMode || 'add',
+                          impulseDirectionMode: activeModal.impulseDirectionMode || 'cardinal',
+                          impulseCardinal: activeModal.impulseCardinal || 'up',
+                          impulseAngle: activeModal.impulseAngle ?? -90,
+                          impulseAngular: activeModal.impulseAngular ?? 0,
+                        })
+                      }
+                      className="w-full p-3.5 bg-white hover:bg-orange-50/70 border-2 border-slate-200 hover:border-orange-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-orange-100 text-orange-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                        💥
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-orange-700 truncate">
+                          Force / Impulsion Physique
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Propulser, faire sauter ou tourner « {modalSubjectName} »
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* 5. Activer / Désactiver le Sujet */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveModal({
+                          ...activeModal,
+                          subStep: 'choose_set_entity_enabled',
+                          targetMode: 'subject',
+                          enabledActionMode: activeModal.enabledActionMode || 'disable',
+                        })
+                      }
+                      className="w-full p-3.5 bg-white hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-slate-200 text-slate-800 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                        ⏻
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-slate-900 truncate">
+                          Activer / Désactiver le Sujet
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Masquer &amp; suspendre temporairement sans détruire
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* 6. Détruire le Sujet */}
                     <button
                       type="button"
                       onClick={() => {
@@ -413,7 +475,65 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                         </div>
                       </button>
 
-                      {/* 3. Détruire Cible */}
+                      {/* 3. Force / Impulsion sur la Cible */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveModal({
+                            ...activeModal,
+                            subStep: 'choose_apply_impulse',
+                            targetMode: 'target',
+                            impulseStrength: activeModal.impulseStrength ?? 350,
+                            impulseApplyMode: activeModal.impulseApplyMode || 'add',
+                            impulseDirectionMode: activeModal.impulseDirectionMode || 'away_target',
+                            impulseTargetMode: 'subject',
+                            impulseCardinal: activeModal.impulseCardinal || 'up',
+                            impulseAngle: activeModal.impulseAngle ?? -90,
+                            impulseAngular: activeModal.impulseAngular ?? 0,
+                          })
+                        }
+                        className="w-full p-3.5 bg-white hover:bg-orange-50/70 border-2 border-slate-200 hover:border-orange-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                      >
+                        <div className="w-11 h-11 rounded-xl bg-orange-100 text-orange-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                          💥
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-black text-slate-900 group-hover:text-orange-700 truncate">
+                            Force / Impulsion sur Cible
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                            Repousser ou projeter « {modalTargetName} »
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* 4. Activer / Désactiver la Cible */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveModal({
+                            ...activeModal,
+                            subStep: 'choose_set_entity_enabled',
+                            targetMode: 'target',
+                            enabledActionMode: activeModal.enabledActionMode || 'disable',
+                          })
+                        }
+                        className="w-full p-3.5 bg-white hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                      >
+                        <div className="w-11 h-11 rounded-xl bg-slate-200 text-slate-800 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                          ⏻
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-black text-slate-900 group-hover:text-slate-900 truncate">
+                            Activer / Désactiver la Cible
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                            Désactiver temporairement « {modalTargetName} »
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* 5. Détruire Cible */}
                       <button
                         type="button"
                         onClick={() => {
@@ -745,7 +865,8 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                         setActiveModal({
                           ...activeModal,
                           subStep: 'choose_attach_parent',
-                          parentChildMode: 'subject',
+                          parentChildMode: isGlobal ? 'instance' : 'subject',
+                          parentChildId: Object.keys(entities)[0] || '',
                           parentTargetMode: isCollision ? 'target' : 'entity',
                           parentEntityId: Object.keys(entities)[0] || '',
                           parentOffset: {
@@ -754,6 +875,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                             rotationOffset: 0,
                             inheritRotation: true,
                             inheritFlip: true,
+                            attachmentMode: 'rigid',
                           },
                         })
                       }
@@ -767,7 +889,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                           Attacher à un Parent
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
-                          Solidariser une entité (arme, accessoire)
+                          Solidariser, ressort ou joint physique configurable
                         </div>
                       </div>
                     </button>
@@ -779,7 +901,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                         setActiveModal({
                           ...activeModal,
                           subStep: 'choose_detach_parent',
-                          targetMode: 'subject',
+                          targetMode: isGlobal ? 'type' : 'subject',
                         })
                       }
                       className="w-full p-3.5 bg-white hover:bg-rose-50/70 border-2 border-slate-200 hover:border-rose-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -793,6 +915,65 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Désolidariser en cours de partie
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* 9. Force / Impulsion sur une entité */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveModal({
+                          ...activeModal,
+                          subStep: 'choose_apply_impulse',
+                          targetMode: isGlobal ? 'instance' : isCollision ? 'target' : 'subject',
+                          targetId: Object.keys(entities)[0] || '',
+                          impulseStrength: activeModal.impulseStrength ?? 350,
+                          impulseApplyMode: activeModal.impulseApplyMode || 'add',
+                          impulseDirectionMode: activeModal.impulseDirectionMode || 'cardinal',
+                          impulseCardinal: activeModal.impulseCardinal || 'up',
+                          impulseAngle: activeModal.impulseAngle ?? -90,
+                          impulseAngular: activeModal.impulseAngular ?? 0,
+                        })
+                      }
+                      className="w-full p-3.5 bg-white hover:bg-orange-50/70 border-2 border-slate-200 hover:border-orange-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-orange-100 text-orange-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                        💥
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-orange-700 truncate">
+                          Force / Impulsion Physique
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Propulser ou appliquer un couple à n'importe quelle entité
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* 10. Activer / Désactiver une entité */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveModal({
+                          ...activeModal,
+                          subStep: 'choose_set_entity_enabled',
+                          targetMode: 'instance',
+                          targetId: activeModal.targetId || Object.keys(entities)[0] || '',
+                          enabledActionMode: activeModal.enabledActionMode || 'disable',
+                        })
+                      }
+                      className="w-full p-3.5 bg-white hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-slate-200 text-slate-800 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                        ⏻
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-slate-900 truncate">
+                          Activer / Désactiver une entité
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Faire apparaître ou disparaître temporairement une entité
                         </div>
                       </div>
                     </button>
@@ -1603,13 +1784,13 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                 <div className="flex items-center gap-1.5">
                   <input
                     type="number"
-                    min="0.1"
-                    max="60"
-                    step="0.1"
+                    step="any"
                     value={activeModal.delayDuration ?? 1}
                     onChange={(e) => {
-                      const val = Math.max(0.1, Math.min(60, parseFloat(e.target.value) || 0.1));
-                      setActiveModal({ ...activeModal, delayDuration: Math.round(val * 10) / 10 });
+                      const val = parseFloat(e.target.value);
+                      if (Number.isFinite(val)) {
+                        setActiveModal({ ...activeModal, delayDuration: val });
+                      }
                     }}
                     className="w-20 px-2 py-1 text-center font-mono font-black text-sm bg-white border border-amber-400 rounded-lg shadow-2xs outline-none focus:ring-2 focus:ring-amber-400"
                   />
@@ -1622,10 +1803,12 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                 min="0.1"
                 max="10.0"
                 step="0.1"
-                value={activeModal.delayDuration ?? 1}
+                value={Math.max(0.1, Math.min(10.0, activeModal.delayDuration ?? 1))}
                 onChange={(e) => {
-                  const val = parseFloat(e.target.value) || 1;
-                  setActiveModal({ ...activeModal, delayDuration: Math.round(val * 10) / 10 });
+                  const val = parseFloat(e.target.value);
+                  if (Number.isFinite(val)) {
+                    setActiveModal({ ...activeModal, delayDuration: Math.round(val * 10) / 10 });
+                  }
                 }}
                 className="w-full accent-amber-500 cursor-pointer h-2 bg-slate-200 rounded-lg"
               />
@@ -2001,15 +2184,20 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                 })()}
 
               <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">
-                  Nombre ({activeModal.particleCount ?? 20})
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-slate-700 text-xs">Nombre</span>
+                  <EditableNumericValue
+                    value={activeModal.particleCount ?? 20}
+                    precision={0}
+                    onChange={(v) => setActiveModal({ ...activeModal, particleCount: Math.round(v) })}
+                  />
+                </div>
                 <input
                   type="range"
                   min="4"
                   max="50"
                   step="2"
-                  value={activeModal.particleCount ?? 20}
+                  value={Math.max(4, Math.min(50, activeModal.particleCount ?? 20))}
                   onChange={(e) =>
                     setActiveModal({ ...activeModal, particleCount: parseInt(e.target.value, 10) })
                   }
@@ -2040,15 +2228,21 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
               </div>
 
               <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">
-                  Taille ({activeModal.particleSize ?? 6} px)
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-slate-700 text-xs">Taille</span>
+                  <EditableNumericValue
+                    value={activeModal.particleSize ?? 6}
+                    unit="px"
+                    precision={1}
+                    onChange={(v) => setActiveModal({ ...activeModal, particleSize: v })}
+                  />
+                </div>
                 <input
                   type="range"
                   min="2"
                   max="24"
                   step="1"
-                  value={activeModal.particleSize ?? 6}
+                  value={Math.max(2, Math.min(24, activeModal.particleSize ?? 6))}
                   onChange={(e) =>
                     setActiveModal({ ...activeModal, particleSize: parseFloat(e.target.value) })
                   }
@@ -2057,15 +2251,21 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
               </div>
 
               <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">
-                  Vitesse ({activeModal.particleSpeed ?? 180} px/s)
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-slate-700 text-xs">Vitesse</span>
+                  <EditableNumericValue
+                    value={activeModal.particleSpeed ?? 180}
+                    unit="px/s"
+                    precision={1}
+                    onChange={(v) => setActiveModal({ ...activeModal, particleSpeed: v })}
+                  />
+                </div>
                 <input
                   type="range"
                   min="40"
                   max="450"
                   step="10"
-                  value={activeModal.particleSpeed ?? 180}
+                  value={Math.max(40, Math.min(450, activeModal.particleSpeed ?? 180))}
                   onChange={(e) =>
                     setActiveModal({ ...activeModal, particleSpeed: parseFloat(e.target.value) })
                   }
@@ -2074,15 +2274,20 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
               </div>
 
               <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">
-                  Gravité ({activeModal.particleGravity ?? 220})
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-slate-700 text-xs">Gravité</span>
+                  <EditableNumericValue
+                    value={activeModal.particleGravity ?? 220}
+                    precision={1}
+                    onChange={(v) => setActiveModal({ ...activeModal, particleGravity: v })}
+                  />
+                </div>
                 <input
                   type="range"
                   min="-200"
                   max="500"
                   step="20"
-                  value={activeModal.particleGravity ?? 220}
+                  value={Math.max(-200, Math.min(500, activeModal.particleGravity ?? 220))}
                   onChange={(e) =>
                     setActiveModal({ ...activeModal, particleGravity: parseFloat(e.target.value) })
                   }
@@ -2148,247 +2353,59 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
           </div>
         )}
 
-        {/* Modal Action : Attacher à un Parent */}
+        {/* Modal Action : Attacher à un Parent (Configurable) */}
         {activeModal.subStep === 'choose_attach_parent' && (
-          <div className="space-y-4 max-w-xl mx-auto py-2">
-            <div className="space-y-1.5 bg-slate-50 p-3 rounded-2xl border border-slate-200">
-              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">Objet enfant à attacher</span>
-                <select
-                  value={activeModal.parentChildMode || 'subject'}
-                  onChange={(e) =>
-                    setActiveModal({ ...activeModal, parentChildMode: e.target.value as any })
-                  }
-                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                >
-                  <option value="subject">Sujet</option>
-                  {isCollision && <option value="target">Cible touchée</option>}
-                  <option value="last_spawned">Dernier objet créé</option>
-                  <option value="tag">Par Tag (#tag)</option>
-                </select>
-              </div>
+          <AttachParentConfigEditor
+            draft={{
+              ...activeModal,
+              parentChildId: activeModal.parentChildId ?? activeModal.targetId,
+            }}
+            onPatch={(patch) =>
+              setActiveModal({
+                ...activeModal,
+                ...patch,
+                ...(patch.parentChildId !== undefined ? { targetId: patch.parentChildId } : {}),
+              })
+            }
+            onConfirm={(actionData) => applyAction(actionData)}
+            isRelational={isCollision}
+            isGlobal={isGlobal}
+            entities={entities}
+            availableEntityOptions={availableEntityOptions}
+            allProjectTags={allProjectTags}
+          />
+        )}
 
-              {activeModal.parentChildMode === 'tag' && (
-                <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                  <span className="font-bold text-slate-700 text-xs">Tag enfant</span>
-                  <input
-                    type="text"
-                    value={activeModal.parentChildTag || ''}
-                    onChange={(e) =>
-                      setActiveModal({
-                        ...activeModal,
-                        parentChildTag: e.target.value.replace(/^#/, ''),
-                      })
-                    }
-                    placeholder="ex: arme"
-                    className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                  />
-                </div>
-              )}
+        {/* Modal Action : Force / Impulsion Physique */}
+        {activeModal.subStep === 'choose_apply_impulse' && (
+          <ApplyImpulseConfigEditor
+            draft={activeModal}
+            onPatch={(patch) => setActiveModal({ ...activeModal, ...patch })}
+            onConfirm={(actionData) => applyAction(actionData)}
+            isRelational={isCollision}
+            isGlobal={isGlobal}
+            subjectType={subjectType}
+            targetType={targetType}
+            entities={entities}
+            availableEntityOptions={availableEntityOptions}
+            allProjectTags={allProjectTags}
+          />
+        )}
 
-              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">Objet parent (Porteur)</span>
-                <select
-                  value={activeModal.parentTargetMode || (isCollision ? 'target' : 'entity')}
-                  onChange={(e) =>
-                    setActiveModal({ ...activeModal, parentTargetMode: e.target.value as any })
-                  }
-                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                >
-                  <option value="subject">Sujet</option>
-                  {isCollision && <option value="target">Cible touchée</option>}
-                  <option value="entity">Entité de la scène</option>
-                  <option value="type">Par Type</option>
-                  <option value="tag">Par Tag (#tag)</option>
-                  <option value="last_spawned">Dernier objet créé</option>
-                </select>
-              </div>
-
-              {activeModal.parentTargetMode === 'entity' && (
-                <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                  <span className="font-bold text-slate-700 text-xs">Choisir parent</span>
-                  <select
-                    value={activeModal.parentEntityId || Object.keys(entities)[0] || ''}
-                    onChange={(e) =>
-                      setActiveModal({ ...activeModal, parentEntityId: e.target.value })
-                    }
-                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                  >
-                    {Object.values(entities).map((ent) => (
-                      <option key={ent.id} value={ent.id}>
-                        {ent.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {activeModal.parentTargetMode === 'type' && (
-                <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                  <span className="font-bold text-slate-700 text-xs">Type parent</span>
-                  <select
-                    value={activeModal.parentEntityType || availableEntityOptions[0]?.type || ''}
-                    onChange={(e) =>
-                      setActiveModal({ ...activeModal, parentEntityType: e.target.value })
-                    }
-                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                  >
-                    {availableEntityOptions.map((opt) => (
-                      <option key={opt.type} value={opt.type}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {activeModal.parentTargetMode === 'tag' && (
-                <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                  <span className="font-bold text-slate-700 text-xs">Tag parent</span>
-                  <input
-                    type="text"
-                    value={activeModal.parentEntityTag || ''}
-                    onChange={(e) =>
-                      setActiveModal({
-                        ...activeModal,
-                        parentEntityTag: e.target.value.replace(/^#/, ''),
-                      })
-                    }
-                    placeholder="ex: joueur"
-                    className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                  />
-                </div>
-              )}
-
-              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <div>
-                  <span className="font-bold text-slate-700 text-xs block">Conserver le décalage actuel</span>
-                  <span className="text-[10px] text-slate-400">
-                    Fige l’objet à sa position relative du moment (idéal pour attraper une balle en vol)
-                  </span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={Boolean(activeModal.attachKeepCurrentOffset)}
-                  onChange={(e) =>
-                    setActiveModal({ ...activeModal, attachKeepCurrentOffset: e.target.checked })
-                  }
-                  className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
-                />
-              </div>
-
-              {!activeModal.attachKeepCurrentOffset && (
-                <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                  <span className="font-bold text-slate-700 text-xs">Décalage ΔX / ΔY (px)</span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={activeModal.parentOffset?.x ?? 0}
-                      onChange={(e) =>
-                        setActiveModal({
-                          ...activeModal,
-                          parentOffset: {
-                            x: parseFloat(e.target.value) || 0,
-                            y: activeModal.parentOffset?.y ?? 0,
-                            inheritRotation: activeModal.parentOffset?.inheritRotation ?? true,
-                            inheritFlip: activeModal.parentOffset?.inheritFlip ?? true,
-                          },
-                        })
-                      }
-                      className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
-                    />
-                    <input
-                      type="number"
-                      value={activeModal.parentOffset?.y ?? 0}
-                      onChange={(e) =>
-                        setActiveModal({
-                          ...activeModal,
-                          parentOffset: {
-                            x: activeModal.parentOffset?.x ?? 0,
-                            y: parseFloat(e.target.value) || 0,
-                            inheritRotation: activeModal.parentOffset?.inheritRotation ?? true,
-                            inheritFlip: activeModal.parentOffset?.inheritFlip ?? true,
-                          },
-                        })
-                      }
-                      className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
-                <span className="font-bold text-slate-700 text-xs">
-                  Hériter rotation &amp; Flip du parent
-                </span>
-                <input
-                  type="checkbox"
-                  checked={activeModal.parentOffset?.inheritRotation !== false}
-                  onChange={(e) =>
-                    setActiveModal({
-                      ...activeModal,
-                      parentOffset: {
-                        x: activeModal.parentOffset?.x ?? 0,
-                        y: activeModal.parentOffset?.y ?? 0,
-                        inheritRotation: e.target.checked,
-                        inheritFlip: e.target.checked,
-                      },
-                    })
-                  }
-                  className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
-                />
-              </div>
-
-              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <div>
-                  <span className="font-bold text-slate-700 text-xs block">Désactiver les collisions tant qu’attaché</span>
-                  <span className="text-[10px] text-slate-400">
-                    Évite que l’objet porté ne bloque ou pousse le porteur
-                  </span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={Boolean(activeModal.attachDisableCollisions)}
-                  onChange={(e) =>
-                    setActiveModal({ ...activeModal, attachDisableCollisions: e.target.checked })
-                  }
-                  className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
-                />
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                applyAction({
-                  type: 'attach_to_parent',
-                  targetMode: activeModal.parentChildMode || 'subject',
-                  targetTag:
-                    activeModal.parentChildMode === 'tag' ? activeModal.parentChildTag : undefined,
-                  parentTargetMode: activeModal.parentTargetMode || 'entity',
-                  parentEntityId:
-                    activeModal.parentTargetMode === 'entity'
-                      ? activeModal.parentEntityId || Object.keys(entities)[0]
-                      : undefined,
-                  parentEntityType:
-                    activeModal.parentTargetMode === 'type'
-                      ? activeModal.parentEntityType || availableEntityOptions[0]?.type
-                      : undefined,
-                  parentEntityTag:
-                    activeModal.parentTargetMode === 'tag'
-                      ? activeModal.parentEntityTag
-                      : undefined,
-                  parentOffset: activeModal.parentOffset,
-                  attachKeepCurrentOffset: Boolean(activeModal.attachKeepCurrentOffset),
-                  attachDisableCollisions: Boolean(activeModal.attachDisableCollisions),
-                });
-              }}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
-            >
-              <Check className="w-4 h-4" />
-              <span>Valider l'attachement</span>
-            </button>
-          </div>
+        {/* Modal Action : Activer / Désactiver une entité */}
+        {activeModal.subStep === 'choose_set_entity_enabled' && (
+          <SetEntityEnabledConfigEditor
+            draft={activeModal}
+            onPatch={(patch) => setActiveModal({ ...activeModal, ...patch })}
+            onConfirm={(actionData) => applyAction(actionData)}
+            isRelational={isCollision}
+            isGlobal={isGlobal}
+            subjectType={subjectType}
+            targetType={targetType}
+            entities={entities}
+            availableEntityOptions={availableEntityOptions}
+            allProjectTags={allProjectTags}
+          />
         )}
 
         {/* Modal Action : Détacher du Parent */}
@@ -2452,19 +2469,30 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
               <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-bold text-slate-700">Impulsion au détachement (Lancer)</span>
-                  <span className="font-mono font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded text-[11px]">
-                    {(activeModal.detachImpulseSpeed ?? 0) > 0 ? `${Math.round(activeModal.detachImpulseSpeed!)} px/s` : 'Lâcher sur place'}
-                  </span>
+                  <EditableNumericValue
+                    value={activeModal.detachImpulseSpeed ?? 0}
+                    precision={1}
+                    displayText={
+                      (activeModal.detachImpulseSpeed ?? 0) > 0
+                        ? `${Math.round((activeModal.detachImpulseSpeed ?? 0) * 10) / 10} px/s`
+                        : 'Lâcher sur place'
+                    }
+                    onChange={(v) => setActiveModal({ ...activeModal, detachImpulseSpeed: v })}
+                    className="font-mono font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+                  />
                 </div>
                 <input
                   type="range"
                   min="0"
                   max="900"
                   step="25"
-                  value={activeModal.detachImpulseSpeed ?? 0}
-                  onChange={(e) =>
-                    setActiveModal({ ...activeModal, detachImpulseSpeed: parseFloat(e.target.value) })
-                  }
+                  value={Math.max(0, Math.min(900, activeModal.detachImpulseSpeed ?? 0))}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (Number.isFinite(v)) {
+                      setActiveModal({ ...activeModal, detachImpulseSpeed: v });
+                    }
+                  }}
                   className="w-full accent-rose-600"
                 />
                 {(activeModal.detachImpulseSpeed ?? 0) > 0 && (
@@ -2492,14 +2520,15 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                       ))}
                       <input
                         type="number"
+                        step="any"
                         value={activeModal.detachImpulseAngle ?? -45}
-                        onChange={(e) =>
-                          setActiveModal({
-                            ...activeModal,
-                            detachImpulseAngle: parseFloat(e.target.value) || 0,
-                          })
-                        }
-                        className="w-14 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px] font-mono text-right"
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (Number.isFinite(v)) {
+                            setActiveModal({ ...activeModal, detachImpulseAngle: v });
+                          }
+                        }}
+                        className="w-16 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px] font-mono text-right"
                       />
                     </div>
                   </div>
@@ -2606,25 +2635,26 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                     min="1"
                     max="500"
                     step="5"
-                    value={activeModal.moveDistance ?? 40}
-                    onChange={(e) =>
-                      setActiveModal({
-                        ...activeModal,
-                        moveDistance: parseFloat(e.target.value) || 0,
-                      })
-                    }
+                    value={Math.max(1, Math.min(500, activeModal.moveDistance ?? 40))}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        setActiveModal({ ...activeModal, moveDistance: v });
+                      }
+                    }}
                     className="w-32 accent-sky-600"
                   />
                   <input
                     type="number"
+                    step="any"
                     value={activeModal.moveDistance ?? 40}
-                    onChange={(e) =>
-                      setActiveModal({
-                        ...activeModal,
-                        moveDistance: parseFloat(e.target.value) || 0,
-                      })
-                    }
-                    className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        setActiveModal({ ...activeModal, moveDistance: v });
+                      }
+                    }}
+                    className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
                   />
                 </div>
               </div>
@@ -2683,25 +2713,26 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                       min="-180"
                       max="180"
                       step="5"
-                      value={activeModal.moveAngle ?? 0}
-                      onChange={(e) =>
-                        setActiveModal({
-                          ...activeModal,
-                          moveAngle: parseFloat(e.target.value) || 0,
-                        })
-                      }
+                      value={Math.max(-180, Math.min(180, activeModal.moveAngle ?? 0))}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          setActiveModal({ ...activeModal, moveAngle: v });
+                        }
+                      }}
                       className="w-32 accent-sky-600"
                     />
                     <input
                       type="number"
+                      step="any"
                       value={activeModal.moveAngle ?? 0}
-                      onChange={(e) =>
-                        setActiveModal({
-                          ...activeModal,
-                          moveAngle: parseFloat(e.target.value) || 0,
-                        })
-                      }
-                      className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          setActiveModal({ ...activeModal, moveAngle: v });
+                        }
+                      }}
+                      className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
                     />
                   </div>
                 </div>
@@ -2975,22 +3006,28 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs font-bold text-slate-700">Durée de transition :</label>
-                    <span className="text-xs font-mono font-black text-violet-700">
-                      {(activeModal.sceneTransitionDuration ?? 0.45).toFixed(2)}s
-                    </span>
+                    <EditableNumericValue
+                      value={activeModal.sceneTransitionDuration ?? 0.45}
+                      unit="s"
+                      precision={2}
+                      onChange={(v) =>
+                        setActiveModal({ ...activeModal, sceneTransitionDuration: v })
+                      }
+                      className="text-xs font-mono font-black text-violet-700 bg-violet-50 hover:bg-violet-100 px-1.5 py-0.5 rounded cursor-text tabular-nums"
+                    />
                   </div>
                   <input
                     type="range"
                     min={0.1}
                     max={2}
                     step={0.05}
-                    value={activeModal.sceneTransitionDuration ?? 0.45}
-                    onChange={(e) =>
-                      setActiveModal({
-                        ...activeModal,
-                        sceneTransitionDuration: parseFloat(e.target.value) || 0.45,
-                      })
-                    }
+                    value={Math.max(0.1, Math.min(2, activeModal.sceneTransitionDuration ?? 0.45))}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        setActiveModal({ ...activeModal, sceneTransitionDuration: v });
+                      }
+                    }}
                     className="w-full accent-violet-600 cursor-pointer"
                   />
                 </div>

@@ -14,6 +14,7 @@ import {
   Eye,
   EyeOff,
   Pencil,
+  Power,
 } from 'lucide-react';
 import { Entity, SceneLayer, SceneLayerGroup } from '../types';
 import { isEntityDraggable } from '../utils/matterPhysicsEngine';
@@ -95,6 +96,7 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
     const showGapBelow = isTargeted && dragOverTarget.position === 'below';
     const hasValidParent = Boolean(entity.parentId && entities[entity.parentId]);
     const isVisible = entity.visible !== false;
+    const isDisabled = Boolean(entity.disabled);
 
     return (
       <div key={entity.id} className="space-y-1.5">
@@ -177,7 +179,7 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
             }}
             onClick={() => selectEntity(entity.id)}
             className={`p-2.5 bg-white border rounded-2xl transition-all cursor-pointer flex flex-col gap-1.5 group ${
-              !isVisible ? 'opacity-65 bg-slate-50/70' : ''
+              isDisabled ? 'opacity-50 bg-slate-100/70' : !isVisible ? 'opacity-65 bg-slate-50/70' : ''
             } ${
               showInside
                 ? 'border-indigo-600 ring-2 ring-indigo-500/40 bg-indigo-50/80 shadow-md scale-[1.01]'
@@ -285,7 +287,15 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                         <span className="truncate">{entities[entity.parentId].name}</span>
                       </span>
                     )}
-                    {isEntityDraggable(entity, currentState).canDrag && (
+                    {isDisabled && (
+                      <span
+                        className="text-[9px] px-1 py-0.2 bg-rose-100 text-rose-700 border border-rose-200 font-black rounded"
+                        title="Objet désactivé (ignoré en mode Play)"
+                      >
+                        OFF
+                      </span>
+                    )}
+                    {isEntityDraggable(entity, currentState).canDrag && !isDisabled && (
                       <span className="text-[9px] px-1 py-0.2 bg-emerald-50 text-emerald-600 font-semibold rounded">
                         Drag
                       </span>
@@ -294,8 +304,8 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                 </div>
               </div>
 
-              {/* Actions primaires : renommer, masquer/afficher, détacher (si enfant), dupliquer et supprimer */}
-              <div className={`flex items-center gap-0.5 shrink-0 transition-opacity ${!isVisible ? 'opacity-100' : 'opacity-70 group-hover:opacity-100'}`}>
+              {/* Actions primaires : renommer, activer/désactiver, masquer/afficher, détacher (si enfant), dupliquer et supprimer */}
+              <div className={`flex items-center gap-0.5 shrink-0 transition-opacity ${!isVisible || isDisabled ? 'opacity-100' : 'opacity-70 group-hover:opacity-100'}`}>
                 <button
                   type="button"
                   onClick={(e) => {
@@ -312,6 +322,21 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
+                    updateEntityDetails(entity.id, { disabled: !isDisabled }, { instanceOnly: true });
+                  }}
+                  className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                    isDisabled
+                      ? 'text-rose-700 bg-rose-100 hover:bg-rose-200/80'
+                      : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
+                  }`}
+                  title={isDisabled ? 'Activer l’objet (logique, physique, rendu)' : 'Désactiver l’objet (aucune logique, physique ou rendu en jeu)'}
+                >
+                  <Power className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
                     updateEntityDetails(entity.id, { visible: !isVisible });
                   }}
                   className={`p-1 rounded-lg transition-colors cursor-pointer ${
@@ -319,7 +344,7 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                       ? 'text-amber-700 bg-amber-100/80 hover:bg-amber-200/70'
                       : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'
                   }`}
-                  title={isVisible ? 'Masquer l’objet sur la scène' : 'Afficher l’objet sur la scène'}
+                  title={isVisible ? 'Masquer visuellement l’objet sur la scène' : 'Afficher visuellement l’objet sur la scène'}
                 >
                   {isVisible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
                 </button>

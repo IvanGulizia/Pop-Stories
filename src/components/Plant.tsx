@@ -141,10 +141,19 @@ export function Plant({ entity, style }: PlantProps) {
         </div>
       )}
 
+      {appMode !== 'play' && entity.disabled && (
+        <div
+          className="absolute -top-2 -left-2 z-40 pointer-events-none px-1.5 py-0.5 rounded bg-slate-800/90 text-rose-300 border border-rose-400/50 text-[9px] font-black tracking-wider shadow-xs"
+          title="Objet désactivé (ignoré en mode Play)"
+        >
+          OFF
+        </div>
+      )}
+
       <div
         className={`relative w-full h-full flex items-end justify-center ${
           runtimeHealth?.isInvincible && healthConfig?.blinkOnDamage === true ? 'animate-pulse opacity-65' : ''
-        }`}
+        } ${appMode !== 'play' && entity.disabled ? 'opacity-45 grayscale-[35%]' : ''}`}
         style={{ transform: entity.flipX ? 'scaleX(-1)' : undefined }}
       >
         {/* Pot / Terre */}

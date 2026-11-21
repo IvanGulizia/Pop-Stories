@@ -100,10 +100,12 @@ export function WizardStep1Condition({
               <div className="flex items-center gap-3">
                 <input
                   type="number"
-                  min={0.5}
-                  step={0.5}
-                  value={activeWizard.timerInterval || 2}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, timerInterval: Math.max(0.5, parseFloat(e.target.value) || 1) })}
+                  step="any"
+                  value={activeWizard.timerInterval ?? 2}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (Number.isFinite(v)) setActiveWizard({ ...activeWizard, timerInterval: v });
+                  }}
                   className="w-28 text-center text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-400"
                 />
                 <span className="text-xs text-slate-500 font-bold">secondes</span>
@@ -191,10 +193,12 @@ export function WizardStep1Condition({
               <div className="flex items-center gap-3">
                 <input
                   type="number"
-                  min={10}
-                  step={10}
-                  value={activeWizard.proximityDistance || 80}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, proximityDistance: Math.max(10, parseInt(e.target.value) || 50) })}
+                  step="any"
+                  value={activeWizard.proximityDistance ?? 80}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (Number.isFinite(v)) setActiveWizard({ ...activeWizard, proximityDistance: v });
+                  }}
                   className="w-32 text-center text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2 outline-none"
                 />
                 <span className="text-xs text-slate-500 font-bold">pixels</span>
@@ -393,16 +397,14 @@ export function WizardStep1Condition({
               <span>Marge anti-rebond de sortie (px) :</span>
               <input
                 type="number"
-                min={0}
-                max={60}
-                step={2}
+                step="any"
                 value={activeWizard.collisionExitMargin ?? 10}
-                onChange={(e) =>
-                  setActiveWizard({
-                    ...activeWizard,
-                    collisionExitMargin: Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)),
-                  })
-                }
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v)) {
+                    setActiveWizard({ ...activeWizard, collisionExitMargin: v });
+                  }
+                }}
                 className="w-20 px-2.5 py-1.5 text-center text-xs font-bold bg-white border border-indigo-200 rounded-xl outline-none"
               />
             </label>
@@ -644,17 +646,15 @@ export function WizardStep1Condition({
               <span>Marge anti-rebond sortie :</span>
               <input
                 type="number"
-                min={0}
-                max={60}
-                step={2}
+                step="any"
                 value={activeWizard.collisionExitMargin ?? 10}
-                onChange={(e) =>
-                  setActiveWizard({
-                    ...activeWizard,
-                    collisionExitMargin: Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)),
-                  })
-                }
-                className="w-14 px-2 py-1 text-center text-xs font-bold bg-white border border-indigo-200 rounded-lg outline-none focus:border-indigo-500"
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v)) {
+                    setActiveWizard({ ...activeWizard, collisionExitMargin: v });
+                  }
+                }}
+                className="w-16 px-2 py-1 text-center text-xs font-bold bg-white border border-indigo-200 rounded-lg outline-none focus:border-indigo-500"
               />
               <span className="text-[10px] text-indigo-600 font-normal">px</span>
             </label>

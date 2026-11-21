@@ -15,6 +15,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { GrabPhysicsControls } from './behaviors/GrabPhysicsControls';
+import { EditableNumericValue } from './shared/EditableNumericValue';
 
 interface InteractivePuppetControlsProps {
   behavior: InteractivePuppetBehaviorConfig;
@@ -221,16 +222,20 @@ export function InteractivePuppetControls({
             <div>
               <div className="flex justify-between items-center text-[11px] text-slate-700">
                 <span className="font-semibold">Amplitude max du pendule</span>
-                <span className="font-mono tabular-nums font-bold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap shrink-0">
-                  ±{b.pendulumMaxAngle ?? 32}°
-                </span>
+                <EditableNumericValue
+                  value={b.pendulumMaxAngle ?? 32}
+                  displayText={`±${Math.round(b.pendulumMaxAngle ?? 32)}°`}
+                  precision={1}
+                  onChange={(v) => update({ pendulumMaxAngle: v })}
+                  className="font-mono tabular-nums font-bold text-violet-600 bg-violet-50 hover:bg-violet-100 px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap shrink-0 cursor-text"
+                />
               </div>
               <input
                 type="range"
                 min="5"
                 max="65"
                 step="1"
-                value={b.pendulumMaxAngle ?? 32}
+                value={Math.max(5, Math.min(65, b.pendulumMaxAngle ?? 32))}
                 onChange={(e) => update({ pendulumMaxAngle: parseFloat(e.target.value) })}
                 className="w-full accent-violet-600 h-1.5"
               />
@@ -239,16 +244,20 @@ export function InteractivePuppetControls({
             <div>
               <div className="flex justify-between items-center text-[11px] text-slate-700">
                 <span className="font-semibold">Réactivité à la vitesse</span>
-                <span className="font-mono font-bold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded text-[10px]">
-                  {(b.pendulumIntensity ?? 1.0).toFixed(1)}x
-                </span>
+                <EditableNumericValue
+                  value={b.pendulumIntensity ?? 1.0}
+                  unit="x"
+                  precision={2}
+                  onChange={(v) => update({ pendulumIntensity: v })}
+                  className="font-mono font-bold text-violet-600 bg-violet-50 hover:bg-violet-100 px-1.5 py-0.5 rounded text-[10px] cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="0.2"
                 max="2.2"
                 step="0.1"
-                value={b.pendulumIntensity ?? 1.0}
+                value={Math.max(0.2, Math.min(2.2, b.pendulumIntensity ?? 1.0))}
                 onChange={(e) => update({ pendulumIntensity: parseFloat(e.target.value) })}
                 className="w-full accent-violet-600 h-1.5"
               />
@@ -257,16 +266,20 @@ export function InteractivePuppetControls({
             <div>
               <div className="flex justify-between items-center text-[11px] text-slate-700">
                 <span className="font-semibold">Amortissement ressort</span>
-                <span className="font-mono font-bold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded text-[10px]">
-                  {Math.round((b.pendulumSmoothing ?? 0.18) * 100)}%
-                </span>
+                <EditableNumericValue
+                  value={Math.round((b.pendulumSmoothing ?? 0.18) * 100)}
+                  unit="%"
+                  precision={1}
+                  onChange={(v) => update({ pendulumSmoothing: v / 100 })}
+                  className="font-mono font-bold text-violet-600 bg-violet-50 hover:bg-violet-100 px-1.5 py-0.5 rounded text-[10px] cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="0.05"
                 max="0.5"
                 step="0.02"
-                value={b.pendulumSmoothing ?? 0.18}
+                value={Math.max(0.05, Math.min(0.5, b.pendulumSmoothing ?? 0.18))}
                 onChange={(e) => update({ pendulumSmoothing: parseFloat(e.target.value) })}
                 className="w-full accent-violet-600 h-1.5"
               />
@@ -279,16 +292,20 @@ export function InteractivePuppetControls({
             <div>
               <div className="flex justify-between items-center text-[11px] text-slate-700">
                 <span className="font-semibold">Seuil vitesse état Balancement</span>
-                <span className="font-mono font-bold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded text-[10px]">
-                  {b.swingSpeedThreshold ?? 320} px/s
-                </span>
+                <EditableNumericValue
+                  value={b.swingSpeedThreshold ?? 320}
+                  unit="px/s"
+                  precision={1}
+                  onChange={(v) => update({ swingSpeedThreshold: v })}
+                  className="font-mono font-bold text-violet-600 bg-violet-50 hover:bg-violet-100 px-1.5 py-0.5 rounded text-[10px] cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="80"
                 max="900"
                 step="20"
-                value={b.swingSpeedThreshold ?? 320}
+                value={Math.max(80, Math.min(900, b.swingSpeedThreshold ?? 320))}
                 onChange={(e) => update({ swingSpeedThreshold: parseFloat(e.target.value) })}
                 className="w-full accent-violet-600 h-1.5"
               />
@@ -296,16 +313,20 @@ export function InteractivePuppetControls({
             <div>
               <div className="flex justify-between items-center text-[11px] text-slate-700">
                 <span className="font-semibold">Sensibilité Secousse (allers-retours)</span>
-                <span className="font-mono font-bold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded text-[10px]">
-                  {b.shakeThreshold ?? 3}x
-                </span>
+                <EditableNumericValue
+                  value={b.shakeThreshold ?? 3}
+                  unit="x"
+                  precision={0}
+                  onChange={(v) => update({ shakeThreshold: Math.round(v) })}
+                  className="font-mono font-bold text-violet-600 bg-violet-50 hover:bg-violet-100 px-1.5 py-0.5 rounded text-[10px] cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="2"
                 max="6"
                 step="1"
-                value={b.shakeThreshold ?? 3}
+                value={Math.max(2, Math.min(6, b.shakeThreshold ?? 3))}
                 onChange={(e) => update({ shakeThreshold: parseInt(e.target.value, 10) })}
                 className="w-full accent-violet-600 h-1.5"
               />
@@ -320,31 +341,43 @@ export function InteractivePuppetControls({
 
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
+            <div className="flex justify-between items-center text-[10px] text-slate-600 mb-0.5">
               <span className="font-semibold">Zone lointaine</span>
-              <span className="font-mono font-bold text-violet-600">{b.approachFarDistance ?? 280} px</span>
+              <EditableNumericValue
+                value={b.approachFarDistance ?? 280}
+                unit="px"
+                precision={1}
+                onChange={(v) => update({ approachFarDistance: v })}
+                className="font-mono font-bold text-violet-600 hover:bg-violet-50 px-1 rounded cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="80"
               max="600"
               step="10"
-              value={b.approachFarDistance ?? 280}
+              value={Math.max(80, Math.min(600, b.approachFarDistance ?? 280))}
               onChange={(e) => update({ approachFarDistance: parseInt(e.target.value, 10) })}
               className="w-full accent-violet-600 h-1.5"
             />
           </div>
           <div>
-            <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
+            <div className="flex justify-between items-center text-[10px] text-slate-600 mb-0.5">
               <span className="font-semibold">Zone proche</span>
-              <span className="font-mono font-bold text-violet-600">{b.approachNearDistance ?? 120} px</span>
+              <EditableNumericValue
+                value={b.approachNearDistance ?? 120}
+                unit="px"
+                precision={1}
+                onChange={(v) => update({ approachNearDistance: v })}
+                className="font-mono font-bold text-violet-600 hover:bg-violet-50 px-1 rounded cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="20"
               max="300"
               step="10"
-              value={b.approachNearDistance ?? 120}
+              value={Math.max(20, Math.min(300, b.approachNearDistance ?? 120))}
               onChange={(e) => update({ approachNearDistance: parseInt(e.target.value, 10) })}
               className="w-full accent-violet-600 h-1.5"
             />
@@ -353,31 +386,43 @@ export function InteractivePuppetControls({
 
         <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100">
           <div>
-            <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
+            <div className="flex justify-between items-center text-[10px] text-slate-600 mb-0.5">
               <span className="font-semibold">Survol maintenu</span>
-              <span className="font-mono font-bold text-violet-600">{(b.hoverDwellDelay ?? 1.5).toFixed(1)}s</span>
+              <EditableNumericValue
+                value={b.hoverDwellDelay ?? 1.5}
+                unit="s"
+                precision={2}
+                onChange={(v) => update({ hoverDwellDelay: v })}
+                className="font-mono font-bold text-violet-600 hover:bg-violet-50 px-1 rounded cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="0.3"
               max="5"
               step="0.1"
-              value={b.hoverDwellDelay ?? 1.5}
+              value={Math.max(0.3, Math.min(5, b.hoverDwellDelay ?? 1.5))}
               onChange={(e) => update({ hoverDwellDelay: parseFloat(e.target.value) })}
               className="w-full accent-violet-600 h-1.5"
             />
           </div>
           <div>
-            <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
+            <div className="flex justify-between items-center text-[10px] text-slate-600 mb-0.5">
               <span className="font-semibold">Retour après survol</span>
-              <span className="font-mono font-bold text-violet-600">{(b.hoverReturnDelay ?? 0).toFixed(2)}s</span>
+              <EditableNumericValue
+                value={b.hoverReturnDelay ?? 0}
+                unit="s"
+                precision={2}
+                onChange={(v) => update({ hoverReturnDelay: v })}
+                className="font-mono font-bold text-violet-600 hover:bg-violet-50 px-1 rounded cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="0"
               max="3"
               step="0.05"
-              value={b.hoverReturnDelay ?? 0}
+              value={Math.max(0, Math.min(3, b.hoverReturnDelay ?? 0))}
               onChange={(e) => update({ hoverReturnDelay: parseFloat(e.target.value) })}
               className="w-full accent-violet-600 h-1.5"
             />
@@ -386,31 +431,43 @@ export function InteractivePuppetControls({
 
         <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100">
           <div>
-            <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
+            <div className="flex justify-between items-center text-[10px] text-slate-600 mb-0.5">
               <span className="font-semibold">Drag maintenu</span>
-              <span className="font-mono font-bold text-violet-600">{(b.dragDwellDelay ?? 2.0).toFixed(1)}s</span>
+              <EditableNumericValue
+                value={b.dragDwellDelay ?? 2.0}
+                unit="s"
+                precision={2}
+                onChange={(v) => update({ dragDwellDelay: v })}
+                className="font-mono font-bold text-violet-600 hover:bg-violet-50 px-1 rounded cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="0.3"
               max="6"
               step="0.1"
-              value={b.dragDwellDelay ?? 2.0}
+              value={Math.max(0.3, Math.min(6, b.dragDwellDelay ?? 2.0))}
               onChange={(e) => update({ dragDwellDelay: parseFloat(e.target.value) })}
               className="w-full accent-violet-600 h-1.5"
             />
           </div>
           <div>
-            <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
+            <div className="flex justify-between items-center text-[10px] text-slate-600 mb-0.5">
               <span className="font-semibold">Retour Balancement</span>
-              <span className="font-mono font-bold text-violet-600">{(b.swingReturnDelay ?? 0.15).toFixed(2)}s</span>
+              <EditableNumericValue
+                value={b.swingReturnDelay ?? 0.15}
+                unit="s"
+                precision={2}
+                onChange={(v) => update({ swingReturnDelay: v })}
+                className="font-mono font-bold text-violet-600 hover:bg-violet-50 px-1 rounded cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="0"
               max="2"
               step="0.05"
-              value={b.swingReturnDelay ?? 0.15}
+              value={Math.max(0, Math.min(2, b.swingReturnDelay ?? 0.15))}
               onChange={(e) => update({ swingReturnDelay: parseFloat(e.target.value) })}
               className="w-full accent-violet-600 h-1.5"
             />
@@ -419,31 +476,43 @@ export function InteractivePuppetControls({
 
         <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100">
           <div>
-            <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
+            <div className="flex justify-between items-center text-[10px] text-slate-600 mb-0.5">
               <span className="font-semibold">Maintien Secousse</span>
-              <span className="font-mono font-bold text-violet-600">{(b.shakeHoldDuration ?? 0.45).toFixed(2)}s</span>
+              <EditableNumericValue
+                value={b.shakeHoldDuration ?? 0.45}
+                unit="s"
+                precision={2}
+                onChange={(v) => update({ shakeHoldDuration: v })}
+                className="font-mono font-bold text-violet-600 hover:bg-violet-50 px-1 rounded cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="0.1"
               max="2.5"
               step="0.05"
-              value={b.shakeHoldDuration ?? 0.45}
+              value={Math.max(0.1, Math.min(2.5, b.shakeHoldDuration ?? 0.45))}
               onChange={(e) => update({ shakeHoldDuration: parseFloat(e.target.value) })}
               className="w-full accent-violet-600 h-1.5"
             />
           </div>
           <div>
-            <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
+            <div className="flex justify-between items-center text-[10px] text-slate-600 mb-0.5">
               <span className="font-semibold">Retour Drag Cible</span>
-              <span className="font-mono font-bold text-violet-600">{(b.dragOverReturnDelay ?? 0).toFixed(2)}s</span>
+              <EditableNumericValue
+                value={b.dragOverReturnDelay ?? 0}
+                unit="s"
+                precision={2}
+                onChange={(v) => update({ dragOverReturnDelay: v })}
+                className="font-mono font-bold text-violet-600 hover:bg-violet-50 px-1 rounded cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="0"
               max="2"
               step="0.05"
-              value={b.dragOverReturnDelay ?? 0}
+              value={Math.max(0, Math.min(2, b.dragOverReturnDelay ?? 0))}
               onChange={(e) => update({ dragOverReturnDelay: parseFloat(e.target.value) })}
               className="w-full accent-violet-600 h-1.5"
             />
@@ -452,31 +521,43 @@ export function InteractivePuppetControls({
 
         <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100">
           <div>
-            <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
+            <div className="flex justify-between items-center text-[10px] text-slate-600 mb-0.5">
               <span className="font-semibold">Hauteur min. chute</span>
-              <span className="font-mono font-bold text-violet-600">{b.minFallHeight ?? 20} px</span>
+              <EditableNumericValue
+                value={b.minFallHeight ?? 20}
+                unit="px"
+                precision={1}
+                onChange={(v) => update({ minFallHeight: v })}
+                className="font-mono font-bold text-violet-600 hover:bg-violet-50 px-1 rounded cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="0"
               max="160"
               step="2"
-              value={b.minFallHeight ?? 20}
+              value={Math.max(0, Math.min(160, b.minFallHeight ?? 20))}
               onChange={(e) => update({ minFallHeight: parseInt(e.target.value, 10) || 0 })}
               className="w-full accent-violet-600 h-1.5"
             />
           </div>
           <div>
-            <div className="flex justify-between text-[10px] text-slate-600 mb-0.5">
+            <div className="flex justify-between items-center text-[10px] text-slate-600 mb-0.5">
               <span className="font-semibold">Durée Land</span>
-              <span className="font-mono font-bold text-violet-600">{(b.landDuration ?? 0.18).toFixed(2)}s</span>
+              <EditableNumericValue
+                value={b.landDuration ?? 0.18}
+                unit="s"
+                precision={2}
+                onChange={(v) => update({ landDuration: v })}
+                className="font-mono font-bold text-violet-600 hover:bg-violet-50 px-1 rounded cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="0.05"
               max="0.6"
               step="0.05"
-              value={b.landDuration ?? 0.18}
+              value={Math.max(0.05, Math.min(0.6, b.landDuration ?? 0.18))}
               onChange={(e) => update({ landDuration: parseFloat(e.target.value) })}
               className="w-full accent-violet-600 h-1.5"
             />
@@ -495,61 +576,85 @@ export function InteractivePuppetControls({
         {showShortTimings && (
           <div className="grid grid-cols-2 gap-2 pt-1">
             <div>
-              <div className="flex justify-between text-[10px] text-slate-600">
+              <div className="flex justify-between items-center text-[10px] text-slate-600">
                 <span>Hover Enter</span>
-                <span className="font-mono font-bold text-violet-600">{(b.hoverEnterDuration ?? 0.18).toFixed(2)}s</span>
+                <EditableNumericValue
+                  value={b.hoverEnterDuration ?? 0.18}
+                  unit="s"
+                  precision={2}
+                  onChange={(v) => update({ hoverEnterDuration: v })}
+                  className="font-mono font-bold text-violet-600 hover:bg-violet-50 px-1 rounded cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="0.05"
                 max="1.5"
                 step="0.05"
-                value={b.hoverEnterDuration ?? 0.18}
+                value={Math.max(0.05, Math.min(1.5, b.hoverEnterDuration ?? 0.18))}
                 onChange={(e) => update({ hoverEnterDuration: parseFloat(e.target.value) })}
                 className="w-full accent-violet-600 h-1.5"
               />
             </div>
             <div>
-              <div className="flex justify-between text-[10px] text-slate-600">
+              <div className="flex justify-between items-center text-[10px] text-slate-600">
                 <span>Hover Exit</span>
-                <span className="font-mono font-bold text-violet-600">{(b.hoverExitDuration ?? 0.2).toFixed(2)}s</span>
+                <EditableNumericValue
+                  value={b.hoverExitDuration ?? 0.2}
+                  unit="s"
+                  precision={2}
+                  onChange={(v) => update({ hoverExitDuration: v })}
+                  className="font-mono font-bold text-violet-600 hover:bg-violet-50 px-1 rounded cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="0.05"
                 max="1.5"
                 step="0.05"
-                value={b.hoverExitDuration ?? 0.2}
+                value={Math.max(0.05, Math.min(1.5, b.hoverExitDuration ?? 0.2))}
                 onChange={(e) => update({ hoverExitDuration: parseFloat(e.target.value) })}
                 className="w-full accent-violet-600 h-1.5"
               />
             </div>
             <div>
-              <div className="flex justify-between text-[10px] text-slate-600">
+              <div className="flex justify-between items-center text-[10px] text-slate-600">
                 <span>Drag Start</span>
-                <span className="font-mono font-bold text-violet-600">{(b.dragStartDuration ?? 0.18).toFixed(2)}s</span>
+                <EditableNumericValue
+                  value={b.dragStartDuration ?? 0.18}
+                  unit="s"
+                  precision={2}
+                  onChange={(v) => update({ dragStartDuration: v })}
+                  className="font-mono font-bold text-violet-600 hover:bg-violet-50 px-1 rounded cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="0.05"
                 max="1.5"
                 step="0.05"
-                value={b.dragStartDuration ?? 0.18}
+                value={Math.max(0.05, Math.min(1.5, b.dragStartDuration ?? 0.18))}
                 onChange={(e) => update({ dragStartDuration: parseFloat(e.target.value) })}
                 className="w-full accent-violet-600 h-1.5"
               />
             </div>
             <div>
-              <div className="flex justify-between text-[10px] text-slate-600">
+              <div className="flex justify-between items-center text-[10px] text-slate-600">
                 <span>Drag Release</span>
-                <span className="font-mono font-bold text-violet-600">{(b.dragReleaseDuration ?? 0.2).toFixed(2)}s</span>
+                <EditableNumericValue
+                  value={b.dragReleaseDuration ?? 0.2}
+                  unit="s"
+                  precision={2}
+                  onChange={(v) => update({ dragReleaseDuration: v })}
+                  className="font-mono font-bold text-violet-600 hover:bg-violet-50 px-1 rounded cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="0.05"
                 max="1.5"
                 step="0.05"
-                value={b.dragReleaseDuration ?? 0.2}
+                value={Math.max(0.05, Math.min(1.5, b.dragReleaseDuration ?? 0.2))}
                 onChange={(e) => update({ dragReleaseDuration: parseFloat(e.target.value) })}
                 className="w-full accent-violet-600 h-1.5"
               />

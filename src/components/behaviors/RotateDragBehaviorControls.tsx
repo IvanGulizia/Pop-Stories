@@ -7,6 +7,7 @@ import {
   RotateDragReturnMode,
   RotateDragStepMode,
 } from '../../types';
+import { EditableNumericValue } from '../shared/EditableNumericValue';
 
 export function RotateDragBehaviorControls({
   b,
@@ -63,16 +64,20 @@ export function RotateDragBehaviorControls({
           <div>
             <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
               <span className="font-semibold">Sensibilité (degrés / px)</span>
-              <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded text-[11px]">
-                {(b.sensitivity ?? 0.85).toFixed(2)} °/px
-              </span>
+              <EditableNumericValue
+                value={b.sensitivity ?? 0.85}
+                unit="°/px"
+                precision={2}
+                onChange={(v) => update({ sensitivity: v })}
+                className="font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="0.1"
               max="3"
               step="0.05"
-              value={b.sensitivity ?? 0.85}
+              value={Math.max(0.1, Math.min(3, b.sensitivity ?? 0.85))}
               onChange={(e) => update({ sensitivity: parseFloat(e.target.value) })}
               className="w-full accent-amber-600 cursor-pointer"
             />
@@ -113,14 +118,19 @@ export function RotateDragBehaviorControls({
             <div>
               <div className="flex justify-between items-center text-[11px] text-slate-700">
                 <span>Raideur du suivi</span>
-                <span className="font-mono font-bold text-amber-700">{b.dragStiffness ?? 240}</span>
+                <EditableNumericValue
+                  value={b.dragStiffness ?? 240}
+                  precision={1}
+                  onChange={(v) => update({ dragStiffness: v })}
+                  className="font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-1 rounded cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="40"
                 max="600"
                 step="10"
-                value={b.dragStiffness ?? 240}
+                value={Math.max(40, Math.min(600, b.dragStiffness ?? 240))}
                 onChange={(e) => update({ dragStiffness: parseInt(e.target.value, 10) })}
                 className="w-full accent-amber-600 cursor-pointer"
               />
@@ -129,14 +139,19 @@ export function RotateDragBehaviorControls({
             <div>
               <div className="flex justify-between items-center text-[11px] text-slate-700">
                 <span>Amortissement (drag)</span>
-                <span className="font-mono font-bold text-amber-700">{b.dragDamping ?? 16}</span>
+                <EditableNumericValue
+                  value={b.dragDamping ?? 16}
+                  precision={1}
+                  onChange={(v) => update({ dragDamping: v })}
+                  className="font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-1 rounded cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="2"
                 max="50"
                 step="1"
-                value={b.dragDamping ?? 16}
+                value={Math.max(2, Math.min(50, b.dragDamping ?? 16))}
                 onChange={(e) => update({ dragDamping: parseInt(e.target.value, 10) })}
                 className="w-full accent-amber-600 cursor-pointer"
               />
@@ -145,14 +160,19 @@ export function RotateDragBehaviorControls({
             <div>
               <div className="flex justify-between items-center text-[11px] text-slate-700">
                 <span>Frein d'inertie (au relâchement)</span>
-                <span className="font-mono font-bold text-amber-700">{(b.inertiaDamping ?? 4).toFixed(1)}</span>
+                <EditableNumericValue
+                  value={b.inertiaDamping ?? 4}
+                  precision={2}
+                  onChange={(v) => update({ inertiaDamping: v })}
+                  className="font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-1 rounded cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="0"
                 max="20"
                 step="0.5"
-                value={b.inertiaDamping ?? 4}
+                value={Math.max(0, Math.min(20, b.inertiaDamping ?? 4))}
                 onChange={(e) => update({ inertiaDamping: parseFloat(e.target.value) })}
                 className="w-full accent-amber-600 cursor-pointer"
               />
@@ -181,24 +201,24 @@ export function RotateDragBehaviorControls({
         {limitRange && (
           <div className="space-y-1.5 pt-1 border-t border-slate-100">
             <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-[10px] font-bold text-slate-600 block mb-0.5">Angle Min (°)</label>
-                <input
-                  type="number"
-                  step="5"
+              <div className="flex items-center justify-between bg-slate-50 border border-slate-300 rounded-lg px-2 py-1">
+                <span className="text-[10px] font-bold text-slate-600">Min</span>
+                <EditableNumericValue
                   value={minAngle}
-                  onChange={(e) => update({ minAngle: parseFloat(e.target.value) || 0 })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-slate-800"
+                  unit="°"
+                  precision={1}
+                  onChange={(v) => update({ minAngle: v })}
+                  className="text-xs font-mono font-bold text-slate-800 hover:bg-amber-50 px-1 rounded cursor-text tabular-nums"
                 />
               </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-600 block mb-0.5">Angle Max (°)</label>
-                <input
-                  type="number"
-                  step="5"
+              <div className="flex items-center justify-between bg-slate-50 border border-slate-300 rounded-lg px-2 py-1">
+                <span className="text-[10px] font-bold text-slate-600">Max</span>
+                <EditableNumericValue
                   value={maxAngle}
-                  onChange={(e) => update({ maxAngle: parseFloat(e.target.value) || 0 })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-slate-800"
+                  unit="°"
+                  precision={1}
+                  onChange={(v) => update({ maxAngle: v })}
+                  className="text-xs font-mono font-bold text-slate-800 hover:bg-amber-50 px-1 rounded cursor-text tabular-nums"
                 />
               </div>
             </div>
@@ -207,16 +227,20 @@ export function RotateDragBehaviorControls({
               <div>
                 <div className="flex justify-between items-center text-[11px] text-slate-700">
                   <span>Rebond aux butées</span>
-                  <span className="font-mono font-bold text-amber-700">
-                    {Math.round((b.boundaryBounce ?? 0.3) * 100)}%
-                  </span>
+                  <EditableNumericValue
+                    value={Math.round((b.boundaryBounce ?? 0.3) * 1000) / 10}
+                    unit="%"
+                    precision={1}
+                    onChange={(v) => update({ boundaryBounce: v / 100 })}
+                    className="font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-1 rounded cursor-text tabular-nums"
+                  />
                 </div>
                 <input
                   type="range"
                   min="0"
                   max="1"
                   step="0.05"
-                  value={b.boundaryBounce ?? 0.3}
+                  value={Math.max(0, Math.min(1, b.boundaryBounce ?? 0.3))}
                   onChange={(e) => update({ boundaryBounce: parseFloat(e.target.value) })}
                   className="w-full accent-amber-600 cursor-pointer"
                 />
@@ -233,16 +257,23 @@ export function RotateDragBehaviorControls({
           <div>
             <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
               <span className="font-semibold">Nombre de crans (0 = continu)</span>
-              <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded text-[11px]">
-                {steps <= 1 ? 'Continu' : `${steps} crans`}
-              </span>
+              <EditableNumericValue
+                value={steps}
+                displayText={steps <= 1 ? 'Continu' : `${steps} crans`}
+                precision={0}
+                onChange={(v) => {
+                  const r = Math.max(0, Math.round(v));
+                  update({ steps: r === 1 ? 2 : r });
+                }}
+                className="font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+              />
             </div>
             <input
               type="range"
               min="0"
               max="24"
               step="1"
-              value={steps}
+              value={Math.max(0, Math.min(24, steps))}
               onChange={(e) => {
                 const v = parseInt(e.target.value, 10);
                 update({ steps: v === 1 ? 2 : v });
@@ -265,14 +296,20 @@ export function RotateDragBehaviorControls({
               <div>
                 <div className="flex justify-between items-center text-[11px] text-slate-700">
                   <span>Pas entre crans (°)</span>
-                  <span className="font-mono font-bold text-amber-700">{stepAngleDeg}°</span>
+                  <EditableNumericValue
+                    value={stepAngleDeg}
+                    unit="°"
+                    precision={1}
+                    onChange={(v) => update({ stepAngleDeg: v })}
+                    className="font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-1 rounded cursor-text tabular-nums"
+                  />
                 </div>
                 <input
                   type="range"
                   min="5"
                   max="90"
                   step="5"
-                  value={stepAngleDeg}
+                  value={Math.max(5, Math.min(90, stepAngleDeg))}
                   onChange={(e) => update({ stepAngleDeg: parseInt(e.target.value, 10) })}
                   className="w-full accent-amber-600 cursor-pointer"
                 />
@@ -311,14 +348,19 @@ export function RotateDragBehaviorControls({
               <div>
                 <div className="flex justify-between items-center text-[11px] text-slate-700">
                   <span>Force d'aimantation</span>
-                  <span className="font-mono font-bold text-amber-700">{b.magneticStrength ?? 140}</span>
+                  <EditableNumericValue
+                    value={b.magneticStrength ?? 140}
+                    precision={1}
+                    onChange={(v) => update({ magneticStrength: v })}
+                    className="font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-1 rounded cursor-text tabular-nums"
+                  />
                 </div>
                 <input
                   type="range"
                   min="30"
                   max="360"
                   step="10"
-                  value={b.magneticStrength ?? 140}
+                  value={Math.max(30, Math.min(360, b.magneticStrength ?? 140))}
                   onChange={(e) => update({ magneticStrength: parseInt(e.target.value, 10) })}
                   className="w-full accent-amber-600 cursor-pointer"
                 />
@@ -360,26 +402,31 @@ export function RotateDragBehaviorControls({
           <div className="space-y-1.5 pt-1">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[11px] font-semibold text-slate-700">Angle de repos (°)</span>
-              <input
-                type="number"
-                step="5"
+              <EditableNumericValue
                 value={b.restAngle ?? 0}
-                onChange={(e) => update({ restAngle: parseFloat(e.target.value) || 0 })}
-                className="w-24 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-right text-slate-800"
+                unit="°"
+                precision={1}
+                onChange={(v) => update({ restAngle: v })}
+                className="bg-slate-50 hover:bg-amber-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-slate-800 cursor-text tabular-nums"
               />
             </div>
 
             <div>
               <div className="flex justify-between items-center text-[11px] text-slate-700">
                 <span>Raideur du retour</span>
-                <span className="font-mono font-bold text-amber-700">{b.returnStiffness ?? 140}</span>
+                <EditableNumericValue
+                  value={b.returnStiffness ?? 140}
+                  precision={1}
+                  onChange={(v) => update({ returnStiffness: v })}
+                  className="font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-1 rounded cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="20"
                 max="400"
                 step="10"
-                value={b.returnStiffness ?? 140}
+                value={Math.max(20, Math.min(400, b.returnStiffness ?? 140))}
                 onChange={(e) => update({ returnStiffness: parseInt(e.target.value, 10) })}
                 className="w-full accent-amber-600 cursor-pointer"
               />
@@ -388,14 +435,19 @@ export function RotateDragBehaviorControls({
             <div>
               <div className="flex justify-between items-center text-[11px] text-slate-700">
                 <span>Amortissement du retour</span>
-                <span className="font-mono font-bold text-amber-700">{b.returnDamping ?? 12}</span>
+                <EditableNumericValue
+                  value={b.returnDamping ?? 12}
+                  precision={1}
+                  onChange={(v) => update({ returnDamping: v })}
+                  className="font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-1 rounded cursor-text tabular-nums"
+                />
               </div>
               <input
                 type="range"
                 min="1"
                 max="40"
                 step="1"
-                value={b.returnDamping ?? 12}
+                value={Math.max(1, Math.min(40, b.returnDamping ?? 12))}
                 onChange={(e) => update({ returnDamping: parseInt(e.target.value, 10) })}
                 className="w-full accent-amber-600 cursor-pointer"
               />
@@ -439,24 +491,22 @@ export function RotateDragBehaviorControls({
         </div>
 
         <div className="grid grid-cols-2 gap-1.5">
-          <div>
-            <label className="text-[10px] font-bold text-slate-600 block mb-0.5">Min (sortie)</label>
-            <input
-              type="number"
-              step="any"
+          <div className="flex items-center justify-between bg-white border border-slate-300 rounded-lg px-2 py-1">
+            <span className="text-[10px] font-bold text-slate-600">Min</span>
+            <EditableNumericValue
               value={b.outputMin ?? 0}
-              onChange={(e) => update({ outputMin: parseFloat(e.target.value) || 0 })}
-              className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-slate-800"
+              precision={3}
+              onChange={(v) => update({ outputMin: v })}
+              className="text-xs font-mono font-bold text-slate-800 hover:bg-amber-50 px-1 rounded cursor-text tabular-nums"
             />
           </div>
-          <div>
-            <label className="text-[10px] font-bold text-slate-600 block mb-0.5">Max (sortie)</label>
-            <input
-              type="number"
-              step="any"
+          <div className="flex items-center justify-between bg-white border border-slate-300 rounded-lg px-2 py-1">
+            <span className="text-[10px] font-bold text-slate-600">Max</span>
+            <EditableNumericValue
               value={b.outputMax ?? 100}
-              onChange={(e) => update({ outputMax: parseFloat(e.target.value) || 0 })}
-              className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-slate-800"
+              precision={3}
+              onChange={(v) => update({ outputMax: v })}
+              className="text-xs font-mono font-bold text-slate-800 hover:bg-amber-50 px-1 rounded cursor-text tabular-nums"
             />
           </div>
         </div>

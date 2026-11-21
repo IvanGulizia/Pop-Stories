@@ -52,6 +52,7 @@ import {
 import { shortestAngleDiffRad } from '../utils/physics/lookAtSolver';
 import { getActiveCameraView } from '../utils/cameraRuntime';
 import { screenToWorldPoint } from '../utils/cameraSolver';
+import { resolveEffectiveParentOffset } from '../store/parentingHelpers';
 
 export interface UseEntityPointerInteractionOptions {
   entity: Entity;
@@ -121,7 +122,8 @@ export function useEntityPointerInteraction({
     throwable,
     maxThrowSpeed,
   } = isEntityDraggable(entity, currentState);
-  const canDrag = !isResizing && !isRotating && (appMode !== 'play' || canDragFromBehavior);
+  const isPlayDisabled = appMode === 'play' && Boolean(entity.disabled);
+  const canDrag = !isPlayDisabled && !isResizing && !isRotating && (appMode !== 'play' || canDragFromBehavior);
 
   // Santé & invincibilité runtime
   const healthConfig =
@@ -502,7 +504,7 @@ export function useEntityPointerInteraction({
   };
 
   const handlePointerHoverCheck = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (isDraggingRef.current || performance.now() - lastDragEndTimeRef.current < 130 || appMode !== 'play') return;
+    if (isPlayDisabled || isDraggingRef.current || performance.now() - lastDragEndTimeRef.current < 130 || appMode !== 'play') return;
     const pt = getSceneEventPosition(e.clientX, e.clientY);
     const isInside = isPointInsideEntityCollider(
       e.clientX,
@@ -561,7 +563,7 @@ export function useEntityPointerInteraction({
 
   const hitboxProps: React.HTMLAttributes<HTMLDivElement> = {
     className: `absolute inset-0 ${
-      appMode === 'play' && entity.ignorePointer ? 'pointer-events-none' : 'pointer-events-auto'
+      appMode === 'play' && (entity.ignorePointer || entity.disabled) ? 'pointer-events-none' : 'pointer-events-auto'
     } flex items-center justify-center z-10 ${nativeCursorClass}`,
     style: {
       clipPath: colliderClipPath,
@@ -618,6 +620,9 @@ export function useEntityPointerInteraction({
       pointerDownTargetIdRef.current = target.id;
       const liveEntitiesMap = useSceneStore.getState().entities;
       const liveTarget = liveEntitiesMap[target.id] || target;
+      if (liveTarget.disabled) {
+        return;
+      }
       const liveTargetState = liveTarget.states[liveTarget.currentStateId];
       const liveDragInfo = isEntityDraggable(liveTarget, liveTargetState);
       const canDragTarget =
@@ -627,12 +632,13 @@ export function useEntityPointerInteraction({
       upHandledForPointerRef.current = false;
       triggerPointerEvent(target.id, 'mouse_down', pt);
 
-      const attachMode = liveTarget.parentOffset?.attachmentMode || 'rigid';
+      const effParentOffset = resolveEffectiveParentOffset(liveTarget, liveTargetState);
+      const attachMode = effParentOffset?.attachmentMode || 'rigid';
       const isDynamicAttachedChild = Boolean(
         liveTarget.parentId &&
           liveEntitiesMap[liveTarget.parentId] &&
           (attachMode === 'physics_joint' ||
-            (attachMode === 'spring' && liveTarget.parentOffset?.collideWithWorld === true))
+            (attachMode === 'spring' && effParentOffset?.collideWithWorld === true))
       );
 
       // Mode 0 : Slider contraint (prioritaire sur draggable et saisie libre)
@@ -1050,7 +1056,7 @@ export function useEntityPointerInteraction({
       window.addEventListener('pointercancel', handleGlobalUp, { once: true });
     },
     onPointerUp: (e) => {
-      if (isPhysicsGrabbingRef.current) {
+      if (isPlayDisabled || isPhysicsGrabbingRef.current) {
         return;
       }
       const isInside = isPointInsideEntityCollider(

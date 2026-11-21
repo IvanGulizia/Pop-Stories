@@ -171,10 +171,11 @@ export function resolveCameraFollowTarget(
   if (!spec || spec.mode === 'none') return null;
   const list = Object.values(entities);
   if (spec.mode === 'entity' && spec.entityId) {
-    return entities[spec.entityId] || null;
+    const ent = entities[spec.entityId];
+    return ent && !ent.disabled ? ent : null;
   }
   if (spec.mode === 'type' && spec.entityType) {
-    return list.find((e) => e.type === spec.entityType && e.visible !== false) || null;
+    return list.find((e) => e.type === spec.entityType && e.visible !== false && !e.disabled) || null;
   }
   if (spec.mode === 'tag' && spec.tag) {
     const clean = spec.tag.trim().replace(/^#/, '').toLowerCase();
@@ -183,6 +184,7 @@ export function resolveCameraFollowTarget(
       list.find(
         (e) =>
           e.visible !== false &&
+          !e.disabled &&
           (e.tags || []).some((t) => t.trim().replace(/^#/, '').toLowerCase() === clean)
       ) || null
     );

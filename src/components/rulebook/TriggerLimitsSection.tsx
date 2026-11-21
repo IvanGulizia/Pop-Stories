@@ -95,8 +95,6 @@ export const TriggerLimitsSection: React.FC<TriggerLimitsSectionProps> = ({
             </span>
             <input
               type="number"
-              min={1}
-              max={999}
               step={1}
               value={normalizedMax}
               onChange={(e) => {
@@ -120,15 +118,13 @@ export const TriggerLimitsSection: React.FC<TriggerLimitsSectionProps> = ({
           <div className="flex items-center gap-2">
             <input
               type="number"
-              min={0}
-              max={120}
-              step={0.25}
+              step="any"
               value={triggerCooldownSec ?? 0}
               onChange={(e) => {
                 const parsed = parseFloat(e.target.value);
                 onChange({
                   triggerCooldownSec:
-                    Number.isFinite(parsed) && parsed > 0 ? Math.min(120, parsed) : undefined,
+                    Number.isFinite(parsed) && parsed > 0 ? parsed : undefined,
                 });
               }}
               className="w-20 text-center text-xs font-bold bg-slate-50 text-slate-900 border border-slate-300 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-indigo-400"
@@ -146,15 +142,13 @@ export const TriggerLimitsSection: React.FC<TriggerLimitsSectionProps> = ({
           <div className="flex items-center gap-2">
             <input
               type="number"
-              min={0}
-              max={120}
-              step={0.5}
+              step="any"
               value={triggerStartDelaySec ?? 0}
               onChange={(e) => {
                 const parsed = parseFloat(e.target.value);
                 onChange({
                   triggerStartDelaySec:
-                    Number.isFinite(parsed) && parsed > 0 ? Math.min(120, parsed) : undefined,
+                    Number.isFinite(parsed) && parsed > 0 ? parsed : undefined,
                 });
               }}
               className="w-20 text-center text-xs font-bold bg-slate-50 text-slate-900 border border-slate-300 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-indigo-400"

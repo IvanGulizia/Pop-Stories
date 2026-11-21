@@ -102,3 +102,10 @@
   - **Cache d'instantané DOM léger (`transitionSnapshotCache.ts`)** : Capturer une vignette/instantané visuel de la scène sortante juste avant `changeSceneInPlay` afin que les transitions `push_left / push_right / push_up / push_down` animent simultanément la scène sortante poussée et la scène entrante sans maintenir deux instances du moteur physique en parallèle.
   - **Identification interne stable, libellés propres** : Les IDs internes restent inchangés tandis que la création et les sélecteurs n'ajoutent plus de suffixe `#N` automatique ni n'exposent de types techniques bruts (`custom_*`) dans l'interface.
 
+## ADR-015 : Modèle Prefab vs Instance Séparée pour les Doublons (Décision Différée)
+- **Date :** 2026-11-21
+- **Statut :** En attente (Vague ultérieure)
+- **Contexte :** Plusieurs instances d'un même type d'entité sur une scène partagent actuellement un nom et un halo discret dans la hiérarchie/scène, mais la question de savoir si l'édition d'une instance doit modifier toutes les instances du modèle (*Prefab*) ou rester purement locale mérite une réflexion dédiée pour ne pas créer de confusion avec le système d'*overrides par État* (`behaviorOverrides`, `parentOffsetOverride`).
+- **Orientation pressentie (Solution 2) :** Modèle *Prefab partagé par défaut* avec possibilité de *surcharge locale à 1 niveau* sur une instance précise, tout en gardant l'UX suffisamment légère pour ne jamais mélanger surcharge d'instance et surcharge d'état.
+- **Décision :** Conserver le comportement actuel (entités éditées indépendamment + duplication indépendante dans la galerie) jusqu'à conception dédiée de l'UX Prefab/Instance.
+

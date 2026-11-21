@@ -2,6 +2,7 @@ import React from 'react';
 import { Check } from 'lucide-react';
 import { CameraFollowMode, Entity, EntityType, RuleAction } from '../../types';
 import { EntityOption } from './ruleBookTypes';
+import { EditableNumericValue } from '../shared/EditableNumericValue';
 
 export interface CameraActionDraft {
   cameraCommand?: 'shake' | 'zoom' | 'follow' | 'move_to' | 'reset';
@@ -194,16 +195,22 @@ export const CameraActionEditor: React.FC<CameraActionEditorProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs font-bold text-slate-700">Intensité (amplitude) :</label>
-                <span className="text-xs font-mono font-black text-cyan-700">{shakeIntensity} px</span>
+                <EditableNumericValue
+                  value={shakeIntensity}
+                  unit="px"
+                  precision={1}
+                  onChange={(v) => onPatch({ cameraShakeIntensity: v })}
+                  className="text-xs font-mono font-black text-cyan-700 bg-cyan-50 hover:bg-cyan-100 px-1.5 py-0.5 rounded cursor-text"
+                />
               </div>
               <input
                 type="range"
                 min={1}
                 max={50}
                 step={1}
-                value={shakeIntensity}
+                value={Math.max(1, Math.min(50, shakeIntensity))}
                 onChange={(e) =>
-                  onPatch({ cameraShakeIntensity: parseFloat(e.target.value) || 12 })
+                  onPatch({ cameraShakeIntensity: parseFloat(e.target.value) })
                 }
                 className="w-full accent-cyan-600 cursor-pointer"
               />
@@ -212,18 +219,22 @@ export const CameraActionEditor: React.FC<CameraActionEditorProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs font-bold text-slate-700">Durée :</label>
-                <span className="text-xs font-mono font-black text-cyan-700">
-                  {shakeDuration.toFixed(2)}s
-                </span>
+                <EditableNumericValue
+                  value={shakeDuration}
+                  unit="s"
+                  precision={2}
+                  onChange={(v) => onPatch({ cameraShakeDuration: v })}
+                  className="text-xs font-mono font-black text-cyan-700 bg-cyan-50 hover:bg-cyan-100 px-1.5 py-0.5 rounded cursor-text"
+                />
               </div>
               <input
                 type="range"
                 min={0.05}
                 max={3}
                 step={0.05}
-                value={shakeDuration}
+                value={Math.max(0.05, Math.min(3, shakeDuration))}
                 onChange={(e) =>
-                  onPatch({ cameraShakeDuration: parseFloat(e.target.value) || 0.35 })
+                  onPatch({ cameraShakeDuration: parseFloat(e.target.value) })
                 }
                 className="w-full accent-cyan-600 cursor-pointer"
               />
@@ -253,15 +264,21 @@ export const CameraActionEditor: React.FC<CameraActionEditorProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs font-bold text-slate-700">Facteur de zoom :</label>
-                <span className="text-xs font-mono font-black text-cyan-700">{zoom.toFixed(2)}×</span>
+                <EditableNumericValue
+                  value={zoom}
+                  unit="×"
+                  precision={2}
+                  onChange={(v) => onPatch({ cameraZoom: v })}
+                  className="text-xs font-mono font-black text-cyan-700 bg-cyan-50 hover:bg-cyan-100 px-1.5 py-0.5 rounded cursor-text"
+                />
               </div>
               <input
                 type="range"
                 min={0.25}
                 max={3}
                 step={0.05}
-                value={zoom}
-                onChange={(e) => onPatch({ cameraZoom: parseFloat(e.target.value) || 1 })}
+                value={Math.max(0.25, Math.min(3, zoom))}
+                onChange={(e) => onPatch({ cameraZoom: parseFloat(e.target.value) })}
                 className="w-full accent-cyan-600 cursor-pointer"
               />
             </div>
@@ -269,17 +286,21 @@ export const CameraActionEditor: React.FC<CameraActionEditorProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs font-bold text-slate-700">Durée de transition :</label>
-                <span className="text-xs font-mono font-black text-cyan-700">
-                  {duration.toFixed(2)}s
-                </span>
+                <EditableNumericValue
+                  value={duration}
+                  unit="s"
+                  precision={2}
+                  onChange={(v) => onPatch({ cameraDuration: v })}
+                  className="text-xs font-mono font-black text-cyan-700 bg-cyan-50 hover:bg-cyan-100 px-1.5 py-0.5 rounded cursor-text"
+                />
               </div>
               <input
                 type="range"
                 min={0}
                 max={5}
                 step={0.05}
-                value={duration}
-                onChange={(e) => onPatch({ cameraDuration: parseFloat(e.target.value) || 0 })}
+                value={Math.max(0, Math.min(5, duration))}
+                onChange={(e) => onPatch({ cameraDuration: parseFloat(e.target.value) })}
                 className="w-full accent-cyan-600 cursor-pointer"
               />
             </div>
@@ -416,15 +437,17 @@ export const CameraActionEditor: React.FC<CameraActionEditorProps> = ({
                   <label className="text-xs font-bold text-slate-700 block mb-1">X (px monde) :</label>
                   <input
                     type="number"
+                    step="any"
                     value={draft.cameraPosition?.x ?? 0}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
                       onPatch({
                         cameraPosition: {
-                          x: parseFloat(e.target.value) || 0,
+                          x: Number.isFinite(v) ? v : 0,
                           y: draft.cameraPosition?.y ?? 0,
                         },
-                      })
-                    }
+                      });
+                    }}
                     className="w-full px-3 py-2 text-xs font-mono font-bold bg-white border border-slate-300 rounded-xl"
                   />
                 </div>
@@ -432,15 +455,17 @@ export const CameraActionEditor: React.FC<CameraActionEditorProps> = ({
                   <label className="text-xs font-bold text-slate-700 block mb-1">Y (px monde) :</label>
                   <input
                     type="number"
+                    step="any"
                     value={draft.cameraPosition?.y ?? 0}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
                       onPatch({
                         cameraPosition: {
                           x: draft.cameraPosition?.x ?? 0,
-                          y: parseFloat(e.target.value) || 0,
+                          y: Number.isFinite(v) ? v : 0,
                         },
-                      })
-                    }
+                      });
+                    }}
                     className="w-full px-3 py-2 text-xs font-mono font-bold bg-white border border-slate-300 rounded-xl"
                   />
                 </div>
@@ -476,17 +501,21 @@ export const CameraActionEditor: React.FC<CameraActionEditorProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs font-bold text-slate-700">Durée du déplacement :</label>
-                <span className="text-xs font-mono font-black text-cyan-700">
-                  {duration.toFixed(2)}s
-                </span>
+                <EditableNumericValue
+                  value={duration}
+                  unit="s"
+                  precision={2}
+                  onChange={(v) => onPatch({ cameraDuration: v })}
+                  className="text-xs font-mono font-black text-cyan-700 bg-cyan-50 hover:bg-cyan-100 px-1.5 py-0.5 rounded cursor-text"
+                />
               </div>
               <input
                 type="range"
                 min={0}
                 max={5}
                 step={0.05}
-                value={duration}
-                onChange={(e) => onPatch({ cameraDuration: parseFloat(e.target.value) || 0 })}
+                value={Math.max(0, Math.min(5, duration))}
+                onChange={(e) => onPatch({ cameraDuration: parseFloat(e.target.value) })}
                 className="w-full accent-cyan-600 cursor-pointer"
               />
             </div>
@@ -500,17 +529,21 @@ export const CameraActionEditor: React.FC<CameraActionEditorProps> = ({
             </p>
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-bold text-slate-700">Durée du retour :</label>
-              <span className="text-xs font-mono font-black text-cyan-700">
-                {duration.toFixed(2)}s
-              </span>
+              <EditableNumericValue
+                value={duration}
+                unit="s"
+                precision={2}
+                onChange={(v) => onPatch({ cameraDuration: v })}
+                className="text-xs font-mono font-black text-cyan-700 bg-cyan-50 hover:bg-cyan-100 px-1.5 py-0.5 rounded cursor-text"
+              />
             </div>
             <input
               type="range"
               min={0}
               max={5}
               step={0.05}
-              value={duration}
-              onChange={(e) => onPatch({ cameraDuration: parseFloat(e.target.value) || 0 })}
+              value={Math.max(0, Math.min(5, duration))}
+              onChange={(e) => onPatch({ cameraDuration: parseFloat(e.target.value) })}
               className="w-full accent-cyan-600 cursor-pointer"
             />
           </div>

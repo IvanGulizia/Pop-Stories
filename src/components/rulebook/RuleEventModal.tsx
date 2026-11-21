@@ -136,15 +136,14 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                   <div className="flex items-center gap-3">
                     <input
                       type="number"
-                      min={0.5}
-                      step={0.5}
+                      step="any"
                       value={activeModal.timerInterval ?? 2}
-                      onChange={(e) =>
-                        setActiveModal({
-                          ...activeModal,
-                          timerInterval: Math.max(0.5, parseFloat(e.target.value) || 1),
-                        })
-                      }
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          setActiveModal({ ...activeModal, timerInterval: v });
+                        }
+                      }}
                       className="w-28 text-center text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-400"
                     />
                     <span className="text-xs text-slate-500 font-bold">secondes</span>
@@ -240,15 +239,14 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                   <div className="flex items-center gap-3">
                     <input
                       type="number"
-                      min={10}
-                      step={10}
-                      value={activeModal.proximityDistance || 80}
-                      onChange={(e) =>
-                        setActiveModal({
-                          ...activeModal,
-                          proximityDistance: Math.max(10, parseInt(e.target.value, 10) || 50),
-                        })
-                      }
+                      step="any"
+                      value={activeModal.proximityDistance ?? 80}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          setActiveModal({ ...activeModal, proximityDistance: v });
+                        }
+                      }}
                       className="w-32 text-center text-sm font-bold bg-white text-slate-900 border border-slate-300 rounded-xl px-3 py-2 outline-none"
                     />
                     <span className="text-xs text-slate-500 font-bold">pixels</span>
@@ -624,19 +622,20 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                     <span>Marge séparation (anti-boucle) :</span>
                     <input
                       type="number"
-                      min={0}
-                      max={60}
-                      step={2}
+                      step="any"
                       value={rule.trigger.collisionExitMargin ?? 10}
-                      onChange={(e) =>
-                        updateRule(rule.id, {
-                          trigger: {
-                            ...rule.trigger,
-                            collisionExitMargin: Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)),
-                          },
-                        })
-                      }
-                      className="w-14 px-2 py-1 text-center text-xs font-bold bg-white border border-indigo-200 rounded-lg outline-none focus:border-indigo-500"
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          updateRule(rule.id, {
+                            trigger: {
+                              ...rule.trigger,
+                              collisionExitMargin: v,
+                            },
+                          });
+                        }
+                      }}
+                      className="w-16 px-2 py-1 text-center text-xs font-bold bg-white border border-indigo-200 rounded-lg outline-none focus:border-indigo-500"
                     />
                     <span className="text-[10px] font-normal text-indigo-700">px</span>
                   </label>

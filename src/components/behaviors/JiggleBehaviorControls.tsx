@@ -2,6 +2,7 @@ import React from 'react';
 import { Crosshair, RotateCcw } from 'lucide-react';
 import { EntityPivot, JiggleBehaviorConfig } from '../../types';
 import { DEFAULT_PIVOT, sanitizePivot } from '../../utils/physics/pivotHelpers';
+import { EditableNumericValue } from '../shared/EditableNumericValue';
 
 const PIVOT_PRESETS: { label: string; x: number; y: number }[] = [
   { label: 'Haut-Gauche', x: 0, y: 0 },
@@ -40,16 +41,19 @@ export function JiggleBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Raideur du ressort (Stiffness)</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {Math.round(stiffness)}
-          </span>
+          <EditableNumericValue
+            value={stiffness}
+            precision={1}
+            onChange={(v) => update({ stiffness: v })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+          />
         </div>
         <input
           type="range"
           min="20"
           max="500"
           step="10"
-          value={stiffness}
+          value={Math.max(20, Math.min(500, stiffness))}
           onChange={(e) => update({ stiffness: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -59,16 +63,19 @@ export function JiggleBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Amortissement (Damping)</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {damping.toFixed(1)}
-          </span>
+          <EditableNumericValue
+            value={damping}
+            precision={2}
+            onChange={(v) => update({ damping: v })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+          />
         </div>
         <input
           type="range"
           min="1"
           max="30"
           step="0.5"
-          value={damping}
+          value={Math.max(1, Math.min(30, damping))}
           onChange={(e) => update({ damping: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -78,16 +85,20 @@ export function JiggleBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Inertie au mouvement</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            {inertia.toFixed(2)}×
-          </span>
+          <EditableNumericValue
+            value={inertia}
+            unit="×"
+            precision={2}
+            onChange={(v) => update({ inertia: v })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+          />
         </div>
         <input
           type="range"
           min="0"
           max="3"
           step="0.1"
-          value={inertia}
+          value={Math.max(0, Math.min(3, inertia))}
           onChange={(e) => update({ inertia: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -97,16 +108,20 @@ export function JiggleBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Amplitude max (± angle)</span>
-          <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-            ±{Math.round(maxAngle)}°
-          </span>
+          <EditableNumericValue
+            value={maxAngle}
+            displayText={`±${Math.round(maxAngle)}°`}
+            precision={1}
+            onChange={(v) => update({ maxAngle: v })}
+            className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+          />
         </div>
         <input
           type="range"
           min="5"
           max="150"
           step="1"
-          value={maxAngle}
+          value={Math.max(5, Math.min(150, maxAngle))}
           onChange={(e) => update({ maxAngle: parseFloat(e.target.value) })}
           className="w-full accent-indigo-600"
         />
@@ -117,16 +132,19 @@ export function JiggleBehaviorControls({
         <div>
           <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
             <span className="font-bold">Pesanteur locale (Gravity Pull)</span>
-            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-              {Math.round(gravityPull)}
-            </span>
+            <EditableNumericValue
+              value={gravityPull}
+              precision={1}
+              onChange={(v) => update({ gravityPull: v })}
+              className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+            />
           </div>
           <input
             type="range"
             min="-150"
             max="300"
             step="5"
-            value={gravityPull}
+            value={Math.max(-150, Math.min(300, gravityPull))}
             onChange={(e) => update({ gravityPull: parseFloat(e.target.value) })}
             className="w-full accent-indigo-600"
           />
@@ -135,16 +153,20 @@ export function JiggleBehaviorControls({
         <div className="pt-1 border-t border-slate-100">
           <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
             <span className="font-bold">Angle de repos</span>
-            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]">
-              {Math.round(restAngleOffset)}°
-            </span>
+            <EditableNumericValue
+              value={restAngleOffset}
+              unit="°"
+              precision={1}
+              onChange={(v) => update({ restAngleOffset: v })}
+              className="font-mono font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+            />
           </div>
           <input
             type="range"
             min="-90"
             max="90"
             step="1"
-            value={restAngleOffset}
+            value={Math.max(-90, Math.min(90, restAngleOffset))}
             onChange={(e) => update({ restAngleOffset: parseFloat(e.target.value) })}
             className="w-full accent-indigo-600"
           />
@@ -153,16 +175,20 @@ export function JiggleBehaviorControls({
         <div className="pt-1 border-t border-slate-100">
           <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
             <span className="font-bold">Angle de départ (hors repos)</span>
-            <span className="font-mono font-bold text-fuchsia-600 bg-fuchsia-50 px-1.5 py-0.5 rounded text-[11px]">
-              {Math.round(initialAngleOffset)}°
-            </span>
+            <EditableNumericValue
+              value={initialAngleOffset}
+              unit="°"
+              precision={1}
+              onChange={(v) => update({ initialAngleOffset: v })}
+              className="font-mono font-bold text-fuchsia-600 bg-fuchsia-50 hover:bg-fuchsia-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+            />
           </div>
           <input
             type="range"
             min="-120"
             max="120"
             step="1"
-            value={initialAngleOffset}
+            value={Math.max(-120, Math.min(120, initialAngleOffset))}
             onChange={(e) => update({ initialAngleOffset: parseFloat(e.target.value) })}
             className="w-full accent-fuchsia-600"
           />
@@ -176,16 +202,20 @@ export function JiggleBehaviorControls({
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
           <span className="font-bold">Déformation élastique (Squash)</span>
-          <span className="font-mono font-bold text-fuchsia-600 bg-fuchsia-50 px-1.5 py-0.5 rounded text-[11px]">
-            {Math.round(squashIntensity * 100)}%
-          </span>
+          <EditableNumericValue
+            value={Math.round(squashIntensity * 1000) / 10}
+            unit="%"
+            precision={1}
+            onChange={(v) => update({ squashIntensity: v / 100 })}
+            className="font-mono font-bold text-fuchsia-600 bg-fuchsia-50 hover:bg-fuchsia-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+          />
         </div>
         <input
           type="range"
           min="0"
           max="1.5"
           step="0.05"
-          value={squashIntensity}
+          value={Math.max(0, Math.min(1.5, squashIntensity))}
           onChange={(e) => update({ squashIntensity: parseFloat(e.target.value) })}
           className="w-full accent-fuchsia-600"
         />
@@ -260,47 +290,41 @@ export function JiggleBehaviorControls({
 
             {/* Coordonnées X% / Y% + Reset */}
             <div className="flex-1 grid grid-cols-2 gap-1.5 items-center">
-              <label className="flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]">
+              <div className="flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]">
                 <span className="font-bold text-slate-500">X</span>
-                <input
-                  type="number"
-                  min={-50}
-                  max={150}
-                  step={5}
-                  value={Math.round(pivotOverride.x * 100)}
-                  onChange={(e) =>
+                <EditableNumericValue
+                  value={Math.round(pivotOverride.x * 1000) / 10}
+                  unit="%"
+                  precision={1}
+                  onChange={(v) =>
                     update({
                       pivotOverride: sanitizePivot({
                         ...pivotOverride,
-                        x: (parseFloat(e.target.value) || 0) / 100,
+                        x: v / 100,
                       }),
                     })
                   }
-                  className="w-11 bg-transparent font-mono font-bold text-right text-slate-800 outline-none"
+                  className="font-mono font-bold text-slate-800 hover:text-fuchsia-700 hover:bg-fuchsia-50 px-1 rounded cursor-text tabular-nums"
                 />
-                <span className="text-slate-400">%</span>
-              </label>
+              </div>
 
-              <label className="flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]">
+              <div className="flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]">
                 <span className="font-bold text-slate-500">Y</span>
-                <input
-                  type="number"
-                  min={-50}
-                  max={150}
-                  step={5}
-                  value={Math.round(pivotOverride.y * 100)}
-                  onChange={(e) =>
+                <EditableNumericValue
+                  value={Math.round(pivotOverride.y * 1000) / 10}
+                  unit="%"
+                  precision={1}
+                  onChange={(v) =>
                     update({
                       pivotOverride: sanitizePivot({
                         ...pivotOverride,
-                        y: (parseFloat(e.target.value) || 0) / 100,
+                        y: v / 100,
                       }),
                     })
                   }
-                  className="w-11 bg-transparent font-mono font-bold text-right text-slate-800 outline-none"
+                  className="font-mono font-bold text-slate-800 hover:text-fuchsia-700 hover:bg-fuchsia-50 px-1 rounded cursor-text tabular-nums"
                 />
-                <span className="text-slate-400">%</span>
-              </label>
+              </div>
 
               <button
                 type="button"

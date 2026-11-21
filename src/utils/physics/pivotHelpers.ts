@@ -4,10 +4,10 @@ export const DEFAULT_PIVOT: EntityPivot = { x: 0.5, y: 0.5 };
 
 export function sanitizePivot(pivot?: Partial<EntityPivot> | null): EntityPivot {
   const x = typeof pivot?.x === 'number' && Number.isFinite(pivot.x)
-    ? Math.max(-4, Math.min(5, pivot.x))
+    ? pivot.x
     : DEFAULT_PIVOT.x;
   const y = typeof pivot?.y === 'number' && Number.isFinite(pivot.y)
-    ? Math.max(-4, Math.min(5, pivot.y))
+    ? pivot.y
     : DEFAULT_PIVOT.y;
   return { x, y };
 }
@@ -23,10 +23,11 @@ export function resolveRawPivot(
 ): EntityPivot {
   if (explicitOverride) return sanitizePivot(explicitOverride);
   if (entity.runtimePivot) return sanitizePivot(entity.runtimePivot);
-  if (entity.parentId && entity.parentOffset?.jointChildPivot) {
-    return sanitizePivot(entity.parentOffset.jointChildPivot);
-  }
   const state = stateOverride ?? entity.states?.[entity.currentStateId];
+  const effectiveJointChildPivot = state?.parentOffsetOverride?.jointChildPivot ?? entity.parentOffset?.jointChildPivot;
+  if (entity.parentId && effectiveJointChildPivot) {
+    return sanitizePivot(effectiveJointChildPivot);
+  }
   if (state?.pivot) return sanitizePivot(state.pivot);
   if (entity.pivot) return sanitizePivot(entity.pivot);
   return { ...DEFAULT_PIVOT };

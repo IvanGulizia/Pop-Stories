@@ -1,4 +1,4 @@
-import { Entity, EntityId, EntityPivot, EntityType, ParentOffset, Position, SpawnReferenceMode } from '../types';
+import { Entity, EntityId, EntityPivot, EntityState, EntityType, ParentOffset, Position, SpawnReferenceMode } from '../types';
 import {
   getParentAnchorWorldPosition,
   getPivotWorldPosition,
@@ -6,6 +6,29 @@ import {
   rotateVector,
   sanitizePivot,
 } from '../utils/physics/pivotHelpers';
+
+/**
+ * Résout le ParentOffset effectif d'un enfant en fusionnant sa configuration de base
+ * avec une éventuelle surcharge définie sur son état actif (parentOffsetOverride).
+ * Ne mute jamais entity.parentOffset.
+ */
+export function resolveEffectiveParentOffset(
+  entity: Pick<Entity, 'parentId' | 'parentOffset' | 'states' | 'currentStateId'>,
+  stateOverride?: EntityState | null
+): ParentOffset | undefined {
+  const st = stateOverride ?? entity.states?.[entity.currentStateId];
+  const ov = st?.parentOffsetOverride;
+  if (!entity.parentOffset && !ov) return undefined;
+  return {
+    x: 0,
+    y: 0,
+    rotationOffset: 0,
+    inheritRotation: true,
+    inheritFlip: true,
+    ...(entity.parentOffset || {}),
+    ...(ov || {}),
+  };
+}
 
 export function wouldCreateParentCycle(
   entities: Record<EntityId, Entity>,
@@ -169,7 +192,7 @@ export function computeParentOffsetFromWorldPin(
  * Retourne la position monde exacte du point d'attache d'un enfant sur son parent.
  */
 export function getChildAttachmentPinWorld(child: Entity, parent: Entity): Position {
-  const offset = child.parentOffset || { x: 0, y: 0 };
+  const offset = resolveEffectiveParentOffset(child) || { x: 0, y: 0 };
   const pState = parent.states[parent.currentStateId];
   const parentEffPivot = resolveEffectivePivot(parent, pState);
   const parentRotDeg = pState?.rotation ?? 0;
@@ -190,7 +213,13 @@ export function computeChildWorldFromParent(
   child: Entity,
   parent: Entity
 ): { position: Position; rotation: number; flipX: boolean } {
-  const offset = child.parentOffset || { x: 0, y: 0, rotationOffset: 0, inheritRotation: true, inheritFlip: true };
+  const offset = resolveEffectiveParentOffset(child) || {
+    x: 0,
+    y: 0,
+    rotationOffset: 0,
+    inheritRotation: true,
+    inheritFlip: true,
+  };
   const inheritRotation = offset.inheritRotation !== false;
   const inheritFlip = offset.inheritFlip !== false;
 
@@ -230,27 +259,33 @@ export function resolveEntityReference(
   subject: Entity | undefined,
   target: Entity | undefined,
   liveEntities: Record<EntityId, Entity>,
-  lastSpawnedEntityId?: EntityId | null
+  lastSpawnedEntityId?: EntityId | null,
+  includeDisabled: boolean = false
 ): Entity | undefined {
+  const isAllowed = (e?: Entity): e is Entity => Boolean(e && (includeDisabled || !e.disabled));
   if (mode === 'subject') {
-    return subject ? liveEntities[subject.id] || subject : undefined;
+    const resolved = subject ? liveEntities[subject.id] || subject : undefined;
+    return isAllowed(resolved) ? resolved : undefined;
   }
   if (mode === 'target') {
-    return target ? liveEntities[target.id] || target : undefined;
+    const resolved = target ? liveEntities[target.id] || target : undefined;
+    return isAllowed(resolved) ? resolved : undefined;
   }
   if (mode === 'last_spawned') {
-    return lastSpawnedEntityId ? liveEntities[lastSpawnedEntityId] : undefined;
+    const resolved = lastSpawnedEntityId ? liveEntities[lastSpawnedEntityId] : undefined;
+    return isAllowed(resolved) ? resolved : undefined;
   }
   if ((mode === 'entity' || mode === 'instance') && entityId) {
-    return liveEntities[entityId];
+    const resolved = liveEntities[entityId];
+    return isAllowed(resolved) ? resolved : undefined;
   }
   if (mode === 'type' && entityType) {
-    return Object.values(liveEntities).find((e) => e.type === entityType);
+    return Object.values(liveEntities).find((e) => e.type === entityType && isAllowed(e));
   }
   if (mode === 'tag' && tag) {
     const cleanTag = tag.toLowerCase().trim().replace(/^#/, '');
     if (cleanTag) {
-      return Object.values(liveEntities).find((e) => e.tags?.includes(cleanTag));
+      return Object.values(liveEntities).find((e) => e.tags?.includes(cleanTag) && isAllowed(e));
     }
   }
   return undefined;

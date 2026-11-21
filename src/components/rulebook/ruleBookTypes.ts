@@ -113,11 +113,14 @@ export type ActiveModal =
         | 'choose_attach_parent'
         | 'choose_detach_parent'
         | 'choose_move_entity'
+        | 'choose_apply_impulse'
+        | 'choose_set_entity_enabled'
         | 'choose_variable_action'
         | 'choose_scene_action'
         | 'choose_camera_action';
       actionType?: ActionType;
       targetMode?: ActionTargetMode;
+      targetId?: EntityId;
       selectedTargetType?: EntityType;
       variableName?: string;
       variableOperation?: 'set' | 'add' | 'subtract' | 'multiply';
@@ -154,6 +157,7 @@ export type ActiveModal =
       particleAngle?: number;
       // Parenting config
       parentChildMode?: ActionTargetMode;
+      parentChildId?: string;
       parentChildType?: EntityType;
       parentChildTag?: string;
       parentTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned';
@@ -175,6 +179,19 @@ export type ActiveModal =
       moveTargetEntityId?: string;
       moveTargetEntityType?: EntityType;
       moveTargetTag?: string;
+      // Apply Impulse config
+      impulseStrength?: number;
+      impulseDirectionMode?: 'cardinal' | 'angle' | 'facing' | 'toward_target' | 'away_target';
+      impulseCardinal?: 'right' | 'left' | 'up' | 'down';
+      impulseAngle?: number;
+      impulseApplyMode?: 'add' | 'set';
+      impulseTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'mouse';
+      impulseTargetEntityId?: string;
+      impulseTargetEntityType?: EntityType;
+      impulseTargetTag?: string;
+      impulseAngular?: number;
+      // Set Entity Enabled config
+      enabledActionMode?: 'enable' | 'disable' | 'toggle';
       // Scene change config
       targetSceneId?: string;
       sceneTransition?: SceneTransitionType;
@@ -221,6 +238,8 @@ export interface WizardData {
     | 'attach_parent_picker'
     | 'detach_parent_picker'
     | 'move_entity_picker'
+    | 'apply_impulse_picker'
+    | 'set_entity_enabled_picker'
     | 'variable_action_picker'
     | 'scene_action_picker'
     | 'camera_action_picker';
@@ -242,6 +261,7 @@ export interface WizardData {
   targetStateId?: string;
   actionType?: ActionType;
   actionTargetMode?: ActionTargetMode;
+  actionTargetId?: EntityId;
   actionTargetType?: EntityType;
   actionTargetStateId?: string;
   pendingSpawnType?: EntityType;
@@ -287,6 +307,7 @@ export interface WizardData {
 
   // Parenting config
   parentChildMode?: ActionTargetMode;
+  parentChildId?: string;
   parentChildType?: EntityType;
   parentChildTag?: string;
   parentTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned';
@@ -309,6 +330,21 @@ export interface WizardData {
   moveTargetEntityId?: string;
   moveTargetEntityType?: EntityType;
   moveTargetTag?: string;
+
+  // Apply Impulse config
+  impulseStrength?: number;
+  impulseDirectionMode?: 'cardinal' | 'angle' | 'facing' | 'toward_target' | 'away_target';
+  impulseCardinal?: 'right' | 'left' | 'up' | 'down';
+  impulseAngle?: number;
+  impulseApplyMode?: 'add' | 'set';
+  impulseTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'mouse';
+  impulseTargetEntityId?: string;
+  impulseTargetEntityType?: EntityType;
+  impulseTargetTag?: string;
+  impulseAngular?: number;
+
+  // Set Entity Enabled config
+  enabledActionMode?: 'enable' | 'disable' | 'toggle';
 
   // Configuration Minuteurs, Clavier, Proximité, Bords, Score
   timerInterval?: number;

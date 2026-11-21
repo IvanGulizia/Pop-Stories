@@ -778,7 +778,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
             {isPlayMode && (() => {
               const rtSliderTracks = getGizmoRuntimeDebugData().sliderTracks;
               const sliderEntities = Object.values(entities).filter((ent) => {
-                if (!ent || ent.visible === false || ent.parentId) return false;
+                if (!ent || ent.visible === false || ent.disabled || ent.parentId) return false;
                 const st = ent.states[ent.currentStateId];
                 const sb = getEffectiveBehaviors(ent, st).find(
                   (b): b is SliderBehaviorConfig => b.type === 'slider' && b.enabled !== false
@@ -915,7 +915,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
             {isPlayMode && (() => {
               const rtRotateTracks = getGizmoRuntimeDebugData().rotateDragTracks;
               const rotateEntities = Object.values(entities).filter((ent) => {
-                if (!ent || ent.visible === false || ent.parentId) return false;
+                if (!ent || ent.visible === false || ent.disabled || ent.parentId) return false;
                 const st = ent.states[ent.currentStateId];
                 const rb = getEffectiveBehaviors(ent, st).find(
                   (b): b is RotateDragBehaviorConfig => b.type === 'rotate_drag' && b.enabled !== false
@@ -1019,7 +1019,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
                 const allKeys = Array.from(new Set([...order, ...Object.keys(entities)]));
                 return allKeys
                   .map((id) => entities[id])
-                  .filter((entity): entity is NonNullable<typeof entity> => Boolean(entity) && entity.visible !== false)
+                  .filter((entity): entity is NonNullable<typeof entity> => Boolean(entity) && entity.visible !== false && !(isPlayMode && entity.disabled))
                   .map((entity, index) => {
                     const isSelected = selectedEntityId === entity.id;
                     const zIndexStyle = { zIndex: isSelected && appMode !== 'play' ? 35 : 10 + index };

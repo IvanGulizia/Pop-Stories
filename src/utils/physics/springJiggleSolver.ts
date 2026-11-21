@@ -11,11 +11,12 @@ export interface Spring2DStepParams {
   state: Spring2DState;
   targetX: number;
   targetY: number;
-  stiffness: number;     // ~10..800 (défaut 160)
-  damping: number;       // ~0..40 (défaut 12)
-  gravity?: number;      // px/s² vers le bas (+Y), défaut 0
-  maxDistance?: number;  // laisse max en px (0 = illimité)
-  dt: number;            // secondes
+  stiffness: number;       // ~10..800 (défaut 160)
+  damping: number;         // ~0..40 (défaut 12)
+  gravity?: number;        // px/s² vers le bas (+Y), défaut 0
+  maxDistance?: number;    // laisse max en px (0 = illimité sauf si limitMaxDistance === true)
+  limitMaxDistance?: boolean; // si true et maxDistance === 0, bride strictement à 0 px sans jeu
+  dt: number;              // secondes
 }
 
 /**
@@ -37,6 +38,7 @@ export function stepSpring2D(params: Spring2DStepParams): {
     damping,
     gravity = 0,
     maxDistance = 0,
+    limitMaxDistance = false,
     dt,
   } = params;
 
@@ -72,21 +74,30 @@ export function stepSpring2D(params: Spring2DStepParams): {
   }
 
   let clampedByLeash = false;
-  if (maxDistance > 0) {
-    const dx = x - targetX;
-    const dy = y - targetY;
-    const dist = Math.hypot(dx, dy);
-    if (dist > maxDistance && dist > 0.0001) {
+  const hasMaxLimit = limitMaxDistance ? maxDistance >= 0 : maxDistance > 0;
+  if (hasMaxLimit) {
+    if (maxDistance <= 0.0001) {
       clampedByLeash = true;
-      const nx = dx / dist;
-      const ny = dy / dist;
-      x = targetX + nx * maxDistance;
-      y = targetY + ny * maxDistance;
-      // Supprime la composante de vitesse qui tire encore vers l'extérieur
-      const outwardVel = vx * nx + vy * ny;
-      if (outwardVel > 0) {
-        vx -= outwardVel * nx;
-        vy -= outwardVel * ny;
+      x = targetX;
+      y = targetY;
+      vx = 0;
+      vy = 0;
+    } else {
+      const dx = x - targetX;
+      const dy = y - targetY;
+      const dist = Math.hypot(dx, dy);
+      if (dist > maxDistance && dist > 0.0001) {
+        clampedByLeash = true;
+        const nx = dx / dist;
+        const ny = dy / dist;
+        x = targetX + nx * maxDistance;
+        y = targetY + ny * maxDistance;
+        // Supprime la composante de vitesse qui tire encore vers l'extérieur
+        const outwardVel = vx * nx + vy * ny;
+        if (outwardVel > 0) {
+          vx -= outwardVel * nx;
+          vy -= outwardVel * ny;
+        }
       }
     }
   }

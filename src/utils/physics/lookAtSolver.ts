@@ -28,7 +28,7 @@ export function resolveTargetWorldPoint(
   }
   if (targetType === 'entity' && targetEntityId) {
     const targetEntity = entities[targetEntityId];
-    if (!targetEntity) return null;
+    if (!targetEntity || targetEntity.disabled) return null;
     const tOffset = colliderOffsets?.get(targetEntity.id) || {
       relCenterX: targetEntity.size.width / 2,
       relCenterY: targetEntity.size.height / 2,
@@ -43,7 +43,7 @@ export function resolveTargetWorldPoint(
     let nearest: Entity | undefined;
     let minDistSq = Infinity;
     for (const candidate of Object.values(entities)) {
-      if (candidate.id === selfId) continue;
+      if (candidate.id === selfId || candidate.disabled) continue;
       if (targetType === 'nearest_type') {
         if (!targetEntityType || candidate.type !== targetEntityType) continue;
       } else {
