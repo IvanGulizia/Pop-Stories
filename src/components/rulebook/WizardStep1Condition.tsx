@@ -1219,6 +1219,76 @@ export function WizardStep1Condition({
             </div>
           </button>
         </div>
+
+        <div className="bg-cyan-50/60 p-3.5 rounded-2xl border border-cyan-300/80 space-y-2 sm:col-span-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs font-black uppercase text-cyan-900">🧲 Aimant / Snap</div>
+            <span className="text-[10px] font-bold text-cyan-800 bg-cyan-100 px-2 py-0.5 rounded-full">
+              Sujet → Cible (Optionnelle)
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveWizard({
+                  ...activeWizard,
+                  triggerType: 'snap',
+                  triggerPhase: 'enter',
+                  targetMode: 'any',
+                  targetType: undefined,
+                  targetId: undefined,
+                  targetTag: undefined,
+                  targetStateId: undefined,
+                  step: 2,
+                  objectPhase: 'subject',
+                  subjectSubStep: 'choose_object',
+                  targetSubStep: 'choose_object',
+                  actionSubStep: 'main',
+                });
+              }}
+              className="p-3 bg-white hover:bg-cyan-100/70 border border-cyan-300 rounded-xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-2xs group"
+            >
+              <span className="text-2xl">🧲</span>
+              <div>
+                <div className="text-xs font-black text-slate-900">Quand il s&apos;aimante (Snap)</div>
+                <div className="text-[10px] text-slate-500">
+                  Ex: une pièce se verrouille dans son socle aimanté
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setActiveWizard({
+                  ...activeWizard,
+                  triggerType: 'snap',
+                  triggerPhase: 'exit',
+                  targetMode: 'any',
+                  targetType: undefined,
+                  targetId: undefined,
+                  targetTag: undefined,
+                  targetStateId: undefined,
+                  step: 2,
+                  objectPhase: 'subject',
+                  subjectSubStep: 'choose_object',
+                  targetSubStep: 'choose_object',
+                  actionSubStep: 'main',
+                });
+              }}
+              className="p-3 bg-white hover:bg-cyan-100/70 border border-cyan-300 rounded-xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-2xs group"
+            >
+              <span className="text-2xl">🔓</span>
+              <div>
+                <div className="text-xs font-black text-slate-900">Quand il se détache (Unsnap)</div>
+                <div className="text-[10px] text-slate-500">
+                  Ex: un objet aimanté est retiré ou arraché
+                </div>
+              </div>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

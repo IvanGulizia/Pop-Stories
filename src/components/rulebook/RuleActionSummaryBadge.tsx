@@ -406,6 +406,86 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
       </div>
     );
   }
+  if (act.type === 'snap_to') {
+    const srcLabel =
+      act.targetMode === 'subject'
+        ? 'Sujet'
+        : act.targetMode === 'target'
+        ? 'Cible'
+        : act.targetMode === 'last_spawned'
+        ? 'Dernier créé'
+        : act.targetMode === 'instance' && act.targetId
+        ? entities[act.targetId]?.name || 'Entité'
+        : act.targetMode === 'tag' && act.targetTag
+        ? `#${act.targetTag}`
+        : getEntityObj(act.targetType)?.name || 'Objet';
+    const dstLabel =
+      act.snapTargetMode === 'subject'
+        ? 'Sujet'
+        : act.snapTargetMode === 'target'
+        ? 'Cible'
+        : act.snapTargetMode === 'last_spawned'
+        ? 'Dernier créé'
+        : act.snapTargetMode === 'entity' && act.snapTargetEntityId
+        ? entities[act.snapTargetEntityId]?.name || 'Cible'
+        : act.snapTargetMode === 'tag' && act.snapTargetTag
+        ? `#${act.snapTargetTag}`
+        : getEntityObj(act.snapTargetEntityType)?.name || 'Cible';
+    return (
+      <div
+        role={canJump ? 'button' : undefined}
+        tabIndex={canJump ? 0 : undefined}
+        onClick={canJump ? (e) => jumpSub(e, 'choose_snap_to') : undefined}
+        className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+          canJump ? 'hover:border-cyan-400 hover:bg-cyan-50/40 cursor-pointer transition-colors' : ''
+        }`}
+      >
+        <div className="w-5 h-5 rounded-md bg-cyan-100 text-cyan-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+          🧲
+        </div>
+        <span className="text-xs truncate">{srcLabel}</span>
+        <span className="text-[10px] text-cyan-700 bg-cyan-50 px-1.5 py-0.2 rounded font-medium truncate">
+          (→ {dstLabel})
+        </span>
+      </div>
+    );
+  }
+  if (act.type === 'unsnap') {
+    const targetLabel =
+      act.targetMode === 'subject'
+        ? 'Sujet'
+        : act.targetMode === 'target'
+        ? 'Cible'
+        : act.targetMode === 'last_spawned'
+        ? 'Dernier créé'
+        : act.targetMode === 'instance' && act.targetId
+        ? entities[act.targetId]?.name || 'Entité'
+        : act.targetMode === 'tag' && act.targetTag
+        ? `#${act.targetTag}`
+        : getEntityObj(act.targetType)?.name || 'Objet';
+    const impulseNote =
+      (act.unsnapImpulseSpeed || 0) > 0
+        ? ` 🚀 ${Math.round(act.unsnapImpulseSpeed!)}px/s`
+        : '';
+    return (
+      <div
+        role={canJump ? 'button' : undefined}
+        tabIndex={canJump ? 0 : undefined}
+        onClick={canJump ? (e) => jumpSub(e, 'choose_unsnap') : undefined}
+        className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+          canJump ? 'hover:border-cyan-400 hover:bg-cyan-50/40 cursor-pointer transition-colors' : ''
+        }`}
+      >
+        <div className="w-5 h-5 rounded-md bg-cyan-100 text-cyan-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+          🔓
+        </div>
+        <span className="text-xs truncate">{targetLabel}</span>
+        <span className="text-[10px] text-cyan-700 bg-cyan-50 px-1.5 py-0.2 rounded font-medium truncate">
+          (Unsnap{impulseNote})
+        </span>
+      </div>
+    );
+  }
   if (act.type === 'move_entity') {
     const targetLabel =
       act.targetMode === 'subject'

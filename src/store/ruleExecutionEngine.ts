@@ -21,8 +21,10 @@ import {
   getEffectiveBehaviors,
   queueEntityInitialVelocity,
   setActiveDragPosition,
+  snapEntityToTargetRuntime,
+  unsnapEntityRuntime,
 } from '../utils/matterPhysicsEngine';
-import { PhysicsBehaviorConfig } from '../types';
+import { PhysicsBehaviorConfig, SnapBehaviorConfig } from '../types';
 import {
   computeRelativeParticleOrigin,
   emitParticlesBurst,
@@ -48,6 +50,7 @@ export interface RuleEngineStoreSnapshot {
   customSounds: CustomSound[];
   entities: Record<EntityId, Entity>;
   sceneBounds: Size;
+  editSceneBounds?: Size;
   camera?: SceneCameraConfig;
   customArchetypes: Record<string, Entity>;
   setEntityParent: (childId: EntityId, parentId: EntityId | null, customOffset?: ParentOffset) => void;
@@ -415,7 +418,8 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
   // Toujours lire l'état à jour des entités (utile après un spawn ou un délai)
   const liveEntities = bridgeSnap?.entities || helpers.allEntities;
   const viewportBounds = bridgeSnap?.sceneBounds || { width: 800, height: 500 };
-  const sceneBounds = resolveWorldBounds(viewportBounds, bridgeSnap?.camera);
+  const editBounds = bridgeSnap?.editSceneBounds;
+  const sceneBounds = resolveWorldBounds(viewportBounds, bridgeSnap?.camera, editBounds);
 
   if (act.type === 'camera_action') {
     dispatchPlayCameraAction(
@@ -427,7 +431,8 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
         lastSpawnedId: lastSpawnedEntityId,
       },
       viewportBounds,
-      bridgeSnap?.camera
+      bridgeSnap?.camera,
+      editBounds
     );
     return;
   }
@@ -1003,6 +1008,103 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
         const physicsCfg = effBehaviors.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
         const isExplicitStatic = physicsCfg?.isStatic === true;
         applyEntityImpulseAction(entity.id, vx, vy, act.impulseApplyMode || 'add', ang, isExplicitStatic);
+      }
+    } else if (act.type === 'snap_to') {
+      const refMode = act.snapTargetMode || (helpers.target ? 'target' : 'entity');
+      let targetEnt: Entity | undefined;
+      if (refMode === 'any') {
+        const ex = entity.position.x + entity.size.width / 2;
+        const ey = entity.position.y + entity.size.height / 2;
+        let bestDist = Infinity;
+        for (const cand of Object.values(liveEntities)) {
+          if (!cand || cand.id === entity.id || cand.disabled || cand.visible === false) continue;
+          const dist = Math.hypot(
+            cand.position.x + cand.size.width / 2 - ex,
+            cand.position.y + cand.size.height / 2 - ey
+          );
+          if (dist < bestDist) {
+            bestDist = dist;
+            targetEnt = cand;
+          }
+        }
+      } else {
+        targetEnt = resolveEntityReference(
+          refMode,
+          act.snapTargetEntityId,
+          act.snapTargetEntityType,
+          act.snapTargetTag,
+          helpers.subject,
+          helpers.target,
+          liveEntities,
+          lastSpawnedEntityId
+        );
+      }
+      if (!targetEnt || targetEnt.id === entity.id) return;
+
+      const curState = entity.states[entity.currentStateId];
+      const effBehaviors = getEffectiveBehaviors(entity, curState);
+      const existingSnapCfg = effBehaviors.find((b) => b.type === 'snap') as
+        | SnapBehaviorConfig
+        | undefined;
+      const snapRes = snapEntityToTargetRuntime({
+        entity,
+        target: targetEnt,
+        snapConfig: existingSnapCfg,
+        snapAlignment: act.snapAlignment,
+        sourceAnchor: act.snapSourceAnchor,
+        targetAnchor: act.snapTargetAnchor,
+        offsetX: act.snapOffsetX,
+        offsetY: act.snapOffsetY,
+        matchTargetRotation: act.snapMatchRotation,
+        rotationOffset: act.snapRotationOffset,
+        attachBehavior: act.snapAttachBehavior,
+      });
+
+      const snapBridge = getBridgeState();
+      snapBridge?.updateEntityPosition(entity.id, snapRes.goalTopLeft);
+      if (snapRes.goalRotationDeg !== undefined && curState) {
+        helpers.updateEntityDetails(
+          entity.id,
+          {
+            states: {
+              ...entity.states,
+              [entity.currentStateId]: {
+                ...curState,
+                rotation: snapRes.goalRotationDeg,
+              },
+            },
+          },
+          { instanceOnly: true }
+        );
+      }
+      if (
+        (snapRes.attachBehavior === 'parent_rigid' || snapRes.attachBehavior === 'parent_spring') &&
+        snapRes.parentOffset
+      ) {
+        snapBridge?.setEntityParent(entity.id, targetEnt.id, snapRes.parentOffset);
+      }
+    } else if (act.type === 'unsnap') {
+      const unsnapRes = unsnapEntityRuntime(entity.id, act.unsnapCooldownSec ?? 0.35);
+      const snapBridge = getBridgeState();
+      if (unsnapRes.wasParented || entity.parentId) {
+        snapBridge?.detachEntity(entity.id);
+      }
+      if (act.unsnapImpulseSpeed && act.unsnapImpulseSpeed > 0) {
+        const angRad = ((act.unsnapImpulseAngle ?? 0) * Math.PI) / 180;
+        const speed = act.unsnapImpulseSpeed;
+        const curState = entity.states[entity.currentStateId];
+        const effBehaviors = getEffectiveBehaviors(entity, curState);
+        const physicsCfg = effBehaviors.find((b) => b.type === 'physics') as
+          | PhysicsBehaviorConfig
+          | undefined;
+        applyEntityImpulseAction(
+          entity.id,
+          Math.cos(angRad) * speed,
+          Math.sin(angRad) * speed,
+          'add',
+          0,
+          physicsCfg?.isStatic === true
+        );
       }
     } else if (act.type === 'delete_entity') {
       helpers.deleteEntity(entity.id);

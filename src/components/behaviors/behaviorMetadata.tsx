@@ -7,6 +7,7 @@ import {
   Gamepad2,
   Hand,
   Heart,
+  Magnet,
   Move,
   Repeat,
   RotateCw,
@@ -38,6 +39,7 @@ import {
   PhysicsBehaviorConfig,
   RotateDragBehaviorConfig,
   SliderBehaviorConfig,
+  SnapBehaviorConfig,
   StrokeWiggleBehaviorConfig,
   WanderingBehaviorConfig,
 } from '../../types';
@@ -326,6 +328,30 @@ export function createDefaultBehaviorConfig(type: BehaviorType, entity: Entity):
         outputMax: 100,
         showDialInPlay: true,
       } as RotateDragBehaviorConfig;
+    case 'snap':
+      return {
+        id: generateBehaviorId('snap'),
+        type: 'snap',
+        enabled: true,
+        targetType: 'any',
+        snapTrigger: 'on_release',
+        snapRadius: 48,
+        snapMode: 'magnetic_smooth',
+        smoothSpeed: 0.3,
+        snapAlignment: 'center',
+        sourceAnchor: 'center',
+        targetAnchor: 'center',
+        offsetX: 0,
+        offsetY: 0,
+        matchTargetRotation: false,
+        rotationOffset: 0,
+        attachBehavior: 'position_only',
+        springStiffness: 0.25,
+        springDamping: 0.18,
+        allowPullUnsnap: true,
+        unsnapDistance: 72,
+        reSnapCooldownSec: 0.35,
+      } as SnapBehaviorConfig;
   }
 }
 
@@ -369,6 +395,8 @@ export function getBehaviorIcon(type: BehaviorType): React.ReactNode {
       return <SlidersHorizontal className="w-4 h-4 text-sky-600" />;
     case 'rotate_drag':
       return <RotateCw className="w-4 h-4 text-amber-600" />;
+    case 'snap':
+      return <Magnet className="w-4 h-4 text-cyan-600" />;
   }
 }
 
@@ -412,5 +440,7 @@ export function getBehaviorTitle(type: BehaviorType): string {
       return 'Slider & Glissière Contrainte';
     case 'rotate_drag':
       return 'Cadran Rotatif au Drag (Volant)';
+    case 'snap':
+      return 'Aimant & Snap (Collage sur cible)';
   }
 }

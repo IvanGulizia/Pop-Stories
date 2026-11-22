@@ -15,6 +15,7 @@ import {
   Position,
   RotateDragBehaviorConfig,
   SliderBehaviorConfig,
+  SnapBehaviorConfig,
   WanderingBehaviorConfig,
 } from '../types';
 import { getEntityWorldColliderBounds } from '../utils/collider';
@@ -968,6 +969,59 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
                 </g>
               );
             }
+          }
+
+          const snapBeh = effective.find((b) => b.type === 'snap') as SnapBehaviorConfig | undefined;
+          if (snapBeh) {
+            const snapR = Math.max(4, snapBeh.snapRadius ?? 48);
+            const snapLink = runtimeDebug?.snapLinks?.[entity.id];
+            elements.push(
+              <g key={`ai-snap-${entity.id}`}>
+                <circle
+                  cx={center.x}
+                  cy={center.y}
+                  r={snapR}
+                  fill="rgba(6, 182, 212, 0.04)"
+                  stroke="#06b6d4"
+                  strokeWidth="1.4"
+                  strokeDasharray="4 4"
+                  strokeOpacity={0.75}
+                />
+                <text
+                  x={center.x}
+                  y={center.y - snapR - 4}
+                  textAnchor="middle"
+                  fill="#0e7490"
+                  fontSize="9"
+                  fontFamily="monospace"
+                  fontWeight="700"
+                >
+                  Snap {snapR}px
+                </text>
+                {snapLink && (
+                  <>
+                    <line
+                      x1={snapLink.from.x}
+                      y1={snapLink.from.y}
+                      x2={snapLink.to.x}
+                      y2={snapLink.to.y}
+                      stroke={snapLink.snapped ? '#06b6d4' : '#22d3ee'}
+                      strokeWidth={snapLink.snapped ? '2' : '1.4'}
+                      strokeDasharray={snapLink.snapped ? undefined : '4 3'}
+                      markerEnd="url(#gizmo-arrow-cyan)"
+                    />
+                    <circle
+                      cx={snapLink.to.x}
+                      cy={snapLink.to.y}
+                      r={4}
+                      fill={snapLink.snapped ? '#06b6d4' : '#ffffff'}
+                      stroke="#0891b2"
+                      strokeWidth="1.5"
+                    />
+                  </>
+                )}
+              </g>
+            );
           }
 
           return elements.length > 0 ? <g key={`gizmo-ai-${entity.id}`}>{elements}</g> : null;

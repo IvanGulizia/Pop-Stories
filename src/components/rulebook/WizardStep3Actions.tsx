@@ -30,6 +30,7 @@ import { CameraActionEditor } from './CameraActionEditor';
 import { AttachParentConfigEditor } from './AttachParentConfigEditor';
 import { ApplyImpulseConfigEditor } from './ApplyImpulseConfigEditor';
 import { SetEntityEnabledConfigEditor } from './SetEntityEnabledConfigEditor';
+import { SnapActionConfigEditor } from './SnapActionConfigEditor';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 import { useSceneStore, EMPTY_RECORD, EMPTY_LIST } from '../../store/useSceneStore';
 import { ParticleActionOriginSection } from '../particles/ParticleActionOriginSection';
@@ -1085,6 +1086,65 @@ export function WizardStep3Actions({
                       </div>
                       <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                         Faire apparaître ou disparaître temporairement une entité
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* 10. Aimanter vers une cible (Snap) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveWizard({
+                        ...activeWizard,
+                        actionSubStep: 'snap_to_picker',
+                        actionTargetMode: isWizardGlobal ? 'instance' : 'subject',
+                        actionTargetId: activeWizard.actionTargetId || Object.keys(entities)[0] || '',
+                        snapTargetMode: activeWizard.snapTargetMode || (isCollision ? 'target' : 'entity'),
+                        snapTargetEntityId: activeWizard.snapTargetEntityId || Object.keys(entities)[0] || '',
+                        snapAlignment: activeWizard.snapAlignment || 'center',
+                        snapAttachBehavior: activeWizard.snapAttachBehavior || 'parent_rigid',
+                      });
+                    }}
+                    className="w-full p-3.5 bg-white hover:bg-cyan-50/70 border-2 border-slate-200 hover:border-cyan-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-cyan-100 text-cyan-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                      🧲
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-black text-slate-900 group-hover:text-cyan-700 truncate">
+                        Aimanter vers une cible (Snap)
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                        Coller et aligner sur une cible, ancre ou socle
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* 11. Désaimanter (Unsnap) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveWizard({
+                        ...activeWizard,
+                        actionSubStep: 'unsnap_picker',
+                        actionTargetMode: isWizardGlobal ? 'instance' : 'subject',
+                        actionTargetId: activeWizard.actionTargetId || Object.keys(entities)[0] || '',
+                        unsnapCooldownSec: activeWizard.unsnapCooldownSec ?? 0.35,
+                        unsnapImpulseSpeed: activeWizard.unsnapImpulseSpeed ?? 0,
+                        unsnapImpulseAngle: activeWizard.unsnapImpulseAngle ?? -45,
+                      });
+                    }}
+                    className="w-full p-3.5 bg-white hover:bg-cyan-50/70 border-2 border-slate-200 hover:border-cyan-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-cyan-100 text-cyan-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                      🔓
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-black text-slate-900 group-hover:text-cyan-700 truncate">
+                        Désaimanter (Unsnap)
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                        Libérer d&apos;une aimantation avec impulsion optionnelle
                       </div>
                     </div>
                   </button>
@@ -2323,6 +2383,40 @@ export function WizardStep3Actions({
       {/* Sous-étape Wizard : Activer / Désactiver une entité */}
       {activeWizard.actionSubStep === 'set_entity_enabled_picker' && (
         <SetEntityEnabledConfigEditor
+          draft={{
+            ...activeWizard,
+            targetMode: activeWizard.actionTargetMode,
+            targetId: activeWizard.actionTargetId,
+            targetType: activeWizard.actionTargetType,
+            targetTag: activeWizard.actionTargetTag,
+          }}
+          onPatch={(patch) => {
+            const { targetMode, targetId, targetType: tType, targetTag, ...rest } = patch;
+            setActiveWizard({
+              ...activeWizard,
+              ...rest,
+              ...(targetMode !== undefined ? { actionTargetMode: targetMode } : {}),
+              ...(targetId !== undefined ? { actionTargetId: targetId } : {}),
+              ...(tType !== undefined ? { actionTargetType: tType } : {}),
+              ...(targetTag !== undefined ? { actionTargetTag: targetTag } : {}),
+            });
+          }}
+          onConfirm={(actionData) => completeWizardWithAction(actionData)}
+          isRelational={isWizardRelational}
+          isGlobal={isWizardGlobal}
+          subjectType={activeWizard.subjectType}
+          targetType={activeWizard.targetType}
+          entities={entities}
+          availableEntityOptions={availableEntityOptions}
+          allProjectTags={allProjectTags}
+        />
+      )}
+
+      {/* Sous-étape Wizard : Aimanter / Désaimanter (Snap / Unsnap) */}
+      {(activeWizard.actionSubStep === 'snap_to_picker' ||
+        activeWizard.actionSubStep === 'unsnap_picker') && (
+        <SnapActionConfigEditor
+          mode={activeWizard.actionSubStep === 'unsnap_picker' ? 'unsnap' : 'snap_to'}
           draft={{
             ...activeWizard,
             targetMode: activeWizard.actionTargetMode,

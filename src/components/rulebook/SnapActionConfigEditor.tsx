@@ -1,0 +1,595 @@
+import React from 'react';
+import { Check, Magnet, Unlink } from 'lucide-react';
+import {
+  ActionTargetMode,
+  Entity,
+  EntityId,
+  EntityType,
+  ParticleAnchorPreset,
+  RuleAction,
+  SnapAlignmentMode,
+  SnapAttachBehavior,
+} from '../../types';
+import { EntityOption } from './ruleBookTypes';
+
+const ANCHOR_OPTIONS: { value: ParticleAnchorPreset; label: string }[] = [
+  { value: 'center', label: 'Centre' },
+  { value: 'top', label: 'Haut' },
+  { value: 'bottom', label: 'Bas' },
+  { value: 'left', label: 'Gauche' },
+  { value: 'right', label: 'Droite' },
+  { value: 'top_left', label: 'Haut-Gauche' },
+  { value: 'top_right', label: 'Haut-Droite' },
+  { value: 'bottom_left', label: 'Bas-Gauche' },
+  { value: 'bottom_right', label: 'Bas-Droite' },
+];
+
+export interface SnapActionConfigDraft {
+  targetMode?: ActionTargetMode;
+  targetId?: EntityId;
+  targetType?: EntityType;
+  targetTag?: string;
+  snapTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'any';
+  snapTargetEntityId?: EntityId;
+  snapTargetEntityType?: EntityType;
+  snapTargetTag?: string;
+  snapAlignment?: SnapAlignmentMode;
+  snapSourceAnchor?: ParticleAnchorPreset;
+  snapTargetAnchor?: ParticleAnchorPreset;
+  snapOffsetX?: number;
+  snapOffsetY?: number;
+  snapMatchRotation?: boolean;
+  snapRotationOffset?: number;
+  snapAttachBehavior?: SnapAttachBehavior;
+  unsnapImpulseSpeed?: number;
+  unsnapImpulseAngle?: number;
+  unsnapCooldownSec?: number;
+}
+
+interface SnapActionConfigEditorProps {
+  mode: 'snap_to' | 'unsnap';
+  draft: SnapActionConfigDraft;
+  onPatch: (patch: Partial<SnapActionConfigDraft>) => void;
+  onConfirm: (actionData: Omit<RuleAction, 'id'>) => void;
+  isRelational: boolean;
+  isGlobal?: boolean;
+  subjectType: EntityType;
+  targetType: EntityType;
+  entities: Record<string, Entity>;
+  availableEntityOptions: EntityOption[];
+  allProjectTags: string[];
+}
+
+export const SnapActionConfigEditor: React.FC<SnapActionConfigEditorProps> = ({
+  mode,
+  draft,
+  onPatch,
+  onConfirm,
+  isRelational,
+  isGlobal = false,
+  subjectType,
+  targetType,
+  entities,
+  availableEntityOptions,
+  allProjectTags,
+}) => {
+  const entityList = Object.values(entities);
+  const firstEntityId = entityList[0]?.id || '';
+  const firstEntityType = availableEntityOptions[0]?.type || '';
+
+  const tMode: ActionTargetMode = draft.targetMode || (isGlobal ? 'instance' : 'subject');
+  const snapTargetMode = draft.snapTargetMode || (isRelational ? 'target' : 'entity');
+  const alignment: SnapAlignmentMode = draft.snapAlignment || 'center';
+  const attachBehavior: SnapAttachBehavior = draft.snapAttachBehavior || 'parent_rigid';
+  const unsnapImpulseSpeed = draft.unsnapImpulseSpeed ?? 0;
+  const unsnapImpulseAngle = draft.unsnapImpulseAngle ?? -45;
+  const unsnapCooldownSec = draft.unsnapCooldownSec ?? 0.35;
+
+  const resolveSourceTargetType = (): EntityType | undefined => {
+    if (tMode === 'type') return draft.targetType || firstEntityType;
+    if (tMode === 'target') return targetType;
+    if (tMode === 'subject') return subjectType;
+    return undefined;
+  };
+
+  if (mode === 'unsnap') {
+    return (
+      <div className="space-y-4 max-w-xl mx-auto py-2">
+        <div className="text-center space-y-1">
+          <div className="w-12 h-12 bg-cyan-100 text-cyan-700 rounded-2xl flex items-center justify-center mx-auto shadow-xs">
+            <Unlink className="w-6 h-6" />
+          </div>
+          <h4 className="text-sm font-black text-slate-800">Désaimanter (Unsnap)</h4>
+          <p className="text-xs text-slate-500">
+            Détache l&apos;objet de sa cible magnétique avec un délai anti-recollage et une impulsion optionnelle.
+          </p>
+        </div>
+
+        <div className="space-y-2 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Objet à désaimanter</span>
+            <select
+              value={tMode}
+              onChange={(e) => onPatch({ targetMode: e.target.value as ActionTargetMode })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              {!isGlobal && <option value="subject">Sujet</option>}
+              {isRelational && <option value="target">Cible touchée</option>}
+              <option value="last_spawned">Dernier objet créé</option>
+              <option value="instance">Entité précise</option>
+              <option value="type">Par Type</option>
+              <option value="tag">Par Tag (#tag)</option>
+            </select>
+          </div>
+
+          {tMode === 'instance' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Choisir l&apos;entité</span>
+              <select
+                value={draft.targetId || firstEntityId}
+                onChange={(e) => onPatch({ targetId: e.target.value })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[220px]"
+              >
+                {entityList.map((ent) => (
+                  <option key={ent.id} value={ent.id}>
+                    {ent.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {tMode === 'type' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Type à désaimanter</span>
+              <select
+                value={draft.targetType || firstEntityType}
+                onChange={(e) => onPatch({ targetType: e.target.value })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+              >
+                {availableEntityOptions.map((opt) => (
+                  <option key={opt.type} value={opt.type}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {tMode === 'tag' && (
+            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">Tag (#tag)</span>
+              <input
+                type="text"
+                list="unsnap-target-tags"
+                value={draft.targetTag || ''}
+                onChange={(e) => onPatch({ targetTag: e.target.value.replace(/^#/, '') })}
+                placeholder="ex: bloc, cle..."
+                className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+              />
+              <datalist id="unsnap-target-tags">
+                {allProjectTags.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
+            </div>
+          )}
+
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Délai anti-recollage (s)</span>
+            <input
+              type="number"
+              step="any"
+              value={unsnapCooldownSec}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                if (Number.isFinite(v)) {
+                  onPatch({ unsnapCooldownSec: v });
+                }
+              }}
+              className="w-24 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-right text-slate-800"
+            />
+          </div>
+
+          <div className="p-2.5 bg-white rounded-xl border border-slate-200 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700 text-xs">
+                Impulsion d&apos;éjection (optionnelle, px/s)
+              </span>
+              <input
+                type="number"
+                step="any"
+                value={unsnapImpulseSpeed}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v)) {
+                    onPatch({ unsnapImpulseSpeed: v });
+                  }
+                }}
+                className="w-24 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-right text-slate-800"
+              />
+            </div>
+
+            {unsnapImpulseSpeed > 0 && (
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                <span className="font-bold text-slate-700 text-[11px]">Angle d&apos;éjection (°)</span>
+                <div className="flex items-center gap-1 flex-wrap justify-end">
+                  {[
+                    { label: '↑ -90°', val: -90 },
+                    { label: '↗ -45°', val: -45 },
+                    { label: '→ 0°', val: 0 },
+                    { label: '← 180°', val: 180 },
+                  ].map((p) => (
+                    <button
+                      key={p.val}
+                      type="button"
+                      onClick={() => onPatch({ unsnapImpulseAngle: p.val })}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold border cursor-pointer ${
+                        unsnapImpulseAngle === p.val
+                          ? 'bg-cyan-600 text-white border-cyan-700'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-cyan-50'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                  <input
+                    type="number"
+                    step="any"
+                    value={unsnapImpulseAngle}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        onPatch({ unsnapImpulseAngle: v });
+                      }
+                    }}
+                    className="w-16 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px] font-mono text-right"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            onConfirm({
+              type: 'unsnap',
+              targetMode: tMode,
+              targetId: tMode === 'instance' ? draft.targetId || firstEntityId : undefined,
+              targetType: resolveSourceTargetType(),
+              targetTag:
+                tMode === 'tag'
+                  ? (draft.targetTag || '').trim().replace(/^#/, '')
+                  : undefined,
+              unsnapCooldownSec,
+              unsnapImpulseSpeed: unsnapImpulseSpeed > 0 ? unsnapImpulseSpeed : undefined,
+              unsnapImpulseAngle: unsnapImpulseSpeed > 0 ? unsnapImpulseAngle : undefined,
+            });
+          }}
+          className="w-full py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
+        >
+          <Check className="w-4 h-4" />
+          <span>Valider le désaimantage</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 max-w-xl mx-auto py-2">
+      <div className="text-center space-y-1">
+        <div className="w-12 h-12 bg-cyan-100 text-cyan-700 rounded-2xl flex items-center justify-center mx-auto shadow-xs">
+          <Magnet className="w-6 h-6" />
+        </div>
+        <h4 className="text-sm font-black text-slate-800">Aimanter vers une Cible (Snap)</h4>
+        <p className="text-xs text-slate-500">
+          Aligne et colle instantanément un objet sur une cible ou un socle avec la liaison choisie.
+        </p>
+      </div>
+
+      <div className="space-y-2 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+        {/* Objet à aimanter */}
+        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+          <span className="font-bold text-slate-700 text-xs">Objet à aimanter</span>
+          <select
+            value={tMode}
+            onChange={(e) => onPatch({ targetMode: e.target.value as ActionTargetMode })}
+            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+          >
+            {!isGlobal && <option value="subject">Sujet</option>}
+            {isRelational && <option value="target">Cible touchée</option>}
+            <option value="last_spawned">Dernier objet créé</option>
+            <option value="instance">Entité précise</option>
+            <option value="type">Par Type</option>
+            <option value="tag">Par Tag (#tag)</option>
+          </select>
+        </div>
+
+        {tMode === 'instance' && (
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Choisir l&apos;objet</span>
+            <select
+              value={draft.targetId || firstEntityId}
+              onChange={(e) => onPatch({ targetId: e.target.value })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[220px]"
+            >
+              {entityList.map((ent) => (
+                <option key={ent.id} value={ent.id}>
+                  {ent.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {tMode === 'type' && (
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Type à aimanter</span>
+            <select
+              value={draft.targetType || firstEntityType}
+              onChange={(e) => onPatch({ targetType: e.target.value })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              {availableEntityOptions.map((opt) => (
+                <option key={opt.type} value={opt.type}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {tMode === 'tag' && (
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Tag objet (#tag)</span>
+            <input
+              type="text"
+              list="snap-source-tags"
+              value={draft.targetTag || ''}
+              onChange={(e) => onPatch({ targetTag: e.target.value.replace(/^#/, '') })}
+              placeholder="ex: piece, objet..."
+              className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            />
+            <datalist id="snap-source-tags">
+              {allProjectTags.map((t) => (
+                <option key={t} value={t} />
+              ))}
+            </datalist>
+          </div>
+        )}
+
+        {/* Cible de l'aimant */}
+        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+          <span className="font-bold text-slate-700 text-xs">Cible d&apos;aimantation (Socle)</span>
+          <select
+            value={snapTargetMode}
+            onChange={(e) => onPatch({ snapTargetMode: e.target.value as any })}
+            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+          >
+            {!isGlobal && <option value="subject">Sujet</option>}
+            {isRelational && <option value="target">Cible touchée</option>}
+            <option value="entity">Entité de la scène</option>
+            <option value="type">Par Type</option>
+            <option value="tag">Par Tag (#tag)</option>
+            <option value="last_spawned">Dernier objet créé</option>
+          </select>
+        </div>
+
+        {snapTargetMode === 'entity' && (
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Choisir la cible</span>
+            <select
+              value={draft.snapTargetEntityId || firstEntityId}
+              onChange={(e) => onPatch({ snapTargetEntityId: e.target.value })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[220px]"
+            >
+              {entityList.map((ent) => (
+                <option key={ent.id} value={ent.id}>
+                  {ent.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {snapTargetMode === 'type' && (
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Type cible</span>
+            <select
+              value={draft.snapTargetEntityType || firstEntityType}
+              onChange={(e) => onPatch({ snapTargetEntityType: e.target.value })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              {availableEntityOptions.map((opt) => (
+                <option key={opt.type} value={opt.type}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {snapTargetMode === 'tag' && (
+          <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Tag cible</span>
+            <input
+              type="text"
+              list="snap-target-tags"
+              value={draft.snapTargetTag || ''}
+              onChange={(e) => onPatch({ snapTargetTag: e.target.value.replace(/^#/, '') })}
+              placeholder="ex: socle, slot..."
+              className="w-40 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            />
+            <datalist id="snap-target-tags">
+              {allProjectTags.map((t) => (
+                <option key={t} value={t} />
+              ))}
+            </datalist>
+          </div>
+        )}
+
+        {/* Alignement & Ancres */}
+        <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Alignement</span>
+            <select
+              value={alignment}
+              onChange={(e) => onPatch({ snapAlignment: e.target.value as SnapAlignmentMode })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              <option value="center">Centre sur centre</option>
+              <option value="anchor_offset">Par points d&apos;ancrage</option>
+              <option value="edge_closest">Bord le plus proche</option>
+            </select>
+          </div>
+
+          {alignment === 'anchor_offset' && (
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Ancre objet</span>
+                <select
+                  value={draft.snapSourceAnchor || 'center'}
+                  onChange={(e) =>
+                    onPatch({ snapSourceAnchor: e.target.value as ParticleAnchorPreset })
+                  }
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                >
+                  {ANCHOR_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Ancre cible</span>
+                <select
+                  value={draft.snapTargetAnchor || 'center'}
+                  onChange={(e) =>
+                    onPatch({ snapTargetAnchor: e.target.value as ParticleAnchorPreset })
+                  }
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                >
+                  {ANCHOR_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-bold text-slate-500">Décalage X (px)</span>
+              <input
+                type="number"
+                step="any"
+                value={draft.snapOffsetX ?? 0}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v)) onPatch({ snapOffsetX: v });
+                }}
+                className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-right text-slate-800"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-bold text-slate-500">Décalage Y (px)</span>
+              <input
+                type="number"
+                step="any"
+                value={draft.snapOffsetY ?? 0}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v)) onPatch({ snapOffsetY: v });
+                }}
+                className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-right text-slate-800"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+            <span className="text-xs font-bold text-slate-700">Aligner la rotation sur la cible</span>
+            <input
+              type="checkbox"
+              checked={Boolean(draft.snapMatchRotation)}
+              onChange={(e) => onPatch({ snapMatchRotation: e.target.checked })}
+              className="w-4 h-4 accent-cyan-600 rounded cursor-pointer"
+            />
+          </div>
+
+          {draft.snapMatchRotation && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-bold text-slate-500">Décalage angle (°)</span>
+              <input
+                type="number"
+                step="any"
+                value={draft.snapRotationOffset ?? 0}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v)) onPatch({ snapRotationOffset: v });
+                }}
+                className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-right text-slate-800"
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Liaison après snap */}
+        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+          <span className="font-bold text-slate-700 text-xs">Liaison après snap</span>
+          <select
+            value={attachBehavior}
+            onChange={(e) => onPatch({ snapAttachBehavior: e.target.value as SnapAttachBehavior })}
+            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+          >
+            <option value="parent_rigid">Parenter solidement</option>
+            <option value="parent_spring">Parenter avec ressort</option>
+            <option value="position_only">Placer uniquement</option>
+            <option value="freeze_physics">Poser et figer la physique</option>
+          </select>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => {
+          onConfirm({
+            type: 'snap_to',
+            targetMode: tMode,
+            targetId: tMode === 'instance' ? draft.targetId || firstEntityId : undefined,
+            targetType: resolveSourceTargetType(),
+            targetTag:
+              tMode === 'tag'
+                ? (draft.targetTag || '').trim().replace(/^#/, '')
+                : undefined,
+            snapTargetMode,
+            snapTargetEntityId:
+              snapTargetMode === 'entity' ? draft.snapTargetEntityId || firstEntityId : undefined,
+            snapTargetEntityType:
+              snapTargetMode === 'type' ? draft.snapTargetEntityType || firstEntityType : undefined,
+            snapTargetTag:
+              snapTargetMode === 'tag'
+                ? (draft.snapTargetTag || '').trim().replace(/^#/, '')
+                : undefined,
+            snapAlignment: alignment,
+            snapSourceAnchor: alignment === 'anchor_offset' ? draft.snapSourceAnchor || 'center' : undefined,
+            snapTargetAnchor: alignment === 'anchor_offset' ? draft.snapTargetAnchor || 'center' : undefined,
+            snapOffsetX: draft.snapOffsetX ?? 0,
+            snapOffsetY: draft.snapOffsetY ?? 0,
+            snapMatchRotation: Boolean(draft.snapMatchRotation),
+            snapRotationOffset: draft.snapMatchRotation ? draft.snapRotationOffset ?? 0 : 0,
+            snapAttachBehavior: attachBehavior,
+          });
+        }}
+        className="w-full py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"
+      >
+        <Check className="w-4 h-4" />
+        <span>Valider l&apos;aimantation</span>
+      </button>
+    </div>
+  );
+};

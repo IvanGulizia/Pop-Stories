@@ -31,6 +31,7 @@ import { CameraActionEditor } from './CameraActionEditor';
 import { AttachParentConfigEditor } from './AttachParentConfigEditor';
 import { ApplyImpulseConfigEditor } from './ApplyImpulseConfigEditor';
 import { SetEntityEnabledConfigEditor } from './SetEntityEnabledConfigEditor';
+import { SnapActionConfigEditor } from './SnapActionConfigEditor';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 import { useSceneStore, EMPTY_RECORD, EMPTY_LIST } from '../../store/useSceneStore';
 import { ParticleActionOriginSection } from '../particles/ParticleActionOriginSection';
@@ -76,7 +77,8 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
   const isCollision =
     rule.trigger.type === 'collision' ||
     rule.trigger.type === 'proximity' ||
-    rule.trigger.type === 'target_arrived';
+    rule.trigger.type === 'target_arrived' ||
+    rule.trigger.type === 'snap';
   const subjectType = rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
   const targetType = rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
 
@@ -975,6 +977,65 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Faire apparaître ou disparaître temporairement une entité
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* 11. Aimanter vers une cible (Snap) */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveModal({
+                          ...activeModal,
+                          subStep: 'choose_snap_to',
+                          targetMode: isGlobal ? 'instance' : 'subject',
+                          targetId: activeModal.targetId || Object.keys(entities)[0] || '',
+                          snapTargetMode: activeModal.snapTargetMode || (isCollision ? 'target' : 'entity'),
+                          snapTargetEntityId: activeModal.snapTargetEntityId || Object.keys(entities)[0] || '',
+                          snapAlignment: activeModal.snapAlignment || 'center',
+                          snapAttachBehavior: activeModal.snapAttachBehavior || 'parent_rigid',
+                        })
+                      }
+                      className="w-full p-3.5 bg-white hover:bg-cyan-50/70 border-2 border-slate-200 hover:border-cyan-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-cyan-100 text-cyan-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                        🧲
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-cyan-700 truncate">
+                          Aimanter vers une cible (Snap)
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Coller et aligner sur une cible, ancre ou socle
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* 12. Désaimanter (Unsnap) */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveModal({
+                          ...activeModal,
+                          subStep: 'choose_unsnap',
+                          targetMode: isGlobal ? 'instance' : 'subject',
+                          targetId: activeModal.targetId || Object.keys(entities)[0] || '',
+                          unsnapCooldownSec: activeModal.unsnapCooldownSec ?? 0.35,
+                          unsnapImpulseSpeed: activeModal.unsnapImpulseSpeed ?? 0,
+                          unsnapImpulseAngle: activeModal.unsnapImpulseAngle ?? -45,
+                        })
+                      }
+                      className="w-full p-3.5 bg-white hover:bg-cyan-50/70 border-2 border-slate-200 hover:border-cyan-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-cyan-100 text-cyan-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                        🔓
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-cyan-700 truncate">
+                          Désaimanter (Unsnap)
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Libérer d&apos;une aimantation avec impulsion optionnelle
                         </div>
                       </div>
                     </button>
@@ -2341,6 +2402,23 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
         {/* Modal Action : Activer / Désactiver une entité */}
         {activeModal.subStep === 'choose_set_entity_enabled' && (
           <SetEntityEnabledConfigEditor
+            draft={activeModal}
+            onPatch={(patch) => setActiveModal({ ...activeModal, ...patch })}
+            onConfirm={(actionData) => applyAction(actionData)}
+            isRelational={isCollision}
+            isGlobal={isGlobal}
+            subjectType={subjectType}
+            targetType={targetType}
+            entities={entities}
+            availableEntityOptions={availableEntityOptions}
+            allProjectTags={allProjectTags}
+          />
+        )}
+
+        {/* Modal Action : Aimanter / Désaimanter (Snap / Unsnap) */}
+        {(activeModal.subStep === 'choose_snap_to' || activeModal.subStep === 'choose_unsnap') && (
+          <SnapActionConfigEditor
+            mode={activeModal.subStep === 'choose_unsnap' ? 'unsnap' : 'snap_to'}
             draft={activeModal}
             onPatch={(patch) => setActiveModal({ ...activeModal, ...patch })}
             onConfirm={(actionData) => applyAction(actionData)}

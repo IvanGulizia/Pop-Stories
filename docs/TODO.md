@@ -15,10 +15,10 @@
   - Ranges aléatoires Min/Max, mono-couleur vs dégradé, drag/opacité/taille de fin/spin, durée d'émetteur finie, boucle, bursts initiaux/périodiques et formes d'émission (`point`, `circle`, `box`)
   - Collection locale de particules (projet + inter-projets IndexedDB) avec sprites vectoriels embarqués/remappés
   - Spawn particules relatif à une entité (ancres, offsets locaux, rotation/`flipX`), coordonnées exactes, position souris live ou point d'événement
-- [ ] **Sous-phase D — Ratio Caméra Play (sans bandes noires), Tri Cartes d'Action & Snap/Aimant** :
-  - Ratio caméra dédié au Play avec cadrage en Édition sans bandes noires
+- [x] **Sous-phase D — Ratio Caméra Play (sans bandes noires), Tri Cartes d'Action & Snap/Aimant** :
+  - Ratio caméra dédié au Play (`playAspectRatio`) avec cadrage d'aperçu en Édition sans bandes noires
   - Drag & drop de réorganisation des cartes d'actions individuelles dans une règle (`RuleBook`)
-  - Comportement Snap / Aimant + événements/actions compagnons (`on_snap`, `snap_to`, `unsnap`)
+  - Comportement Snap / Aimant + événements/actions compagnons (`snap` enter/exit, `snap_to`, `unsnap`)
 - [ ] **Décision en attente (#17)** : Modèle *Prefab vs Instance séparée* pour la modification des doublons sur scène (piste privilégiée : Solution 2 — Prefab partagé + surcharge 1 niveau optionnelle, sans collision UX avec les overrides d'états).
 
 ## En cours / Récent

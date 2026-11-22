@@ -17,9 +17,12 @@ import { SceneGizmoOverlay } from './SceneGizmoOverlay';
 import { setLatestMouseWorldPos } from '../utils/particleSystem';
 import {
   clampCameraZoom,
+  computeEditPlayCameraPreviewSize,
   computeLayerParallaxTransform,
   computeWorldTransformCss,
   DEFAULT_SCENE_CAMERA_CONFIG,
+  fitAspectRatioSize,
+  resolveEffectivePlayAspectRatio,
   resolveWorldBounds,
   screenToWorldPoint,
 } from '../utils/cameraSolver';
@@ -84,6 +87,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const setEditorCamera = useSceneStore((state) => state.setEditorCamera);
   const isPanToolActive = useSceneStore((state) => state.editorPanToolActive);
   const sceneBounds = useSceneStore((state) => state.sceneBounds);
+  const editSceneBounds = useSceneStore((state) => state.editSceneBounds);
   const activeSceneTransition = useSceneStore((state) => state.activeSceneTransition);
   const [transitionEngaged, setTransitionEngaged] = useState(false);
 
@@ -129,7 +133,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const hasArchetypesInCatalog = Object.keys(customArchetypes).length > 0;
   const isCompletelyEmptyProject = !hasEntitiesOnCanvas && !hasArchetypesInCatalog;
 
-  const worldBounds = resolveWorldBounds(sceneBounds, cameraConfig);
+  const worldBounds = resolveWorldBounds(sceneBounds, cameraConfig, editSceneBounds);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -192,8 +196,12 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const isCustomCursorActive =
     isPlayMode && settings.useCustomCursors !== false && !spawnCanvasPick && !jointCanvasPick;
   const ratio = settings.aspectRatio || 'free';
+  const effectivePlayRatio = resolveEffectivePlayAspectRatio(ratio, cameraConfig);
+  const activeRatio = isPlayMode ? effectivePlayRatio : ratio;
   const batchUpdateEntityTransforms = useSceneStore((state) => state.batchUpdateEntityTransforms);
 
+  const outerContainerRef = useRef<HTMLDivElement>(null);
+  const [outerAvailSize, setOuterAvailSize] = useState<{ width: number; height: number } | null>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const shakeWrapperRef = useRef<HTMLDivElement>(null);
   const worldLayerRef = useRef<HTMLDivElement>(null);
@@ -207,6 +215,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const [jointPickHoverPt, setJointPickHoverPt] = useState<{ x: number; y: number } | null>(null);
   const [isDraggingJointPin, setIsDraggingJointPin] = useState(false);
   const setSceneBounds = useSceneStore((state) => state.setSceneBounds);
+  const setEditSceneBounds = useSceneStore((state) => state.setEditSceneBounds);
 
   const worldTransformPagePoint = useCallback((pt: { x: number; y: number }) => {
     const snap = useSceneStore.getState();
@@ -229,6 +238,30 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
     }
   }, [jointCanvasPick]);
 
+  // Mesurer l'espace interne disponible autour du canvas pour ajuster exactement le ratio (sans bandes noires)
+  useEffect(() => {
+    const outer = outerContainerRef.current;
+    if (!outer) return;
+    const measureAvail = () => {
+      const cs = window.getComputedStyle(outer);
+      const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+      const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      const availW = Math.max(100, Math.floor(outer.clientWidth - padX));
+      const availH = Math.max(100, Math.floor(outer.clientHeight - padY));
+      setOuterAvailSize((prev) =>
+        prev && prev.width === availW && prev.height === availH ? prev : { width: availW, height: availH }
+      );
+    };
+    measureAvail();
+    const ro = new ResizeObserver(measureAvail);
+    ro.observe(outer);
+    window.addEventListener('resize', measureAvail);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measureAvail);
+    };
+  }, []);
+
   // Synchronisation dynamique des dimensions réelles du canvas vers le store (Boundary & Spawn aléatoire)
   useEffect(() => {
     const el = canvasContainerRef.current;
@@ -238,6 +271,9 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
       const h = el.clientHeight || Math.round(el.getBoundingClientRect().height);
       if (w > 0 && h > 0) {
         setSceneBounds({ width: w, height: h });
+        if (useSceneStore.getState().appMode !== 'play') {
+          setEditSceneBounds({ width: w, height: h });
+        }
       }
     };
     updateBounds();
@@ -248,7 +284,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
       ro.disconnect();
       window.removeEventListener('resize', updateBounds);
     };
-  }, [setSceneBounds, ratio]);
+  }, [setSceneBounds, setEditSceneBounds, activeRatio, isPlayMode, outerAvailSize]);
 
   // Focus automatique du canvas au passage en mode Play (contrôles clavier immédiats sans clic requis)
   useEffect(() => {
@@ -295,7 +331,11 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
 
         const stateSnapshot = useSceneStore.getState();
         const viewportSize = { width: liveW, height: liveH };
-        const liveWorldBounds = resolveWorldBounds(viewportSize, stateSnapshot.camera);
+        const liveWorldBounds = resolveWorldBounds(
+          viewportSize,
+          stateSnapshot.camera,
+          stateSnapshot.editSceneBounds
+        );
 
         // Convertir la position curseur écran en coordonnées monde selon la caméra Play courante
         if (mouseScreenPosRef.current) {
@@ -380,13 +420,33 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           });
         }
 
+        // Mutations de parentage & événements "Snap / Aimant"
+        if (result.snapParentMutations && result.snapParentMutations.length > 0) {
+          const { setEntityParent, detachEntity } = useSceneStore.getState();
+          result.snapParentMutations.forEach((mut) => {
+            if (mut.parentId) {
+              setEntityParent(mut.childId, mut.parentId, mut.customOffset);
+            } else {
+              detachEntity(mut.childId);
+            }
+          });
+        }
+
+        if (result.snapEvents && result.snapEvents.length > 0) {
+          const { triggerSnapEvent } = useSceneStore.getState();
+          result.snapEvents.forEach((ev) => {
+            triggerSnapEvent(ev.subjectId, ev.targetEntityId, ev.phase, ev.eventPosition);
+          });
+        }
+
         // Mise à jour caméra 60 FPS sans re-render React (transforms DOM directs)
         const latestState = useSceneStore.getState();
         const rtCam = stepPlayCameraRuntime(
           deltaTime,
           latestState.entities,
           viewportSize,
-          latestState.camera
+          latestState.camera,
+          latestState.editSceneBounds
         );
 
         const followedTargetId = consumePlayCameraFollowChange();
@@ -427,9 +487,20 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
     };
   }, [isPlayMode, batchUpdateEntityTransforms, setSceneBounds]);
 
-  // Calcul des styles d'aspect ratio pour ancrage en haut & centré horizontalement
+  // Calcul des styles d'aspect ratio pour ancrage en haut & centré horizontalement (sans bandes noires)
+  const fittedCanvasSize =
+    outerAvailSize && outerAvailSize.width > 0 && outerAvailSize.height > 0
+      ? fitAspectRatioSize(outerAvailSize.width, outerAvailSize.height, activeRatio)
+      : null;
+
   const getAspectRatioStyle = (): React.CSSProperties => {
-    switch (ratio) {
+    if (fittedCanvasSize) {
+      return {
+        width: `${fittedCanvasSize.width}px`,
+        height: `${fittedCanvasSize.height}px`,
+      };
+    }
+    switch (activeRatio) {
       case '16:9':
         return {
           aspectRatio: '16 / 9',
@@ -604,10 +675,11 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
 
   return (
     <div
+      ref={outerContainerRef}
       className="relative w-full h-full min-h-0 bg-slate-100/70 overflow-hidden select-none flex flex-col items-center justify-start p-3 sm:p-4"
       onClick={() => selectEntity(null)}
     >
-      {/* CADRE DE SCÈNE AVEC RESPECT DU FORMAT / RATIO */}
+      {/* CADRE DE SCÈNE AVEC RESPECT DU FORMAT / RATIO (Édition ou Play, sans bandes noires) */}
       <div
         id="scene-canvas-container"
         ref={canvasContainerRef}
@@ -636,7 +708,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           mousePosRef.current = null;
           setLatestMouseWorldPos(null);
         }}
-        className={`relative overflow-hidden select-none outline-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-all duration-300 ${
+        className={`relative overflow-hidden select-none outline-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-colors duration-200 ${
           isCustomCursorActive
             ? 'atelier-cursor-hidden'
             : isPanning
@@ -738,32 +810,48 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
             {!isPlayMode &&
               cameraConfig.worldMode === 'custom' &&
               cameraConfig.showWorldBoundsInEdit !== false && (
-                <>
-                  <div
-                    className="absolute inset-0 pointer-events-none z-[1] border-2 border-dashed border-sky-400/60 rounded-sm"
-                    style={{
-                      boxShadow: 'inset 0 0 0 1px rgba(14,165,233,0.12)',
-                    }}
-                  >
-                    <span className="absolute top-1.5 left-2 px-1.5 py-0.5 rounded bg-sky-600/85 text-white text-[9px] font-mono font-bold">
-                      Monde {worldBounds.width}×{worldBounds.height}px
-                    </span>
-                  </div>
+                <div
+                  className="absolute inset-0 pointer-events-none z-[1] border-2 border-dashed border-sky-400/60 rounded-sm"
+                  style={{
+                    boxShadow: 'inset 0 0 0 1px rgba(14,165,233,0.12)',
+                  }}
+                >
+                  <span className="absolute top-1.5 left-2 px-1.5 py-0.5 rounded bg-sky-600/85 text-white text-[9px] font-mono font-bold">
+                    Monde {worldBounds.width}×{worldBounds.height}px
+                  </span>
+                </div>
+              )}
+
+            {!isPlayMode &&
+              cameraConfig.showWorldBoundsInEdit !== false &&
+              (cameraConfig.worldMode === 'custom' ||
+                effectivePlayRatio !== ratio ||
+                Math.abs((cameraConfig.zoom ?? 1) - 1) > 0.01) &&
+              (() => {
+                const previewSize = computeEditPlayCameraPreviewSize(
+                  sceneBounds,
+                  outerAvailSize,
+                  ratio,
+                  cameraConfig
+                );
+                const playRatioLabel =
+                  effectivePlayRatio === 'free' ? 'Libre' : effectivePlayRatio;
+                return (
                   <div
                     className="absolute pointer-events-none z-[2] border-2 border-dashed border-emerald-500/75 bg-emerald-500/[0.03]"
                     style={{
                       left: cameraConfig.initialX ?? 0,
                       top: cameraConfig.initialY ?? 0,
-                      width: Math.max(80, Math.round(sceneBounds.width / Math.max(0.25, cameraConfig.zoom ?? 1))),
-                      height: Math.max(80, Math.round(sceneBounds.height / Math.max(0.25, cameraConfig.zoom ?? 1))),
+                      width: previewSize.width,
+                      height: previewSize.height,
                     }}
                   >
-                    <span className="absolute -top-4 left-0 px-1.5 py-0.2 rounded bg-emerald-600/90 text-white text-[9px] font-mono font-bold whitespace-nowrap">
-                      📷 Vue Play ({Math.round((cameraConfig.zoom ?? 1) * 100)}%)
+                    <span className="absolute top-1 right-1.5 px-1.5 py-0.5 rounded bg-emerald-600/90 text-white text-[9px] font-mono font-bold whitespace-nowrap">
+                      📷 Vue Play ({playRatioLabel} • {Math.round((cameraConfig.zoom ?? 1) * 100)}%)
                     </span>
                   </div>
-                </>
-              )}
+                );
+              })()}
 
             {/* 1.5. CALQUES COLLIDERS DE DÉCOR (MURS / SOLS / CAPTEURS: z-5) */}
             <div className="absolute inset-0 pointer-events-none z-5">

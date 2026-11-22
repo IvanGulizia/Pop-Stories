@@ -33,6 +33,7 @@ import {
   PhysicsBehaviorConfig,
   RotateDragBehaviorConfig,
   SliderBehaviorConfig,
+  SnapBehaviorConfig,
   StrokeWiggleBehaviorConfig,
   WanderingBehaviorConfig,
 } from '../types';
@@ -66,6 +67,7 @@ import {
 import { JiggleBehaviorControls } from './behaviors/JiggleBehaviorControls';
 import { SliderBehaviorControls } from './behaviors/SliderBehaviorControls';
 import { RotateDragBehaviorControls } from './behaviors/RotateDragBehaviorControls';
+import { SnapBehaviorControls } from './behaviors/SnapBehaviorControls';
 import {
   HealthBehaviorControls,
   LookAtBehaviorControls,
@@ -861,5 +863,18 @@ function renderBehaviorControls({
       return <SliderBehaviorControls b={{ ...behavior, ...(override || {}) } as SliderBehaviorConfig} update={update} />;
     case 'rotate_drag':
       return <RotateDragBehaviorControls b={{ ...behavior, ...(override || {}) } as RotateDragBehaviorConfig} update={update} />;
+    case 'snap':
+      return (
+        <SnapBehaviorControls
+          b={{ ...behavior, ...(override || {}) } as SnapBehaviorConfig}
+          update={update}
+          targetEntityOptions={targetEntityOptions}
+          entityTypeOptions={entityTypeOptions}
+          availableTags={availableTags}
+          stateList={stateList}
+          onQuickCreateState={onQuickCreateState}
+          onEditStateDrawing={onEditStateDrawing}
+        />
+      );
   }
 }

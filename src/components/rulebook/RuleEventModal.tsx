@@ -31,12 +31,17 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
   const applyEventTrigger = (patch: Partial<RuleTrigger>, closeAfter = true) => {
     const nextType = patch.type ?? modalTriggerType;
     const needsTarget =
-      nextType === 'collision' || nextType === 'proximity' || nextType === 'target_arrived';
+      nextType === 'collision' ||
+      nextType === 'proximity' ||
+      nextType === 'target_arrived' ||
+      nextType === 'snap';
     updateRule(rule.id, {
       trigger: {
         ...rule.trigger,
         ...patch,
-        ...(nextType === 'target_arrived' && !rule.trigger.targetMode && !patch.targetMode
+        ...((nextType === 'target_arrived' || nextType === 'snap') &&
+        !rule.trigger.targetMode &&
+        !patch.targetMode
           ? { targetMode: 'any' }
           : needsTarget && !rule.trigger.targetType && !patch.targetType && rule.trigger.targetMode !== 'any'
           ? { targetType: availableEntityOptions[1]?.type || availableEntityOptions[0]?.type || 'plant' }
@@ -121,9 +126,40 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
           </div>
         ) : modalSubStep === 'config_event_params' ? (
           <div className="bg-slate-50/90 p-5 rounded-3xl border border-slate-200/90 space-y-5 max-w-xl mx-auto shadow-xs">
-            {['click', 'hover', 'drag', 'state_change', 'joint_break', 'camera_follow', 'target_arrived'].includes(modalTriggerType) && (
+            {['click', 'hover', 'drag', 'state_change', 'joint_break', 'camera_follow', 'target_arrived', 'snap'].includes(modalTriggerType) && (
               <div className="bg-white border border-slate-200 rounded-2xl p-3 text-xs text-slate-600 font-medium">
                 Configurez la fréquence, les délais d&apos;activation ou l&apos;auto-remise pour cet événement ({modalTriggerType}).
+              </div>
+            )}
+            {modalTriggerType === 'snap' && (
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-700 block">
+                  Moment de l&apos;aimantation (Snap) :
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setActiveModal({ ...activeModal, triggerPhase: 'enter' })}
+                    className={`p-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                      modalTriggerPhase !== 'exit'
+                        ? 'bg-cyan-50 border-cyan-500 text-cyan-800 shadow-2xs'
+                        : 'bg-white border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    🧲 Quand il s&apos;aimante (Entrée)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveModal({ ...activeModal, triggerPhase: 'exit' })}
+                    className={`p-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                      modalTriggerPhase === 'exit'
+                        ? 'bg-cyan-50 border-cyan-500 text-cyan-800 shadow-2xs'
+                        : 'bg-white border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    🔓 Quand il se détache (Sortie)
+                  </button>
+                </div>
               </div>
             )}
             {/* 1. Minuteur / Timer */}
@@ -1046,6 +1082,51 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                     </div>
                   </div>
                 </button>
+              </div>
+
+              <div className="bg-cyan-50/60 p-3 rounded-2xl border border-cyan-300/80 space-y-1.5 sm:col-span-4">
+                <div className="text-[11px] font-black uppercase text-cyan-900">🧲 Aimant / Snap</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      applyEventTrigger({
+                        type: 'snap',
+                        phase: 'enter',
+                        targetMode: rule.trigger.targetMode || 'any',
+                      })
+                    }
+                    className="p-2.5 bg-white hover:bg-cyan-100/70 border border-cyan-300 rounded-xl flex items-center gap-2.5 text-left cursor-pointer transition-all shadow-2xs"
+                  >
+                    <span className="text-lg">🧲</span>
+                    <div>
+                      <div className="text-xs font-black text-slate-900">Quand il s&apos;aimante (Snap)</div>
+                      <div className="text-[9px] text-slate-500">
+                        Lorsqu&apos;un objet vient se coller sur une cible
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      applyEventTrigger({
+                        type: 'snap',
+                        phase: 'exit',
+                        targetMode: rule.trigger.targetMode || 'any',
+                      })
+                    }
+                    className="p-2.5 bg-white hover:bg-cyan-100/70 border border-cyan-300 rounded-xl flex items-center gap-2.5 text-left cursor-pointer transition-all shadow-2xs"
+                  >
+                    <span className="text-lg">🔓</span>
+                    <div>
+                      <div className="text-xs font-black text-slate-900">Quand il se détache (Unsnap)</div>
+                      <div className="text-[9px] text-slate-500">
+                        Lorsque l&apos;objet aimanté est arraché ou libéré
+                      </div>
+                    </div>
+                  </button>
+                </div>
               </div>
             </div>
           </>

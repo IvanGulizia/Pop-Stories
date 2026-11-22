@@ -10,7 +10,11 @@ import {
   Lock,
 } from 'lucide-react';
 import { useSceneStore } from '../store/useSceneStore';
-import { CameraFollowAxis, CameraFollowMode } from '../types';
+import {
+  CameraFollowAxis,
+  CameraFollowMode,
+  SceneAspectRatio,
+} from '../types';
 import { DEFAULT_SCENE_CAMERA_CONFIG } from '../utils/cameraSolver';
 
 interface SceneCameraModalProps {
@@ -22,6 +26,19 @@ const WORLD_PRESETS = [
   { label: 'Monde 2000×1200', width: 2000, height: 1200 },
   { label: 'Tour 900×2000', width: 900, height: 2000 },
   { label: 'Long 3200×800', width: 3200, height: 800 },
+];
+
+const PLAY_RATIO_OPTIONS: {
+  id: SceneAspectRatio | 'inherit';
+  label: string;
+  hint: string;
+}[] = [
+  { id: 'inherit', label: 'Identique Édition', hint: 'Suit le format de scène' },
+  { id: '16:9', label: '16:9', hint: 'Cinéma / Paysage' },
+  { id: '4:3', label: '4:3', hint: 'Rétro / Arcade' },
+  { id: '1:1', label: '1:1', hint: 'Carré' },
+  { id: '9:16', label: '9:16', hint: 'Portrait / Mobile' },
+  { id: 'free', label: 'Libre', hint: 'Plein espace Play' },
 ];
 
 export function SceneCameraModal({ onClose }: SceneCameraModalProps) {
@@ -163,15 +180,14 @@ export function SceneCameraModal({ onClose }: SceneCameraModalProps) {
                     </label>
                     <input
                       type="number"
-                      min={200}
-                      max={10000}
-                      step={50}
+                      step="any"
                       value={camera.worldWidth ?? 1600}
-                      onChange={(e) =>
-                        updateSceneCamera({
-                          worldWidth: Math.max(200, Math.min(10000, Number(e.target.value) || 1600)),
-                        })
-                      }
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          updateSceneCamera({ worldWidth: Math.max(200, v) });
+                        }
+                      }}
                       className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-mono font-bold text-slate-800 outline-none focus:ring-2 focus:ring-sky-300"
                     />
                   </div>
@@ -181,31 +197,71 @@ export function SceneCameraModal({ onClose }: SceneCameraModalProps) {
                     </label>
                     <input
                       type="number"
-                      min={200}
-                      max={10000}
-                      step={50}
+                      step="any"
                       value={camera.worldHeight ?? 900}
-                      onChange={(e) =>
-                        updateSceneCamera({
-                          worldHeight: Math.max(200, Math.min(10000, Number(e.target.value) || 900)),
-                        })
-                      }
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          updateSceneCamera({ worldHeight: Math.max(200, v) });
+                        }
+                      }}
                       className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-mono font-bold text-slate-800 outline-none focus:ring-2 focus:ring-sky-300"
                     />
                   </div>
                 </div>
-
-                <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-700 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={camera.showWorldBoundsInEdit !== false}
-                    onChange={(e) => updateSceneCamera({ showWorldBoundsInEdit: e.target.checked })}
-                    className="rounded accent-sky-600"
-                  />
-                  <span>Afficher les limites du monde & l'aperçu caméra en mode Édition</span>
-                </label>
               </div>
             )}
+
+            {/* Format / Ratio dédié au Mode Play (sans bandes noires) */}
+            <div className="pt-3 border-t border-slate-200/80 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-bold text-slate-800 text-[11px]">
+                    Format / Ratio du Cadre en Mode Play
+                  </div>
+                  <div className="text-[10px] text-slate-500">
+                    L'éditeur garde tout son espace de travail ; seul le cadre de jeu Play s'ajuste proprement (sans bandes noires).
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                {PLAY_RATIO_OPTIONS.map((opt) => {
+                  const isActive = (camera.playAspectRatio || 'inherit') === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => updateSceneCamera({ playAspectRatio: opt.id })}
+                      className={`px-2 py-2 rounded-xl border text-center transition-all cursor-pointer ${
+                        isActive
+                          ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/40'
+                      }`}
+                      title={opt.hint}
+                    >
+                      <div className="font-black text-[11px] leading-tight">{opt.label}</div>
+                      <div
+                        className={`text-[9px] mt-0.5 truncate ${
+                          isActive ? 'text-emerald-100' : 'text-slate-400'
+                        }`}
+                      >
+                        {opt.hint}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-700 cursor-pointer pt-1">
+              <input
+                type="checkbox"
+                checked={camera.showWorldBoundsInEdit !== false}
+                onChange={(e) => updateSceneCamera({ showWorldBoundsInEdit: e.target.checked })}
+                className="rounded accent-sky-600"
+              />
+              <span>Afficher les limites du monde & l'aperçu du cadre Play en mode Édition</span>
+            </label>
           </section>
 
           {/* 2. Suivi automatique */}

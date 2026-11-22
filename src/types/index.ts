@@ -106,7 +106,8 @@ export type BehaviorType =
   | 'jiggle'
   | 'stroke_wiggle'
   | 'slider'
-  | 'rotate_drag';
+  | 'rotate_drag'
+  | 'snap';
 
 export interface BaseBehaviorConfig {
   id: string;
@@ -324,7 +325,17 @@ export type ParticleShape = 'circle' | 'square' | 'spark' | 'star' | 'custom';
 export type CustomParticleUsageMode = 'random' | 'sequence' | 'lifetime_anim';
 export type ParticleColorMode = 'single' | 'two_colors' | 'gradient_lifetime';
 export type ParticleEmissionShape = 'point' | 'circle' | 'box';
-export type ParticleAnchorPreset = 'center' | 'top' | 'bottom' | 'left' | 'right' | 'pivot';
+export type ParticleAnchorPreset =
+  | 'center'
+  | 'top'
+  | 'bottom'
+  | 'left'
+  | 'right'
+  | 'top_left'
+  | 'top_right'
+  | 'bottom_left'
+  | 'bottom_right'
+  | 'pivot';
 
 export interface CustomParticlePreset {
   id: string;
@@ -559,7 +570,8 @@ export type EntityBehavior =
   | JiggleBehaviorConfig
   | StrokeWiggleBehaviorConfig
   | SliderBehaviorConfig
-  | RotateDragBehaviorConfig;
+  | RotateDragBehaviorConfig
+  | SnapBehaviorConfig;
 
 export interface EntityPivot {
   x: number; // normalisé 0..1 (0.5 = centre horizontal)
@@ -663,6 +675,39 @@ export interface RotateDragBehaviorConfig extends BaseBehaviorConfig {
   outputMin?: number;                   // Borne min mappée (défaut 0)
   outputMax?: number;                   // Borne max mappée (défaut 100)
   showDialInPlay?: boolean;             // Afficher le cadran/arc repère en Play (défaut true)
+}
+
+export type SnapTargetType = 'entity' | 'type' | 'tag' | 'any';
+export type SnapTriggerMode = 'on_release' | 'always_when_near';
+export type SnapAnimationMode = 'instant' | 'magnetic_smooth';
+export type SnapAlignmentMode = 'center' | 'anchor_offset' | 'edge_closest';
+export type SnapAttachBehavior = 'position_only' | 'parent_rigid' | 'parent_spring' | 'freeze_physics';
+
+export interface SnapBehaviorConfig extends BaseBehaviorConfig {
+  type: 'snap';
+  targetType: SnapTargetType;
+  targetEntityId?: EntityId;
+  targetEntityType?: EntityType;
+  targetTag?: string;
+  snapTrigger: SnapTriggerMode;         // 'on_release' | 'always_when_near'
+  snapRadius: number;                   // px, défaut 48
+  snapMode: SnapAnimationMode;          // 'instant' | 'magnetic_smooth'
+  smoothSpeed?: number;                 // 0.05..1, défaut 0.3
+  snapAlignment: SnapAlignmentMode;     // 'center' | 'anchor_offset' | 'edge_closest'
+  sourceAnchor?: ParticleAnchorPreset;  // point d'ancre sur l'objet snappé
+  targetAnchor?: ParticleAnchorPreset;  // point d'ancre sur la cible
+  offsetX?: number;
+  offsetY?: number;
+  matchTargetRotation?: boolean;
+  rotationOffset?: number;
+  attachBehavior: SnapAttachBehavior;   // 'position_only' | 'parent_rigid' | 'parent_spring' | 'freeze_physics'
+  springStiffness?: number;             // utilisé si attachBehavior === 'parent_spring'
+  springDamping?: number;
+  allowPullUnsnap?: boolean;            // défaut true
+  unsnapDistance?: number;              // px (hystérésis d'arrachement, défaut ~1.5x rayon)
+  reSnapCooldownSec?: number;           // s avant ré-aimantation après détachement (défaut 0.35)
+  snappedStateId?: StateId;
+  unsnappedStateId?: StateId;
 }
 
 export type BehaviorOverride = {
@@ -803,7 +848,8 @@ export type TriggerType =
   | 'variable'
   | 'joint_break'
   | 'camera_follow'
-  | 'target_arrived';
+  | 'target_arrived'
+  | 'snap';
 
 export type TriggerPhase =
   | 'click'             // Clic complet (sans drag)
@@ -928,6 +974,7 @@ export interface SceneCameraConfig {
   initialX?: number;        // défaut 0
   initialY?: number;        // défaut 0
   showWorldBoundsInEdit?: boolean; // défaut true
+  playAspectRatio?: SceneAspectRatio | 'inherit'; // Format caméra spécifique au Mode Play (sans bandes noires)
 }
 
 export interface CameraRuntimeState {
@@ -956,7 +1003,9 @@ export type ActionType =
   | 'apply_impulse'
   | 'set_entity_enabled'
   | 'change_scene'
-  | 'camera_action';
+  | 'camera_action'
+  | 'snap_to'
+  | 'unsnap';
 
 export type SpawnLocationMode =
   | 'at_subject'
@@ -1176,6 +1225,24 @@ export interface RuleAction {
   cameraTargetType?: EntityType;
   cameraTargetTag?: string;
   cameraPosition?: Position;
+
+  // Champs pour 'snap_to' et 'unsnap' (Aimantation / Détachement magnétique)
+  snapTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'any';
+  snapTargetEntityId?: EntityId;
+  snapTargetEntityType?: EntityType;
+  snapTargetTag?: string;
+  snapRadius?: number;
+  snapAlignment?: SnapAlignmentMode;
+  snapSourceAnchor?: ParticleAnchorPreset;
+  snapTargetAnchor?: ParticleAnchorPreset;
+  snapOffsetX?: number;
+  snapOffsetY?: number;
+  snapMatchRotation?: boolean;
+  snapRotationOffset?: number;
+  snapAttachBehavior?: SnapAttachBehavior;
+  unsnapImpulseSpeed?: number;
+  unsnapImpulseAngle?: number;
+  unsnapCooldownSec?: number;
 }
 
 export interface DynamicRule {

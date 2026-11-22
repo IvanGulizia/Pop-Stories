@@ -18,6 +18,8 @@ import {
   ParticleColorMode,
   ParticleEmissionShape,
   Position,
+  SnapAlignmentMode,
+  SnapAttachBehavior,
 } from '../../types';
 
 export const SCENE_TRANSITION_OPTIONS: {
@@ -116,6 +118,8 @@ export type ActiveModal =
         | 'choose_particles'
         | 'choose_attach_parent'
         | 'choose_detach_parent'
+        | 'choose_snap_to'
+        | 'choose_unsnap'
         | 'choose_move_entity'
         | 'choose_apply_impulse'
         | 'choose_set_entity_enabled'
@@ -241,6 +245,22 @@ export type ActiveModal =
       cameraTargetTag?: string;
       cameraPosition?: { x: number; y: number };
       cameraMoveTargetKind?: 'position' | 'entity';
+      // Snap / Unsnap config
+      snapTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'any';
+      snapTargetEntityId?: EntityId;
+      snapTargetEntityType?: EntityType;
+      snapTargetTag?: string;
+      snapAlignment?: SnapAlignmentMode;
+      snapSourceAnchor?: ParticleAnchorPreset;
+      snapTargetAnchor?: ParticleAnchorPreset;
+      snapOffsetX?: number;
+      snapOffsetY?: number;
+      snapMatchRotation?: boolean;
+      snapRotationOffset?: number;
+      snapAttachBehavior?: SnapAttachBehavior;
+      unsnapImpulseSpeed?: number;
+      unsnapImpulseAngle?: number;
+      unsnapCooldownSec?: number;
     }
   | null;
 
@@ -269,6 +289,8 @@ export interface WizardData {
     | 'particle_picker'
     | 'attach_parent_picker'
     | 'detach_parent_picker'
+    | 'snap_to_picker'
+    | 'unsnap_picker'
     | 'move_entity_picker'
     | 'apply_impulse_picker'
     | 'set_entity_enabled_picker'
@@ -444,6 +466,22 @@ export interface WizardData {
   cameraTargetTag?: string;
   cameraPosition?: { x: number; y: number };
   cameraMoveTargetKind?: 'position' | 'entity';
+  // Snap / Unsnap config
+  snapTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'any';
+  snapTargetEntityId?: EntityId;
+  snapTargetEntityType?: EntityType;
+  snapTargetTag?: string;
+  snapAlignment?: SnapAlignmentMode;
+  snapSourceAnchor?: ParticleAnchorPreset;
+  snapTargetAnchor?: ParticleAnchorPreset;
+  snapOffsetX?: number;
+  snapOffsetY?: number;
+  snapMatchRotation?: boolean;
+  snapRotationOffset?: number;
+  snapAttachBehavior?: SnapAttachBehavior;
+  unsnapImpulseSpeed?: number;
+  unsnapImpulseAngle?: number;
+  unsnapCooldownSec?: number;
 }
 
 export interface EntityOption {

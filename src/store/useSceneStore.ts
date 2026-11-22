@@ -319,6 +319,8 @@ interface SceneState {
   appMode: AppMode;
   sceneBounds: Size;
   setSceneBounds: (bounds: Size) => void;
+  editSceneBounds: Size;
+  setEditSceneBounds: (bounds: Size) => void;
   entityOrder: EntityId[];
   scenes: ProjectScene[];
   activeSceneId: string;
@@ -603,6 +605,12 @@ interface SceneState {
   deleteRule: (id: string) => void;
   toggleRule: (id: string) => void;
   reorderRules: (sourceId: string, targetId: string, position?: 'above' | 'below') => void;
+  reorderRuleActions: (
+    ruleId: string,
+    sourceActionId: string,
+    targetActionId: string,
+    position?: 'before' | 'after'
+  ) => void;
   setRuleFolder: (ruleId: string, folderId?: string) => void;
 
   // Folder CRUD
@@ -623,11 +631,37 @@ interface SceneState {
   triggerJointBreak: (childId: EntityId, parentId: EntityId, breakPoint?: Position) => void;
   triggerCameraFollowEvent: (targetEntityId: EntityId) => void;
   triggerTargetArrivedEvent: (subjectId: EntityId, targetEntityId?: EntityId, eventPosition?: Position) => void;
+  triggerSnapEvent: (
+    subjectId: EntityId,
+    targetEntityId: EntityId | undefined,
+    phase: 'enter' | 'exit',
+    eventPosition?: Position
+  ) => void;
   evaluateRules: () => void;
   evaluateRulesWithTemp: (tempPositions?: Record<EntityId, Position>) => void;
 }
 
 // Defaults, collision helpers, and rule execution engine moved to storeDefaults.ts, collisionHelpers.ts, and ruleExecutionEngine.ts.
+export function reorderRuleActionsInList(
+  actions: RuleAction[],
+  sourceActionId: string,
+  targetActionId: string,
+  position: 'before' | 'after' = 'before'
+): RuleAction[] {
+  if (!sourceActionId || sourceActionId === targetActionId) return actions;
+  const next = [...actions];
+  const fromIdx = next.findIndex((a) => a.id === sourceActionId);
+  if (fromIdx === -1) return actions;
+  const [moved] = next.splice(fromIdx, 1);
+  const toIdx = next.findIndex((a) => a.id === targetActionId);
+  if (toIdx === -1) {
+    next.push(moved);
+  } else {
+    const insertIdx = position === 'after' ? toIdx + 1 : toIdx;
+    next.splice(insertIdx, 0, moved);
+  }
+  return next;
+}
 
 export const useSceneStore = create<SceneState>()((set, get) => ({
   entities: {},
@@ -991,6 +1025,15 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       set({ sceneBounds: { width: w, height: h } });
     }
   },
+  editSceneBounds: { width: 800, height: 500 },
+  setEditSceneBounds: (bounds) => {
+    const w = Math.max(100, Math.round(bounds.width));
+    const h = Math.max(100, Math.round(bounds.height));
+    const prev = get().editSceneBounds;
+    if (prev.width !== w || prev.height !== h) {
+      set({ editSceneBounds: { width: w, height: h } });
+    }
+  },
   entityOrder: ['plant-1', 'apple-1'],
   layerGroups: JSON.parse(JSON.stringify(initialSceneLayerGroups)),
   selectedLayerId: null,
@@ -1247,7 +1290,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         ...DEFAULT_SCENE_CAMERA_CONFIG,
         ...(target.camera || {}),
       };
-      initPlayCameraRuntime(targetCamera, cur.sceneBounds, targetEntities);
+      initPlayCameraRuntime(targetCamera, cur.sceneBounds, targetEntities, cur.editSceneBounds);
 
       set({
         activeSceneId: target.id,
@@ -1980,7 +2023,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const snapshot = JSON.parse(JSON.stringify(curState.entities));
       const orderSnapshot = [...(curState.entityOrder || Object.keys(curState.entities))];
       const resetVars = { score: 0, ...curState.initialGameVariables };
-      initPlayCameraRuntime(curState.camera, curState.sceneBounds, curState.entities);
+      initPlayCameraRuntime(curState.camera, curState.sceneBounds, curState.entities, curState.editSceneBounds);
       set({
         appMode: 'play',
         scenes: syncedScenes,
@@ -2107,7 +2150,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           ? [...startScene.entityOrder]
           : Object.keys(restoredEntities);
       const startCam: SceneCameraConfig = { ...DEFAULT_SCENE_CAMERA_CONFIG, ...(startScene.camera || {}) };
-      initPlayCameraRuntime(startCam, sceneBounds, restoredEntities);
+      initPlayCameraRuntime(startCam, sceneBounds, restoredEntities, get().editSceneBounds);
       set({
         snapshotScenes: mergedScenes,
         scenes: JSON.parse(JSON.stringify(mergedScenes)),
@@ -2126,7 +2169,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       });
     } else if (snapshotEntities) {
       const restoredEnts = JSON.parse(JSON.stringify(snapshotEntities));
-      initPlayCameraRuntime(camera, sceneBounds, restoredEnts);
+      initPlayCameraRuntime(camera, sceneBounds, restoredEnts, get().editSceneBounds);
       set({
         entities: restoredEnts,
         entityOrder: snapshotEntityOrder ? [...snapshotEntityOrder] : Object.keys(snapshotEntities),
@@ -4337,6 +4380,20 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     get().evaluateRules();
   },
 
+  reorderRuleActions: (ruleId, sourceActionId, targetActionId, position = 'before') => {
+    if (!ruleId || !sourceActionId || sourceActionId === targetActionId) return;
+    set((state) => ({
+      rules: state.rules.map((r) =>
+        r.id === ruleId
+          ? {
+              ...r,
+              actions: reorderRuleActionsInList(r.actions, sourceActionId, targetActionId, position),
+            }
+          : r
+      ),
+    }));
+  },
+
   setRuleFolder: (ruleId, folderId) => {
     set((state) => ({
       rules: state.rules.map((r) => (r.id === ruleId ? { ...r, folderId } : r)),
@@ -5116,6 +5173,88 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     });
   },
 
+  triggerSnapEvent: (subjectId, targetEntityId, phase, eventPosition) => {
+    if (get().appMode !== 'play') return;
+    const { rules, entities, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
+    const subject = entities[subjectId];
+    if (!subject || subject.disabled) return;
+
+    const target = targetEntityId ? entities[targetEntityId] : undefined;
+    const resolvedPoint = eventPosition || {
+      x: Math.round(subject.position.x + subject.size.width / 2),
+      y: Math.round(subject.position.y + subject.size.height / 2),
+    };
+    const now = Date.now();
+
+    const snapRules = rules.filter((r) => r.enabled && r.trigger.type === 'snap');
+    if (snapRules.length === 0) return;
+
+    snapRules.forEach((rule) => {
+      const expectedPhase = rule.trigger.phase === 'exit' ? 'exit' : 'enter';
+      if (expectedPhase !== phase) return;
+
+      if (
+        !matchesEntityFilter(
+          subject,
+          rule.trigger.subjectMode,
+          rule.trigger.subjectId,
+          rule.trigger.subjectType,
+          rule.trigger.subjectTag
+        )
+      ) {
+        return;
+      }
+
+      if (
+        rule.trigger.subjectStateId &&
+        rule.trigger.subjectStateId !== '' &&
+        subject.currentStateId !== rule.trigger.subjectStateId
+      ) {
+        return;
+      }
+
+      const targetMode = rule.trigger.targetMode || 'any';
+      if (targetMode !== 'any') {
+        if (!target) return;
+        if (
+          !matchesEntityFilter(
+            target,
+            targetMode,
+            rule.trigger.targetId,
+            rule.trigger.targetType,
+            rule.trigger.targetTag
+          )
+        ) {
+          return;
+        }
+        if (
+          rule.trigger.targetStateId &&
+          rule.trigger.targetStateId !== '' &&
+          target.currentStateId !== rule.trigger.targetStateId
+        ) {
+          return;
+        }
+      }
+
+      const cooldownKey = `snap_${phase}_${rule.id}_${subject.id}_${target?.id || 'any'}`;
+      if (!canRuleFireWithGate(rule, now, 120, { cooldownKey })) {
+        return;
+      }
+      recordRuleFired(rule, now, { cooldownKey });
+
+      executeRuleActions(rule.actions, {
+        subject,
+        target,
+        eventPosition: resolvedPoint,
+        allEntities: entities,
+        updateEntityState,
+        updateEntityDetails,
+        deleteEntity,
+        spawnEntity,
+      });
+    });
+  },
+
   evaluateRules: () => {
     get().evaluateRulesWithTemp();
   },
@@ -5126,7 +5265,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     if (getIsEvaluatingRules()) return;
     setIsEvaluatingRules(true);
     try {
-      const { entities, rules, activeCollisions, sceneBounds, camera, layerGroups, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
+      const { entities, rules, activeCollisions, sceneBounds, editSceneBounds, camera, layerGroups, updateEntityState, updateEntityDetails, deleteEntity, spawnEntity } = get();
       const collisionRules = rules.filter((r) => r.enabled && r.trigger.type === 'collision');
 
       // Fusionner les positions des entités actuellement déplacées à la souris (activeDragPositions)
@@ -5141,7 +5280,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const nextCollisions: Record<string, boolean> = { ...activeCollisions };
       const allEntitiesList = Object.values(entities).filter((e) => !e.disabled);
       const now = Date.now();
-      const worldBounds = resolveWorldBounds(sceneBounds || { width: 800, height: 500 }, camera);
+      const worldBounds = resolveWorldBounds(sceneBounds || { width: 800, height: 500 }, camera, editSceneBounds);
       const sceneW = Math.max(100, worldBounds.width);
       const sceneH = Math.max(100, worldBounds.height);
 

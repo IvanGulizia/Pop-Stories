@@ -203,6 +203,18 @@ export function computeRelativeParticleOrigin(params: {
     anchorLocalX = -w / 2;
   } else if (anchor === 'right') {
     anchorLocalX = w / 2;
+  } else if (anchor === 'top_left') {
+    anchorLocalX = -w / 2;
+    anchorLocalY = -h / 2;
+  } else if (anchor === 'top_right') {
+    anchorLocalX = w / 2;
+    anchorLocalY = -h / 2;
+  } else if (anchor === 'bottom_left') {
+    anchorLocalX = -w / 2;
+    anchorLocalY = h / 2;
+  } else if (anchor === 'bottom_right') {
+    anchorLocalX = w / 2;
+    anchorLocalY = h / 2;
   } else if (anchor === 'pivot') {
     const effPivot = resolveEffectivePivot(entity, curState, undefined, flipX);
     anchorLocalX = (effPivot.x - 0.5) * w;

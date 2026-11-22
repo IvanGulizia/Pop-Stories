@@ -75,7 +75,8 @@ export const RuleSlotEditModal: React.FC<RuleSlotEditModalProps> = ({
   const isModalRelational = modalRule
     ? modalRule.trigger.type === 'collision' ||
       modalRule.trigger.type === 'proximity' ||
-      modalRule.trigger.type === 'target_arrived'
+      modalRule.trigger.type === 'target_arrived' ||
+      modalRule.trigger.type === 'snap'
     : false;
   const hasModalParams = Boolean(modalRule);
   const modalSubjectType = modalRule?.trigger.subjectType || availableEntityOptions[0]?.type;

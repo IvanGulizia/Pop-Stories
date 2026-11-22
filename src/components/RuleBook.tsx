@@ -80,6 +80,8 @@ export function RuleBook() {
   const setCurrentPage = useSceneStore((state) => state.setRuleBookPage);
   const [draggedRuleId, setDraggedRuleId] = useState<string | null>(null);
   const [dragOverRuleTarget, setDragOverRuleTarget] = useState<{ id: string; position: 'above' | 'below' } | null>(null);
+  const [draggedAction, setDraggedAction] = useState<{ ruleId: string; actionId: string; index: number } | null>(null);
+  const [dragOverAction, setDragOverAction] = useState<{ ruleId: string; actionId: string; position: 'before' | 'after' } | null>(null);
   const RULES_PER_PAGE = 5;
   const [filterObject, setFilterObject] = useState<string>('all');
   const [filterType, setFilterType] = useState<string>('all');
@@ -228,7 +230,9 @@ export function RuleBook() {
     rule: DynamicRule,
     subStep: 'choose_object' | 'choose_state' = 'choose_object'
   ) => {
-    const mode = rule.trigger.targetMode || (rule.trigger.type === 'target_arrived' ? 'any' : 'type');
+    const mode =
+      rule.trigger.targetMode ||
+      (rule.trigger.type === 'target_arrived' || rule.trigger.type === 'snap' ? 'any' : 'type');
     const inst = mode === 'instance' && rule.trigger.targetId ? entities[rule.trigger.targetId] : undefined;
     const type = inst?.type || rule.trigger.targetType || availableEntityOptions[1]?.type || availableEntityOptions[0]?.type || 'plant';
     setActiveModal({
@@ -285,7 +289,8 @@ export function RuleBook() {
     const isCollisionOrProx =
       rule.trigger.type === 'collision' ||
       rule.trigger.type === 'proximity' ||
-      rule.trigger.type === 'target_arrived';
+      rule.trigger.type === 'target_arrived' ||
+      rule.trigger.type === 'snap';
     const subType = rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
     const tarType = rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
     const resolvedTargetType =
@@ -304,6 +309,10 @@ export function RuleBook() {
         ? 'choose_attach_parent'
         : act.type === 'detach_parent'
         ? 'choose_detach_parent'
+        : act.type === 'snap_to'
+        ? 'choose_snap_to'
+        : act.type === 'unsnap'
+        ? 'choose_unsnap'
         : act.type === 'move_entity'
         ? 'choose_move_entity'
         : act.type === 'apply_impulse'
@@ -425,6 +434,21 @@ export function RuleBook() {
       cameraTargetTag: act.cameraTargetTag,
       cameraPosition: act.cameraPosition,
       cameraMoveTargetKind: act.cameraPosition ? 'position' : 'entity',
+      snapTargetMode: act.snapTargetMode,
+      snapTargetEntityId: act.snapTargetEntityId,
+      snapTargetEntityType: act.snapTargetEntityType,
+      snapTargetTag: act.snapTargetTag,
+      snapAlignment: act.snapAlignment,
+      snapSourceAnchor: act.snapSourceAnchor,
+      snapTargetAnchor: act.snapTargetAnchor,
+      snapOffsetX: act.snapOffsetX,
+      snapOffsetY: act.snapOffsetY,
+      snapMatchRotation: act.snapMatchRotation,
+      snapRotationOffset: act.snapRotationOffset,
+      snapAttachBehavior: act.snapAttachBehavior,
+      unsnapImpulseSpeed: act.unsnapImpulseSpeed,
+      unsnapImpulseAngle: act.unsnapImpulseAngle,
+      unsnapCooldownSec: act.unsnapCooldownSec,
     });
   };
 
@@ -479,10 +503,14 @@ export function RuleBook() {
     const needsTarget =
       activeWizard.triggerType === 'collision' ||
       activeWizard.triggerType === 'proximity' ||
-      activeWizard.triggerType === 'target_arrived';
+      activeWizard.triggerType === 'target_arrived' ||
+      activeWizard.triggerType === 'snap';
     const subMode: SelectionMode = activeWizard.subjectMode || 'type';
     const tarMode: SelectionMode =
-      activeWizard.targetMode || (activeWizard.triggerType === 'target_arrived' ? 'any' : 'type');
+      activeWizard.targetMode ||
+      (activeWizard.triggerType === 'target_arrived' || activeWizard.triggerType === 'snap'
+        ? 'any'
+        : 'type');
     const resolvedSubType =
       subMode === 'instance' && activeWizard.subjectId
         ? entities[activeWizard.subjectId]?.type || activeWizard.subjectType
@@ -1142,7 +1170,8 @@ export function RuleBook() {
             const isCollision =
               rule.trigger.type === 'collision' ||
               rule.trigger.type === 'proximity' ||
-              rule.trigger.type === 'target_arrived';
+              rule.trigger.type === 'target_arrived' ||
+              rule.trigger.type === 'snap';
 
             // Find subject display info (Type / #Tag / Instance / Tous)
             const subjectMode = rule.trigger.subjectMode || 'type';
@@ -1163,7 +1192,11 @@ export function RuleBook() {
               : 'Tous les états';
 
             // Find target display info (Type / #Tag / Instance / Tous)
-            const targetMode = rule.trigger.targetMode || (rule.trigger.type === 'target_arrived' ? 'any' : 'type');
+            const targetMode =
+              rule.trigger.targetMode ||
+              (rule.trigger.type === 'target_arrived' || rule.trigger.type === 'snap'
+                ? 'any'
+                : 'type');
             const targetInst = targetMode === 'instance' && rule.trigger.targetId ? entities[rule.trigger.targetId] : undefined;
             const targetType = targetInst?.type || rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
             const targetOpt = availableEntityOptions.find((o) => o.type === targetType);
@@ -1256,6 +1289,16 @@ export function RuleBook() {
               eventName = 'Arrivé sur cible';
               eventIcon = '🏁';
               eventSub = 'Suivre / Aller vers';
+            } else if (rule.trigger.type === 'snap') {
+              if (rule.trigger.phase === 'exit') {
+                eventName = 'Détaché (Unsnap)';
+                eventIcon = '🔓';
+                eventSub = 'Aimant libéré';
+              } else {
+                eventName = 'Aimanté (Snap)';
+                eventIcon = '🧲';
+                eventSub = 'Collé à la cible';
+              }
             } else if (rule.trigger.type === 'collision') {
               const sideMap: Record<string, string> = {
                 top: '↑Haut',
@@ -1312,6 +1355,10 @@ export function RuleBook() {
 
                 <div
                   onDragOver={(e) => {
+                    const types = Array.from(e.dataTransfer.types || []);
+                    if (types.includes('text/rule-action') || draggedAction) {
+                      return;
+                    }
                     e.preventDefault();
                     e.dataTransfer.dropEffect = 'move';
                     const rect = e.currentTarget.getBoundingClientRect();
@@ -1327,6 +1374,12 @@ export function RuleBook() {
                     }
                   }}
                   onDrop={(e) => {
+                    const types = Array.from(e.dataTransfer.types || []);
+                    if (types.includes('text/rule-action') || draggedAction) {
+                      setDraggedAction(null);
+                      setDragOverAction(null);
+                      return;
+                    }
                     e.preventDefault();
                     const sourceId = e.dataTransfer.getData('text/rule-id') || draggedRuleId;
                     if (sourceId && sourceId !== rule.id) {
@@ -2300,6 +2353,29 @@ export function RuleBook() {
                               (act.detachImpulseSpeed || 0) > 0
                                 ? `Lancer ${Math.round(act.detachImpulseSpeed!)}px/s @ ${Math.round(act.detachImpulseAngle ?? -45)}°`
                                 : 'Libérer du parent';
+                          } else if (act.type === 'snap_to') {
+                            actionBadge = 'Aimanter (Snap)';
+                            const snapDst =
+                              act.snapTargetMode === 'subject'
+                                ? 'Sujet'
+                                : act.snapTargetMode === 'target'
+                                ? 'Cible'
+                                : act.snapTargetMode === 'last_spawned'
+                                ? 'Dernier créé'
+                                : act.snapTargetMode === 'tag' && act.snapTargetTag
+                                ? `#${act.snapTargetTag}`
+                                : act.snapTargetMode === 'entity' && act.snapTargetEntityId
+                                ? entities[act.snapTargetEntityId]?.name || 'Entité'
+                                : getEntityObj(act.snapTargetEntityType)?.name ||
+                                  act.snapTargetEntityType ||
+                                  'Cible';
+                            actionDetail = `Coller à ${snapDst}`;
+                          } else if (act.type === 'unsnap') {
+                            actionBadge = 'Désaimanter';
+                            actionDetail =
+                              (act.unsnapImpulseSpeed || 0) > 0
+                                ? `Éjecter ${Math.round(act.unsnapImpulseSpeed!)}px/s`
+                                : 'Libérer aimant';
                           } else if (act.type === 'move_entity') {
                             actionBadge = 'Déplacer';
                             const dist = act.moveDistance ?? 40;
@@ -2448,6 +2524,10 @@ export function RuleBook() {
                               ? 'choose_attach_parent'
                               : act.type === 'detach_parent'
                               ? 'choose_detach_parent'
+                              : act.type === 'snap_to'
+                              ? 'choose_snap_to'
+                              : act.type === 'unsnap'
+                              ? 'choose_unsnap'
                               : act.type === 'move_entity'
                               ? 'choose_move_entity'
                               : act.type === 'apply_impulse'
@@ -2467,9 +2547,118 @@ export function RuleBook() {
                               : 'main';
 
                           const actionSlotKey = `${rule.id}-act-${act.id}`;
+                          const isBeingDragged =
+                            draggedAction?.ruleId === rule.id && draggedAction.actionId === act.id;
+                          const isHoveredDrop =
+                            dragOverAction?.ruleId === rule.id && dragOverAction.actionId === act.id;
+                          const hoveredIdx =
+                            dragOverAction?.ruleId === rule.id
+                              ? rule.actions.findIndex((a) => a.id === dragOverAction.actionId)
+                              : -1;
+                          const insertIndex =
+                            hoveredIdx >= 0 && dragOverAction
+                              ? dragOverAction.position === 'before'
+                                ? hoveredIdx
+                                : hoveredIdx + 1
+                              : -1;
+                          const shiftClass =
+                            draggedAction?.ruleId === rule.id && !isBeingDragged && insertIndex >= 0
+                              ? isHoveredDrop
+                                ? dragOverAction?.position === 'before'
+                                  ? 'translate-x-2'
+                                  : '-translate-x-2'
+                                : actIdx >= insertIndex
+                                ? 'translate-x-1'
+                                : '-translate-x-0.5'
+                              : '';
 
                           return (
-                            <div key={act.id} className="relative group">
+                            <div
+                              key={act.id}
+                              draggable={true}
+                              onDragStart={(e) => {
+                                e.stopPropagation();
+                                e.dataTransfer.setData(
+                                  'text/rule-action',
+                                  JSON.stringify({ ruleId: rule.id, actionId: act.id })
+                                );
+                                e.dataTransfer.effectAllowed = 'move';
+                                setDraggedAction({ ruleId: rule.id, actionId: act.id, index: actIdx });
+                              }}
+                              onDragEnd={(e) => {
+                                e.stopPropagation();
+                                setDraggedAction(null);
+                                setDragOverAction(null);
+                              }}
+                              onDragOver={(e) => {
+                                const types = Array.from(e.dataTransfer.types || []);
+                                if (types.includes('text/rule-action') || draggedAction) {
+                                  if (draggedAction && draggedAction.ruleId !== rule.id) return;
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  e.dataTransfer.dropEffect = 'move';
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  const pos: 'before' | 'after' =
+                                    e.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+                                  if (
+                                    dragOverAction?.ruleId !== rule.id ||
+                                    dragOverAction.actionId !== act.id ||
+                                    dragOverAction.position !== pos
+                                  ) {
+                                    setDragOverAction({ ruleId: rule.id, actionId: act.id, position: pos });
+                                  }
+                                  return;
+                                }
+                                e.preventDefault();
+                                setDragOverSlot(actionSlotKey);
+                              }}
+                              onDragLeave={() => {
+                                setDragOverSlot((prev) => (prev === actionSlotKey ? null : prev));
+                                if (dragOverAction?.ruleId === rule.id && dragOverAction.actionId === act.id) {
+                                  setDragOverAction(null);
+                                }
+                              }}
+                              onDrop={(e) => {
+                                const rawActDrag = e.dataTransfer.getData('text/rule-action');
+                                if (rawActDrag || draggedAction) {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  let srcRuleId = draggedAction?.ruleId;
+                                  let srcActionId = draggedAction?.actionId;
+                                  if (rawActDrag) {
+                                    try {
+                                      const parsed = JSON.parse(rawActDrag);
+                                      srcRuleId = parsed.ruleId;
+                                      srcActionId = parsed.actionId;
+                                    } catch {
+                                      // ignore
+                                    }
+                                  }
+                                  if (srcRuleId === rule.id && srcActionId && srcActionId !== act.id) {
+                                    const dropPos =
+                                      dragOverAction?.ruleId === rule.id && dragOverAction.actionId === act.id
+                                        ? dragOverAction.position
+                                        : 'before';
+                                    useSceneStore
+                                      .getState()
+                                      .reorderRuleActions(rule.id, srcActionId, act.id, dropPos);
+                                  }
+                                  setDraggedAction(null);
+                                  setDragOverAction(null);
+                                  return;
+                                }
+                                handleDropOnSlot(e, rule.id, 'action', act.id);
+                              }}
+                              className={`relative group transition-transform duration-150 ${shiftClass}`}
+                            >
+                              {/* Vertical Insertion Bar (before / after) */}
+                              {isHoveredDrop && dragOverAction?.position === 'before' && !isBeingDragged && (
+                                <div className="absolute -left-2 top-1 bottom-1 w-1.5 bg-indigo-600 rounded-full shadow-md z-20 pointer-events-none" />
+                              )}
+                              {isHoveredDrop && dragOverAction?.position === 'after' && !isBeingDragged && (
+                                <div className="absolute -right-2 top-1 bottom-1 w-1.5 bg-indigo-600 rounded-full shadow-md z-20 pointer-events-none" />
+                              )}
+
                               {/* Remove Action Button */}
                               <button
                                 type="button"
@@ -2494,21 +2683,28 @@ export function RuleBook() {
                                     openRuleActionModal(rule, act, actIdx);
                                   }
                                 }}
-                                onDragOver={(e) => {
-                                  e.preventDefault();
-                                  setDragOverSlot(actionSlotKey);
-                                }}
-                                onDragLeave={() => setDragOverSlot(null)}
-                                onDrop={(e) => handleDropOnSlot(e, rule.id, 'action', act.id)}
-                                className={`w-32 h-36 bg-white border rounded-2xl p-3 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group ${
-                                  dragOverSlot === actionSlotKey
+                                className={`w-32 h-36 bg-white border rounded-2xl p-2.5 flex flex-col items-center justify-between shadow-xs transition-all cursor-pointer text-center group ${
+                                  isBeingDragged
+                                    ? 'opacity-45 scale-95 rotate-1 border-indigo-400 shadow-lg ring-2 ring-indigo-300/60'
+                                    : dragOverSlot === actionSlotKey
                                     ? 'border-indigo-500 ring-4 ring-indigo-300/50 bg-indigo-50/40 scale-105'
                                     : 'border-slate-200 hover:border-slate-400'
                                 }`}
-                                title="Cliquer pour modifier cette action"
+                                title="Glisser-déposer pour réordonner • Cliquer pour modifier"
                               >
-                                <div className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">
-                                  {actionBadge}
+                                <div className="w-full flex items-center justify-between gap-1">
+                                  <span
+                                    className="text-slate-300 group-hover:text-indigo-500 cursor-grab active:cursor-grabbing shrink-0"
+                                    title="Glisser pour déplacer cette action"
+                                  >
+                                    <GripVertical className="w-3.5 h-3.5" />
+                                  </span>
+                                  <div className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider truncate flex-1">
+                                    {actionBadge}
+                                  </div>
+                                  <span className="text-[9px] font-black text-slate-400 bg-slate-100 px-1 rounded shrink-0">
+                                    #{actIdx + 1}
+                                  </span>
                                 </div>
 
                                 {act.type === 'delete_entity' ? (
@@ -2526,6 +2722,14 @@ export function RuleBook() {
                                 ) : act.type === 'detach_parent' ? (
                                   <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
                                     ✂️
+                                  </div>
+                                ) : act.type === 'snap_to' ? (
+                                  <div className="w-14 h-14 rounded-2xl bg-cyan-50 border border-cyan-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                    🧲
+                                  </div>
+                                ) : act.type === 'unsnap' ? (
+                                  <div className="w-14 h-14 rounded-2xl bg-cyan-50 border border-cyan-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                    🔓
                                   </div>
                                 ) : act.type === 'move_entity' ? (
                                   <div className="w-14 h-14 rounded-2xl bg-sky-50 border border-sky-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">

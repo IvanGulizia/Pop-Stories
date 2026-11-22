@@ -4,6 +4,7 @@ import {
   Entity,
   Position,
   RuleAction,
+  SceneAspectRatio,
   SceneCameraConfig,
   Size,
 } from '../types';
@@ -24,6 +25,7 @@ export const DEFAULT_SCENE_CAMERA_CONFIG: SceneCameraConfig = {
   initialX: 0,
   initialY: 0,
   showWorldBoundsInEdit: true,
+  playAspectRatio: 'inherit',
 };
 
 export interface SimpleCameraView {
@@ -73,15 +75,93 @@ export function clampCameraZoom(zoom: number | undefined): number {
   return Math.max(0.25, Math.min(3, Math.round(z * 1000) / 1000));
 }
 
-export function resolveWorldBounds(viewportBounds: Size, camera?: SceneCameraConfig): Size {
+export function resolveEffectivePlayAspectRatio(
+  editRatio: SceneAspectRatio,
+  camera?: SceneCameraConfig
+): SceneAspectRatio {
+  if (!camera?.playAspectRatio || camera.playAspectRatio === 'inherit') {
+    return editRatio;
+  }
+  return camera.playAspectRatio;
+}
+
+export function getAspectRatioNumeric(ratio: SceneAspectRatio): number | null {
+  switch (ratio) {
+    case '16:9':
+      return 16 / 9;
+    case '4:3':
+      return 4 / 3;
+    case '1:1':
+      return 1;
+    case '9:16':
+      return 9 / 16;
+    default:
+      return null;
+  }
+}
+
+export function fitAspectRatioSize(
+  availWidth: number,
+  availHeight: number,
+  ratio: SceneAspectRatio
+): Size {
+  const safeW = Math.max(100, Math.floor(Number.isFinite(availWidth) ? availWidth : 800));
+  const safeH = Math.max(100, Math.floor(Number.isFinite(availHeight) ? availHeight : 500));
+  const targetRatio = getAspectRatioNumeric(ratio);
+  if (!targetRatio) {
+    return { width: safeW, height: safeH };
+  }
+  const currentRatio = safeW / safeH;
+  if (currentRatio > targetRatio) {
+    const height = safeH;
+    const width = Math.max(100, Math.min(safeW, Math.round(height * targetRatio)));
+    return { width, height };
+  }
+  const width = safeW;
+  const height = Math.max(100, Math.min(safeH, Math.round(width / targetRatio)));
+  return { width, height };
+}
+
+export function resolveWorldBounds(
+  viewportBounds: Size,
+  camera?: SceneCameraConfig,
+  editViewportBounds?: Size
+): Size {
   const vw = Math.max(100, Math.round(viewportBounds.width || 800));
   const vh = Math.max(100, Math.round(viewportBounds.height || 500));
   if (!camera || camera.worldMode !== 'custom') {
-    return { width: vw, height: vh };
+    const ew = Math.round(editViewportBounds?.width || 0);
+    const eh = Math.round(editViewportBounds?.height || 0);
+    return {
+      width: Math.max(vw, ew),
+      height: Math.max(vh, eh),
+    };
   }
   const ww = Math.max(200, Math.round(camera.worldWidth || vw));
   const wh = Math.max(200, Math.round(camera.worldHeight || vh));
   return { width: ww, height: wh };
+}
+
+export function computeEditPlayCameraPreviewSize(
+  editViewportSize: Size,
+  outerWorkspaceSize: Size | null | undefined,
+  editRatio: SceneAspectRatio,
+  camera?: SceneCameraConfig
+): Size {
+  const effRatio = resolveEffectivePlayAspectRatio(editRatio, camera);
+  const safeEditW = Math.max(100, Math.round(editViewportSize.width || 800));
+  const safeEditH = Math.max(100, Math.round(editViewportSize.height || 500));
+  const refSize =
+    outerWorkspaceSize && outerWorkspaceSize.width > 120 && outerWorkspaceSize.height > 120
+      ? fitAspectRatioSize(outerWorkspaceSize.width, outerWorkspaceSize.height, effRatio)
+      : effRatio === editRatio
+      ? { width: safeEditW, height: safeEditH }
+      : fitAspectRatioSize(safeEditW, safeEditH, effRatio);
+  const safeZoom = clampCameraZoom(camera?.zoom ?? 1);
+  return {
+    width: Math.max(80, Math.round(refSize.width / safeZoom)),
+    height: Math.max(80, Math.round(refSize.height / safeZoom)),
+  };
 }
 
 export function getVisibleWorldRect(

@@ -49,7 +49,8 @@ export function RuleCreationWizardModal({
   const isWizardRelational =
     activeWizard.triggerType === 'collision' ||
     activeWizard.triggerType === 'proximity' ||
-    activeWizard.triggerType === 'target_arrived';
+    activeWizard.triggerType === 'target_arrived' ||
+    activeWizard.triggerType === 'snap';
   const wizardObjectPhase = activeWizard.objectPhase || 'subject';
   const hasWizardParams = true;
 

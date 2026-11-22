@@ -1,3 +1,13 @@
+## [Phase 10.44 — Sous-phase D] - 2026-11-22
+### Ajouté & Amélioré (Ratio Caméra Play, Drag & Drop RuleBook & Comportement Snap)
+- **Ratio Caméra dédié au Mode Play (`cameraSolver.ts`, `SceneCameraModal.tsx`, `Scene.tsx`, `types/index.ts`)** :
+  - Ajout de `playAspectRatio` (`'inherit' | '16:9' | '4:3' | '1:1' | '9:16' | 'free'`) sur `SceneCameraConfig` : en Mode Play, le conteneur du canvas adopte exactement les dimensions ajustées sans bandes noires, tandis qu'en Mode Édition un cadre pointillé d'aperçu matérialise le cadrage Play (`computeEditPlayCameraPreviewSize`).
+- **Drag & Drop des cartes d'actions dans le RuleBook (`RuleBook.tsx`, `useSceneStore.ts`)** :
+  - Réorganisation directe par glisser-déposer des cartes d'actions au sein d'une règle (`reorderRuleActions` / `reorderRuleActionsInList`) avec poignée dédiée, effet de décalage visuel (`translate-x-1.5 opacity-60`) et repère d'insertion haut/bas.
+- **Comportement `snap` (Aimant / Magnétisme) & Événements/Actions RuleBook (`snapSolver.ts`, `matterPhysicsEngine.ts`, `ruleExecutionEngine.ts`, `useSceneStore.ts`, `SnapBehaviorControls.tsx`, `SnapActionConfigEditor.tsx`, `SceneGizmoOverlay.tsx`, `components/rulebook/*`)** :
+  - Solveur dédié (`computeSnapGoalForTarget`, `stepSnapSolver`) gérant les modes `always_when_near` et `on_release`, l'approche `instant` ou `magnetic_smooth`, 3 alignements (`center`, `anchor_offset`, `edge_closest`), 9 ancres (dont coins) partagées avec `ParticleAnchorPreset`, alignement de rotation optionnel, attachement (`position_only`, `freeze_physics`, `parent_rigid`, `parent_spring`), arrachement par traction (`unsnapDistance`), délai anti-recollage (`reSnapCooldownSec`) et états visuels `snappedStateId`/`unsnappedStateId`.
+  - Événement RuleBook `snap` (`enter` / `exit` via `triggerSnapEvent`) et actions `snap_to` / `unsnap` configurables dans les modales et l'assistant RuleBook + gizmos d'aimantation et suite Vitest complète (`src/__tests__/subphaseD_features.test.ts`).
+
 ## [Phase 10.43 — Sous-phase C] - 2026-11-21
 ### Ajouté & Amélioré (Studio Particules Avancé, Collection & Spawn Relatif)
 - **Studio Particules Avancé (`ParticleEditorModal.tsx`, `particleSystem.ts`, `matterPhysicsEngine.ts`, `types/index.ts`)** :

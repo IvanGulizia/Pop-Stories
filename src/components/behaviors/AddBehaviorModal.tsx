@@ -7,6 +7,7 @@ import {
   Gamepad2,
   Hand,
   Heart,
+  Magnet,
   Move,
   Plus,
   Repeat,
@@ -121,6 +122,22 @@ export function AddBehaviorModal({ isOpen, onClose, onAddBehavior }: AddBehavior
                 <div className="font-bold text-slate-800 text-xs">Cadran Rotatif au Drag (Volant / Potentiomètre)</div>
                 <div className="text-[11px] text-slate-500">
                   Rotation circulaire ou linéaire autour du pivot avec inertie, butées, crans et retour élastique.
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onAddBehavior('snap')}
+              className="w-full p-2.5 rounded-2xl border border-cyan-200 bg-cyan-50/20 hover:border-cyan-400 hover:bg-cyan-50/60 flex items-center gap-3 transition-all text-left cursor-pointer group"
+            >
+              <div className="w-8 h-8 rounded-xl bg-cyan-100 text-cyan-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Magnet className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="font-bold text-slate-800 text-xs">Aimant &amp; Snap (Collage / Emboîtement)</div>
+                <div className="text-[11px] text-slate-500">
+                  Attire et aligne l'objet sur une cible à portée (au relâcher ou dès l'approche) avec détachement souple.
                 </div>
               </div>
             </button>

@@ -40,9 +40,26 @@ function syncFollowTargetChange(
 export function initPlayCameraRuntime(
   config?: SceneCameraConfig,
   viewport: Size = { width: 800, height: 500 },
-  entities?: Record<string, Entity>
+  entities?: Record<string, Entity>,
+  editBounds?: Size
 ): CameraRuntimeState {
   controllerState = createInitialCameraControllerState(config, viewport, entities);
+  if (editBounds) {
+    const worldBounds = resolveWorldBounds(viewport, config, editBounds);
+    controllerState = createInitialCameraControllerState(
+      config ? { ...config, worldMode: config.worldMode || 'viewport' } : undefined,
+      viewport,
+      entities
+    );
+    const clamped = {
+      x: Math.max(0, Math.min(Math.max(0, worldBounds.width - viewport.width / Math.max(0.25, controllerState.zoom)), controllerState.x)),
+      y: Math.max(0, Math.min(Math.max(0, worldBounds.height - viewport.height / Math.max(0.25, controllerState.zoom)), controllerState.y)),
+    };
+    if (config?.clampToWorld !== false) {
+      controllerState.x = clamped.x;
+      controllerState.y = clamped.y;
+    }
+  }
   lastEmittedFollowTargetId = null;
   pendingFollowTargetId = null;
   syncFollowTargetChange(entities, config);
@@ -75,9 +92,10 @@ export function stepPlayCameraRuntime(
   dt: number,
   entities: Record<string, Entity>,
   viewport: Size,
-  config?: SceneCameraConfig
+  config?: SceneCameraConfig,
+  editBounds?: Size
 ): CameraRuntimeState {
-  const worldBounds = resolveWorldBounds(viewport, config);
+  const worldBounds = resolveWorldBounds(viewport, config, editBounds);
   latestPlayCamera = stepCameraController(
     controllerState,
     dt,
@@ -99,9 +117,10 @@ export function dispatchPlayCameraAction(
     lastSpawnedId?: string | null;
   },
   viewport: Size,
-  config?: SceneCameraConfig
+  config?: SceneCameraConfig,
+  editBounds?: Size
 ): void {
-  const worldBounds = resolveWorldBounds(viewport, config);
+  const worldBounds = resolveWorldBounds(viewport, config, editBounds);
   applyCameraCommandToController(controllerState, action, context, viewport, worldBounds, config);
   syncFollowTargetChange(context.entities, config);
 }
