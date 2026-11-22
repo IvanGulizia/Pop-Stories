@@ -322,6 +322,9 @@ export interface BoundaryBehaviorConfig extends BaseBehaviorConfig {
 
 export type ParticleShape = 'circle' | 'square' | 'spark' | 'star' | 'custom';
 export type CustomParticleUsageMode = 'random' | 'sequence' | 'lifetime_anim';
+export type ParticleColorMode = 'single' | 'two_colors' | 'gradient_lifetime';
+export type ParticleEmissionShape = 'point' | 'circle' | 'box';
+export type ParticleAnchorPreset = 'center' | 'top' | 'bottom' | 'left' | 'right' | 'pivot';
 
 export interface CustomParticlePreset {
   id: string;
@@ -331,24 +334,96 @@ export interface CustomParticlePreset {
   createdAt: number;
 }
 
-export interface ParticleEmitterBehaviorConfig extends BaseBehaviorConfig {
-  type: 'particle_emitter';
-  rate: number;          // particules / seconde (1..40)
+export interface ParticleEffectConfig {
+  shape: ParticleShape;
+  customParticleId?: string;
+  customParticleIds?: string[];
+  customParticleMode?: CustomParticleUsageMode;
+  useParticleTint?: boolean;
   color: string;
   color2?: string;
+  colorMode?: ParticleColorMode;
+  rate?: number;
+  rateMax?: number;
+  count?: number;
+  countMax?: number;
+  speed: number;
+  speedMax?: number;
+  size: number;
+  sizeMax?: number;
+  endSizeScale?: number;
+  lifetime: number;
+  lifetimeMax?: number;
+  gravity: number;
+  drag?: number;
+  opacityStart?: number;
+  opacityEnd?: number;
+  spinSpeed?: number;
+  spread: number;
+  angle: number;
+  offsetX?: number;
+  offsetY?: number;
+  anchor?: ParticleAnchorPreset;
+  followRotation?: boolean;
+  emissionShape?: ParticleEmissionShape;
+  emissionRadius?: number;
+  emissionWidth?: number;
+  emissionHeight?: number;
+  emitterDuration?: number;
+  emitterLoop?: boolean;
+  initialBurstCount?: number;
+  burstInterval?: number;
+  burstCount?: number;
+}
+
+export interface ParticleEffectPreset {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt?: number;
+  config: ParticleEffectConfig;
+  embeddedCustomSprites?: CustomParticlePreset[];
+}
+
+export interface ParticleEmitterBehaviorConfig extends BaseBehaviorConfig {
+  type: 'particle_emitter';
+  rate: number;          // particules / seconde (1..40+)
+  rateMax?: number;
+  color: string;
+  color2?: string;
+  colorMode?: ParticleColorMode;
   shape: ParticleShape;
   customParticleId?: string;
   customParticleIds?: string[];
   customParticleMode?: CustomParticleUsageMode;
   useParticleTint?: boolean;
   speed: number;         // px/s
+  speedMax?: number;
   size: number;          // px
+  sizeMax?: number;
+  endSizeScale?: number;
   lifetime: number;      // secondes
+  lifetimeMax?: number;
   gravity: number;       // px/s²
+  drag?: number;
+  opacityStart?: number;
+  opacityEnd?: number;
+  spinSpeed?: number;
   spread: number;        // cône en degrés (0..360)
   angle: number;         // direction en degrés (-90 = haut)
-  offsetX?: number;      // décalage X par rapport au centre
-  offsetY?: number;      // décalage Y par rapport au centre
+  offsetX?: number;      // décalage X par rapport à l'ancre
+  offsetY?: number;      // décalage Y par rapport à l'ancre
+  anchor?: ParticleAnchorPreset;
+  followRotation?: boolean;
+  emissionShape?: ParticleEmissionShape;
+  emissionRadius?: number;
+  emissionWidth?: number;
+  emissionHeight?: number;
+  emitterDuration?: number;    // 0 ou undefined = infini ; > 0 = durée finie en secondes
+  emitterLoop?: boolean;
+  initialBurstCount?: number;  // salve immédiate au démarrage
+  burstInterval?: number;      // salves périodiques toutes les X s
+  burstCount?: number;
 }
 
 export interface FleeBehaviorConfig extends BaseBehaviorConfig {
@@ -999,24 +1074,52 @@ export interface RuleAction {
   detachImpulseAngle?: number;       // Angle d'éjection en degrés (0 = droite, -90 = haut)
 
   // Champs pour 'emit_particles'
-  particleOriginMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'event_point';
+  particleOriginMode?:
+    | 'subject'
+    | 'target'
+    | 'entity'
+    | 'type'
+    | 'tag'
+    | 'last_spawned'
+    | 'event_point'
+    | 'coordinates'
+    | 'mouse';
   particleOriginEntityId?: EntityId;
   particleOriginEntityType?: EntityType;
   particleOriginTag?: string;
+  particleCoords?: Position;
+  particleAnchor?: ParticleAnchorPreset;
+  particleOffsetX?: number;
+  particleOffsetY?: number;
+  particleMatchOriginRotation?: boolean;
   particleCount?: number;
+  particleCountMax?: number;
   particleColor?: string;
   particleColor2?: string;
+  particleColorMode?: ParticleColorMode;
   particleShape?: ParticleShape;
   customParticleId?: string;
   customParticleIds?: string[];
   customParticleMode?: CustomParticleUsageMode;
   useParticleTint?: boolean;
   particleSpeed?: number;
+  particleSpeedMax?: number;
   particleSize?: number;
+  particleSizeMax?: number;
+  particleEndSizeScale?: number;
   particleLifetime?: number;
+  particleLifetimeMax?: number;
   particleGravity?: number;
+  particleDrag?: number;
+  particleOpacityStart?: number;
+  particleOpacityEnd?: number;
+  particleSpinSpeed?: number;
   particleSpread?: number;
   particleAngle?: number;
+  particleEmissionShape?: ParticleEmissionShape;
+  particleEmissionRadius?: number;
+  particleEmissionWidth?: number;
+  particleEmissionHeight?: number;
 
   // Champs pour 'move_entity' (Déplacer de X px dans une direction)
   moveDistance?: number;
@@ -1224,6 +1327,7 @@ export interface ProjectExportData {
   folders?: RuleFolder[];
   customSounds?: CustomSound[];
   customParticles?: CustomParticlePreset[];
+  particlePresets?: ParticleEffectPreset[];
   layerGroups?: SceneLayerGroup[];
   backgroundColor?: string;
   camera?: SceneCameraConfig;

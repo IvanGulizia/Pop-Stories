@@ -43,6 +43,7 @@ import {
   ProjectScene,
   SceneTransitionType,
   SceneCameraConfig,
+  ParticleEffectPreset,
 } from '../types';
 import { getEntityWorldColliderBounds } from '../utils/collider';
 import { DEFAULT_SCENE_CAMERA_CONFIG, resolveWorldBounds } from '../utils/cameraSolver';
@@ -80,6 +81,8 @@ import {
   loadAutoSaveDraftFromDB,
   saveAutoSaveDraftInDB,
   clearAutoSaveDraftFromDB,
+  loadParticleCollectionFromDB,
+  saveParticleCollectionInDB,
 } from '../utils/localStorageDB';
 import defaultCursorPack from '../data/defaultCursorPack.json';
 import { DEFAULT_GIZMO_SETTINGS, resolveGizmoSettings } from '../utils/gizmoHelpers';
@@ -295,6 +298,17 @@ interface SceneState {
   addCustomParticle: (preset: Omit<CustomParticlePreset, 'id' | 'createdAt'>) => string;
   updateCustomParticle: (id: string, partial: Partial<CustomParticlePreset>) => void;
   deleteCustomParticle: (id: string) => void;
+  projectParticlePresets: ParticleEffectPreset[];
+  localParticleCollection: Record<string, ParticleEffectPreset>;
+  saveProjectParticlePreset: (
+    preset: Omit<ParticleEffectPreset, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
+  ) => string;
+  deleteProjectParticlePreset: (id: string) => void;
+  saveParticleToLocalCollection: (
+    preset: Omit<ParticleEffectPreset, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
+  ) => string;
+  deleteParticleFromLocalCollection: (id: string) => void;
+  importEmbeddedParticleSprites: (sprites?: CustomParticlePreset[]) => Record<string, string>;
   layerGroups: SceneLayerGroup[];
   projectPalette: ProjectPaletteColor[];
   updateProjectPaletteColor: (paletteId: string, newHexColor: string) => void;
@@ -720,9 +734,10 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
 
   hydrateLocalStorage: async () => {
     try {
-      const [slots, coll, draft] = await Promise.all([
+      const [slots, coll, particleColl, draft] = await Promise.all([
         loadAllSlotsFromDB(),
         loadCollectionFromDB(),
+        loadParticleCollectionFromDB(),
         loadAutoSaveDraftFromDB(),
       ]);
       const hasContentInDraft = Boolean(
@@ -742,6 +757,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         projectSlots: slots,
         localEntityCollection:
           Object.keys(coll).length > 0 ? coll : state.localEntityCollection,
+        localParticleCollection:
+          particleColl && typeof particleColl === 'object' ? particleColl : state.localParticleCollection,
         autoSaveDraft: draft,
         lastAutoSaveAt: draft?.updatedAt || null,
         hasRecoveryDraftOnBoot: hasContentInDraft,
@@ -960,6 +977,8 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   entityGroups: [],
   customSounds: [],
   customParticles: [],
+  projectParticlePresets: [],
+  localParticleCollection: {},
   activeCollisions: {},
   selectedEntityId: null,
   appMode: 'edit',
@@ -3743,6 +3762,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       entityGroups: [],
       customSounds: [],
       customParticles: [],
+      projectParticlePresets: [],
       layerGroups: JSON.parse(JSON.stringify(emptyScene.layerGroups)),
       backgroundColor: '#ffffff',
       camera: { ...DEFAULT_SCENE_CAMERA_CONFIG },
@@ -3788,6 +3808,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       folders: JSON.parse(JSON.stringify(defScene.folders)),
       customSounds: [],
       customParticles: [],
+      projectParticlePresets: [],
       layerGroups: JSON.parse(JSON.stringify(defScene.layerGroups)),
       backgroundColor: '#ffffff',
       camera: { ...DEFAULT_SCENE_CAMERA_CONFIG },
@@ -3838,6 +3859,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       folders: built.folders,
       customSounds: [],
       customParticles: [],
+      projectParticlePresets: [],
       layerGroups: built.layerGroups,
       backgroundColor: '#ffffff',
       camera: { ...DEFAULT_SCENE_CAMERA_CONFIG },
@@ -3887,6 +3909,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       folders: state.folders,
       customSounds: state.customSounds,
       customParticles: state.customParticles,
+      particlePresets: state.projectParticlePresets,
       layerGroups: state.layerGroups,
       backgroundColor: state.backgroundColor,
       camera: state.camera,
@@ -3982,6 +4005,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       const importedEntityGroups = Array.isArray(data.entityGroups) ? data.entityGroups : [];
       const importedCustomSounds = Array.isArray(data.customSounds) ? data.customSounds : [];
       const importedCustomParticles = Array.isArray(data.customParticles) ? data.customParticles : [];
+      const importedParticlePresets = Array.isArray(data.particlePresets) ? data.particlePresets : [];
       const importedLayerGroups = normalizeLayerGroups(targetActiveScene.layerGroups);
       const importedSettings = data.settings && typeof data.settings === 'object' ? data.settings : undefined;
       const importedPalette: ProjectPaletteColor[] = Array.isArray(data.projectPalette) && data.projectPalette.length > 0
@@ -4015,6 +4039,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         folders: importedFolders,
         customSounds: importedCustomSounds,
         customParticles: importedCustomParticles,
+        projectParticlePresets: importedParticlePresets,
         layerGroups: importedLayerGroups,
         projectPalette: importedPalette,
         initialGameVariables: importedVariables,
@@ -4411,6 +4436,148 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     set((state) => ({
       customParticles: state.customParticles.filter((p) => p.id !== id),
     }));
+  },
+
+  importEmbeddedParticleSprites: (sprites) => {
+    const idMap: Record<string, string> = {};
+    if (!sprites || sprites.length === 0) return idMap;
+
+    const existing = get().customParticles;
+    const toAdd: CustomParticlePreset[] = [];
+
+    sprites.forEach((sprite) => {
+      if (!sprite || !sprite.id) return;
+      const serialized = JSON.stringify(sprite.vectorPaths || []);
+      const sameId = existing.find((e) => e.id === sprite.id);
+      if (sameId && JSON.stringify(sameId.vectorPaths || []) === serialized) {
+        idMap[sprite.id] = sameId.id;
+        return;
+      }
+      const sameGeom = existing.find(
+        (e) => e.name === sprite.name && JSON.stringify(e.vectorPaths || []) === serialized
+      );
+      if (sameGeom) {
+        idMap[sprite.id] = sameGeom.id;
+        return;
+      }
+      const newId = sameId
+        ? `part-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+        : sprite.id;
+      idMap[sprite.id] = newId;
+      toAdd.push({
+        ...JSON.parse(JSON.stringify(sprite)),
+        id: newId,
+        createdAt: sprite.createdAt || Date.now(),
+      });
+    });
+
+    if (toAdd.length > 0) {
+      set((state) => ({
+        customParticles: [...state.customParticles, ...toAdd],
+      }));
+      toAdd.forEach((s) => invalidateCustomParticleSprite(s.id));
+    }
+
+    return idMap;
+  },
+
+  saveProjectParticlePreset: (presetData) => {
+    const state = get();
+    const now = Date.now();
+    const cleanConfig = JSON.parse(JSON.stringify(presetData.config));
+    const referencedIds = new Set<string>();
+    if (cleanConfig.customParticleId) referencedIds.add(cleanConfig.customParticleId);
+    if (Array.isArray(cleanConfig.customParticleIds)) {
+      cleanConfig.customParticleIds.forEach((cid: string) => cid && referencedIds.add(cid));
+    }
+    const embeddedSprites =
+      presetData.embeddedCustomSprites && presetData.embeddedCustomSprites.length > 0
+        ? JSON.parse(JSON.stringify(presetData.embeddedCustomSprites))
+        : state.customParticles
+            .filter((sp) => referencedIds.has(sp.id))
+            .map((sp) => JSON.parse(JSON.stringify(sp)));
+
+    const existingIdx = presetData.id
+      ? state.projectParticlePresets.findIndex((p) => p.id === presetData.id)
+      : -1;
+    const id =
+      existingIdx >= 0
+        ? state.projectParticlePresets[existingIdx].id
+        : presetData.id || `fx-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+    const entry: ParticleEffectPreset = {
+      id,
+      name: (presetData.name || 'Effet particules').trim() || 'Effet particules',
+      createdAt: existingIdx >= 0 ? state.projectParticlePresets[existingIdx].createdAt : now,
+      updatedAt: now,
+      config: cleanConfig,
+      ...(embeddedSprites.length > 0 ? { embeddedCustomSprites: embeddedSprites } : {}),
+    };
+
+    const nextList =
+      existingIdx >= 0
+        ? state.projectParticlePresets.map((p, idx) => (idx === existingIdx ? entry : p))
+        : [...state.projectParticlePresets, entry];
+    set({ projectParticlePresets: nextList });
+    return id;
+  },
+
+  deleteProjectParticlePreset: (id) => {
+    set((state) => ({
+      projectParticlePresets: state.projectParticlePresets.filter((p) => p.id !== id),
+    }));
+  },
+
+  saveParticleToLocalCollection: (presetData) => {
+    const state = get();
+    const now = Date.now();
+    const cleanConfig = JSON.parse(JSON.stringify(presetData.config));
+    const referencedIds = new Set<string>();
+    if (cleanConfig.customParticleId) referencedIds.add(cleanConfig.customParticleId);
+    if (Array.isArray(cleanConfig.customParticleIds)) {
+      cleanConfig.customParticleIds.forEach((cid: string) => cid && referencedIds.add(cid));
+    }
+    const embeddedSprites =
+      presetData.embeddedCustomSprites && presetData.embeddedCustomSprites.length > 0
+        ? JSON.parse(JSON.stringify(presetData.embeddedCustomSprites))
+        : state.customParticles
+            .filter((sp) => referencedIds.has(sp.id))
+            .map((sp) => JSON.parse(JSON.stringify(sp)));
+
+    const existing = presetData.id ? state.localParticleCollection[presetData.id] : undefined;
+    const id = existing
+      ? existing.id
+      : presetData.id || `gfx-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+    const entry: ParticleEffectPreset = {
+      id,
+      name: (presetData.name || 'Effet particules').trim() || 'Effet particules',
+      createdAt: existing ? existing.createdAt : now,
+      updatedAt: now,
+      config: cleanConfig,
+      ...(embeddedSprites.length > 0 ? { embeddedCustomSprites: embeddedSprites } : {}),
+    };
+
+    const nextColl = {
+      ...state.localParticleCollection,
+      [id]: entry,
+    };
+    set({ localParticleCollection: nextColl });
+    saveParticleCollectionInDB(nextColl).catch((err) => {
+      console.error('Failed to save particle collection to DB:', err);
+    });
+    return id;
+  },
+
+  deleteParticleFromLocalCollection: (id) => {
+    const state = get();
+    if (!state.localParticleCollection[id]) return;
+    const nextColl = { ...state.localParticleCollection };
+    delete nextColl[id];
+    set({ localParticleCollection: nextColl });
+    saveParticleCollectionInDB(nextColl).catch((err) => {
+      console.error('Failed to delete particle preset from DB:', err);
+    });
   },
 
   triggerKeyEvent: (keyName, phase = 'down', keyCode) => {

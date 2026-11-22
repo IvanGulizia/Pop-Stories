@@ -33,6 +33,7 @@ import { ApplyImpulseConfigEditor } from './ApplyImpulseConfigEditor';
 import { SetEntityEnabledConfigEditor } from './SetEntityEnabledConfigEditor';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 import { useSceneStore, EMPTY_RECORD, EMPTY_LIST } from '../../store/useSceneStore';
+import { ParticleActionOriginSection } from '../particles/ParticleActionOriginSection';
 
 interface RuleActionModalProps {
   activeModal: Extract<NonNullable<ActiveModal>, { type: 'action' }>;
@@ -1899,92 +1900,15 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
             </div>
 
             <div className="space-y-1.5 bg-slate-50 p-3 rounded-2xl border border-slate-200">
-              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">Source d'émission</span>
-                <select
-                  value={activeModal.particleOriginMode || 'subject'}
-                  onChange={(e) =>
-                    setActiveModal({ ...activeModal, particleOriginMode: e.target.value as any })
-                  }
-                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                >
-                  <option value="subject">Sujet</option>
-                  {(isCollision || rule.trigger.type === 'proximity') && (
-                    <option value="target">Cible touchée</option>
-                  )}
-                  <option value="event_point">💥 Point exact (Collision / Clic)</option>
-                  <option value="entity">Entité de la scène</option>
-                  <option value="type">Par Type d'objet</option>
-                  <option value="tag">Par #Tag</option>
-                  <option value="last_spawned">Dernier objet créé</option>
-                </select>
-              </div>
-
-              {activeModal.particleOriginMode === 'entity' && (
-                <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                  <span className="font-bold text-slate-700 text-xs">Entité source</span>
-                  <select
-                    value={activeModal.particleOriginEntityId || Object.keys(entities)[0] || ''}
-                    onChange={(e) =>
-                      setActiveModal({ ...activeModal, particleOriginEntityId: e.target.value })
-                    }
-                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                  >
-                    {Object.values(entities).map((ent) => (
-                      <option key={ent.id} value={ent.id}>
-                        {ent.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {activeModal.particleOriginMode === 'type' && (
-                <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                  <span className="font-bold text-slate-700 text-xs">Type source</span>
-                  <select
-                    value={
-                      activeModal.particleOriginEntityType ||
-                      availableEntityOptions[0]?.type ||
-                      ''
-                    }
-                    onChange={(e) =>
-                      setActiveModal({ ...activeModal, particleOriginEntityType: e.target.value })
-                    }
-                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                  >
-                    {availableEntityOptions.map((opt) => (
-                      <option key={opt.type} value={opt.type}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {activeModal.particleOriginMode === 'tag' && (
-                <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                  <span className="font-bold text-slate-700 text-xs">Tag source (#tag)</span>
-                  <input
-                    type="text"
-                    list="modal-particle-tags"
-                    value={activeModal.particleOriginTag || ''}
-                    onChange={(e) =>
-                      setActiveModal({
-                        ...activeModal,
-                        particleOriginTag: e.target.value.replace(/^#/, ''),
-                      })
-                    }
-                    placeholder="ex: joueur, ennemi..."
-                    className="w-44 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                  />
-                  <datalist id="modal-particle-tags">
-                    {allProjectTags.map((t) => (
-                      <option key={t} value={t} />
-                    ))}
-                  </datalist>
-                </div>
-              )}
+              <ParticleActionOriginSection
+                draft={activeModal}
+                allowTarget={isCollision || rule.trigger.type === 'proximity'}
+                entities={entities}
+                availableEntityOptions={availableEntityOptions}
+                allProjectTags={allProjectTags}
+                datalistId="modal-particle-tags"
+                onPatch={(patch) => setActiveModal({ ...activeModal, ...patch })}
+              />
 
               <button
                 type="button"
@@ -1992,7 +1916,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                 className="w-full py-2 px-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-all active:scale-[0.99]"
               >
                 <Sliders className="w-3.5 h-3.5" />
-                <span>Ouvrir l'Éditeur &amp; Testeur Visuel</span>
+                <span>Studio Particules &amp; Collection (Plages, Zones...)</span>
               </button>
 
               <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
@@ -2321,9 +2245,19 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                     pOriginMode === 'tag'
                       ? (activeModal.particleOriginTag || '').trim().replace(/^#/, '')
                       : undefined,
+                  particleCoords:
+                    pOriginMode === 'coordinates'
+                      ? activeModal.particleCoords || { x: 300, y: 200 }
+                      : undefined,
+                  particleAnchor: activeModal.particleAnchor,
+                  particleOffsetX: activeModal.particleOffsetX,
+                  particleOffsetY: activeModal.particleOffsetY,
+                  particleMatchOriginRotation: activeModal.particleMatchOriginRotation,
                   particleCount: activeModal.particleCount ?? 20,
+                  particleCountMax: activeModal.particleCountMax,
                   particleColor: activeModal.particleColor ?? '#f59e0b',
                   particleColor2: activeModal.particleColor2 ?? '#ef4444',
+                  particleColorMode: activeModal.particleColorMode,
                   particleShape: activeModal.particleShape ?? 'circle',
                   customParticleId:
                     activeModal.particleShape === 'custom' ? selectedIds?.[0] : undefined,
@@ -2338,11 +2272,23 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                       ? Boolean(activeModal.useParticleTint)
                       : undefined,
                   particleSpeed: activeModal.particleSpeed ?? 180,
+                  particleSpeedMax: activeModal.particleSpeedMax,
                   particleSize: activeModal.particleSize ?? 6,
+                  particleSizeMax: activeModal.particleSizeMax,
+                  particleEndSizeScale: activeModal.particleEndSizeScale,
                   particleLifetime: activeModal.particleLifetime ?? 0.7,
+                  particleLifetimeMax: activeModal.particleLifetimeMax,
                   particleGravity: activeModal.particleGravity ?? 220,
+                  particleDrag: activeModal.particleDrag,
+                  particleOpacityStart: activeModal.particleOpacityStart,
+                  particleOpacityEnd: activeModal.particleOpacityEnd,
+                  particleSpinSpeed: activeModal.particleSpinSpeed,
                   particleSpread: activeModal.particleSpread ?? 360,
                   particleAngle: activeModal.particleAngle ?? -90,
+                  particleEmissionShape: activeModal.particleEmissionShape,
+                  particleEmissionRadius: activeModal.particleEmissionRadius,
+                  particleEmissionWidth: activeModal.particleEmissionWidth,
+                  particleEmissionHeight: activeModal.particleEmissionHeight,
                 });
               }}
               className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"

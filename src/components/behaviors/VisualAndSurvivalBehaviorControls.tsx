@@ -1,5 +1,5 @@
 import React from 'react';
-import { Dices, Paintbrush, Pencil, Plus, Sliders, X } from 'lucide-react';
+import { Dices, FolderOpen, Paintbrush, Pencil, Plus, Sliders, X } from 'lucide-react';
 import { EMPTY_LIST, EMPTY_RECORD, useSceneStore } from '../../store/useSceneStore';
 import {
   CustomParticlePreset,
@@ -8,6 +8,10 @@ import {
   EntityState,
   HealthBehaviorConfig,
   LookAtBehaviorConfig,
+  ParticleAnchorPreset,
+  ParticleColorMode,
+  ParticleEffectPreset,
+  ParticleEmissionShape,
   ParticleEmitterBehaviorConfig,
   ParticleShape,
   SceneTransitionType,
@@ -15,6 +19,7 @@ import {
 } from '../../types';
 import { SCENE_TRANSITION_OPTIONS } from '../rulebook/ruleBookTypes';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
+import { remapPresetConfigSprites } from '../particles/ParticlePresetLibrary';
 
 export function LookAtBehaviorControls({
   b,
@@ -390,6 +395,14 @@ export function ParticleEmitterBehaviorControls({
   onOpenParticleEditor: () => void;
   onDeleteCustomParticle: (presetId: string) => void;
 }) {
+  const projectPresets = useSceneStore((s) => s.projectParticlePresets || EMPTY_LIST);
+  const localCollection = useSceneStore((s) => s.localParticleCollection || EMPTY_RECORD);
+  const importEmbeddedParticleSprites = useSceneStore((s) => s.importEmbeddedParticleSprites);
+  const allSavedPresets: { scope: string; preset: ParticleEffectPreset }[] = [
+    ...projectPresets.map((preset) => ({ scope: 'Projet', preset })),
+    ...Object.values(localCollection).map((preset) => ({ scope: 'Globale', preset })),
+  ];
+
   const selectedCustomIds: string[] =
     b.customParticleIds && b.customParticleIds.length > 0
       ? b.customParticleIds
@@ -412,15 +425,84 @@ export function ParticleEmitterBehaviorControls({
 
   return (
     <div className="space-y-1.5">
-      {/* Bouton Éditeur & Testeur interactif */}
+      {/* Bouton Studio Particules */}
       <button
         type="button"
         onClick={onOpenParticleEditor}
         className="w-full py-2 px-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-all active:scale-[0.99]"
       >
         <Sliders className="w-3.5 h-3.5" />
-        <span>Ouvrir l'Éditeur &amp; Testeur de Particules</span>
+        <span>Studio Particules &amp; Collection</span>
       </button>
+
+      {/* Sélecteur rapide depuis la Collection Projet / Globale */}
+      {allSavedPresets.length > 0 && (
+        <div className="p-2 bg-amber-50/60 rounded-xl border border-amber-200/80 flex items-center justify-between gap-2">
+          <span className="font-bold text-amber-950 text-[11px] flex items-center gap-1 shrink-0">
+            <FolderOpen className="w-3.5 h-3.5 text-amber-600" />
+            <span>Appliquer preset</span>
+          </span>
+          <select
+            value=""
+            onChange={(e) => {
+              const found = allSavedPresets.find((x) => `${x.scope}:${x.preset.id}` === e.target.value);
+              if (!found) return;
+              const mapped = remapPresetConfigSprites(
+                found.preset.config,
+                found.preset.embeddedCustomSprites,
+                importEmbeddedParticleSprites
+              );
+              update({
+                shape: mapped.shape,
+                customParticleId: mapped.customParticleId,
+                customParticleIds: mapped.customParticleIds,
+                customParticleMode: mapped.customParticleMode,
+                useParticleTint: mapped.useParticleTint,
+                color: mapped.color,
+                color2: mapped.color2,
+                colorMode: mapped.colorMode,
+                rate: mapped.rate ?? b.rate,
+                rateMax: mapped.rateMax,
+                speed: mapped.speed,
+                speedMax: mapped.speedMax,
+                size: mapped.size,
+                sizeMax: mapped.sizeMax,
+                endSizeScale: mapped.endSizeScale,
+                lifetime: mapped.lifetime,
+                lifetimeMax: mapped.lifetimeMax,
+                gravity: mapped.gravity,
+                drag: mapped.drag,
+                opacityStart: mapped.opacityStart,
+                opacityEnd: mapped.opacityEnd,
+                spinSpeed: mapped.spinSpeed,
+                spread: mapped.spread,
+                angle: mapped.angle,
+                offsetX: mapped.offsetX ?? b.offsetX,
+                offsetY: mapped.offsetY ?? b.offsetY,
+                anchor: mapped.anchor ?? b.anchor,
+                followRotation: mapped.followRotation ?? b.followRotation,
+                emissionShape: mapped.emissionShape,
+                emissionRadius: mapped.emissionRadius,
+                emissionWidth: mapped.emissionWidth,
+                emissionHeight: mapped.emissionHeight,
+                emitterDuration: mapped.emitterDuration,
+                emitterLoop: mapped.emitterLoop,
+                initialBurstCount: mapped.initialBurstCount,
+                burstInterval: mapped.burstInterval,
+                burstCount: mapped.burstCount,
+              });
+            }}
+            className="bg-white border border-amber-300 rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-800 max-w-[165px]"
+          >
+            <option value="">-- Choisir ({allSavedPresets.length}) --</option>
+            {allSavedPresets.map(({ scope, preset }) => (
+              <option key={`${scope}:${preset.id}`} value={`${scope}:${preset.id}`}>
+                [{scope}] {preset.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Ligne 1: Forme des particules */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
@@ -758,39 +840,97 @@ export function ParticleEmitterBehaviorControls({
         />
       </div>
 
-      {/* Ligne 11: Décalage d'émission X */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-        <span className="font-bold text-slate-700 text-xs">Point d'émission ΔX</span>
-        <div className="flex items-center gap-1">
+      {/* Ligne 11: Ancrage relatif, Rotation & Décalage ΔX/ΔY */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-bold text-slate-700 text-xs">Ancre relative</span>
+          <select
+            value={b.anchor || 'center'}
+            onChange={(e) => update({ anchor: e.target.value as ParticleAnchorPreset })}
+            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+          >
+            <option value="center">Centre</option>
+            <option value="top">Bord Haut</option>
+            <option value="bottom">Bord Bas</option>
+            <option value="left">Bord Gauche</option>
+            <option value="right">Bord Droite</option>
+            <option value="pivot">Point de Pivot</option>
+          </select>
+        </div>
+
+        <label className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100 cursor-pointer">
+          <span className="text-[11px] font-semibold text-slate-600">
+            Suivre rotation &amp; miroir (flipX)
+          </span>
           <input
-            type="number"
-            step="any"
-            value={b.offsetX ?? 0}
-            onChange={(e) => {
-              const v = parseFloat(e.target.value);
-              if (Number.isFinite(v)) update({ offsetX: v });
-            }}
-            className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
+            type="checkbox"
+            checked={b.followRotation !== false}
+            onChange={(e) => update({ followRotation: e.target.checked })}
+            className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
           />
-          <span className="text-slate-400 text-xs">px</span>
+        </label>
+
+        <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-slate-100">
+          <div className="flex items-center justify-between gap-1 text-xs">
+            <span className="font-semibold text-slate-600">ΔX</span>
+            <EditableNumericValue
+              value={b.offsetX ?? 0}
+              unit="px"
+              precision={0}
+              onChange={(val) => update({ offsetX: val })}
+              className="font-mono font-bold text-slate-800 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded"
+            />
+          </div>
+          <div className="flex items-center justify-between gap-1 text-xs">
+            <span className="font-semibold text-slate-600">ΔY</span>
+            <EditableNumericValue
+              value={b.offsetY ?? 0}
+              unit="px"
+              precision={0}
+              onChange={(val) => update({ offsetY: val })}
+              className="font-mono font-bold text-slate-800 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded"
+            />
+          </div>
         </div>
       </div>
 
-      {/* Ligne 12: Décalage d'émission Y */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-        <span className="font-bold text-slate-700 text-xs">Point d'émission ΔY</span>
-        <div className="flex items-center gap-1">
-          <input
-            type="number"
-            step="any"
-            value={b.offsetY ?? 0}
-            onChange={(e) => {
-              const v = parseFloat(e.target.value);
-              if (Number.isFinite(v)) update({ offsetY: v });
-            }}
-            className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-right text-slate-800"
-          />
-          <span className="text-slate-400 text-xs">px</span>
+      {/* Ligne 12: Zone d'apparition & Cycle / Durée */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-bold text-slate-700 text-xs">Zone &amp; Durée</span>
+          <select
+            value={b.emissionShape || 'point'}
+            onChange={(e) => update({ emissionShape: e.target.value as ParticleEmissionShape })}
+            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800"
+          >
+            <option value="point">Point précis</option>
+            <option value="circle">Disque (Rayon)</option>
+            <option value="box">Rectangle</option>
+          </select>
+        </div>
+
+        <div className="flex items-center justify-between gap-2 text-[11px] pt-1 border-t border-slate-100">
+          <span className="font-semibold text-slate-600">Durée émetteur (0 = ∞)</span>
+          <div className="flex items-center gap-2">
+            <EditableNumericValue
+              value={b.emitterDuration ?? 0}
+              unit="s"
+              precision={1}
+              onChange={(val) => update({ emitterDuration: val })}
+              className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded"
+            />
+            {(b.emitterDuration ?? 0) > 0 && (
+              <label className="flex items-center gap-1 cursor-pointer text-[10px] font-bold text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={b.emitterLoop !== false}
+                  onChange={(e) => update({ emitterLoop: e.target.checked })}
+                  className="w-3.5 h-3.5 accent-amber-500 rounded cursor-pointer"
+                />
+                <span>Boucle</span>
+              </label>
+            )}
+          </div>
         </div>
       </div>
     </div>

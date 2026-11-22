@@ -1,4 +1,4 @@
-import { AutoSaveDraft, Entity, ProjectSlot } from '../types';
+import { AutoSaveDraft, Entity, ParticleEffectPreset, ProjectSlot } from '../types';
 
 const DB_NAME = 'atelier-vivant-local-db';
 const DB_VERSION = 1;
@@ -272,5 +272,57 @@ export async function clearAutoSaveDraftFromDB(): Promise<void> {
     });
   } catch (err) {
     console.warn('Auto-save clear failed:', err);
+  }
+}
+
+const PARTICLE_COLLECTION_DB_KEY = 'particle_collection';
+const LEGACY_PARTICLE_COLLECTION_KEY = 'atelier-vivant-particle-collection-v1';
+
+export async function loadParticleCollectionFromDB(): Promise<Record<string, ParticleEffectPreset>> {
+  try {
+    const db = await openDB();
+    const fromIdb = await new Promise<Record<string, ParticleEffectPreset> | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_KV, 'readonly');
+      const req = tx.objectStore(STORE_KV).get(PARTICLE_COLLECTION_DB_KEY);
+      req.onsuccess = () => resolve((req.result as Record<string, ParticleEffectPreset>) || null);
+      req.onerror = () => reject(req.error);
+    });
+    if (fromIdb && typeof fromIdb === 'object') {
+      return fromIdb;
+    }
+    return {};
+  } catch {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const raw = window.localStorage.getItem(LEGACY_PARTICLE_COLLECTION_KEY);
+        return raw ? JSON.parse(raw) : {};
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  }
+}
+
+export async function saveParticleCollectionInDB(
+  coll: Record<string, ParticleEffectPreset>
+): Promise<void> {
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_KV, 'readwrite');
+      tx.objectStore(STORE_KV).put(coll, PARTICLE_COLLECTION_DB_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn('IndexedDB particle collection save failed, trying localStorage fallback:', err);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem(LEGACY_PARTICLE_COLLECTION_KEY, JSON.stringify(coll));
+      } catch {
+        // ignore quota fallback
+      }
+    }
   }
 }

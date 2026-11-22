@@ -11,10 +11,10 @@
   - Bouton **Désactiver/Activer** séparé de *Masquer/Afficher* (`Entity.disabled`) + action RuleBook `set_entity_enabled`
   - Action RuleBook `apply_impulse` (Force / Impulsion paramétrable linéaire & angulaire)
   - Paramétrage du parentage/joint dans l'action RuleBook *Parenter* (`AttachParentConfigEditor`) + override `parentOffsetOverride` par État (`resolveEffectiveParentOffset`)
-- [ ] **Sous-phase C — Studio Particules Avancé, Collection & Spawn Relatif** :
-  - Ranges aléatoires Min/Max, mono-couleur vs dégradé, durée d'émetteur finie, bursts et formes d'émission
-  - Collection locale de particules (projet + inter-projets IndexedDB)
-  - Spawn particules relatif à une entité / point local / point d'impact
+- [x] **Sous-phase C — Studio Particules Avancé, Collection & Spawn Relatif** :
+  - Ranges aléatoires Min/Max, mono-couleur vs dégradé, drag/opacité/taille de fin/spin, durée d'émetteur finie, boucle, bursts initiaux/périodiques et formes d'émission (`point`, `circle`, `box`)
+  - Collection locale de particules (projet + inter-projets IndexedDB) avec sprites vectoriels embarqués/remappés
+  - Spawn particules relatif à une entité (ancres, offsets locaux, rotation/`flipX`), coordonnées exactes, position souris live ou point d'événement
 - [ ] **Sous-phase D — Ratio Caméra Play (sans bandes noires), Tri Cartes d'Action & Snap/Aimant** :
   - Ratio caméra dédié au Play avec cadrage en Édition sans bandes noires
   - Drag & drop de réorganisation des cartes d'actions individuelles dans une règle (`RuleBook`)

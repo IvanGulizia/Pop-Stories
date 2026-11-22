@@ -37,6 +37,7 @@ import {
   resolveJointLimits,
 } from '../utils/physics/jointAngularSolver';
 import { resolveEffectiveParentOffset } from '../store/parentingHelpers';
+import { computeRelativeParticleOrigin } from '../utils/particleSystem';
 
 interface SceneGizmoOverlayProps {
   mousePosRef: React.MutableRefObject<{ x: number; y: number } | null>;
@@ -1021,19 +1022,52 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
               })()}
 
               {emitter && (() => {
-                const rawOx = entity.flipX ? -(emitter.offsetX ?? 0) : (emitter.offsetX ?? 0);
-                const rawOy = emitter.offsetY ?? 0;
-                const rad = degToRad(rotDeg);
-                const emitX = center.x + rawOx * Math.cos(rad) - rawOy * Math.sin(rad);
-                const emitY = center.y + rawOx * Math.sin(rad) + rawOy * Math.cos(rad);
-                const emitAngle = (emitter.angle ?? -90) + rotDeg;
+                const originRes = computeRelativeParticleOrigin({
+                  entity,
+                  anchor: emitter.anchor || 'center',
+                  offsetX: emitter.offsetX ?? 0,
+                  offsetY: emitter.offsetY ?? 0,
+                  baseAngleDeg: emitter.angle ?? -90,
+                  followRotation: emitter.followRotation !== false,
+                  overrideRotationDeg: rotDeg,
+                });
+                const emitX = originRes.x;
+                const emitY = originRes.y;
+                const emitAngle = originRes.angleDeg;
                 const spread = Math.max(0, Math.min(360, emitter.spread ?? 60));
                 const rCone = 48;
                 const dirRad = degToRad(emitAngle);
                 const endX = emitX + Math.cos(dirRad) * (rCone + 8);
                 const endY = emitY + Math.sin(dirRad) * (rCone + 8);
+                const emShape = emitter.emissionShape || 'point';
+                const emRadius = Math.max(4, emitter.emissionRadius ?? 28);
+                const emWidth = Math.max(4, emitter.emissionWidth ?? 60);
+                const emHeight = Math.max(4, emitter.emissionHeight ?? 30);
                 return (
                   <g>
+                    {emShape === 'circle' && (
+                      <circle
+                        cx={emitX}
+                        cy={emitY}
+                        r={emRadius}
+                        fill="rgba(245, 158, 11, 0.08)"
+                        stroke="#f59e0b"
+                        strokeWidth="1.2"
+                        strokeDasharray="4 3"
+                      />
+                    )}
+                    {emShape === 'box' && (
+                      <rect
+                        x={emitX - emWidth / 2}
+                        y={emitY - emHeight / 2}
+                        width={emWidth}
+                        height={emHeight}
+                        fill="rgba(245, 158, 11, 0.08)"
+                        stroke="#f59e0b"
+                        strokeWidth="1.2"
+                        strokeDasharray="4 3"
+                      />
+                    )}
                     <path
                       d={buildArcSectorPath(
                         emitX,

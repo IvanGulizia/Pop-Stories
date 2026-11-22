@@ -1,3 +1,13 @@
+## [Phase 10.43 — Sous-phase C] - 2026-11-21
+### Ajouté & Amélioré (Studio Particules Avancé, Collection & Spawn Relatif)
+- **Studio Particules Avancé (`ParticleEditorModal.tsx`, `particleSystem.ts`, `matterPhysicsEngine.ts`, `types/index.ts`)** :
+  - Plages aléatoires Min/Max (`speedMax`, `sizeMax`, `lifetimeMax`, `rateMax`, `countMax`), mode couleur (`single`, `two_colors`, `gradient_lifetime` interpolé sur la vie), `endSizeScale`, friction `drag`, courbe d'opacité (`opacityStart` → `opacityEnd`) et rotation `spinSpeed`.
+  - Formes d'émission (`point`, `circle` avec rayon, `box` avec largeur/hauteur), durée d'émetteur finie (`emitterDuration` + `emitterLoop`), salve initiale (`initialBurstCount`) et salves périodiques (`burstInterval` / `burstCount`), avec aperçu temps réel et bouton *Cycle*.
+- **Collection de particules Projet & Globale (`ParticlePresetLibrary.tsx`, `localStorageDB.ts`, `useSceneStore.ts`, `App.tsx`)** :
+  - Sauvegarde, application, mise à jour, copie Projet ↔ Collection globale (IndexedDB) et suppression de recettes `ParticleEffectPreset` ; embarquement et déduplication/remapping automatique des sprites vectoriels personnalisés (`importEmbeddedParticleSprites`) + export/import JSON de `particlePresets`.
+- **Spawn relatif, ancres & souris live (`computeRelativeParticleOrigin`, `ParticleActionOriginSection.tsx`, `RuleActionModal.tsx`, `WizardStep3Actions.tsx`, `VisualAndSurvivalBehaviorControls.tsx`, `Scene.tsx`, `SceneGizmoOverlay.tsx`, `ruleExecutionEngine.ts`)** :
+  - Ancres sur entité (`center`, `top`, `bottom`, `left`, `right`, `pivot`), `offsetX`/`offsetY`, suivi optionnel rotation & `flipX`, modes `'coordinates'` et `'mouse'` (position monde live synchronisée en Play), chargement rapide depuis la collection dans le RuleBook et l'émetteur, gizmos d'émission (`circle`/`box`) et suite Vitest dédiée (`src/__tests__/subphaseC_particles.test.ts`).
+
 ## [Phase 10.42 — Sous-phase B] - 2026-11-21
 ### Ajouté & Amélioré (Saisie Numérique Libre, Impulsion, Désactivation Complète & Parenting/État)
 - **Saisie numérique libre sans garde-fou (`EditableNumericValue.tsx`, `BehaviorControls`, `RuleBook`, `SpawnLocationPicker.tsx`)** : Remplacement des lectures statiques et inputs bornés par une édition directe au clic acceptant `0`, les décimales fines (`step="any"`, `Number.isFinite`) et les valeurs élevées (dont le ressort angulaire > 400), avec curseurs `<input type="range">` uniquement bornés visuellement pour ne jamais tronquer la valeur saisie.

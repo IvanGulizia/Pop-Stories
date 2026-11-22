@@ -1,22 +1,46 @@
-import { CustomParticlePreset, CustomParticleUsageMode, ParticleShape } from '../types';
+import {
+  CustomParticlePreset,
+  CustomParticleUsageMode,
+  Entity,
+  ParticleAnchorPreset,
+  ParticleColorMode,
+  ParticleEmissionShape,
+  ParticleShape,
+  Position,
+} from '../types';
+import { resolveEffectivePivot } from './physics/pivotHelpers';
 
 export interface ParticleBurstOptions {
   x: number;
   y: number;
   count?: number;
+  countMax?: number;
   color?: string;
   color2?: string;
+  colorMode?: ParticleColorMode;
   shape?: ParticleShape;
   customParticleId?: string;
   customParticleIds?: string[];
   customParticleMode?: CustomParticleUsageMode;
   useTint?: boolean;
   speed?: number;
+  speedMax?: number;
   size?: number;
+  sizeMax?: number;
+  endSizeScale?: number;
   lifetime?: number;
+  lifetimeMax?: number;
   gravity?: number;
+  drag?: number;
+  opacityStart?: number;
+  opacityEnd?: number;
+  spinSpeed?: number;
   spread?: number; // degrés (0..360)
   angle?: number;  // degrés (-90 = haut)
+  emissionShape?: ParticleEmissionShape;
+  emissionRadius?: number;
+  emissionWidth?: number;
+  emissionHeight?: number;
 }
 
 interface PooledParticle {
@@ -26,10 +50,16 @@ interface PooledParticle {
   vx: number;
   vy: number;
   size: number;
+  endSizeScale: number;
   color: string;
+  color2: string;
+  colorMode: ParticleColorMode;
+  opacityStart: number;
+  opacityEnd: number;
   life: number;
   maxLife: number;
   gravity: number;
+  drag: number;
   shape: ParticleShape;
   customParticleId?: string;
   customParticleIds?: string[];
@@ -40,12 +70,21 @@ interface PooledParticle {
   ageSeq: number;
 }
 
-const DEFAULT_MAX_PARTICLES = 280;
+const DEFAULT_MAX_PARTICLES = 420;
 const SPRITE_SIZE = 96;
 
 const customParticlePresetsMap = new Map<string, CustomParticlePreset>();
 const customParticleSpriteCache = new Map<string, HTMLCanvasElement>();
 let tintScratchCanvas: HTMLCanvasElement | null = null;
+let latestMouseWorldPos: Position | null = null;
+
+export function setLatestMouseWorldPos(pos: Position | null) {
+  latestMouseWorldPos = pos ? { x: pos.x, y: pos.y } : null;
+}
+
+export function getLatestMouseWorldPos(): Position | null {
+  return latestMouseWorldPos;
+}
 
 export function invalidateCustomParticleSprite(id: string) {
   customParticleSpriteCache.delete(id);
@@ -67,6 +106,135 @@ export function syncCustomParticlePresets(presets: CustomParticlePreset[]) {
       customParticleSpriteCache.delete(existingId);
     }
   }
+}
+
+export function parseHexRgb(hex: string): { r: number; g: number; b: number } | null {
+  const clean = (hex || '').trim().replace(/^#/, '');
+  if (/^[0-9a-fA-F]{3}$/.test(clean)) {
+    return {
+      r: parseInt(clean[0] + clean[0], 16),
+      g: parseInt(clean[1] + clean[1], 16),
+      b: parseInt(clean[2] + clean[2], 16),
+    };
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(clean)) {
+    return {
+      r: parseInt(clean.slice(0, 2), 16),
+      g: parseInt(clean.slice(2, 4), 16),
+      b: parseInt(clean.slice(4, 6), 16),
+    };
+  }
+  return null;
+}
+
+export function interpolateHexColor(hexA: string, hexB: string, t: number): string {
+  const clamped = Math.max(0, Math.min(1, t));
+  const a = parseHexRgb(hexA);
+  const b = parseHexRgb(hexB);
+  if (!a || !b) return clamped < 0.5 ? hexA : hexB;
+  const r = Math.round(a.r + (b.r - a.r) * clamped);
+  const g = Math.round(a.g + (b.g - a.g) * clamped);
+  const bl = Math.round(a.b + (b.b - a.b) * clamped);
+  return `rgb(${r}, ${g}, ${bl})`;
+}
+
+export function sampleParticleRange(
+  minVal: number,
+  maxVal: number | undefined,
+  legacyLowFactor: number,
+  legacyHighFactor: number,
+  rand: number = Math.random()
+): number {
+  if (maxVal !== undefined && Number.isFinite(maxVal)) {
+    const lo = Math.min(minVal, maxVal);
+    const hi = Math.max(minVal, maxVal);
+    return lo + (hi - lo) * rand;
+  }
+  return minVal * (legacyLowFactor + rand * (legacyHighFactor - legacyLowFactor));
+}
+
+export function computeRelativeParticleOrigin(params: {
+  entity?: Pick<Entity, 'position' | 'size' | 'flipX' | 'pivot' | 'runtimePivot' | 'states' | 'currentStateId'>;
+  anchor?: ParticleAnchorPreset;
+  offsetX?: number;
+  offsetY?: number;
+  baseAngleDeg?: number;
+  followRotation?: boolean;
+  overridePosition?: Position;
+  overrideRotationDeg?: number;
+  overrideFlipX?: boolean;
+}): { x: number; y: number; angleDeg: number } {
+  const {
+    entity,
+    anchor = 'center',
+    offsetX = 0,
+    offsetY = 0,
+    baseAngleDeg = -90,
+    followRotation = true,
+    overridePosition,
+    overrideRotationDeg,
+    overrideFlipX,
+  } = params;
+
+  if (!entity) {
+    return {
+      x: offsetX,
+      y: offsetY,
+      angleDeg: baseAngleDeg,
+    };
+  }
+
+  const pos = overridePosition || entity.position;
+  const w = entity.size?.width ?? 0;
+  const h = entity.size?.height ?? 0;
+  const flipX = overrideFlipX !== undefined ? overrideFlipX : Boolean(entity.flipX);
+  const curState = entity.states?.[entity.currentStateId];
+  const rotDeg =
+    overrideRotationDeg !== undefined ? overrideRotationDeg : (curState?.rotation ?? 0);
+
+  // Coordonnées locales relatives au centre de l'entité selon l'ancre choisie
+  let anchorLocalX = 0;
+  let anchorLocalY = 0;
+  if (anchor === 'top') {
+    anchorLocalY = -h / 2;
+  } else if (anchor === 'bottom') {
+    anchorLocalY = h / 2;
+  } else if (anchor === 'left') {
+    anchorLocalX = -w / 2;
+  } else if (anchor === 'right') {
+    anchorLocalX = w / 2;
+  } else if (anchor === 'pivot') {
+    const effPivot = resolveEffectivePivot(entity, curState, undefined, flipX);
+    anchorLocalX = (effPivot.x - 0.5) * w;
+    anchorLocalY = (effPivot.y - 0.5) * h;
+  }
+
+  const centerX = pos.x + w / 2;
+  const centerY = pos.y + h / 2;
+
+  const rawOx = flipX && followRotation ? -offsetX : offsetX;
+  const rawOy = offsetY;
+
+  const localX = (anchor === 'pivot' ? anchorLocalX : flipX && followRotation ? -anchorLocalX : anchorLocalX) + rawOx;
+  const localY = anchorLocalY + rawOy;
+
+  let worldX = centerX + localX;
+  let worldY = centerY + localY;
+  let outAngle = baseAngleDeg;
+
+  if (followRotation) {
+    if (flipX) {
+      outAngle = 180 - outAngle;
+    }
+    const rad = (rotDeg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    worldX = centerX + localX * cos - localY * sin;
+    worldY = centerY + localX * sin + localY * cos;
+    outAngle += rotDeg;
+  }
+
+  return { x: worldX, y: worldY, angleDeg: outAngle };
 }
 
 function getOrBuildCustomParticleSprite(customParticleId?: string): HTMLCanvasElement | null {
@@ -134,10 +302,16 @@ export function createParticlePool(maxParticles: number = DEFAULT_MAX_PARTICLES)
     vx: 0,
     vy: 0,
     size: 5,
+    endSizeScale: 0.35,
     color: '#f59e0b',
+    color2: '#f59e0b',
+    colorMode: 'two_colors',
+    opacityStart: 1,
+    opacityEnd: 0,
     life: 0,
     maxLife: 0.7,
     gravity: 220,
+    drag: 0,
     shape: 'circle',
     customParticleId: undefined,
     customParticleIds: undefined,
@@ -165,16 +339,34 @@ export function createParticlePool(maxParticles: number = DEFAULT_MAX_PARTICLES)
   };
 
   const emitBurst = (opts: ParticleBurstOptions) => {
-    const count = Math.max(1, Math.min(80, Math.round(opts.count ?? 18)));
+    const minCount = Math.max(1, Math.round(opts.count ?? 18));
+    const rawCount =
+      opts.countMax !== undefined && Number.isFinite(opts.countMax)
+        ? Math.round(sampleParticleRange(minCount, Math.max(1, opts.countMax), 1, 1))
+        : minCount;
+    const count = Math.max(1, Math.min(180, rawCount));
+
     const color1 = opts.color || '#f59e0b';
     const color2 = opts.color2 || color1;
+    const colorMode: ParticleColorMode =
+      opts.colorMode || (opts.color2 && opts.color2 !== color1 ? 'two_colors' : 'single');
+
     const shape: ParticleShape = opts.shape || 'circle';
-    const baseSpeed = Math.max(5, opts.speed ?? 180);
-    const baseSize = Math.max(2, Math.min(48, opts.size ?? 6));
-    const baseLife = Math.max(0.1, Math.min(4, opts.lifetime ?? 0.7));
+    const baseSpeed = Math.max(0, opts.speed ?? 180);
+    const baseSize = Math.max(1, Math.min(96, opts.size ?? 6));
+    const endSizeScale = Math.max(0, Math.min(4, opts.endSizeScale ?? 0.35));
+    const baseLife = Math.max(0.05, Math.min(12, opts.lifetime ?? 0.7));
     const gravity = opts.gravity ?? 220;
+    const drag = Math.max(0, opts.drag ?? 0);
+    const opacityStart = Math.max(0, Math.min(1, opts.opacityStart ?? 1));
+    const opacityEnd = Math.max(0, Math.min(1, opts.opacityEnd ?? 0));
     const spreadRad = ((opts.spread ?? 360) * Math.PI) / 180;
     const centerAngleRad = ((opts.angle ?? -90) * Math.PI) / 180;
+    const emissionShape: ParticleEmissionShape = opts.emissionShape || 'point';
+    const emissionRadius = Math.max(0, opts.emissionRadius ?? 28);
+    const emissionWidth = Math.max(0, opts.emissionWidth ?? 60);
+    const emissionHeight = Math.max(0, opts.emissionHeight ?? 30);
+
     const customList =
       opts.customParticleIds && opts.customParticleIds.length > 0
         ? opts.customParticleIds
@@ -186,8 +378,9 @@ export function createParticlePool(maxParticles: number = DEFAULT_MAX_PARTICLES)
     for (let i = 0; i < count; i++) {
       const p = acquireSlot();
       const theta = centerAngleRad + (Math.random() - 0.5) * spreadRad;
-      const spd = baseSpeed * (0.45 + Math.random() * 0.75);
-      const life = baseLife * (0.7 + Math.random() * 0.5);
+      const spd = Math.max(0, sampleParticleRange(baseSpeed, opts.speedMax, 0.45, 1.2));
+      const life = Math.max(0.05, sampleParticleRange(baseLife, opts.lifetimeMax, 0.7, 1.2));
+      const size = Math.max(1, sampleParticleRange(baseSize, opts.sizeMax, 0.7, 1.3));
 
       let chosenCustomId = customList[0];
       if (customList.length > 1) {
@@ -201,23 +394,52 @@ export function createParticlePool(maxParticles: number = DEFAULT_MAX_PARTICLES)
         }
       }
 
+      let spawnDx = (Math.random() - 0.5) * 6;
+      let spawnDy = (Math.random() - 0.5) * 6;
+      if (emissionShape === 'circle') {
+        const a = Math.random() * Math.PI * 2;
+        const r = emissionRadius * Math.sqrt(Math.random());
+        spawnDx = Math.cos(a) * r;
+        spawnDy = Math.sin(a) * r;
+      } else if (emissionShape === 'box') {
+        spawnDx = (Math.random() - 0.5) * emissionWidth;
+        spawnDy = (Math.random() - 0.5) * emissionHeight;
+      }
+
       p.active = true;
-      p.x = opts.x + (Math.random() - 0.5) * 6;
-      p.y = opts.y + (Math.random() - 0.5) * 6;
+      p.x = opts.x + spawnDx;
+      p.y = opts.y + spawnDy;
       p.vx = Math.cos(theta) * spd;
       p.vy = Math.sin(theta) * spd;
-      p.size = baseSize * (0.7 + Math.random() * 0.6);
-      p.color = Math.random() < 0.5 ? color1 : color2;
+      p.size = size;
+      p.endSizeScale = endSizeScale;
+      p.colorMode = colorMode;
+      if (colorMode === 'single') {
+        p.color = color1;
+        p.color2 = color1;
+      } else if (colorMode === 'gradient_lifetime') {
+        p.color = color1;
+        p.color2 = color2;
+      } else {
+        p.color = Math.random() < 0.5 ? color1 : color2;
+        p.color2 = p.color;
+      }
+      p.opacityStart = opacityStart;
+      p.opacityEnd = opacityEnd;
       p.life = life;
       p.maxLife = life;
       p.gravity = gravity;
+      p.drag = drag;
       p.shape = shape;
       p.customParticleId = chosenCustomId;
       p.customParticleIds = customList.length > 1 && customMode === 'lifetime_anim' ? customList : undefined;
       p.customParticleMode = customMode;
       p.useTint = opts.useTint;
       p.rotation = Math.random() * Math.PI * 2;
-      p.vr = (Math.random() - 0.5) * 8;
+      p.vr =
+        opts.spinSpeed !== undefined && Number.isFinite(opts.spinSpeed)
+          ? ((opts.spinSpeed * (0.7 + Math.random() * 0.6)) * Math.PI) / 180
+          : (Math.random() - 0.5) * 8;
       p.ageSeq = ++sequenceCounter;
     }
   };
@@ -266,25 +488,39 @@ export function createParticlePool(maxParticles: number = DEFAULT_MAX_PARTICLES)
 
       anyActive = true;
       p.vy += p.gravity * clampedDt;
+      if (p.drag > 0) {
+        const damp = Math.exp(-p.drag * clampedDt);
+        p.vx *= damp;
+        p.vy *= damp;
+      }
       p.x += p.vx * clampedDt;
       p.y += p.vy * clampedDt;
       p.rotation += p.vr * clampedDt;
 
-      const progress = Math.max(0, Math.min(1, p.life / p.maxLife));
-      const currentSize = p.size * (0.35 + progress * 0.65);
+      const remaining = Math.max(0, Math.min(1, p.life / p.maxLife));
+      const elapsed = 1 - remaining;
+      const sizeScale = 1 + (p.endSizeScale - 1) * elapsed;
+      const currentSize = Math.max(0.4, p.size * sizeScale);
+      const currentAlpha = Math.max(
+        0,
+        Math.min(1, p.opacityStart + (p.opacityEnd - p.opacityStart) * elapsed)
+      );
+      const drawColor =
+        p.colorMode === 'gradient_lifetime'
+          ? interpolateHexColor(p.color, p.color2, elapsed)
+          : p.color;
 
       ctx.save();
-      ctx.globalAlpha = progress;
-      ctx.fillStyle = p.color;
+      ctx.globalAlpha = currentAlpha;
+      ctx.fillStyle = drawColor;
       ctx.translate(p.x, p.y);
 
       if (p.shape === 'custom') {
         let spriteId = p.customParticleId;
         if (p.customParticleMode === 'lifetime_anim' && p.customParticleIds && p.customParticleIds.length > 1) {
-          const elapsedNorm = 1 - progress;
           const frameIdx = Math.min(
             p.customParticleIds.length - 1,
-            Math.max(0, Math.floor(elapsedNorm * p.customParticleIds.length))
+            Math.max(0, Math.floor(elapsed * p.customParticleIds.length))
           );
           spriteId = p.customParticleIds[frameIdx];
         }
@@ -304,7 +540,7 @@ export function createParticlePool(maxParticles: number = DEFAULT_MAX_PARTICLES)
               tctx.globalCompositeOperation = 'source-over';
               tctx.drawImage(sprite, 0, 0, SPRITE_SIZE, SPRITE_SIZE);
               tctx.globalCompositeOperation = 'source-atop';
-              tctx.fillStyle = p.color;
+              tctx.fillStyle = drawColor;
               tctx.fillRect(0, 0, SPRITE_SIZE, SPRITE_SIZE);
               tctx.globalCompositeOperation = 'source-over';
               ctx.drawImage(tintScratchCanvas, -drawDim / 2, -drawDim / 2, drawDim, drawDim);

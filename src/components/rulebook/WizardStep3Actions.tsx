@@ -32,6 +32,7 @@ import { ApplyImpulseConfigEditor } from './ApplyImpulseConfigEditor';
 import { SetEntityEnabledConfigEditor } from './SetEntityEnabledConfigEditor';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 import { useSceneStore, EMPTY_RECORD, EMPTY_LIST } from '../../store/useSceneStore';
+import { ParticleActionOriginSection } from '../particles/ParticleActionOriginSection';
 
 interface WizardStep3ActionsProps {
   activeWizard: WizardData;
@@ -1892,73 +1893,15 @@ export function WizardStep3Actions({
           </div>
 
           <div className="space-y-1.5 bg-slate-50 p-3 rounded-2xl border border-slate-200">
-            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-700 text-xs">Source d'émission</span>
-              <select
-                value={activeWizard.particleOriginMode || 'subject'}
-                onChange={(e) => setActiveWizard({ ...activeWizard, particleOriginMode: e.target.value as any })}
-                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-              >
-                <option value="subject">Sujet</option>
-                {(activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity') && (
-                  <option value="target">Cible touchée</option>
-                )}
-                <option value="event_point">💥 Point exact (Collision / Clic)</option>
-                <option value="entity">Entité de la scène</option>
-                <option value="type">Par Type d'objet</option>
-                <option value="tag">Par #Tag</option>
-                <option value="last_spawned">Dernier objet créé</option>
-              </select>
-            </div>
-
-            {activeWizard.particleOriginMode === 'entity' && (
-              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">Entité source</span>
-                <select
-                  value={activeWizard.particleOriginEntityId || Object.keys(entities)[0] || ''}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, particleOriginEntityId: e.target.value })}
-                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                >
-                  {Object.values(entities).map((ent) => (
-                    <option key={ent.id} value={ent.id}>{ent.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {activeWizard.particleOriginMode === 'type' && (
-              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">Type source</span>
-                <select
-                  value={activeWizard.particleOriginEntityType || availableEntityOptions[0]?.type || ''}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, particleOriginEntityType: e.target.value })}
-                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                >
-                  {availableEntityOptions.map((opt) => (
-                    <option key={opt.type} value={opt.type}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {activeWizard.particleOriginMode === 'tag' && (
-              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 text-xs">Tag source (#tag)</span>
-                <input
-                  type="text"
-                  list="wizard-particle-tags"
-                  value={activeWizard.particleOriginTag || ''}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, particleOriginTag: e.target.value.replace(/^#/, '') })}
-                  placeholder="ex: joueur, ennemi..."
-                  className="w-44 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                />
-                <datalist id="wizard-particle-tags">
-                  {allProjectTags.map((t) => (
-                    <option key={t} value={t} />
-                  ))}
-                </datalist>
-              </div>
-            )}
+            <ParticleActionOriginSection
+              draft={activeWizard}
+              allowTarget={activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity'}
+              entities={entities}
+              availableEntityOptions={availableEntityOptions}
+              allProjectTags={allProjectTags}
+              datalistId="wizard-particle-tags"
+              onPatch={(patch) => setActiveWizard({ ...activeWizard, ...patch })}
+            />
 
             <button
               type="button"
@@ -1966,7 +1909,7 @@ export function WizardStep3Actions({
               className="w-full py-2 px-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-all active:scale-[0.99]"
             >
               <Sliders className="w-3.5 h-3.5" />
-              <span>Ouvrir l'Éditeur &amp; Testeur Visuel</span>
+              <span>Studio Particules &amp; Collection (Plages, Zones...)</span>
             </button>
 
             <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
@@ -2272,9 +2215,19 @@ export function WizardStep3Actions({
                   pOriginMode === 'tag'
                     ? (activeWizard.particleOriginTag || '').trim().replace(/^#/, '')
                     : undefined,
+                particleCoords:
+                  pOriginMode === 'coordinates'
+                    ? activeWizard.particleCoords || { x: 300, y: 200 }
+                    : undefined,
+                particleAnchor: activeWizard.particleAnchor,
+                particleOffsetX: activeWizard.particleOffsetX,
+                particleOffsetY: activeWizard.particleOffsetY,
+                particleMatchOriginRotation: activeWizard.particleMatchOriginRotation,
                 particleCount: activeWizard.particleCount ?? 20,
+                particleCountMax: activeWizard.particleCountMax,
                 particleColor: activeWizard.particleColor ?? '#f59e0b',
                 particleColor2: activeWizard.particleColor2 ?? '#ef4444',
+                particleColorMode: activeWizard.particleColorMode,
                 particleShape: activeWizard.particleShape ?? 'circle',
                 customParticleId:
                   activeWizard.particleShape === 'custom' ? selectedIds?.[0] : undefined,
@@ -2285,11 +2238,23 @@ export function WizardStep3Actions({
                 useParticleTint:
                   activeWizard.particleShape === 'custom' ? Boolean(activeWizard.useParticleTint) : undefined,
                 particleSpeed: activeWizard.particleSpeed ?? 180,
+                particleSpeedMax: activeWizard.particleSpeedMax,
                 particleSize: activeWizard.particleSize ?? 6,
+                particleSizeMax: activeWizard.particleSizeMax,
+                particleEndSizeScale: activeWizard.particleEndSizeScale,
                 particleLifetime: activeWizard.particleLifetime ?? 0.7,
+                particleLifetimeMax: activeWizard.particleLifetimeMax,
                 particleGravity: activeWizard.particleGravity ?? 220,
+                particleDrag: activeWizard.particleDrag,
+                particleOpacityStart: activeWizard.particleOpacityStart,
+                particleOpacityEnd: activeWizard.particleOpacityEnd,
+                particleSpinSpeed: activeWizard.particleSpinSpeed,
                 particleSpread: activeWizard.particleSpread ?? 360,
                 particleAngle: activeWizard.particleAngle ?? -90,
+                particleEmissionShape: activeWizard.particleEmissionShape,
+                particleEmissionRadius: activeWizard.particleEmissionRadius,
+                particleEmissionWidth: activeWizard.particleEmissionWidth,
+                particleEmissionHeight: activeWizard.particleEmissionHeight,
               });
             }}
             className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"

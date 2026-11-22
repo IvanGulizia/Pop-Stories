@@ -134,6 +134,7 @@ export default function App() {
       folders: initialState.folders,
       customSounds: initialState.customSounds,
       customParticles: initialState.customParticles,
+      projectParticlePresets: initialState.projectParticlePresets,
       layerGroups: initialState.layerGroups,
       projectPalette: initialState.projectPalette,
       settings: initialState.settings,
@@ -153,6 +154,7 @@ export default function App() {
         state.folders !== prevSig.folders ||
         state.customSounds !== prevSig.customSounds ||
         state.customParticles !== prevSig.customParticles ||
+        state.projectParticlePresets !== prevSig.projectParticlePresets ||
         state.layerGroups !== prevSig.layerGroups ||
         state.projectPalette !== prevSig.projectPalette ||
         state.settings !== prevSig.settings ||
@@ -170,6 +172,7 @@ export default function App() {
         folders: state.folders,
         customSounds: state.customSounds,
         customParticles: state.customParticles,
+        projectParticlePresets: state.projectParticlePresets,
         layerGroups: state.layerGroups,
         projectPalette: state.projectPalette,
         settings: state.settings,

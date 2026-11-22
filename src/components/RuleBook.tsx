@@ -340,20 +340,39 @@ export function RuleBook() {
       particleOriginEntityId: act.particleOriginEntityId,
       particleOriginEntityType: act.particleOriginEntityType,
       particleOriginTag: act.particleOriginTag,
+      particleCoords: act.particleCoords,
+      particleAnchor: act.particleAnchor,
+      particleOffsetX: act.particleOffsetX,
+      particleOffsetY: act.particleOffsetY,
+      particleMatchOriginRotation: act.particleMatchOriginRotation,
       particleCount: act.particleCount,
+      particleCountMax: act.particleCountMax,
       particleColor: act.particleColor,
       particleColor2: act.particleColor2,
+      particleColorMode: act.particleColorMode,
       particleShape: act.particleShape,
       customParticleId: act.customParticleId,
       customParticleIds: act.customParticleIds,
       customParticleMode: act.customParticleMode,
       useParticleTint: act.useParticleTint,
       particleSpeed: act.particleSpeed,
+      particleSpeedMax: act.particleSpeedMax,
       particleSize: act.particleSize,
+      particleSizeMax: act.particleSizeMax,
+      particleEndSizeScale: act.particleEndSizeScale,
       particleLifetime: act.particleLifetime,
+      particleLifetimeMax: act.particleLifetimeMax,
       particleGravity: act.particleGravity,
+      particleDrag: act.particleDrag,
+      particleOpacityStart: act.particleOpacityStart,
+      particleOpacityEnd: act.particleOpacityEnd,
+      particleSpinSpeed: act.particleSpinSpeed,
       particleSpread: act.particleSpread,
       particleAngle: act.particleAngle,
+      particleEmissionShape: act.particleEmissionShape,
+      particleEmissionRadius: act.particleEmissionRadius,
+      particleEmissionWidth: act.particleEmissionWidth,
+      particleEmissionHeight: act.particleEmissionHeight,
       parentChildMode: act.targetMode,
       parentChildId: act.targetId,
       parentChildType: act.targetType,
@@ -2238,9 +2257,21 @@ export function RuleBook() {
                                 : selectedIds.length > 1
                                 ? `${selectedIds.length} dessins`
                                 : undefined;
-                            actionDetail = `${act.particleCount ?? 18}x ${
+                            const countDetail =
+                              act.particleCountMax !== undefined
+                                ? `${act.particleCount ?? 18}–${act.particleCountMax}x`
+                                : `${act.particleCount ?? 18}x`;
+                            const originSuffix =
+                              act.particleOriginMode === 'event_point'
+                                ? ' • Point exact'
+                                : act.particleOriginMode === 'mouse'
+                                ? ' • Souris'
+                                : act.particleOriginMode === 'coordinates'
+                                ? ` • (${Math.round(act.particleCoords?.x ?? 300)},${Math.round(act.particleCoords?.y ?? 200)})`
+                                : '';
+                            actionDetail = `${countDetail} ${
                               act.particleShape === 'custom' && customP ? `✨ ${customP}` : act.particleShape || 'circle'
-                            }${act.particleOriginMode === 'event_point' ? ' • Point exact' : ''}`;
+                            }${originSuffix}`;
                           } else if (act.type === 'attach_to_parent') {
                             actionBadge = 'Attacher Parent';
                             const attMode = act.parentOffset?.attachmentMode;
@@ -2866,13 +2897,27 @@ export function RuleBook() {
               useParticleTint: src.useParticleTint,
               color: src.particleColor || '#f59e0b',
               color2: src.particleColor2 || '#ef4444',
+              colorMode: src.particleColorMode,
               count: src.particleCount ?? 20,
+              countMax: src.particleCountMax,
               speed: src.particleSpeed ?? 180,
+              speedMax: src.particleSpeedMax,
               size: src.particleSize ?? 6,
+              sizeMax: src.particleSizeMax,
+              endSizeScale: src.particleEndSizeScale,
               lifetime: src.particleLifetime ?? 0.7,
+              lifetimeMax: src.particleLifetimeMax,
               gravity: src.particleGravity ?? 220,
+              drag: src.particleDrag,
+              opacityStart: src.particleOpacityStart,
+              opacityEnd: src.particleOpacityEnd,
+              spinSpeed: src.particleSpinSpeed,
               spread: src.particleSpread ?? 360,
               angle: src.particleAngle ?? -90,
+              emissionShape: src.particleEmissionShape,
+              emissionRadius: src.particleEmissionRadius,
+              emissionWidth: src.particleEmissionWidth,
+              emissionHeight: src.particleEmissionHeight,
             }}
             onApply={(cfg) => {
               const nextCustomIds =
@@ -2891,13 +2936,27 @@ export function RuleBook() {
                 useParticleTint: cfg.shape === 'custom' ? Boolean(cfg.useParticleTint) : undefined,
                 particleColor: cfg.color,
                 particleColor2: cfg.color2,
+                particleColorMode: cfg.colorMode,
                 particleCount: cfg.count ?? 20,
+                particleCountMax: cfg.countMax,
                 particleSpeed: cfg.speed,
+                particleSpeedMax: cfg.speedMax,
                 particleSize: cfg.size,
+                particleSizeMax: cfg.sizeMax,
+                particleEndSizeScale: cfg.endSizeScale,
                 particleLifetime: cfg.lifetime,
+                particleLifetimeMax: cfg.lifetimeMax,
                 particleGravity: cfg.gravity,
+                particleDrag: cfg.drag,
+                particleOpacityStart: cfg.opacityStart,
+                particleOpacityEnd: cfg.opacityEnd,
+                particleSpinSpeed: cfg.spinSpeed,
                 particleSpread: cfg.spread,
                 particleAngle: cfg.angle,
+                particleEmissionShape: cfg.emissionShape,
+                particleEmissionRadius: cfg.emissionRadius,
+                particleEmissionWidth: cfg.emissionWidth,
+                particleEmissionHeight: cfg.emissionHeight,
               };
               if (particleEditorContext === 'wizard' && activeWizard) {
                 setActiveWizard({ ...activeWizard, ...patch });

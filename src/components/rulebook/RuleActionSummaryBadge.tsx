@@ -279,6 +279,10 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
     const originBadge =
       act.particleOriginMode === 'event_point'
         ? ' @Point exact'
+        : act.particleOriginMode === 'mouse'
+        ? ' @Souris'
+        : act.particleOriginMode === 'coordinates'
+        ? ` @(${Math.round(act.particleCoords?.x ?? 300)},${Math.round(act.particleCoords?.y ?? 200)})`
         : act.particleOriginMode === 'tag' && act.particleOriginTag
         ? ` @#${act.particleOriginTag}`
         : '';
@@ -288,12 +292,16 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         : act.customParticleId
         ? [act.customParticleId]
         : [];
+    const countLabel =
+      act.particleCountMax !== undefined
+        ? `${act.particleCount ?? 18}–${act.particleCountMax}x`
+        : `${act.particleCount ?? 18}x`;
     const shapeBadge =
       act.particleShape === 'custom' && selectedCustomIds.length > 0
         ? selectedCustomIds.length > 1
           ? `${selectedCustomIds.length} dessins`
           : customParticles.find((p) => p.id === selectedCustomIds[0])?.name || 'Dessin'
-        : `${act.particleCount ?? 18}x`;
+        : countLabel;
     return (
       <div
         role={canJump ? 'button' : undefined}

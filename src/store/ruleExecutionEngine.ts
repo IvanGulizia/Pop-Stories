@@ -23,7 +23,11 @@ import {
   setActiveDragPosition,
 } from '../utils/matterPhysicsEngine';
 import { PhysicsBehaviorConfig } from '../types';
-import { emitParticlesBurst } from '../utils/particleSystem';
+import {
+  computeRelativeParticleOrigin,
+  emitParticlesBurst,
+  getLatestMouseWorldPos,
+} from '../utils/particleSystem';
 import { soundSynth } from '../utils/sound';
 import { dispatchPlayCameraAction } from '../utils/cameraRuntime';
 import { resolveWorldBounds } from '../utils/cameraSolver';
@@ -432,10 +436,18 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
     const originMode = act.particleOriginMode || (helpers.target ? 'target' : 'subject');
     let originX = 300;
     let originY = 200;
+    let emitAngle = act.particleAngle ?? -90;
 
-    if (originMode === 'event_point' && helpers.eventPosition) {
-      originX = helpers.eventPosition.x;
-      originY = helpers.eventPosition.y;
+    if (originMode === 'coordinates') {
+      originX = act.particleCoords?.x ?? 300;
+      originY = act.particleCoords?.y ?? 200;
+    } else if (originMode === 'mouse') {
+      const mPos = helpers.eventPosition || getLatestMouseWorldPos();
+      originX = (mPos?.x ?? 300) + (act.particleOffsetX ?? 0);
+      originY = (mPos?.y ?? 200) + (act.particleOffsetY ?? 0);
+    } else if (originMode === 'event_point' && helpers.eventPosition) {
+      originX = helpers.eventPosition.x + (act.particleOffsetX ?? 0);
+      originY = helpers.eventPosition.y + (act.particleOffsetY ?? 0);
     } else {
       const origin =
         resolveEntityReference(
@@ -452,11 +464,20 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
         helpers.target;
 
       if (origin) {
-        originX = origin.position.x + origin.size.width / 2;
-        originY = origin.position.y + origin.size.height / 2;
+        const rel = computeRelativeParticleOrigin({
+          entity: origin,
+          anchor: act.particleAnchor || 'center',
+          offsetX: act.particleOffsetX ?? 0,
+          offsetY: act.particleOffsetY ?? 0,
+          baseAngleDeg: act.particleAngle ?? -90,
+          followRotation: act.particleMatchOriginRotation !== false,
+        });
+        originX = rel.x;
+        originY = rel.y;
+        emitAngle = rel.angleDeg;
       } else if (helpers.eventPosition) {
-        originX = helpers.eventPosition.x;
-        originY = helpers.eventPosition.y;
+        originX = helpers.eventPosition.x + (act.particleOffsetX ?? 0);
+        originY = helpers.eventPosition.y + (act.particleOffsetY ?? 0);
       }
     }
 
@@ -464,19 +485,33 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
       x: originX,
       y: originY,
       count: act.particleCount ?? 18,
+      countMax: act.particleCountMax,
       color: act.particleColor ?? '#f59e0b',
       color2: act.particleColor2,
+      colorMode: act.particleColorMode,
       shape: act.particleShape ?? 'circle',
       customParticleId: act.customParticleId,
       customParticleIds: act.customParticleIds,
       customParticleMode: act.customParticleMode,
       useTint: act.useParticleTint,
       speed: act.particleSpeed ?? 180,
+      speedMax: act.particleSpeedMax,
       size: act.particleSize ?? 6,
+      sizeMax: act.particleSizeMax,
+      endSizeScale: act.particleEndSizeScale,
       lifetime: act.particleLifetime ?? 0.7,
+      lifetimeMax: act.particleLifetimeMax,
       gravity: act.particleGravity ?? 220,
+      drag: act.particleDrag,
+      opacityStart: act.particleOpacityStart,
+      opacityEnd: act.particleOpacityEnd,
+      spinSpeed: act.particleSpinSpeed,
       spread: act.particleSpread ?? 360,
-      angle: act.particleAngle ?? -90,
+      angle: emitAngle,
+      emissionShape: act.particleEmissionShape,
+      emissionRadius: act.particleEmissionRadius,
+      emissionWidth: act.particleEmissionWidth,
+      emissionHeight: act.particleEmissionHeight,
     });
     return;
   }

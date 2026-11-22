@@ -28,7 +28,12 @@ import {
   SceneTransitionType,
 } from '../types';
 import { getEntityColliderBounds, getEntityWorldColliderBounds, resolveColliderState } from './collider';
-import { emitParticlesBurst } from './particleSystem';
+import {
+  computeRelativeParticleOrigin,
+  emitParticlesBurst,
+  sampleParticleRange,
+  setLatestMouseWorldPos,
+} from './particleSystem';
 
 import {
   getEffectiveBehaviors,
@@ -192,7 +197,13 @@ const pendingInitialVelocities = new Map<
 >();
 const impulseDrivenEntityIds = new Set<string>();
 const autoDestroyTimers = new Map<string, number>();
-const particleEmitterAccumulators = new Map<string, number>();
+interface ParticleEmitterRuntimeState {
+  acc: number;
+  elapsedSec: number;
+  initialBurstDone: boolean;
+  burstTimer: number;
+}
+const particleEmitterStates = new Map<string, ParticleEmitterRuntimeState>();
 const hierarchyGroupIds = new Map<string, number>();
 let nextNegativeGroupId = -100;
 
@@ -869,7 +880,7 @@ export function resetMatterPhysicsRuntime() {
   pendingInitialVelocities.clear();
   impulseDrivenEntityIds.clear();
   autoDestroyTimers.clear();
-  particleEmitterAccumulators.clear();
+  particleEmitterStates.clear();
   hierarchyGroupIds.clear();
   healthRuntimeMap.clear();
   puppetRuntimeStates.clear();
@@ -1735,6 +1746,7 @@ export function stepMatterPhysics(params: {
   colliderLayers?: SceneLayer[];
 }): PhysicsTickResult {
   const { entities, deltaTime, canvasBounds, viewportRect, mousePos, colliderLayers = [] } = params;
+  setLatestMouseWorldPos(mousePos ?? null);
   const dt = Math.min(deltaTime, 0.05);
 
   const activeDragEntries = Object.entries(activeDragPositions);
@@ -4409,41 +4421,112 @@ export function stepMatterPhysics(params: {
       flipX: nextFlipX,
     });
 
-    // Cas 3 : Émetteur de particules continu léger
+    // Cas 3 : Émetteur de particules continu & salves (durée finie, boucle, ancres, plages)
     if (emitter && emitter.enabled !== false) {
-      const rate = Math.max(1, Math.min(40, emitter.rate ?? 12));
-      const acc = (particleEmitterAccumulators.get(entity.id) || 0) + dt * rate;
-      const toEmit = Math.floor(acc);
-      particleEmitterAccumulators.set(entity.id, acc - toEmit);
-
-      if (toEmit > 0) {
-        const centerX = newX + entity.size.width / 2;
-        const centerY = newY + entity.size.height / 2;
-        const rawOx = nextFlipX ? -(emitter.offsetX ?? 0) : (emitter.offsetX ?? 0);
-        const rawOy = emitter.offsetY ?? 0;
-        const rad = (newRot * Math.PI) / 180;
-        const emitX = centerX + rawOx * Math.cos(rad) - rawOy * Math.sin(rad);
-        const emitY = centerY + rawOx * Math.sin(rad) + rawOy * Math.cos(rad);
-
-        emitParticlesBurst({
-          x: emitX,
-          y: emitY,
-          count: toEmit,
-          color: emitter.color || '#f59e0b',
-          color2: emitter.color2,
-          shape: emitter.shape || 'circle',
-          customParticleId: emitter.customParticleId,
-          customParticleIds: emitter.customParticleIds,
-          customParticleMode: emitter.customParticleMode,
-          useTint: emitter.useParticleTint,
-          speed: emitter.speed ?? 120,
-          size: emitter.size ?? 6,
-          lifetime: emitter.lifetime ?? 0.6,
-          gravity: emitter.gravity ?? 150,
-          spread: emitter.spread ?? 60,
-          angle: (emitter.angle ?? -90) + newRot,
-        });
+      let emRt = particleEmitterStates.get(entity.id);
+      if (!emRt) {
+        emRt = { acc: 0, elapsedSec: 0, initialBurstDone: false, burstTimer: 0 };
+        particleEmitterStates.set(entity.id, emRt);
       }
+
+      const emitterDur = emitter.emitterDuration ?? 0;
+      const isFiniteDur = emitterDur > 0;
+      let isActiveWindow = true;
+
+      if (isFiniteDur) {
+        if (emRt.elapsedSec >= emitterDur) {
+          if (emitter.emitterLoop) {
+            emRt.elapsedSec = emRt.elapsedSec % emitterDur;
+            emRt.initialBurstDone = false;
+            emRt.burstTimer = 0;
+          } else {
+            isActiveWindow = false;
+          }
+        }
+      }
+
+      if (isActiveWindow) {
+        let toEmit = 0;
+
+        if (!emRt.initialBurstDone && (emitter.initialBurstCount ?? 0) > 0) {
+          toEmit += Math.max(1, Math.round(emitter.initialBurstCount!));
+          emRt.initialBurstDone = true;
+        }
+
+        const burstInterval = emitter.burstInterval ?? 0;
+        const burstCount = emitter.burstCount ?? 0;
+        if (burstInterval > 0 && burstCount > 0) {
+          emRt.burstTimer += dt;
+          let guard = 0;
+          while (emRt.burstTimer >= burstInterval && guard < 4) {
+            emRt.burstTimer -= burstInterval;
+            toEmit += Math.max(1, Math.round(burstCount));
+            guard++;
+          }
+        }
+
+        const baseRate = Math.max(0, emitter.rate ?? 12);
+        const effRate =
+          emitter.rateMax !== undefined && Number.isFinite(emitter.rateMax)
+            ? Math.max(0, Math.min(80, sampleParticleRange(baseRate, Math.max(0, emitter.rateMax), 1, 1)))
+            : Math.min(80, baseRate);
+        if (effRate > 0) {
+          const acc = emRt.acc + dt * effRate;
+          const contEmit = Math.floor(acc);
+          emRt.acc = acc - contEmit;
+          toEmit += contEmit;
+        }
+
+        emRt.elapsedSec += dt;
+
+        if (toEmit > 0) {
+          const originRes = computeRelativeParticleOrigin({
+            entity,
+            anchor: emitter.anchor || 'center',
+            offsetX: emitter.offsetX ?? 0,
+            offsetY: emitter.offsetY ?? 0,
+            baseAngleDeg: emitter.angle ?? -90,
+            followRotation: emitter.followRotation !== false,
+            overridePosition: { x: newX, y: newY },
+            overrideRotationDeg: newRot,
+            overrideFlipX: nextFlipX,
+          });
+
+          emitParticlesBurst({
+            x: originRes.x,
+            y: originRes.y,
+            count: toEmit,
+            color: emitter.color || '#f59e0b',
+            color2: emitter.color2,
+            colorMode: emitter.colorMode,
+            shape: emitter.shape || 'circle',
+            customParticleId: emitter.customParticleId,
+            customParticleIds: emitter.customParticleIds,
+            customParticleMode: emitter.customParticleMode,
+            useTint: emitter.useParticleTint,
+            speed: emitter.speed ?? 120,
+            speedMax: emitter.speedMax,
+            size: emitter.size ?? 6,
+            sizeMax: emitter.sizeMax,
+            endSizeScale: emitter.endSizeScale,
+            lifetime: emitter.lifetime ?? 0.6,
+            lifetimeMax: emitter.lifetimeMax,
+            gravity: emitter.gravity ?? 150,
+            drag: emitter.drag,
+            opacityStart: emitter.opacityStart,
+            opacityEnd: emitter.opacityEnd,
+            spinSpeed: emitter.spinSpeed,
+            spread: emitter.spread ?? 60,
+            angle: originRes.angleDeg,
+            emissionShape: emitter.emissionShape,
+            emissionRadius: emitter.emissionRadius,
+            emissionWidth: emitter.emissionWidth,
+            emissionHeight: emitter.emissionHeight,
+          });
+        }
+      }
+    } else {
+      particleEmitterStates.delete(entity.id);
     }
     // Cas 4 : Composant Santé / Dégâts (Health) — modulaire & coopératif avec le Character Controller
     const health = effectiveBehaviors.find((b) => b.type === 'health') as HealthBehaviorConfig | undefined;

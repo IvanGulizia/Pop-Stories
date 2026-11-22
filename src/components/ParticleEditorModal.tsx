@@ -11,35 +11,32 @@ import {
   Pencil,
   MousePointerClick,
   Flame,
+  RefreshCw,
 } from 'lucide-react';
-import { CustomParticlePreset, CustomParticleUsageMode, ParticleShape } from '../types';
+import {
+  CustomParticlePreset,
+  CustomParticleUsageMode,
+  ParticleAnchorPreset,
+  ParticleColorMode,
+  ParticleEffectConfig,
+  ParticleEmissionShape,
+  ParticleShape,
+} from '../types';
 import { useSceneStore, EMPTY_LIST } from '../store/useSceneStore';
 import {
   createParticlePool,
   invalidateCustomParticleSprite,
+  sampleParticleRange,
   syncCustomParticlePresets,
 } from '../utils/particleSystem';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
+import { EditableNumericValue } from './shared/EditableNumericValue';
+import {
+  ParticlePresetLibrary,
+  QuickParticlePresetItem,
+} from './particles/ParticlePresetLibrary';
 
-export interface ParticleEditorConfig {
-  shape: ParticleShape;
-  customParticleId?: string;
-  customParticleIds?: string[];
-  customParticleMode?: CustomParticleUsageMode;
-  useParticleTint?: boolean;
-  color: string;
-  color2: string;
-  rate?: number;     // mode === 'emitter'
-  count?: number;    // mode === 'burst'
-  speed: number;
-  size: number;
-  lifetime: number;
-  gravity: number;
-  spread: number;
-  angle: number;
-  offsetX?: number;
-  offsetY?: number;
-}
+export type ParticleEditorConfig = ParticleEffectConfig;
 
 interface ParticleEditorModalProps {
   isOpen: boolean;
@@ -49,28 +46,32 @@ interface ParticleEditorModalProps {
   onClose: () => void;
 }
 
-interface QuickPresetItem {
-  id: string;
-  label: string;
-  config: Partial<ParticleEditorConfig>;
-}
-
-const QUICK_PRESETS: QuickPresetItem[] = [
+const QUICK_PRESETS: QuickParticlePresetItem[] = [
   {
     id: 'fire',
     label: 'Feu & Braises',
     config: {
       shape: 'circle',
-      color: '#f97316',
-      color2: '#facc15',
+      colorMode: 'gradient_lifetime',
+      color: '#facc15',
+      color2: '#ef4444',
       rate: 26,
       count: 28,
-      speed: 120,
-      size: 9,
-      lifetime: 0.75,
+      speed: 90,
+      speedMax: 150,
+      size: 6,
+      sizeMax: 12,
+      endSizeScale: 0.2,
+      lifetime: 0.55,
+      lifetimeMax: 0.95,
       gravity: -160,
-      spread: 45,
+      drag: 0.6,
+      opacityStart: 1,
+      opacityEnd: 0,
+      spread: 40,
       angle: -90,
+      emissionShape: 'circle',
+      emissionRadius: 14,
     },
   },
   {
@@ -78,16 +79,29 @@ const QUICK_PRESETS: QuickPresetItem[] = [
     label: 'Explosion',
     config: {
       shape: 'spark',
-      color: '#ef4444',
-      color2: '#fbbf24',
+      colorMode: 'gradient_lifetime',
+      color: '#fef08a',
+      color2: '#ef4444',
       rate: 32,
-      count: 40,
-      speed: 280,
-      size: 8,
-      lifetime: 0.65,
-      gravity: 180,
+      count: 35,
+      countMax: 50,
+      speed: 180,
+      speedMax: 340,
+      size: 6,
+      sizeMax: 11,
+      endSizeScale: 0.25,
+      lifetime: 0.45,
+      lifetimeMax: 0.8,
+      gravity: 160,
+      drag: 1.8,
+      opacityStart: 1,
+      opacityEnd: 0,
       spread: 360,
       angle: 0,
+      emissionShape: 'point',
+      initialBurstCount: 32,
+      emitterDuration: 0.6,
+      emitterLoop: false,
     },
   },
   {
@@ -95,16 +109,25 @@ const QUICK_PRESETS: QuickPresetItem[] = [
     label: 'Étincelles',
     config: {
       shape: 'spark',
+      colorMode: 'two_colors',
       color: '#38bdf8',
       color2: '#a855f7',
       rate: 22,
       count: 24,
-      speed: 240,
-      size: 6,
-      lifetime: 0.55,
+      speed: 190,
+      speedMax: 290,
+      size: 5,
+      sizeMax: 8,
+      endSizeScale: 0.4,
+      lifetime: 0.4,
+      lifetimeMax: 0.7,
       gravity: 340,
+      drag: 0.4,
+      opacityStart: 1,
+      opacityEnd: 0,
       spread: 110,
       angle: -90,
+      emissionShape: 'point',
     },
   },
   {
@@ -112,16 +135,26 @@ const QUICK_PRESETS: QuickPresetItem[] = [
     label: 'Fumée douce',
     config: {
       shape: 'circle',
-      color: '#94a3b8',
-      color2: '#e2e8f0',
+      colorMode: 'gradient_lifetime',
+      color: '#cbd5e1',
+      color2: '#64748b',
       rate: 10,
       count: 16,
-      speed: 55,
-      size: 15,
-      lifetime: 1.5,
-      gravity: -45,
+      speed: 35,
+      speedMax: 75,
+      size: 11,
+      sizeMax: 18,
+      endSizeScale: 1.8,
+      lifetime: 1.2,
+      lifetimeMax: 1.8,
+      gravity: -40,
+      drag: 1.2,
+      opacityStart: 0.65,
+      opacityEnd: 0,
       spread: 35,
       angle: -90,
+      emissionShape: 'circle',
+      emissionRadius: 16,
     },
   },
   {
@@ -129,16 +162,27 @@ const QUICK_PRESETS: QuickPresetItem[] = [
     label: 'Magie / Étoiles',
     config: {
       shape: 'star',
+      colorMode: 'two_colors',
       color: '#facc15',
       color2: '#ec4899',
       rate: 16,
       count: 22,
-      speed: 140,
-      size: 9,
-      lifetime: 1.0,
-      gravity: 40,
+      speed: 100,
+      speedMax: 180,
+      size: 7,
+      sizeMax: 12,
+      endSizeScale: 0.3,
+      lifetime: 0.8,
+      lifetimeMax: 1.3,
+      gravity: 30,
+      drag: 0.9,
+      opacityStart: 1,
+      opacityEnd: 0,
+      spinSpeed: 180,
       spread: 360,
       angle: -90,
+      emissionShape: 'circle',
+      emissionRadius: 24,
     },
   },
   {
@@ -146,19 +190,146 @@ const QUICK_PRESETS: QuickPresetItem[] = [
     label: 'Confettis',
     config: {
       shape: 'square',
+      colorMode: 'two_colors',
       color: '#22c55e',
       color2: '#3b82f6',
       rate: 28,
       count: 42,
-      speed: 230,
-      size: 7,
-      lifetime: 1.4,
+      speed: 170,
+      speedMax: 290,
+      size: 5,
+      sizeMax: 9,
+      endSizeScale: 0.9,
+      lifetime: 1.1,
+      lifetimeMax: 1.7,
       gravity: 260,
+      drag: 1.4,
+      opacityStart: 1,
+      opacityEnd: 0.2,
+      spinSpeed: 320,
       spread: 120,
       angle: -90,
+      emissionShape: 'box',
+      emissionWidth: 70,
+      emissionHeight: 16,
     },
   },
 ];
+
+interface RangeOrFixedRowProps {
+  label: string;
+  unit?: string;
+  precision?: number;
+  minVal: number;
+  maxVal?: number;
+  sliderMin: number;
+  sliderMax: number;
+  step: number;
+  accent?: 'amber' | 'indigo';
+  onChangeMin: (val: number) => void;
+  onChangeMax: (val: number | undefined) => void;
+  roundInt?: boolean;
+}
+
+const RangeOrFixedRow: React.FC<RangeOrFixedRowProps> = ({
+  label,
+  unit = '',
+  precision = 1,
+  minVal,
+  maxVal,
+  sliderMin,
+  sliderMax,
+  step,
+  accent = 'indigo',
+  onChangeMin,
+  onChangeMax,
+  roundInt = false,
+}) => {
+  const isRange = maxVal !== undefined && Number.isFinite(maxVal);
+  const accentClass = accent === 'amber' ? 'accent-amber-500' : 'accent-indigo-600';
+  const badgeClass =
+    accent === 'amber'
+      ? 'font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded text-[11px]'
+      : 'font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]';
+
+  return (
+    <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5">
+      <div className="flex items-center justify-between gap-2 text-xs text-slate-700">
+        <span className="font-bold">{label}</span>
+        <div className="flex items-center gap-1.5">
+          <EditableNumericValue
+            value={minVal}
+            unit={isRange ? undefined : unit}
+            precision={precision}
+            onChange={(v) => onChangeMin(roundInt ? Math.round(v) : v)}
+            className={badgeClass}
+          />
+          {isRange && (
+            <>
+              <span className="text-[10px] font-bold text-slate-400">à</span>
+              <EditableNumericValue
+                value={maxVal!}
+                unit={unit}
+                precision={precision}
+                onChange={(v) => onChangeMax(roundInt ? Math.round(v) : v)}
+                className={badgeClass}
+              />
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              if (isRange) {
+                onChangeMax(undefined);
+              } else {
+                const suggested = roundInt
+                  ? Math.round(minVal + Math.max(2, minVal * 0.4))
+                  : Number((minVal + Math.max(step * 2, Math.abs(minVal) * 0.4)).toFixed(precision));
+                onChangeMax(suggested);
+              }
+            }}
+            className={`px-1.5 py-0.5 rounded-lg text-[9px] font-extrabold border cursor-pointer transition-colors ${
+              isRange
+                ? 'bg-indigo-600 text-white border-indigo-600'
+                : 'bg-white text-slate-500 border-slate-300 hover:border-indigo-400'
+            }`}
+            title={isRange ? 'Revenir à une valeur fixe' : 'Activer une plage aléatoire Min–Max'}
+          >
+            {isRange ? 'Min–Max' : 'Fixe'}
+          </button>
+        </div>
+      </div>
+
+      <input
+        type="range"
+        min={sliderMin}
+        max={sliderMax}
+        step={step}
+        value={Math.max(sliderMin, Math.min(sliderMax, minVal))}
+        onChange={(e) => {
+          const v = parseFloat(e.target.value);
+          if (Number.isFinite(v)) onChangeMin(roundInt ? Math.round(v) : v);
+        }}
+        className={`w-full ${accentClass} cursor-pointer h-1.5`}
+      />
+
+      {isRange && (
+        <input
+          type="range"
+          min={sliderMin}
+          max={sliderMax}
+          step={step}
+          value={Math.max(sliderMin, Math.min(sliderMax, maxVal!))}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value);
+            if (Number.isFinite(v)) onChangeMax(roundInt ? Math.round(v) : v);
+          }}
+          className={`w-full ${accentClass} cursor-pointer h-1.5 opacity-80`}
+        />
+      )}
+    </div>
+  );
+};
 
 export function ParticleEditorModal({
   isOpen,
@@ -179,36 +350,71 @@ export function ParticleEditorModal({
         : initialConfig.customParticleId
         ? [initialConfig.customParticleId]
         : [];
+    const c1 = initialConfig.color || '#f59e0b';
+    const c2 = initialConfig.color2 || c1;
+    const inferredColorMode: ParticleColorMode =
+      initialConfig.colorMode || (initialConfig.color2 && initialConfig.color2 !== c1 ? 'two_colors' : 'single');
+
     return {
       shape: initialConfig.shape || 'circle',
       customParticleId: initialConfig.customParticleId || initialIds[0],
       customParticleIds: initialIds,
       customParticleMode: initialConfig.customParticleMode || 'random',
       useParticleTint: Boolean(initialConfig.useParticleTint),
-      color: initialConfig.color || '#f59e0b',
-      color2: initialConfig.color2 || initialConfig.color || '#ef4444',
+      color: c1,
+      color2: c2,
+      colorMode: inferredColorMode,
       rate: initialConfig.rate ?? 16,
+      rateMax: initialConfig.rateMax,
       count: initialConfig.count ?? 22,
+      countMax: initialConfig.countMax,
       speed: initialConfig.speed ?? 160,
+      speedMax: initialConfig.speedMax,
       size: initialConfig.size ?? 7,
+      sizeMax: initialConfig.sizeMax,
+      endSizeScale: initialConfig.endSizeScale ?? 0.35,
       lifetime: initialConfig.lifetime ?? 0.8,
+      lifetimeMax: initialConfig.lifetimeMax,
       gravity: initialConfig.gravity ?? 180,
+      drag: initialConfig.drag ?? 0,
+      opacityStart: initialConfig.opacityStart ?? 1,
+      opacityEnd: initialConfig.opacityEnd ?? 0,
+      spinSpeed: initialConfig.spinSpeed,
       spread: initialConfig.spread ?? (mode === 'burst' ? 360 : 60),
       angle: initialConfig.angle ?? -90,
       offsetX: initialConfig.offsetX ?? 0,
       offsetY: initialConfig.offsetY ?? 0,
+      anchor: initialConfig.anchor || 'center',
+      followRotation: initialConfig.followRotation !== false,
+      emissionShape: initialConfig.emissionShape || 'point',
+      emissionRadius: initialConfig.emissionRadius ?? 28,
+      emissionWidth: initialConfig.emissionWidth ?? 60,
+      emissionHeight: initialConfig.emissionHeight ?? 30,
+      emitterDuration: initialConfig.emitterDuration ?? 0,
+      emitterLoop: initialConfig.emitterLoop !== false,
+      initialBurstCount: initialConfig.initialBurstCount ?? 0,
+      burstInterval: initialConfig.burstInterval ?? 0,
+      burstCount: initialConfig.burstCount ?? 12,
     };
   });
 
   const [isAutoEmitting, setIsAutoEmitting] = useState(true);
   const [backdropTheme, setBackdropTheme] = useState<'dark' | 'light' | 'grid'>('dark');
   const [drawerTarget, setDrawerTarget] = useState<{ editingPreset?: CustomParticlePreset } | null>(null);
+  const [cycleRestartSignal, setCycleRestartSignal] = useState(0);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const poolRef = useRef(createParticlePool(260));
+  const poolRef = useRef(createParticlePool(340));
   const configRef = useRef(config);
   const isAutoRef = useRef(isAutoEmitting);
   const isPointerDownRef = useRef(false);
+  const simStateRef = useRef({
+    emitAcc: 0,
+    elapsedSec: 0,
+    initialBurstDone: false,
+    burstTimer: 0,
+    burstLoopTimer: 0.6,
+  });
 
   useEffect(() => {
     configRef.current = config;
@@ -222,13 +428,21 @@ export function ParticleEditorModal({
     syncCustomParticlePresets(customParticles);
   }, [customParticles]);
 
+  useEffect(() => {
+    simStateRef.current = {
+      emitAcc: 0,
+      elapsedSec: 0,
+      initialBurstDone: false,
+      burstTimer: 0,
+      burstLoopTimer: 0.6,
+    };
+  }, [cycleRestartSignal]);
+
   // Boucle de simulation Canvas 2D isolée à l'éditeur
   useEffect(() => {
     if (!isOpen) return;
     let rafId = 0;
     let lastTime = performance.now();
-    let emitAcc = 0;
-    let burstTimer = 0.6; // lance une 1re salve rapidement à l'ouverture
 
     const STAGE_W = 480;
     const STAGE_H = 340;
@@ -241,55 +455,118 @@ export function ParticleEditorModal({
 
       const cfg = configRef.current;
       const pool = poolRef.current;
+      const sim = simStateRef.current;
 
       if (isAutoRef.current) {
         if (mode === 'emitter') {
-          const rate = Math.max(1, cfg.rate ?? 16);
-          emitAcc += rate * dt;
-          const whole = Math.floor(emitAcc);
-          if (whole > 0) {
-            emitAcc -= whole;
-            pool.emitBurst({
-              x: ORIGIN_X,
-              y: ORIGIN_Y,
-              count: Math.min(12, whole),
-              color: cfg.color,
-              color2: cfg.color2,
-              shape: cfg.shape,
-              customParticleId: cfg.customParticleId,
-              customParticleIds: cfg.customParticleIds,
-              customParticleMode: cfg.customParticleMode,
-              useTint: cfg.useParticleTint,
-              speed: cfg.speed,
-              size: cfg.size,
-              lifetime: cfg.lifetime,
-              gravity: cfg.gravity,
-              spread: cfg.spread,
-              angle: cfg.angle,
-            });
+          const dur = cfg.emitterDuration ?? 0;
+          let activeWindow = true;
+          if (dur > 0 && sim.elapsedSec >= dur) {
+            if (cfg.emitterLoop) {
+              sim.elapsedSec = sim.elapsedSec % dur;
+              sim.initialBurstDone = false;
+              sim.burstTimer = 0;
+            } else {
+              activeWindow = false;
+            }
+          }
+
+          if (activeWindow) {
+            let whole = 0;
+            if (!sim.initialBurstDone && (cfg.initialBurstCount ?? 0) > 0) {
+              whole += Math.max(1, Math.round(cfg.initialBurstCount!));
+              sim.initialBurstDone = true;
+            }
+            if ((cfg.burstInterval ?? 0) > 0 && (cfg.burstCount ?? 0) > 0) {
+              sim.burstTimer += dt;
+              if (sim.burstTimer >= cfg.burstInterval!) {
+                sim.burstTimer -= cfg.burstInterval!;
+                whole += Math.max(1, Math.round(cfg.burstCount!));
+              }
+            }
+            const effRate =
+              cfg.rateMax !== undefined && Number.isFinite(cfg.rateMax)
+                ? Math.max(0, sampleParticleRange(cfg.rate ?? 16, cfg.rateMax, 1, 1))
+                : Math.max(0, cfg.rate ?? 16);
+            sim.emitAcc += effRate * dt;
+            const cont = Math.floor(sim.emitAcc);
+            if (cont > 0) {
+              sim.emitAcc -= cont;
+              whole += cont;
+            }
+            sim.elapsedSec += dt;
+
+            if (whole > 0) {
+              pool.emitBurst({
+                x: ORIGIN_X,
+                y: ORIGIN_Y,
+                count: Math.min(80, whole),
+                color: cfg.color,
+                color2: cfg.color2,
+                colorMode: cfg.colorMode,
+                shape: cfg.shape,
+                customParticleId: cfg.customParticleId,
+                customParticleIds: cfg.customParticleIds,
+                customParticleMode: cfg.customParticleMode,
+                useTint: cfg.useParticleTint,
+                speed: cfg.speed,
+                speedMax: cfg.speedMax,
+                size: cfg.size,
+                sizeMax: cfg.sizeMax,
+                endSizeScale: cfg.endSizeScale,
+                lifetime: cfg.lifetime,
+                lifetimeMax: cfg.lifetimeMax,
+                gravity: cfg.gravity,
+                drag: cfg.drag,
+                opacityStart: cfg.opacityStart,
+                opacityEnd: cfg.opacityEnd,
+                spinSpeed: cfg.spinSpeed,
+                spread: cfg.spread,
+                angle: cfg.angle,
+                emissionShape: cfg.emissionShape,
+                emissionRadius: cfg.emissionRadius,
+                emissionWidth: cfg.emissionWidth,
+                emissionHeight: cfg.emissionHeight,
+              });
+            }
           }
         } else {
-          burstTimer += dt;
-          const interval = Math.max(0.7, Math.min(2.2, cfg.lifetime + 0.35));
-          if (burstTimer >= interval) {
-            burstTimer = 0;
+          sim.burstLoopTimer += dt;
+          const maxL = cfg.lifetimeMax ?? cfg.lifetime;
+          const interval = Math.max(0.7, Math.min(2.6, maxL + 0.35));
+          if (sim.burstLoopTimer >= interval) {
+            sim.burstLoopTimer = 0;
             pool.emitBurst({
               x: ORIGIN_X,
               y: ORIGIN_Y,
               count: cfg.count ?? 22,
+              countMax: cfg.countMax,
               color: cfg.color,
               color2: cfg.color2,
+              colorMode: cfg.colorMode,
               shape: cfg.shape,
               customParticleId: cfg.customParticleId,
               customParticleIds: cfg.customParticleIds,
               customParticleMode: cfg.customParticleMode,
               useTint: cfg.useParticleTint,
               speed: cfg.speed,
+              speedMax: cfg.speedMax,
               size: cfg.size,
+              sizeMax: cfg.sizeMax,
+              endSizeScale: cfg.endSizeScale,
               lifetime: cfg.lifetime,
+              lifetimeMax: cfg.lifetimeMax,
               gravity: cfg.gravity,
+              drag: cfg.drag,
+              opacityStart: cfg.opacityStart,
+              opacityEnd: cfg.opacityEnd,
+              spinSpeed: cfg.spinSpeed,
               spread: cfg.spread,
               angle: cfg.angle,
+              emissionShape: cfg.emissionShape,
+              emissionRadius: cfg.emissionRadius,
+              emissionWidth: cfg.emissionWidth,
+              emissionHeight: cfg.emissionHeight,
             });
           }
         }
@@ -321,19 +598,33 @@ export function ParticleEditorModal({
       x,
       y,
       count: mode === 'burst' ? cfg.count ?? 22 : Math.max(8, Math.round((cfg.rate ?? 16) * 0.8)),
+      countMax: mode === 'burst' ? cfg.countMax : undefined,
       color: cfg.color,
       color2: cfg.color2,
+      colorMode: cfg.colorMode,
       shape: cfg.shape,
       customParticleId: cfg.customParticleId,
       customParticleIds: cfg.customParticleIds,
       customParticleMode: cfg.customParticleMode,
       useTint: cfg.useParticleTint,
       speed: cfg.speed,
+      speedMax: cfg.speedMax,
       size: cfg.size,
+      sizeMax: cfg.sizeMax,
+      endSizeScale: cfg.endSizeScale,
       lifetime: cfg.lifetime,
+      lifetimeMax: cfg.lifetimeMax,
       gravity: cfg.gravity,
+      drag: cfg.drag,
+      opacityStart: cfg.opacityStart,
+      opacityEnd: cfg.opacityEnd,
+      spinSpeed: cfg.spinSpeed,
       spread: cfg.spread,
       angle: cfg.angle,
+      emissionShape: cfg.emissionShape,
+      emissionRadius: cfg.emissionRadius,
+      emissionWidth: cfg.emissionWidth,
+      emissionHeight: cfg.emissionHeight,
     });
   };
 
@@ -349,7 +640,6 @@ export function ParticleEditorModal({
     setConfig((prev) => ({ ...prev, ...partial }));
   };
 
-  // Calcul des lignes SVG d'aperçu du cône d'angle sur le stage
   const originX = 240;
   const originY = 340 * 0.56;
   const angleRad = (config.angle * Math.PI) / 180;
@@ -381,12 +671,12 @@ export function ParticleEditorModal({
             </div>
             <div>
               <h2 className="text-sm sm:text-base font-black text-slate-800 tracking-tight">
-                Éditeur & Testeur de Particules
+                Studio Particules &amp; Collection
               </h2>
               <p className="text-[11px] text-slate-500">
                 {mode === 'emitter'
-                  ? 'Prévisualisez et ajustez le flux continu en temps réel'
-                  : 'Testez les salves de particules (cliquez sur la scène de test pour émettre)'}
+                  ? 'Plages Min–Max, formes d’émission, salves, durée et collection inter-projets'
+                  : 'Testez vos salves avancées (plages aléatoires, dégradés, formes) et enregistrez vos recettes'}
               </p>
             </div>
           </div>
@@ -419,8 +709,8 @@ export function ParticleEditorModal({
 
         {/* Body: Left Stage + Right Controls */}
         <div className="flex-1 overflow-hidden grid grid-cols-1 lg:grid-cols-12 min-h-0">
-          {/* LEFT: Live Interactive Stage */}
-          <div className="lg:col-span-6 p-4 bg-slate-100/70 border-b lg:border-b-0 lg:border-r border-slate-200 flex flex-col gap-3">
+          {/* LEFT: Live Interactive Stage + Preset Library */}
+          <div className="lg:col-span-6 p-4 bg-slate-100/70 border-b lg:border-b-0 lg:border-r border-slate-200 flex flex-col gap-3 overflow-y-auto">
             {/* Toolbar above canvas */}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-1.5">
@@ -445,6 +735,21 @@ export function ParticleEditorModal({
                   <Flame className="w-3.5 h-3.5" />
                   <span>Salve test</span>
                 </button>
+
+                {mode === 'emitter' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      poolRef.current.clear();
+                      setCycleRestartSignal((s) => s + 1);
+                    }}
+                    className="px-2 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                    title="Redémarrer le cycle d'émission depuis t = 0"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Cycle</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -481,7 +786,7 @@ export function ParticleEditorModal({
 
             {/* Interactive Canvas Stage */}
             <div
-              className={`relative w-full aspect-[480/340] rounded-2xl border overflow-hidden shadow-inner ${
+              className={`relative w-full aspect-[480/340] rounded-2xl border overflow-hidden shadow-inner shrink-0 ${
                 backdropTheme === 'dark'
                   ? 'bg-slate-900 border-slate-800'
                   : backdropTheme === 'grid'
@@ -498,11 +803,34 @@ export function ParticleEditorModal({
                   : undefined
               }
             >
-              {/* Cone & Angle visual indicator */}
+              {/* Cone, Angle & Emission Zone SVG indicator */}
               <svg
                 viewBox="0 0 480 340"
-                className="absolute inset-0 w-full h-full pointer-events-none opacity-45"
+                className="absolute inset-0 w-full h-full pointer-events-none opacity-55"
               >
+                {config.emissionShape === 'circle' && (
+                  <circle
+                    cx={originX}
+                    cy={originY}
+                    r={Math.max(4, config.emissionRadius ?? 28)}
+                    fill="rgba(245, 158, 11, 0.08)"
+                    stroke="#f59e0b"
+                    strokeWidth="1.2"
+                    strokeDasharray="4 3"
+                  />
+                )}
+                {config.emissionShape === 'box' && (
+                  <rect
+                    x={originX - Math.max(4, config.emissionWidth ?? 60) / 2}
+                    y={originY - Math.max(4, config.emissionHeight ?? 30) / 2}
+                    width={Math.max(4, config.emissionWidth ?? 60)}
+                    height={Math.max(4, config.emissionHeight ?? 30)}
+                    fill="rgba(245, 158, 11, 0.08)"
+                    stroke="#f59e0b"
+                    strokeWidth="1.2"
+                    strokeDasharray="4 3"
+                  />
+                )}
                 {config.spread < 350 && (
                   <>
                     <line
@@ -533,7 +861,7 @@ export function ParticleEditorModal({
                   stroke="#f59e0b"
                   strokeWidth="1.5"
                 />
-                <circle cx={originX} cy={originY} r="4" fill="#f59e0b" opacity="0.7" />
+                <circle cx={originX} cy={originY} r="4" fill="#f59e0b" opacity="0.8" />
               </svg>
 
               <canvas
@@ -554,17 +882,30 @@ export function ParticleEditorModal({
                     count: 3,
                     color: config.color,
                     color2: config.color2,
+                    colorMode: config.colorMode,
                     shape: config.shape,
                     customParticleId: config.customParticleId,
                     customParticleIds: config.customParticleIds,
                     customParticleMode: config.customParticleMode,
                     useTint: config.useParticleTint,
                     speed: config.speed,
+                    speedMax: config.speedMax,
                     size: config.size,
+                    sizeMax: config.sizeMax,
+                    endSizeScale: config.endSizeScale,
                     lifetime: config.lifetime,
+                    lifetimeMax: config.lifetimeMax,
                     gravity: config.gravity,
+                    drag: config.drag,
+                    opacityStart: config.opacityStart,
+                    opacityEnd: config.opacityEnd,
+                    spinSpeed: config.spinSpeed,
                     spread: config.spread,
                     angle: config.angle,
+                    emissionShape: config.emissionShape,
+                    emissionRadius: config.emissionRadius,
+                    emissionWidth: config.emissionWidth,
+                    emissionHeight: config.emissionHeight,
                   });
                 }}
                 onPointerUp={() => {
@@ -588,62 +929,116 @@ export function ParticleEditorModal({
               </div>
             </div>
 
-            {/* Quick Presets */}
-            <div className="space-y-1.5">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
-                Présets rapides
-              </span>
-              <div className="grid grid-cols-3 gap-1.5">
-                {QUICK_PRESETS.map((preset) => (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => update(preset.config)}
-                    className="px-2.5 py-1.5 bg-white hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-xl text-[11px] font-bold text-slate-700 transition-all cursor-pointer flex items-center gap-1.5 truncate"
-                  >
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/10"
-                      style={{
-                        background: `linear-gradient(135deg, ${preset.config.color}, ${preset.config.color2})`,
-                      }}
-                    />
-                    <span className="truncate">{preset.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+            {/* Présets & Collection Projet / Inter-projets */}
+            <ParticlePresetLibrary
+              mode={mode}
+              currentConfig={config}
+              quickPresets={QUICK_PRESETS}
+              onApplyConfig={(patch) => {
+                update(patch);
+                setCycleRestartSignal((s) => s + 1);
+              }}
+            />
           </div>
 
           {/* RIGHT: All Controls */}
           <div className="lg:col-span-6 p-4 overflow-y-auto space-y-2.5 bg-white">
-            {/* Forme */}
-            <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-700 text-xs">Forme des particules</span>
-              <select
-                value={config.shape}
-                onChange={(e) => {
-                  const nextShape = e.target.value as ParticleShape;
-                  if (nextShape === 'custom' && (!config.customParticleIds || config.customParticleIds.length === 0) && customParticles.length > 0) {
-                    update({
-                      shape: nextShape,
-                      customParticleId: customParticles[0].id,
-                      customParticleIds: [customParticles[0].id],
-                    });
-                  } else {
-                    update({ shape: nextShape });
-                  }
-                }}
-                className="bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-xs font-semibold text-slate-800"
-              >
-                <option value="circle">Rond (Bulle / Fumée)</option>
-                <option value="square">Carré (Confetti / Pixel)</option>
-                <option value="spark">Étincelle (Trait)</option>
-                <option value="star">Étoile</option>
-                <option value="custom">Particule dessinée ✨</option>
-              </select>
+            {/* Forme & Zone d'émission */}
+            <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold text-slate-700 text-xs">Forme des particules</span>
+                <select
+                  value={config.shape}
+                  onChange={(e) => {
+                    const nextShape = e.target.value as ParticleShape;
+                    if (
+                      nextShape === 'custom' &&
+                      (!config.customParticleIds || config.customParticleIds.length === 0) &&
+                      customParticles.length > 0
+                    ) {
+                      update({
+                        shape: nextShape,
+                        customParticleId: customParticles[0].id,
+                        customParticleIds: [customParticles[0].id],
+                      });
+                    } else {
+                      update({ shape: nextShape });
+                    }
+                  }}
+                  className="bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-xs font-semibold text-slate-800"
+                >
+                  <option value="circle">Rond (Bulle / Fumée)</option>
+                  <option value="square">Carré (Confetti / Pixel)</option>
+                  <option value="spark">Étincelle (Trait)</option>
+                  <option value="star">Étoile</option>
+                  <option value="custom">Particule dessinée ✨</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-200/70">
+                <span className="font-bold text-slate-700 text-xs">Zone d'apparition</span>
+                <div className="grid grid-cols-3 gap-1 bg-slate-200/70 p-0.5 rounded-lg text-[10px] font-bold">
+                  {[
+                    { id: 'point', label: 'Point' },
+                    { id: 'circle', label: 'Disque' },
+                    { id: 'box', label: 'Rectangle' },
+                  ].map((sh) => (
+                    <button
+                      key={sh.id}
+                      type="button"
+                      onClick={() => update({ emissionShape: sh.id as ParticleEmissionShape })}
+                      className={`px-2 py-0.5 rounded-md cursor-pointer transition-all ${
+                        (config.emissionShape || 'point') === sh.id
+                          ? 'bg-white text-amber-800 shadow-2xs'
+                          : 'text-slate-600'
+                      }`}
+                    >
+                      {sh.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {config.emissionShape === 'circle' && (
+                <div className="flex items-center justify-between gap-2 text-xs pt-1">
+                  <span className="text-slate-600 font-semibold">Rayon du disque</span>
+                  <EditableNumericValue
+                    value={config.emissionRadius ?? 28}
+                    unit="px"
+                    precision={0}
+                    onChange={(v) => update({ emissionRadius: v })}
+                    className="font-mono font-bold text-amber-700 bg-white border border-slate-200 px-2 py-0.5 rounded-lg"
+                  />
+                </div>
+              )}
+
+              {config.emissionShape === 'box' && (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div className="flex items-center justify-between gap-1 text-xs">
+                    <span className="text-slate-600 font-semibold">Largeur</span>
+                    <EditableNumericValue
+                      value={config.emissionWidth ?? 60}
+                      unit="px"
+                      precision={0}
+                      onChange={(v) => update({ emissionWidth: v })}
+                      className="font-mono font-bold text-amber-700 bg-white border border-slate-200 px-2 py-0.5 rounded-lg"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-1 text-xs">
+                    <span className="text-slate-600 font-semibold">Hauteur</span>
+                    <EditableNumericValue
+                      value={config.emissionHeight ?? 30}
+                      unit="px"
+                      precision={0}
+                      onChange={(v) => update({ emissionHeight: v })}
+                      className="font-mono font-bold text-amber-700 bg-white border border-slate-200 px-2 py-0.5 rounded-lg"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Particules vectorielles personnalisées (multi-sélection & mode d'usage) */}
+            {/* Particules vectorielles personnalisées */}
             {config.shape === 'custom' && (
               <div className="p-2.5 bg-amber-50/70 rounded-2xl border border-amber-200 space-y-2">
                 <div className="flex items-center justify-between gap-2">
@@ -680,12 +1075,9 @@ export function ParticleEditorModal({
                         <div
                           key={preset.id}
                           onClick={() => {
-                            let nextIds: string[];
-                            if (isSel) {
-                              nextIds = selectedIds.filter((id) => id !== preset.id);
-                            } else {
-                              nextIds = [...selectedIds, preset.id];
-                            }
+                            const nextIds = isSel
+                              ? selectedIds.filter((id) => id !== preset.id)
+                              : [...selectedIds, preset.id];
                             update({
                               customParticleIds: nextIds,
                               customParticleId: nextIds[0],
@@ -785,197 +1177,404 @@ export function ParticleEditorModal({
               </div>
             )}
 
-            {/* Couleurs Mix */}
-            <div className="grid grid-cols-2 gap-2">
-              <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700">Couleur 1</span>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-mono text-slate-500">{config.color}</span>
-                  <input
-                    type="color"
-                    value={config.color}
-                    onChange={(e) => update({ color: e.target.value })}
-                    className="w-7 h-6 rounded border border-slate-300 cursor-pointer"
-                  />
+            {/* Mode Couleur & Nuancier */}
+            <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-700">Couleur</span>
+                <div className="grid grid-cols-3 gap-1 bg-slate-200/70 p-0.5 rounded-lg text-[10px] font-bold">
+                  {[
+                    { id: 'single', label: '1 Couleur' },
+                    { id: 'two_colors', label: 'Mix 2' },
+                    { id: 'gradient_lifetime', label: 'Dégradé vie' },
+                  ].map((cm) => (
+                    <button
+                      key={cm.id}
+                      type="button"
+                      onClick={() => update({ colorMode: cm.id as ParticleColorMode })}
+                      className={`px-2 py-0.5 rounded-md cursor-pointer transition-all ${
+                        (config.colorMode || 'single') === cm.id
+                          ? 'bg-white text-indigo-700 shadow-2xs'
+                          : 'text-slate-600'
+                      }`}
+                    >
+                      {cm.label}
+                    </button>
+                  ))}
                 </div>
               </div>
-              <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700">Couleur 2</span>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-mono text-slate-500">{config.color2}</span>
-                  <input
-                    type="color"
-                    value={config.color2}
-                    onChange={(e) => update({ color2: e.target.value })}
-                    className="w-7 h-6 rounded border border-slate-300 cursor-pointer"
-                  />
+
+              <div className={`grid ${config.colorMode === 'single' ? 'grid-cols-1' : 'grid-cols-2'} gap-2`}>
+                <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-700">
+                    {config.colorMode === 'gradient_lifetime'
+                      ? 'Début'
+                      : config.colorMode === 'single'
+                      ? 'Couleur unique'
+                      : 'Couleur 1'}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-mono text-slate-500">{config.color}</span>
+                    <input
+                      type="color"
+                      value={config.color}
+                      onChange={(e) => update({ color: e.target.value })}
+                      className="w-7 h-6 rounded border border-slate-300 cursor-pointer"
+                    />
+                  </div>
                 </div>
+                {config.colorMode !== 'single' && (
+                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-700">
+                      {config.colorMode === 'gradient_lifetime' ? 'Fin de vie' : 'Couleur 2'}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-mono text-slate-500">{config.color2}</span>
+                      <input
+                        type="color"
+                        value={config.color2}
+                        onChange={(e) => update({ color2: e.target.value })}
+                        className="w-7 h-6 rounded border border-slate-300 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Débit ou Quantité */}
+            {/* Débit / Quantité avec support Min-Max */}
             {mode === 'emitter' ? (
-              <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200">
-                <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-                  <span className="font-bold">Débit d'émission</span>
-                  <span className="font-mono font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
-                    {config.rate ?? 16} part/s
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={60}
-                  step={1}
-                  value={config.rate ?? 16}
-                  onChange={(e) => update({ rate: parseInt(e.target.value, 10) })}
-                  className="w-full accent-amber-500 cursor-pointer"
-                />
-              </div>
+              <RangeOrFixedRow
+                label="Débit d'émission"
+                unit="part/s"
+                precision={0}
+                roundInt
+                accent="amber"
+                minVal={config.rate ?? 16}
+                maxVal={config.rateMax}
+                sliderMin={0}
+                sliderMax={60}
+                step={1}
+                onChangeMin={(v) => update({ rate: v })}
+                onChangeMax={(v) => update({ rateMax: v })}
+              />
             ) : (
-              <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200">
-                <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-                  <span className="font-bold">Nombre par salve</span>
-                  <span className="font-mono font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
-                    {config.count ?? 22} part.
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={2}
-                  max={80}
-                  step={1}
-                  value={config.count ?? 22}
-                  onChange={(e) => update({ count: parseInt(e.target.value, 10) })}
-                  className="w-full accent-amber-500 cursor-pointer"
-                />
-              </div>
+              <RangeOrFixedRow
+                label="Nombre par salve"
+                unit="part."
+                precision={0}
+                roundInt
+                accent="amber"
+                minVal={config.count ?? 22}
+                maxVal={config.countMax}
+                sliderMin={1}
+                sliderMax={100}
+                step={1}
+                onChangeMin={(v) => update({ count: v })}
+                onChangeMax={(v) => update({ countMax: v })}
+              />
             )}
 
-            {/* Vitesse & Taille */}
+            {/* Vitesse & Taille (Min-Max) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200">
-                <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-                  <span className="font-bold">Vitesse</span>
-                  <span className="font-mono font-bold text-indigo-600">{config.speed} px/s</span>
-                </div>
-                <input
-                  type="range"
-                  min={10}
-                  max={600}
-                  step={10}
-                  value={config.speed}
-                  onChange={(e) => update({ speed: parseFloat(e.target.value) })}
-                  className="w-full accent-indigo-600 cursor-pointer"
-                />
-              </div>
-
-              <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200">
-                <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-                  <span className="font-bold">Taille</span>
-                  <span className="font-mono font-bold text-indigo-600">{config.size} px</span>
-                </div>
-                <input
-                  type="range"
-                  min={2}
-                  max={32}
-                  step={1}
-                  value={config.size}
-                  onChange={(e) => update({ size: parseFloat(e.target.value) })}
-                  className="w-full accent-indigo-600 cursor-pointer"
-                />
-              </div>
+              <RangeOrFixedRow
+                label="Vitesse"
+                unit="px/s"
+                precision={0}
+                minVal={config.speed}
+                maxVal={config.speedMax}
+                sliderMin={0}
+                sliderMax={600}
+                step={10}
+                onChangeMin={(v) => update({ speed: v })}
+                onChangeMax={(v) => update({ speedMax: v })}
+              />
+              <RangeOrFixedRow
+                label="Taille départ"
+                unit="px"
+                precision={1}
+                minVal={config.size}
+                maxVal={config.sizeMax}
+                sliderMin={1}
+                sliderMax={40}
+                step={1}
+                onChangeMin={(v) => update({ size: v })}
+                onChangeMax={(v) => update({ sizeMax: v })}
+              />
             </div>
 
             {/* Durée de vie & Gravité */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200">
-                <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-                  <span className="font-bold">Durée de vie</span>
-                  <span className="font-mono font-bold text-indigo-600">{config.lifetime.toFixed(1)} s</span>
-                </div>
-                <input
-                  type="range"
-                  min={0.15}
-                  max={3.5}
-                  step={0.05}
-                  value={config.lifetime}
-                  onChange={(e) => update({ lifetime: parseFloat(e.target.value) })}
-                  className="w-full accent-indigo-600 cursor-pointer"
-                />
-              </div>
+              <RangeOrFixedRow
+                label="Durée de vie"
+                unit="s"
+                precision={2}
+                minVal={config.lifetime}
+                maxVal={config.lifetimeMax}
+                sliderMin={0.1}
+                sliderMax={5.0}
+                step={0.05}
+                onChangeMin={(v) => update({ lifetime: v })}
+                onChangeMax={(v) => update({ lifetimeMax: v })}
+              />
 
-              <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200">
-                <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5">
+                <div className="flex justify-between items-center text-xs text-slate-700">
                   <span className="font-bold">Gravité</span>
-                  <span className="font-mono font-bold text-indigo-600">{config.gravity} px/s²</span>
+                  <EditableNumericValue
+                    value={config.gravity}
+                    unit="px/s²"
+                    precision={0}
+                    onChange={(v) => update({ gravity: v })}
+                    className="font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+                  />
                 </div>
                 <input
                   type="range"
                   min={-400}
                   max={800}
                   step={20}
-                  value={config.gravity}
+                  value={Math.max(-400, Math.min(800, config.gravity))}
                   onChange={(e) => update({ gravity: parseFloat(e.target.value) })}
-                  className="w-full accent-indigo-600 cursor-pointer"
+                  className="w-full accent-indigo-600 cursor-pointer h-1.5"
                 />
               </div>
             </div>
 
-            {/* Angle & Dispersion */}
+            {/* Taille fin de vie & Frottement (Drag) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5">
+                <div className="flex justify-between items-center text-xs text-slate-700">
+                  <span className="font-bold">Taille fin de vie</span>
+                  <EditableNumericValue
+                    value={config.endSizeScale ?? 0.35}
+                    unit="×"
+                    precision={2}
+                    onChange={(v) => update({ endSizeScale: v })}
+                    className="font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+                  />
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={2.5}
+                  step={0.05}
+                  value={Math.max(0, Math.min(2.5, config.endSizeScale ?? 0.35))}
+                  onChange={(e) => update({ endSizeScale: parseFloat(e.target.value) })}
+                  className="w-full accent-indigo-600 cursor-pointer h-1.5"
+                />
+              </div>
+
+              <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5">
+                <div className="flex justify-between items-center text-xs text-slate-700">
+                  <span className="font-bold">Frottement air (Drag)</span>
+                  <EditableNumericValue
+                    value={config.drag ?? 0}
+                    precision={2}
+                    onChange={(v) => update({ drag: v })}
+                    className="font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+                  />
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={6}
+                  step={0.1}
+                  value={Math.max(0, Math.min(6, config.drag ?? 0))}
+                  onChange={(e) => update({ drag: parseFloat(e.target.value) })}
+                  className="w-full accent-indigo-600 cursor-pointer h-1.5"
+                />
+              </div>
+            </div>
+
+            {/* Opacité début -> fin & Rotation */}
+            <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-slate-600">Opacité début</span>
+                  <EditableNumericValue
+                    value={config.opacityStart ?? 1}
+                    precision={2}
+                    onChange={(v) => update({ opacityStart: v })}
+                    className="font-mono font-bold text-indigo-700 bg-white border border-slate-200 px-2 py-0.5 rounded-lg text-center"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-slate-600">Opacité fin</span>
+                  <EditableNumericValue
+                    value={config.opacityEnd ?? 0}
+                    precision={2}
+                    onChange={(v) => update({ opacityEnd: v })}
+                    className="font-mono font-bold text-indigo-700 bg-white border border-slate-200 px-2 py-0.5 rounded-lg text-center"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-slate-600">Rotation (°/s)</span>
+                  <EditableNumericValue
+                    value={config.spinSpeed ?? 0}
+                    unit="°/s"
+                    precision={0}
+                    onChange={(v) => update({ spinSpeed: v })}
+                    className="font-mono font-bold text-indigo-700 bg-white border border-slate-200 px-2 py-0.5 rounded-lg text-center"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Direction & Dispersion */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200">
                 <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
                   <span className="font-bold">Direction</span>
-                  <span className="font-mono font-bold text-indigo-600">{config.angle}°</span>
+                  <EditableNumericValue
+                    value={config.angle}
+                    unit="°"
+                    precision={0}
+                    onChange={(v) => update({ angle: v })}
+                    className="font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+                  />
                 </div>
                 <input
                   type="range"
                   min={-180}
                   max={180}
                   step={5}
-                  value={config.angle}
+                  value={Math.max(-180, Math.min(180, config.angle))}
                   onChange={(e) => update({ angle: parseFloat(e.target.value) })}
-                  className="w-full accent-indigo-600 cursor-pointer"
+                  className="w-full accent-indigo-600 cursor-pointer h-1.5"
                 />
               </div>
 
               <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200">
                 <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
                   <span className="font-bold">Dispersion (Cône)</span>
-                  <span className="font-mono font-bold text-indigo-600">{config.spread}°</span>
+                  <EditableNumericValue
+                    value={config.spread}
+                    unit="°"
+                    precision={0}
+                    onChange={(v) => update({ spread: v })}
+                    className="font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+                  />
                 </div>
                 <input
                   type="range"
                   min={0}
                   max={360}
                   step={5}
-                  value={config.spread}
+                  value={Math.max(0, Math.min(360, config.spread))}
                   onChange={(e) => update({ spread: parseFloat(e.target.value) })}
-                  className="w-full accent-indigo-600 cursor-pointer"
+                  className="w-full accent-indigo-600 cursor-pointer h-1.5"
                 />
               </div>
             </div>
 
+            {/* Émetteur continu : Durée, Boucle, Salves, Ancrage & Décalage */}
             {mode === 'emitter' && (
-              <div className="grid grid-cols-2 gap-2">
-                <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-700">Décalage ΔX</span>
-                  <input
-                    type="number"
-                    value={config.offsetX ?? 0}
-                    onChange={(e) => update({ offsetX: parseFloat(e.target.value) || 0 })}
-                    className="w-20 bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
-                  />
+              <div className="p-2.5 bg-amber-50/50 rounded-2xl border border-amber-200/80 space-y-2">
+                <span className="text-[11px] font-extrabold text-amber-950 block">
+                  Cycle, Salves &amp; Point d'ancrage
+                </span>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-1">
+                    <span className="font-bold text-slate-700 text-[11px]">Durée (0 = ∞)</span>
+                    <EditableNumericValue
+                      value={config.emitterDuration ?? 0}
+                      unit="s"
+                      precision={1}
+                      onChange={(v) => update({ emitterDuration: v })}
+                      className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded text-[11px]"
+                    />
+                  </div>
+                  <label className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-1 cursor-pointer">
+                    <span className="font-bold text-slate-700 text-[11px]">Boucler cycle</span>
+                    <input
+                      type="checkbox"
+                      checked={config.emitterLoop !== false}
+                      onChange={(e) => update({ emitterLoop: e.target.checked })}
+                      className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                    />
+                  </label>
                 </div>
-                <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-700">Décalage ΔY</span>
-                  <input
-                    type="number"
-                    value={config.offsetY ?? 0}
-                    onChange={(e) => update({ offsetY: parseFloat(e.target.value) || 0 })}
-                    className="w-20 bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono text-right"
-                  />
+
+                <div className="grid grid-cols-3 gap-1.5 text-xs">
+                  <div className="p-1.5 bg-white rounded-xl border border-slate-200 flex flex-col gap-0.5">
+                    <span className="text-[9px] font-bold text-slate-500">Salve départ</span>
+                    <EditableNumericValue
+                      value={config.initialBurstCount ?? 0}
+                      precision={0}
+                      onChange={(v) => update({ initialBurstCount: Math.round(v) })}
+                      className="font-mono font-bold text-amber-700 text-[11px]"
+                    />
+                  </div>
+                  <div className="p-1.5 bg-white rounded-xl border border-slate-200 flex flex-col gap-0.5">
+                    <span className="text-[9px] font-bold text-slate-500">Salve tous les</span>
+                    <EditableNumericValue
+                      value={config.burstInterval ?? 0}
+                      unit="s"
+                      precision={2}
+                      onChange={(v) => update({ burstInterval: v })}
+                      className="font-mono font-bold text-amber-700 text-[11px]"
+                    />
+                  </div>
+                  <div className="p-1.5 bg-white rounded-xl border border-slate-200 flex flex-col gap-0.5">
+                    <span className="text-[9px] font-bold text-slate-500">Nb / salve</span>
+                    <EditableNumericValue
+                      value={config.burstCount ?? 12}
+                      precision={0}
+                      onChange={(v) => update({ burstCount: Math.round(v) })}
+                      className="font-mono font-bold text-amber-700 text-[11px]"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-1">
+                    <span className="text-[11px] font-bold text-slate-700">Ancre</span>
+                    <select
+                      value={config.anchor || 'center'}
+                      onChange={(e) => update({ anchor: e.target.value as ParticleAnchorPreset })}
+                      className="bg-slate-50 border border-slate-300 rounded-lg px-1.5 py-0.5 text-[11px] font-bold text-slate-800"
+                    >
+                      <option value="center">Centre</option>
+                      <option value="top">Haut</option>
+                      <option value="bottom">Bas</option>
+                      <option value="left">Gauche</option>
+                      <option value="right">Droite</option>
+                      <option value="pivot">Pivot</option>
+                    </select>
+                  </div>
+                  <label className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-1 cursor-pointer">
+                    <span className="text-[11px] font-bold text-slate-700">Suivre rot./flip</span>
+                    <input
+                      type="checkbox"
+                      checked={config.followRotation !== false}
+                      onChange={(e) => update({ followRotation: e.target.checked })}
+                      className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-700">Décalage ΔX</span>
+                    <EditableNumericValue
+                      value={config.offsetX ?? 0}
+                      unit="px"
+                      precision={0}
+                      onChange={(v) => update({ offsetX: v })}
+                      className="font-mono font-bold text-slate-800 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-lg"
+                    />
+                  </div>
+                  <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-700">Décalage ΔY</span>
+                    <EditableNumericValue
+                      value={config.offsetY ?? 0}
+                      unit="px"
+                      precision={0}
+                      onChange={(v) => update({ offsetY: v })}
+                      className="font-mono font-bold text-slate-800 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-lg"
+                    />
+                  </div>
                 </div>
               </div>
             )}

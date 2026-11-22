@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { ParticleCanvasOverlay } from './ParticleCanvasOverlay';
 import { SceneGizmoOverlay } from './SceneGizmoOverlay';
+import { setLatestMouseWorldPos } from '../utils/particleSystem';
 import {
   clampCameraZoom,
   computeLayerParallaxTransform,
@@ -304,6 +305,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
             x: mouseScreenPosRef.current.x / safeZ + camNow.x,
             y: mouseScreenPosRef.current.y / safeZ + camNow.y,
           };
+          setLatestMouseWorldPos(mousePosRef.current);
         }
 
         const currentEntities = stateSnapshot.entities;
@@ -626,11 +628,13 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
               x: sx / z + cam.x,
               y: sy / z + cam.y,
             };
+            setLatestMouseWorldPos(mousePosRef.current);
           }
         }}
         onPointerLeave={() => {
           mouseScreenPosRef.current = null;
           mousePosRef.current = null;
+          setLatestMouseWorldPos(null);
         }}
         className={`relative overflow-hidden select-none outline-none flex flex-col rounded-2xl shadow-md border border-slate-300/80 transition-all duration-300 ${
           isCustomCursorActive

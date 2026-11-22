@@ -14,6 +14,10 @@ import {
   SceneTransitionType,
   CameraFollowMode,
   CollisionSideFilter,
+  ParticleAnchorPreset,
+  ParticleColorMode,
+  ParticleEmissionShape,
+  Position,
 } from '../../types';
 
 export const SCENE_TRANSITION_OPTIONS: {
@@ -137,24 +141,52 @@ export type ActiveModal =
       spawnAbsoluteCoords?: { x: number; y: number };
       targetTag?: string;
       // Particles config
-      particleOriginMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'event_point';
+      particleOriginMode?:
+        | 'subject'
+        | 'target'
+        | 'entity'
+        | 'type'
+        | 'tag'
+        | 'last_spawned'
+        | 'event_point'
+        | 'coordinates'
+        | 'mouse';
       particleOriginEntityId?: string;
       particleOriginEntityType?: EntityType;
       particleOriginTag?: string;
+      particleCoords?: Position;
+      particleAnchor?: ParticleAnchorPreset;
+      particleOffsetX?: number;
+      particleOffsetY?: number;
+      particleMatchOriginRotation?: boolean;
       particleCount?: number;
+      particleCountMax?: number;
       particleColor?: string;
       particleColor2?: string;
+      particleColorMode?: ParticleColorMode;
       particleShape?: ParticleShape;
       customParticleId?: string;
       customParticleIds?: string[];
       customParticleMode?: CustomParticleUsageMode;
       useParticleTint?: boolean;
       particleSpeed?: number;
+      particleSpeedMax?: number;
       particleSize?: number;
+      particleSizeMax?: number;
+      particleEndSizeScale?: number;
       particleLifetime?: number;
+      particleLifetimeMax?: number;
       particleGravity?: number;
+      particleDrag?: number;
+      particleOpacityStart?: number;
+      particleOpacityEnd?: number;
+      particleSpinSpeed?: number;
       particleSpread?: number;
       particleAngle?: number;
+      particleEmissionShape?: ParticleEmissionShape;
+      particleEmissionRadius?: number;
+      particleEmissionWidth?: number;
+      particleEmissionHeight?: number;
       // Parenting config
       parentChildMode?: ActionTargetMode;
       parentChildId?: string;
@@ -286,24 +318,52 @@ export interface WizardData {
   actionTargetTag?: string;
 
   // Particles config
-  particleOriginMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'event_point';
+  particleOriginMode?:
+    | 'subject'
+    | 'target'
+    | 'entity'
+    | 'type'
+    | 'tag'
+    | 'last_spawned'
+    | 'event_point'
+    | 'coordinates'
+    | 'mouse';
   particleOriginEntityId?: string;
   particleOriginEntityType?: EntityType;
   particleOriginTag?: string;
+  particleCoords?: Position;
+  particleAnchor?: ParticleAnchorPreset;
+  particleOffsetX?: number;
+  particleOffsetY?: number;
+  particleMatchOriginRotation?: boolean;
   particleCount?: number;
+  particleCountMax?: number;
   particleColor?: string;
   particleColor2?: string;
+  particleColorMode?: ParticleColorMode;
   particleShape?: ParticleShape;
   customParticleId?: string;
   customParticleIds?: string[];
   customParticleMode?: CustomParticleUsageMode;
   useParticleTint?: boolean;
   particleSpeed?: number;
+  particleSpeedMax?: number;
   particleSize?: number;
+  particleSizeMax?: number;
+  particleEndSizeScale?: number;
   particleLifetime?: number;
+  particleLifetimeMax?: number;
   particleGravity?: number;
+  particleDrag?: number;
+  particleOpacityStart?: number;
+  particleOpacityEnd?: number;
+  particleSpinSpeed?: number;
   particleSpread?: number;
   particleAngle?: number;
+  particleEmissionShape?: ParticleEmissionShape;
+  particleEmissionRadius?: number;
+  particleEmissionWidth?: number;
+  particleEmissionHeight?: number;
 
   // Parenting config
   parentChildMode?: ActionTargetMode;
