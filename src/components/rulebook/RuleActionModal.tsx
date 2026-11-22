@@ -35,6 +35,7 @@ import { SnapActionConfigEditor } from './SnapActionConfigEditor';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 import { useSceneStore, EMPTY_RECORD, EMPTY_LIST } from '../../store/useSceneStore';
 import { ParticleActionOriginSection } from '../particles/ParticleActionOriginSection';
+import { ParticleActionEmissionExtrasSection } from '../particles/ParticleActionEmissionExtrasSection';
 
 interface RuleActionModalProps {
   activeModal: Extract<NonNullable<ActiveModal>, { type: 'action' }>;
@@ -333,6 +334,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                           subStep: 'choose_set_entity_enabled',
                           targetMode: 'subject',
                           enabledActionMode: activeModal.enabledActionMode || 'disable',
+                          enabledScope: activeModal.enabledScope || 'with_children',
                         })
                       }
                       className="w-full p-3.5 bg-white hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -519,6 +521,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                             subStep: 'choose_set_entity_enabled',
                             targetMode: 'target',
                             enabledActionMode: activeModal.enabledActionMode || 'disable',
+                            enabledScope: activeModal.enabledScope || 'with_children',
                           })
                         }
                         className="w-full p-3.5 bg-white hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -844,6 +847,11 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                           particleGravity: 220,
                           particleSpread: 360,
                           particleAngle: -90,
+                          particleDirectionMode: 'angle',
+                          particleEmitDuration: 0,
+                          particleEmitRate: 20,
+                          particleBurstCount: 12,
+                          particleBurstInterval: 0,
                         })
                       }
                       className="w-full p-3.5 bg-white hover:bg-amber-50/70 border-2 border-slate-200 hover:border-amber-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -964,6 +972,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                           targetMode: 'instance',
                           targetId: activeModal.targetId || Object.keys(entities)[0] || '',
                           enabledActionMode: activeModal.enabledActionMode || 'disable',
+                          enabledScope: activeModal.enabledScope || 'with_children',
                         })
                       }
                       className="w-full p-3.5 bg-white hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -994,6 +1003,9 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                           snapTargetEntityId: activeModal.snapTargetEntityId || Object.keys(entities)[0] || '',
                           snapAlignment: activeModal.snapAlignment || 'center',
                           snapAttachBehavior: activeModal.snapAttachBehavior || 'parent_rigid',
+                          snapCustomSourceAnchor: activeModal.snapCustomSourceAnchor,
+                          snapCustomTargetAnchor: activeModal.snapCustomTargetAnchor,
+                          snapJointConfig: activeModal.snapJointConfig,
                         })
                       }
                       className="w-full p-3.5 bg-white hover:bg-cyan-50/70 border-2 border-slate-200 hover:border-cyan-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -2279,6 +2291,16 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                   className="w-40 accent-indigo-600"
                 />
               </div>
+
+              <ParticleActionEmissionExtrasSection
+                draft={activeModal}
+                allowTarget={isCollision || rule.trigger.type === 'proximity'}
+                entities={entities}
+                availableEntityOptions={availableEntityOptions}
+                allProjectTags={allProjectTags}
+                datalistId="modal-particle-dir-tags"
+                onPatch={(patch) => setActiveModal({ ...activeModal, ...patch })}
+              />
             </div>
 
             <button
@@ -2346,6 +2368,17 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                   particleSpinSpeed: activeModal.particleSpinSpeed,
                   particleSpread: activeModal.particleSpread ?? 360,
                   particleAngle: activeModal.particleAngle ?? -90,
+                  particleDirectionMode: activeModal.particleDirectionMode,
+                  particleDirectionTargetMode: activeModal.particleDirectionTargetMode,
+                  particleDirectionTargetEntityId: activeModal.particleDirectionTargetEntityId,
+                  particleDirectionTargetEntityType: activeModal.particleDirectionTargetEntityType,
+                  particleDirectionTargetTag: activeModal.particleDirectionTargetTag
+                    ? activeModal.particleDirectionTargetTag.trim().replace(/^#/, '')
+                    : undefined,
+                  particleEmitDuration: activeModal.particleEmitDuration,
+                  particleEmitRate: activeModal.particleEmitRate,
+                  particleBurstCount: activeModal.particleBurstCount,
+                  particleBurstInterval: activeModal.particleBurstInterval,
                   particleEmissionShape: activeModal.particleEmissionShape,
                   particleEmissionRadius: activeModal.particleEmissionRadius,
                   particleEmissionWidth: activeModal.particleEmissionWidth,

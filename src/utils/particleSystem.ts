@@ -2,13 +2,18 @@ import {
   CustomParticlePreset,
   CustomParticleUsageMode,
   Entity,
+  EntityId,
+  EntityType,
   ParticleAnchorPreset,
   ParticleColorMode,
+  ParticleDirectionMode,
   ParticleEmissionShape,
   ParticleShape,
   Position,
+  RuleAction,
 } from '../types';
 import { resolveEffectivePivot } from './physics/pivotHelpers';
+import { resolveEntityReference } from '../store/parentingHelpers';
 
 export interface ParticleBurstOptions {
   x: number;
@@ -247,6 +252,107 @@ export function computeRelativeParticleOrigin(params: {
   }
 
   return { x: worldX, y: worldY, angleDeg: outAngle };
+}
+
+export interface ResolveParticleDirectionParams {
+  directionMode?: ParticleDirectionMode;
+  baseAngleDeg?: number;
+  originX: number;
+  originY: number;
+  originEntity?: Pick<Entity, 'position' | 'size' | 'flipX' | 'states' | 'currentStateId'>;
+  targetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'mouse';
+  targetEntityId?: EntityId;
+  targetEntityType?: EntityType;
+  targetTag?: string;
+  entities?: Record<EntityId, Entity>;
+  subject?: Entity;
+  target?: Entity;
+  eventPosition?: Position | null;
+  mousePos?: Position | null;
+  lastSpawnedId?: string | null;
+  overrideFlipX?: boolean;
+  overrideRotationDeg?: number;
+}
+
+export function resolveParticleDirectionAngle(params: ResolveParticleDirectionParams): number {
+  const {
+    directionMode = 'angle',
+    baseAngleDeg = -90,
+    originX,
+    originY,
+    originEntity,
+    targetMode = 'target',
+    targetEntityId,
+    targetEntityType,
+    targetTag,
+    entities,
+    subject,
+    target,
+    eventPosition,
+    mousePos,
+    lastSpawnedId,
+    overrideFlipX,
+    overrideRotationDeg,
+  } = params;
+
+  if (directionMode === 'facing') {
+    const flipX = overrideFlipX !== undefined ? overrideFlipX : Boolean(originEntity?.flipX);
+    const rotDeg =
+      overrideRotationDeg !== undefined
+        ? overrideRotationDeg
+        : originEntity?.states?.[originEntity.currentStateId]?.rotation ?? 0;
+    const rad = (rotDeg * Math.PI) / 180;
+    const sign = flipX ? -1 : 1;
+    return (Math.atan2(Math.sin(rad) * sign, Math.cos(rad) * sign) * 180) / Math.PI;
+  }
+
+  if (directionMode === 'mouse') {
+    const m = mousePos || getLatestMouseWorldPos() || eventPosition;
+    if (m) {
+      const dx = m.x - originX;
+      const dy = m.y - originY;
+      if (Math.hypot(dx, dy) > 0.001) {
+        return (Math.atan2(dy, dx) * 180) / Math.PI;
+      }
+    }
+    return baseAngleDeg;
+  }
+
+  if (directionMode === 'toward_target' || directionMode === 'away_target') {
+    let targetPt: Position | null = null;
+    if (targetMode === 'mouse') {
+      const m = mousePos || getLatestMouseWorldPos() || eventPosition;
+      if (m) targetPt = { x: m.x, y: m.y };
+    } else if (entities) {
+      const ref = resolveEntityReference(
+        targetMode,
+        targetEntityId,
+        targetEntityType,
+        targetTag,
+        subject,
+        target,
+        entities,
+        lastSpawnedId ?? null
+      );
+      if (ref) {
+        targetPt = {
+          x: ref.position.x + ref.size.width / 2,
+          y: ref.position.y + ref.size.height / 2,
+        };
+      }
+    }
+    if (targetPt) {
+      const mult = directionMode === 'away_target' ? -1 : 1;
+      const dx = (targetPt.x - originX) * mult;
+      const dy = (targetPt.y - originY) * mult;
+      if (Math.hypot(dx, dy) > 0.001) {
+        return (Math.atan2(dy, dx) * 180) / Math.PI;
+      }
+    }
+    return baseAngleDeg;
+  }
+
+  return baseAngleDeg;
 }
 
 function getOrBuildCustomParticleSprite(customParticleId?: string): HTMLCanvasElement | null {
@@ -612,8 +718,184 @@ export function emitParticlesBurst(opts: ParticleBurstOptions) {
   defaultScenePool.emitBurst(opts);
 }
 
+export interface TimedRuleParticleEmitterConfig {
+  burstBaseOpts: Omit<ParticleBurstOptions, 'x' | 'y' | 'angle'>;
+  fallbackOriginX: number;
+  fallbackOriginY: number;
+  fallbackAngleDeg: number;
+  durationSec: number;
+  rate: number;
+  burstCount: number;
+  burstInterval: number;
+  originMode?: RuleAction['particleOriginMode'];
+  originEntityId?: EntityId;
+  anchor?: ParticleAnchorPreset;
+  offsetX?: number;
+  offsetY?: number;
+  followRotation?: boolean;
+  baseAngleDeg?: number;
+  directionMode?: ParticleDirectionMode;
+  directionTargetMode?: RuleAction['particleDirectionTargetMode'];
+  directionTargetEntityId?: EntityId;
+  directionTargetEntityType?: EntityType;
+  directionTargetTag?: string;
+  subjectId?: EntityId;
+  targetId?: EntityId;
+  eventPosition?: Position;
+}
+
+interface ActiveTimedRuleEmitter extends TimedRuleParticleEmitterConfig {
+  elapsedSec: number;
+  acc: number;
+  burstTimer: number;
+}
+
+const MAX_ACTIVE_TIMED_EMITTERS = 32;
+const activeTimedRuleEmitters: ActiveTimedRuleEmitter[] = [];
+
+export function clearTimedRuleEmitters() {
+  activeTimedRuleEmitters.length = 0;
+}
+
+export function hasActiveTimedEmitters(): boolean {
+  return activeTimedRuleEmitters.length > 0;
+}
+
+function emitFromTimedEntry(
+  entry: ActiveTimedRuleEmitter,
+  count: number,
+  entities: Record<EntityId, Entity>,
+  mousePos: Position | null,
+  lastSpawnedId: string | null
+) {
+  if (count <= 0) return;
+  const originEnt = entry.originEntityId ? entities[entry.originEntityId] : undefined;
+  let originX = entry.fallbackOriginX;
+  let originY = entry.fallbackOriginY;
+  let baseAngle = entry.fallbackAngleDeg;
+
+  if (entry.originMode === 'mouse') {
+    const m = mousePos || getLatestMouseWorldPos() || entry.eventPosition;
+    if (m) {
+      originX = m.x + (entry.offsetX ?? 0);
+      originY = m.y + (entry.offsetY ?? 0);
+    }
+  } else if (originEnt && !originEnt.disabled) {
+    const rel = computeRelativeParticleOrigin({
+      entity: originEnt,
+      anchor: entry.anchor || 'center',
+      offsetX: entry.offsetX ?? 0,
+      offsetY: entry.offsetY ?? 0,
+      baseAngleDeg: entry.baseAngleDeg ?? -90,
+      followRotation: entry.followRotation !== false,
+    });
+    originX = rel.x;
+    originY = rel.y;
+    baseAngle = rel.angleDeg;
+  }
+
+  const angle = resolveParticleDirectionAngle({
+    directionMode: entry.directionMode || 'angle',
+    baseAngleDeg: baseAngle,
+    originX,
+    originY,
+    originEntity: originEnt,
+    targetMode: entry.directionTargetMode || (entry.targetId ? 'target' : 'mouse'),
+    targetEntityId: entry.directionTargetEntityId,
+    targetEntityType: entry.directionTargetEntityType,
+    targetTag: entry.directionTargetTag,
+    entities,
+    subject: entry.subjectId ? entities[entry.subjectId] : undefined,
+    target: entry.targetId ? entities[entry.targetId] : undefined,
+    eventPosition: entry.eventPosition,
+    mousePos,
+    lastSpawnedId,
+  });
+
+  emitParticlesBurst({
+    ...entry.burstBaseOpts,
+    x: originX,
+    y: originY,
+    count,
+    countMax: undefined,
+    angle,
+  });
+}
+
+export function startTimedRuleParticleEmitter(
+  config: TimedRuleParticleEmitterConfig,
+  entities: Record<EntityId, Entity> = {},
+  mousePos: Position | null = null,
+  lastSpawnedId: string | null = null
+) {
+  if (config.durationSec <= 0) return;
+  if (activeTimedRuleEmitters.length >= MAX_ACTIVE_TIMED_EMITTERS) {
+    activeTimedRuleEmitters.shift();
+  }
+  const entry: ActiveTimedRuleEmitter = {
+    ...config,
+    elapsedSec: 0,
+    acc: 0,
+    burstTimer: 0,
+  };
+  // Si des salves périodiques sont configurées, déclencher la première salve immédiatement à t = 0
+  if (entry.burstInterval > 0 && entry.burstCount > 0) {
+    emitFromTimedEntry(entry, Math.max(1, Math.round(entry.burstCount)), entities, mousePos, lastSpawnedId);
+  } else if (entry.rate <= 0 && (entry.burstBaseOpts.count ?? 0) > 0) {
+    // Fallback ergonomique si durée > 0 sans débit ni intervalle explicite
+    entry.rate = Math.max(8, Math.round(entry.burstBaseOpts.count ?? 18));
+  }
+  activeTimedRuleEmitters.push(entry);
+}
+
+export function stepTimedRuleEmitters(
+  dt: number,
+  entities: Record<EntityId, Entity>,
+  mousePos: Position | null = null,
+  lastSpawnedId: string | null = null
+) {
+  if (activeTimedRuleEmitters.length === 0) return;
+  const clampedDt = Math.max(0.001, Math.min(0.05, dt));
+  for (let i = activeTimedRuleEmitters.length - 1; i >= 0; i--) {
+    const entry = activeTimedRuleEmitters[i];
+    if (entry.elapsedSec >= entry.durationSec) {
+      activeTimedRuleEmitters.splice(i, 1);
+      continue;
+    }
+
+    let toEmit = 0;
+    if (entry.rate > 0) {
+      const cappedRate = Math.min(100, entry.rate);
+      const nextAcc = entry.acc + clampedDt * cappedRate;
+      const whole = Math.floor(nextAcc);
+      entry.acc = nextAcc - whole;
+      toEmit += whole;
+    }
+
+    if (entry.burstInterval > 0 && entry.burstCount > 0) {
+      entry.burstTimer += clampedDt;
+      let guard = 0;
+      while (entry.burstTimer >= entry.burstInterval && guard < 4) {
+        entry.burstTimer -= entry.burstInterval;
+        toEmit += Math.max(1, Math.round(entry.burstCount));
+        guard++;
+      }
+    }
+
+    if (toEmit > 0) {
+      emitFromTimedEntry(entry, toEmit, entities, mousePos, lastSpawnedId);
+    }
+
+    entry.elapsedSec += clampedDt;
+    if (entry.elapsedSec >= entry.durationSec) {
+      activeTimedRuleEmitters.splice(i, 1);
+    }
+  }
+}
+
 export function clearParticles() {
   defaultScenePool.clear();
+  clearTimedRuleEmitters();
 }
 
 export function hasActiveParticles(): boolean {

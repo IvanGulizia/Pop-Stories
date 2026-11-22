@@ -47,6 +47,7 @@ export function Inspector() {
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
   const entities = useSceneStore((state) => state.entities);
   const updateEntityDetails = useSceneStore((state) => state.updateEntityDetails);
+  const setEntityDisabledCascade = useSceneStore((state) => state.setEntityDisabledCascade);
   const updateEntityState = useSceneStore((state) => state.updateEntityState);
   const updateStateProperties = useSceneStore((state) => state.updateStateProperties);
   const addStateToEntity = useSceneStore((state) => state.addStateToEntity);
@@ -258,10 +259,10 @@ export function Inspector() {
               <button
                 type="button"
                 onClick={() =>
-                  updateEntityDetails(
+                  setEntityDisabledCascade(
                     selectedEntity.id,
-                    { disabled: !selectedEntity.disabled },
-                    { instanceOnly: true }
+                    !selectedEntity.disabled,
+                    'with_children'
                   )
                 }
                 className={`p-1.5 rounded-xl transition-colors cursor-pointer ${
@@ -271,8 +272,8 @@ export function Inspector() {
                 }`}
                 title={
                   selectedEntity.disabled
-                    ? 'Activer cet objet (participe à nouveau au jeu)'
-                    : 'Désactiver cet objet (inactif et invisible en mode Play)'
+                    ? 'Activer cet objet et ses enfants (participe à nouveau au jeu)'
+                    : 'Désactiver cet objet et ses enfants (inactif et invisible en mode Play)'
                 }
               >
                 <Power className="w-4 h-4" />
@@ -335,11 +336,11 @@ export function Inspector() {
             <button
               type="button"
               onClick={() =>
-                updateEntityDetails(selectedEntity.id, { disabled: false }, { instanceOnly: true })
+                setEntityDisabledCascade(selectedEntity.id, false, 'with_children')
               }
               className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-white hover:bg-rose-100 border border-rose-200 text-rose-700 cursor-pointer shrink-0"
             >
-              Réactiver
+              Réactiver (+ enfants)
             </button>
           </div>
         )}

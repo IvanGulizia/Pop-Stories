@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { MotionConfig } from 'motion/react';
 import { useSceneStore, EMPTY_LIST, EMPTY_RECORD } from '../store/useSceneStore';
-import { RotateDragBehaviorConfig, SliderBehaviorConfig, VectorPath } from '../types';
+import { RotateDragBehaviorConfig, SliderBehaviorConfig, SnapBehaviorConfig, VectorPath } from '../types';
 import { Apple } from './Apple';
 import { Plant } from './Plant';
 import { CustomShape } from './CustomShape';
@@ -42,6 +42,7 @@ import {
 } from '../utils/matterPhysicsEngine';
 import { getSliderTrackGeometry } from '../utils/physics/sliderSolver';
 import { getRotateDragBounds } from '../utils/physics/rotateDragSolver';
+import { getSnapAnchorWorldPoint, matchesSnapFilter } from '../utils/physics/snapSolver';
 import { getPivotWorldPosition, resolveEffectivePivot } from '../utils/physics/pivotHelpers';
 import { applyBucketFill } from '../utils/floodFill';
 import {
@@ -189,12 +190,20 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const completeJointCanvasPick = useSceneStore((state) => state.completeJointCanvasPick);
   const cancelJointCanvasPick = useSceneStore((state) => state.cancelJointCanvasPick);
   const moveJointAttachmentPin = useSceneStore((state) => state.moveJointAttachmentPin);
+  const snapPinCanvasPick = useSceneStore((state) => state.snapPinCanvasPick);
+  const completeSnapPinCanvasPick = useSceneStore((state) => state.completeSnapPinCanvasPick);
+  const cancelSnapPinCanvasPick = useSceneStore((state) => state.cancelSnapPinCanvasPick);
+  const moveSnapCustomPin = useSceneStore((state) => state.moveSnapCustomPin);
   const pendingCatalogSpawnType = useSceneStore((state) => state.pendingCatalogSpawnType);
   const setPendingCatalogSpawnType = useSceneStore((state) => state.setPendingCatalogSpawnType);
 
   const isPlayMode = appMode === 'play';
   const isCustomCursorActive =
-    isPlayMode && settings.useCustomCursors !== false && !spawnCanvasPick && !jointCanvasPick;
+    isPlayMode &&
+    settings.useCustomCursors !== false &&
+    !spawnCanvasPick &&
+    !jointCanvasPick &&
+    !snapPinCanvasPick;
   const ratio = settings.aspectRatio || 'free';
   const effectivePlayRatio = resolveEffectivePlayAspectRatio(ratio, cameraConfig);
   const activeRatio = isPlayMode ? effectivePlayRatio : ratio;
@@ -214,6 +223,8 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const [zoneDragCurrent, setZoneDragCurrent] = useState<{ x: number; y: number } | null>(null);
   const [jointPickHoverPt, setJointPickHoverPt] = useState<{ x: number; y: number } | null>(null);
   const [isDraggingJointPin, setIsDraggingJointPin] = useState(false);
+  const [snapPickHoverPt, setSnapPickHoverPt] = useState<{ x: number; y: number } | null>(null);
+  const [draggingSnapPinRole, setDraggingSnapPinRole] = useState<'source' | 'target' | null>(null);
   const setSceneBounds = useSceneStore((state) => state.setSceneBounds);
   const setEditSceneBounds = useSceneStore((state) => state.setEditSceneBounds);
 
@@ -237,6 +248,18 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
       setJointPickHoverPt(null);
     }
   }, [jointCanvasPick]);
+
+  useEffect(() => {
+    if (!snapPinCanvasPick) {
+      setSnapPickHoverPt(null);
+    }
+  }, [snapPinCanvasPick]);
+
+  useEffect(() => {
+    if (isPlayMode && snapPinCanvasPick) {
+      cancelSnapPinCanvasPick();
+    }
+  }, [isPlayMode, snapPinCanvasPick, cancelSnapPinCanvasPick]);
 
   // Mesurer l'espace interne disponible autour du canvas pour ajuster exactement le ratio (sans bandes noires)
   useEffect(() => {
@@ -1130,7 +1153,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
             <SceneGizmoOverlay mousePosRef={mousePosRef} />
 
             {/* 7. POIGNÉE INTERACTIVE DE GLISSER DU POINT D'ATTACHE JOINT SUR LE CANVAS (MODE ÉDITION) */}
-            {!isPlayMode && !spawnCanvasPick && !jointCanvasPick && !selectedLayerId && selectedEntityId && (() => {
+            {!isPlayMode && !spawnCanvasPick && !jointCanvasPick && !snapPinCanvasPick && !selectedLayerId && selectedEntityId && (() => {
               const selChild = entities[selectedEntityId];
               if (!selChild || !selChild.parentId) return null;
               const selParent = entities[selChild.parentId];
@@ -1191,6 +1214,115 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
                   </span>
                 </div>
               );
+            })()}
+
+            {/* 7.5 POIGNÉES INTERACTIVES DES REPÈRES PERSONNALISÉS SNAP (MODE ÉDITION) */}
+            {!isPlayMode && !spawnCanvasPick && !jointCanvasPick && !snapPinCanvasPick && !selectedLayerId && selectedEntityId && (() => {
+              const selEnt = entities[selectedEntityId];
+              if (!selEnt || selEnt.visible === false) return null;
+              const effective = getEffectiveBehaviors(selEnt, selEnt.states[selEnt.currentStateId]);
+              const snapBeh = effective.find((b): b is SnapBehaviorConfig => b.type === 'snap');
+              if (!snapBeh || snapBeh.snapAlignment !== 'anchor_offset') return null;
+
+              const handles: Array<{
+                role: 'source' | 'target';
+                refEnt: typeof selEnt;
+                worldPt: { x: number; y: number };
+                title: string;
+                colorCls: string;
+              }> = [];
+
+              if (snapBeh.sourceAnchor === 'custom_canvas') {
+                handles.push({
+                  role: 'source',
+                  refEnt: selEnt,
+                  worldPt: getSnapAnchorWorldPoint(selEnt, 'custom_canvas', snapBeh.customSourceAnchor),
+                  title: `Glisser pour déplacer le repère Snap (${selEnt.name})`,
+                  colorCls: 'bg-cyan-500/90',
+                });
+              }
+
+              if (snapBeh.targetAnchor === 'custom_canvas') {
+                const targetRef = Object.values(entities).find((cand) =>
+                  matchesSnapFilter(selEnt.id, cand, snapBeh)
+                );
+                if (targetRef) {
+                  handles.push({
+                    role: 'target',
+                    refEnt: targetRef,
+                    worldPt: getSnapAnchorWorldPoint(targetRef, 'custom_canvas', snapBeh.customTargetAnchor),
+                    title: `Glisser pour déplacer le repère cible Snap (${targetRef.name})`,
+                    colorCls: 'bg-indigo-500/90',
+                  });
+                }
+              }
+
+              if (handles.length === 0) return null;
+
+              return handles.map((h) => (
+                <div
+                  key={`snap-pin-handle-${h.role}-${h.refEnt.id}`}
+                  role="button"
+                  tabIndex={-1}
+                  aria-label={h.title}
+                  title={h.title}
+                  onClick={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    useSceneStore.getState().pushSceneHistory();
+                    setDraggingSnapPinRole(h.role);
+                    const startTarget = e.currentTarget;
+                    try {
+                      startTarget.setPointerCapture(e.pointerId);
+                    } catch {
+                      // Ignore if unsupported
+                    }
+
+                    const handleMove = (ev: PointerEvent) => {
+                      const pt = computeCanvasPoint(ev.clientX, ev.clientY);
+                      moveSnapCustomPin({
+                        entityId: selEnt.id,
+                        behaviorId: snapBeh.id,
+                        stateId: selEnt.currentStateId,
+                        pinRole: h.role,
+                        referenceEntityId: h.refEnt.id,
+                        worldX: pt.x,
+                        worldY: pt.y,
+                        skipHistory: true,
+                      });
+                    };
+
+                    const handleUp = (ev: PointerEvent) => {
+                      setDraggingSnapPinRole(null);
+                      try {
+                        startTarget.releasePointerCapture(ev.pointerId);
+                      } catch {
+                        // Ignore
+                      }
+                      window.removeEventListener('pointermove', handleMove);
+                      window.removeEventListener('pointerup', handleUp);
+                      window.removeEventListener('pointercancel', handleUp);
+                    };
+
+                    window.addEventListener('pointermove', handleMove);
+                    window.addEventListener('pointerup', handleUp);
+                    window.addEventListener('pointercancel', handleUp);
+                  }}
+                  style={{
+                    left: `${h.worldPt.x}px`,
+                    top: `${h.worldPt.y}px`,
+                    touchAction: 'none',
+                  }}
+                  className={`absolute -translate-x-1/2 -translate-y-1/2 z-[48] w-7 h-7 flex items-center justify-center pointer-events-auto ${
+                    draggingSnapPinRole === h.role ? 'cursor-grabbing scale-110' : 'cursor-grab hover:scale-110'
+                  } transition-transform`}
+                >
+                  <span className={`w-4 h-4 rounded-full ${h.colorCls} border-2 border-white shadow-md flex items-center justify-center`}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                  </span>
+                </div>
+              ));
             })()}
           </div>
 
@@ -1752,6 +1884,125 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
                 <button
                   type="button"
                   onClick={() => cancelJointCanvasPick()}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-slate-800 hover:bg-rose-600 text-slate-200 hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Annuler (Échap)</span>
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 6.5 OVERLAY INTERACTIF DE PLACEMENT D'UN REPÈRE PERSONNALISÉ SNAP SUR SCÈNE */}
+        {snapPinCanvasPick && !isPlayMode && (() => {
+          const refEnt = entities[snapPinCanvasPick.referenceEntityId];
+          if (!refEnt) return null;
+          const refCenter = {
+            x: refEnt.position.x + refEnt.size.width / 2,
+            y: refEnt.position.y + refEnt.size.height / 2,
+          };
+          const isTargetPin = snapPinCanvasPick.pinRole === 'target';
+          const accent = isTargetPin ? '#6366f1' : '#06b6d4';
+          const fillTint = isTargetPin ? 'rgba(99, 102, 241, 0.16)' : 'rgba(6, 182, 212, 0.16)';
+
+          return (
+            <div
+              className="absolute inset-0 z-50 atelier-fine-crosshair"
+              onPointerMove={(e) => {
+                setSnapPickHoverPt(computeCanvasPoint(e.clientX, e.clientY));
+              }}
+              onPointerLeave={() => setSnapPickHoverPt(null)}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                const pt = computeCanvasPoint(e.clientX, e.clientY);
+                completeSnapPinCanvasPick(pt.x, pt.y);
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                className="absolute left-0 top-0 pointer-events-none"
+                style={{
+                  width: worldBounds.width,
+                  height: worldBounds.height,
+                  transformOrigin: '0 0',
+                  transform: computeWorldTransformCss(editorCamera),
+                }}
+              >
+                <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
+                  <circle cx={refCenter.x} cy={refCenter.y} r={4.5} fill={accent} stroke="#ffffff" strokeWidth={1.75} />
+                  {snapPickHoverPt && (
+                    <>
+                      <line
+                        x1={refCenter.x}
+                        y1={refCenter.y}
+                        x2={snapPickHoverPt.x}
+                        y2={snapPickHoverPt.y}
+                        stroke={accent}
+                        strokeWidth={1.75}
+                        strokeDasharray="5 4"
+                      />
+                      <line
+                        x1={snapPickHoverPt.x}
+                        y1={0}
+                        x2={snapPickHoverPt.x}
+                        y2={worldBounds.height}
+                        stroke={accent}
+                        strokeOpacity={0.35}
+                        strokeWidth={1}
+                        strokeDasharray="4 4"
+                      />
+                      <line
+                        x1={0}
+                        y1={snapPickHoverPt.y}
+                        x2={worldBounds.width}
+                        y2={snapPickHoverPt.y}
+                        stroke={accent}
+                        strokeOpacity={0.35}
+                        strokeWidth={1}
+                        strokeDasharray="4 4"
+                      />
+                      <circle
+                        cx={snapPickHoverPt.x}
+                        cy={snapPickHoverPt.y}
+                        r={10}
+                        fill={fillTint}
+                        stroke={accent}
+                        strokeWidth={1.75}
+                      />
+                      <circle
+                        cx={snapPickHoverPt.x}
+                        cy={snapPickHoverPt.y}
+                        r={4}
+                        fill={accent}
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                      />
+                    </>
+                  )}
+                </svg>
+              </div>
+
+              <div
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                className="absolute top-3 left-1/2 -translate-x-1/2 z-50 max-w-[96%] flex flex-wrap items-center justify-center gap-2 px-3 py-1.5 bg-slate-900/95 text-white border border-slate-700 rounded-2xl shadow-xl cursor-default"
+              >
+                <span className={`flex items-center gap-1.5 text-xs font-bold whitespace-nowrap ${isTargetPin ? 'text-indigo-300' : 'text-cyan-300'}`}>
+                  <Crosshair className="w-3.5 h-3.5" />
+                  {isTargetPin
+                    ? `Cliquez pour poser le repère cible Snap (${refEnt.name})`
+                    : `Cliquez pour poser le repère Snap sur ${refEnt.name}`}
+                </span>
+                <div className="w-px h-4 bg-slate-700" />
+                <span className="text-[11px] font-mono tabular-nums font-bold text-slate-200 bg-slate-800 px-2 py-0.5 rounded-lg whitespace-nowrap">
+                  {snapPickHoverPt
+                    ? `X: ${snapPickHoverPt.x} · Y: ${snapPickHoverPt.y}`
+                    : 'Survolez la scène…'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => cancelSnapPinCanvasPick()}
                   className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-slate-800 hover:bg-rose-600 text-slate-200 hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <X className="w-3.5 h-3.5" />

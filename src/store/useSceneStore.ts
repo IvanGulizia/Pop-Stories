@@ -44,6 +44,9 @@ import {
   SceneTransitionType,
   SceneCameraConfig,
   ParticleEffectPreset,
+  SetEntityEnabledScope,
+  SnapAnchorPreset,
+  SnapBehaviorConfig,
 } from '../types';
 import { getEntityWorldColliderBounds } from '../utils/collider';
 import { DEFAULT_SCENE_CAMERA_CONFIG, resolveWorldBounds } from '../utils/cameraSolver';
@@ -100,10 +103,12 @@ import {
 import {
   wouldCreateParentCycle,
   collectDescendantIds,
+  resolveEntityHierarchyScopeIds,
   computeRelativeParentOffset,
   computeChildWorldFromParent,
   computeParentOffsetFromWorldPin,
 } from './parentingHelpers';
+import { computeSnapCustomAnchorFromWorld } from '../utils/physics/snapSolver';
 import {
   matchesEntityFilter,
   checkCollision,
@@ -356,6 +361,8 @@ interface SceneState {
   currentSlotId: string | null;
   collapsedRuleIds: Record<string, boolean>;
   toggleRuleCollapse: (ruleId: string) => void;
+  expandedBehaviorCards: Record<string, boolean>;
+  setBehaviorCardExpanded: (cardKey: string, expanded: boolean) => void;
   ruleBookPage: number;
   setRuleBookPage: (page: number) => void;
   gameScore: number;
@@ -447,6 +454,34 @@ interface SceneState {
   completeJointCanvasPick: (worldX: number, worldY: number) => void;
   moveJointAttachmentPin: (childId: EntityId, worldX: number, worldY: number, skipHistory?: boolean) => void;
 
+  // Interactive live canvas Snap custom pin picker & direct pin drag
+  snapPinCanvasPick: {
+    entityId: EntityId;
+    behaviorId: string;
+    stateId?: StateId;
+    pinRole: 'source' | 'target';
+    referenceEntityId: EntityId;
+  } | null;
+  startSnapPinCanvasPick: (req: {
+    entityId: EntityId;
+    behaviorId: string;
+    stateId?: StateId;
+    pinRole: 'source' | 'target';
+    referenceEntityId: EntityId;
+  }) => void;
+  cancelSnapPinCanvasPick: () => void;
+  completeSnapPinCanvasPick: (worldX: number, worldY: number) => void;
+  moveSnapCustomPin: (params: {
+    entityId: EntityId;
+    behaviorId: string;
+    stateId?: StateId;
+    pinRole: 'source' | 'target';
+    referenceEntityId: EntityId;
+    worldX: number;
+    worldY: number;
+    skipHistory?: boolean;
+  }) => void;
+
   updateSettings: (partial: Partial<AppSettings>) => void;
   setAspectRatio: (ratio: SceneAspectRatio) => void;
 
@@ -480,6 +515,7 @@ interface SceneState {
     partial: Partial<Entity>,
     options?: { instanceOnly?: boolean }
   ) => void;
+  setEntityDisabledCascade: (id: EntityId, disabled: boolean, scope?: SetEntityEnabledScope) => void;
   addTagToEntity: (id: EntityId, tag: string) => void;
   removeTagFromEntity: (id: EntityId, tag: string) => void;
   updateStateProperties: (entityId: EntityId, stateId: StateId, partial: Partial<EntityState>) => void;
@@ -1379,6 +1415,14 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     cur.changeSceneInPlay(cur.activeSceneId, transition, duration);
   },
   collapsedRuleIds: {},
+  expandedBehaviorCards: {},
+  setBehaviorCardExpanded: (cardKey, expanded) =>
+    set((state) => ({
+      expandedBehaviorCards: {
+        ...state.expandedBehaviorCards,
+        [cardKey]: expanded,
+      },
+    })),
   ruleBookPage: 1,
   setRuleBookPage: (page) => set({ ruleBookPage: Math.max(1, page) }),
   gameScore: 0,
@@ -1634,6 +1678,64 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         },
       };
     });
+  },
+
+  snapPinCanvasPick: null,
+  startSnapPinCanvasPick: (req) =>
+    set((state) => {
+      const refEnt = state.entities[req.referenceEntityId];
+      if (!refEnt) return state;
+      return {
+        spawnCanvasPick: null,
+        jointCanvasPick: null,
+        snapPinCanvasPick: req,
+      };
+    }),
+  cancelSnapPinCanvasPick: () => set({ snapPinCanvasPick: null }),
+  completeSnapPinCanvasPick: (worldX, worldY) => {
+    const pick = get().snapPinCanvasPick;
+    if (!pick) return;
+    get().moveSnapCustomPin({
+      ...pick,
+      worldX,
+      worldY,
+      skipHistory: false,
+    });
+    set({ snapPinCanvasPick: null });
+  },
+  moveSnapCustomPin: ({
+    entityId,
+    behaviorId,
+    stateId,
+    pinRole,
+    referenceEntityId,
+    worldX,
+    worldY,
+    skipHistory = false,
+  }) => {
+    const state = get();
+    const refEnt = state.entities[referenceEntityId];
+    const ownerEnt = findTargetEntityOrArchetype(state, entityId);
+    if (!refEnt || !ownerEnt) return;
+    if (!skipHistory) {
+      state.pushSceneHistory();
+    }
+    const norm = computeSnapCustomAnchorFromWorld(refEnt, { x: worldX, y: worldY });
+    const anchorField = pinRole === 'source' ? 'sourceAnchor' : 'targetAnchor';
+    const pinField = pinRole === 'source' ? 'customSourceAnchor' : 'customTargetAnchor';
+    const patch: Partial<SnapBehaviorConfig> = {
+      [anchorField]: 'custom_canvas' as SnapAnchorPreset,
+      [pinField]: norm,
+    };
+    const hasOverride = Boolean(stateId && ownerEnt.states[stateId]?.behaviorOverrides?.[behaviorId]);
+    if (hasOverride && stateId) {
+      state.updateStateBehaviorOverride(entityId, stateId, behaviorId, patch);
+    } else {
+      const updatedBehaviors = (ownerEnt.behaviors || []).map((b) =>
+        b.id === behaviorId && b.type === 'snap' ? { ...b, ...patch } : b
+      );
+      state.updateEntityBehaviors(entityId, updatedBehaviors);
+    }
   },
 
   projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
@@ -2032,6 +2134,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         activeSceneTransition: null,
         spawnCanvasPick: null,
         jointCanvasPick: null,
+        snapPinCanvasPick: null,
         pendingCatalogSpawnType: null,
         snapshotEntities: snapshot,
         snapshotEntityOrder: orderSnapshot,
@@ -2379,6 +2482,27 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         entities: updatedEntities,
         customArchetypes: updatedArchetypes,
       };
+    });
+  },
+
+  setEntityDisabledCascade: (id, disabled, scope = 'self') => {
+    set((state) => {
+      if (!state.entities[id]) return state;
+      const targetIds = resolveEntityHierarchyScopeIds(state.entities, id, scope);
+      if (targetIds.length === 0) return state;
+      const nextEntities = { ...state.entities };
+      let changed = false;
+      targetIds.forEach((tid) => {
+        const target = nextEntities[tid];
+        if (target && Boolean(target.disabled) !== Boolean(disabled)) {
+          nextEntities[tid] = {
+            ...target,
+            disabled: Boolean(disabled),
+          };
+          changed = true;
+        }
+      });
+      return changed ? { entities: nextEntities } : state;
     });
   },
 

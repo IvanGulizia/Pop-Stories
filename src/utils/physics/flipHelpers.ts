@@ -14,6 +14,7 @@ export interface ComputeMovementFlipParams {
   otherFlipBehavior?: OtherFlipBehaviorInput;
   velocityX: number;
   velocityDeadzone?: number;
+  intendedDirX?: HorizontalIntent;
 }
 
 /**
@@ -26,6 +27,8 @@ export interface ComputeMovementFlipParams {
  * - Lorsque le joueur relâche les touches horizontales (`keyboardHorizIntent === 0`), on conserve
  *   strictement le `flipX` actuel afin qu'un micro-rebond physique ou une séparation de collision
  *   au freinage ne retourne jamais le personnage en sens inverse.
+ * - Si `intendedDirX` est fourni par un comportement autonome actif non en pause (ex: fin de
+ *   délai demi-tour de Patrouille), le flip s'applique instantanément sans attendre 1 tick de vitesse.
  */
 export function computeMovementFlipX({
   keyboard,
@@ -33,6 +36,7 @@ export function computeMovementFlipX({
   otherFlipBehavior,
   velocityX,
   velocityDeadzone = 0.35,
+  intendedDirX = 0,
 }: ComputeMovementFlipParams): boolean | null {
   if (keyboard?.flipOnMove) {
     if (keyboardHorizIntent !== 0) {
@@ -40,15 +44,17 @@ export function computeMovementFlipX({
       return keyboard.flipInvert ? !movingLeft : movingLeft;
     }
 
-    // Clavier immobile : n'autoriser le flip par vitesse que si un autre comportement autonome (IA)
+    // Clavier immobile : n'autoriser le flip par vitesse/intention que si un autre comportement autonome (IA)
     // avec flipOnMove actif est effectivement en train de déplacer l'entité.
-    if (
-      otherFlipBehavior?.flipOnMove &&
-      !otherFlipBehavior.isActivelyPaused &&
-      Math.abs(velocityX) > velocityDeadzone
-    ) {
-      const movingLeft = velocityX < 0;
-      return otherFlipBehavior.flipInvert ? !movingLeft : movingLeft;
+    if (otherFlipBehavior?.flipOnMove && !otherFlipBehavior.isActivelyPaused) {
+      if (Math.abs(velocityX) > velocityDeadzone) {
+        const movingLeft = velocityX < 0;
+        return otherFlipBehavior.flipInvert ? !movingLeft : movingLeft;
+      }
+      if (intendedDirX !== 0) {
+        const movingLeft = intendedDirX < 0;
+        return otherFlipBehavior.flipInvert ? !movingLeft : movingLeft;
+      }
     }
 
     return null;
@@ -60,6 +66,10 @@ export function computeMovementFlipX({
     }
     if (Math.abs(velocityX) > velocityDeadzone) {
       const movingLeft = velocityX < 0;
+      return otherFlipBehavior.flipInvert ? !movingLeft : movingLeft;
+    }
+    if (intendedDirX !== 0) {
+      const movingLeft = intendedDirX < 0;
       return otherFlipBehavior.flipInvert ? !movingLeft : movingLeft;
     }
   }

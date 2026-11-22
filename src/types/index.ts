@@ -252,6 +252,13 @@ export interface PatrolBehaviorConfig extends BaseBehaviorConfig {
   waypointLoopMode?: PatrolWaypointLoopMode; // 'ping_pong' | 'loop'
   movementSpace?: 'free_2d' | 'grounded'; // Utilisé notamment en mode waypoints pour préserver la gravité (vy)
   turnOnWall?: boolean;                   // Demi-tour sur collision mur/obstacle
+  turnOnCollision?: boolean;              // Demi-tour sur collision avec d'autres entités
+  collisionTargetType?: 'any' | 'type' | 'tag' | 'entity';
+  collisionTargetEntityId?: EntityId;
+  collisionTargetEntityType?: EntityType;
+  collisionTargetTag?: string;
+  collisionIgnoreSensors?: boolean;       // défaut true : ignorer capteurs/triggers sans collision solide
+  collisionTurnCooldownSec?: number;      // défaut 0.25s : anti-oscillation après contact
   detectLedges?: boolean;                 // Détection du vide / bord de plateforme
   ledgeCheckDepth?: number;               // Profondeur de sonde vers le bas en px (défaut 28)
   initialDirection?: 1 | -1;              // Sens initial (défaut 1)
@@ -325,6 +332,7 @@ export type ParticleShape = 'circle' | 'square' | 'spark' | 'star' | 'custom';
 export type CustomParticleUsageMode = 'random' | 'sequence' | 'lifetime_anim';
 export type ParticleColorMode = 'single' | 'two_colors' | 'gradient_lifetime';
 export type ParticleEmissionShape = 'point' | 'circle' | 'box';
+export type ParticleDirectionMode = 'angle' | 'facing' | 'toward_target' | 'away_target' | 'mouse';
 export type ParticleAnchorPreset =
   | 'center'
   | 'top'
@@ -372,6 +380,11 @@ export interface ParticleEffectConfig {
   spinSpeed?: number;
   spread: number;
   angle: number;
+  directionMode?: ParticleDirectionMode;
+  directionTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'mouse';
+  directionTargetEntityId?: EntityId;
+  directionTargetEntityType?: EntityType;
+  directionTargetTag?: string;
   offsetX?: number;
   offsetY?: number;
   anchor?: ParticleAnchorPreset;
@@ -422,6 +435,11 @@ export interface ParticleEmitterBehaviorConfig extends BaseBehaviorConfig {
   spinSpeed?: number;
   spread: number;        // cône en degrés (0..360)
   angle: number;         // direction en degrés (-90 = haut)
+  directionMode?: ParticleDirectionMode;
+  directionTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'mouse';
+  directionTargetEntityId?: EntityId;
+  directionTargetEntityType?: EntityType;
+  directionTargetTag?: string;
   offsetX?: number;      // décalage X par rapport à l'ancre
   offsetY?: number;      // décalage Y par rapport à l'ancre
   anchor?: ParticleAnchorPreset;
@@ -681,10 +699,19 @@ export type SnapTargetType = 'entity' | 'type' | 'tag' | 'any';
 export type SnapTriggerMode = 'on_release' | 'always_when_near';
 export type SnapAnimationMode = 'instant' | 'magnetic_smooth';
 export type SnapAlignmentMode = 'center' | 'anchor_offset' | 'edge_closest';
-export type SnapAttachBehavior = 'position_only' | 'parent_rigid' | 'parent_spring' | 'freeze_physics';
+export type SnapAnchorPreset = ParticleAnchorPreset | 'custom_canvas';
+export type SnapRole = 'magnet_object' | 'receptacle';
+export type SnapAttachBehavior =
+  | 'position_only'
+  | 'parent_rigid'
+  | 'parent_spring'
+  | 'parent_physics_joint'
+  | 'freeze_physics';
 
 export interface SnapBehaviorConfig extends BaseBehaviorConfig {
   type: 'snap';
+  snapRole?: SnapRole;                  // 'magnet_object' (défaut) | 'receptacle'
+  maxCapacity?: number;                 // utilisé si snapRole === 'receptacle' (défaut 1)
   targetType: SnapTargetType;
   targetEntityId?: EntityId;
   targetEntityType?: EntityType;
@@ -694,15 +721,22 @@ export interface SnapBehaviorConfig extends BaseBehaviorConfig {
   snapMode: SnapAnimationMode;          // 'instant' | 'magnetic_smooth'
   smoothSpeed?: number;                 // 0.05..1, défaut 0.3
   snapAlignment: SnapAlignmentMode;     // 'center' | 'anchor_offset' | 'edge_closest'
-  sourceAnchor?: ParticleAnchorPreset;  // point d'ancre sur l'objet snappé
-  targetAnchor?: ParticleAnchorPreset;  // point d'ancre sur la cible
+  sourceAnchor?: SnapAnchorPreset;      // point d'ancre sur l'objet snappé
+  targetAnchor?: SnapAnchorPreset;      // point d'ancre sur la cible
+  customSourceAnchor?: Position;        // repère normalisé posé sur le canvas (source)
+  customTargetAnchor?: Position;        // repère normalisé posé sur le canvas (cible)
   offsetX?: number;
   offsetY?: number;
   matchTargetRotation?: boolean;
   rotationOffset?: number;
-  attachBehavior: SnapAttachBehavior;   // 'position_only' | 'parent_rigid' | 'parent_spring' | 'freeze_physics'
+  attachBehavior: SnapAttachBehavior;   // 'position_only' | 'parent_rigid' | 'parent_spring' | 'parent_physics_joint' | 'freeze_physics'
   springStiffness?: number;             // utilisé si attachBehavior === 'parent_spring'
   springDamping?: number;
+  jointConfig?: Partial<ParentOffset>;  // configuration avancée du joint physique + Break Joint
+  magnetEnabled?: boolean;              // champ d'attraction magnétique avant snap
+  magnetRadius?: number;                // rayon du champ d'attraction en px (défaut 120)
+  magnetForce?: number;                 // intensité de la force d'attraction (défaut 260)
+  approachingStateId?: StateId;         // état déclenché quand une cible entre dans le champ d'attraction
   allowPullUnsnap?: boolean;            // défaut true
   unsnapDistance?: number;              // px (hystérésis d'arrachement, défaut ~1.5x rayon)
   reSnapCooldownSec?: number;           // s avant ré-aimantation après détachement (défaut 0.35)
@@ -1066,6 +1100,8 @@ export interface CustomSound {
   createdAt: number;
 }
 
+export type SetEntityEnabledScope = 'self' | 'with_children' | 'with_parent' | 'entire_hierarchy';
+
 export interface RuleFolder {
   id: string;
   name: string;
@@ -1165,6 +1201,15 @@ export interface RuleAction {
   particleSpinSpeed?: number;
   particleSpread?: number;
   particleAngle?: number;
+  particleDirectionMode?: ParticleDirectionMode;
+  particleDirectionTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'mouse';
+  particleDirectionTargetEntityId?: EntityId;
+  particleDirectionTargetEntityType?: EntityType;
+  particleDirectionTargetTag?: string;
+  particleEmitDuration?: number;
+  particleEmitRate?: number;
+  particleBurstCount?: number;
+  particleBurstInterval?: number;
   particleEmissionShape?: ParticleEmissionShape;
   particleEmissionRadius?: number;
   particleEmissionWidth?: number;
@@ -1195,6 +1240,7 @@ export interface RuleAction {
 
   // Champs pour 'set_entity_enabled' (Activer / Désactiver une entité en Play)
   enabledActionMode?: 'enable' | 'disable' | 'toggle';
+  enabledScope?: SetEntityEnabledScope;
 
   // Champs pour 'play_sound'
   soundType?: 'pop' | 'bell' | 'laser' | 'bounce' | 'magic' | 'win';
@@ -1233,13 +1279,16 @@ export interface RuleAction {
   snapTargetTag?: string;
   snapRadius?: number;
   snapAlignment?: SnapAlignmentMode;
-  snapSourceAnchor?: ParticleAnchorPreset;
-  snapTargetAnchor?: ParticleAnchorPreset;
+  snapSourceAnchor?: SnapAnchorPreset;
+  snapTargetAnchor?: SnapAnchorPreset;
+  snapCustomSourceAnchor?: Position;
+  snapCustomTargetAnchor?: Position;
   snapOffsetX?: number;
   snapOffsetY?: number;
   snapMatchRotation?: boolean;
   snapRotationOffset?: number;
   snapAttachBehavior?: SnapAttachBehavior;
+  snapJointConfig?: Partial<ParentOffset>;
   unsnapImpulseSpeed?: number;
   unsnapImpulseAngle?: number;
   unsnapCooldownSec?: number;

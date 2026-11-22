@@ -16,9 +16,12 @@ import {
   CollisionSideFilter,
   ParticleAnchorPreset,
   ParticleColorMode,
+  ParticleDirectionMode,
   ParticleEmissionShape,
   Position,
+  SetEntityEnabledScope,
   SnapAlignmentMode,
+  SnapAnchorPreset,
   SnapAttachBehavior,
 } from '../../types';
 
@@ -187,6 +190,15 @@ export type ActiveModal =
       particleSpinSpeed?: number;
       particleSpread?: number;
       particleAngle?: number;
+      particleDirectionMode?: ParticleDirectionMode;
+      particleDirectionTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'mouse';
+      particleDirectionTargetEntityId?: EntityId;
+      particleDirectionTargetEntityType?: EntityType;
+      particleDirectionTargetTag?: string;
+      particleEmitDuration?: number;
+      particleEmitRate?: number;
+      particleBurstCount?: number;
+      particleBurstInterval?: number;
       particleEmissionShape?: ParticleEmissionShape;
       particleEmissionRadius?: number;
       particleEmissionWidth?: number;
@@ -228,6 +240,7 @@ export type ActiveModal =
       impulseAngular?: number;
       // Set Entity Enabled config
       enabledActionMode?: 'enable' | 'disable' | 'toggle';
+      enabledScope?: SetEntityEnabledScope;
       // Scene change config
       targetSceneId?: string;
       sceneTransition?: SceneTransitionType;
@@ -251,13 +264,16 @@ export type ActiveModal =
       snapTargetEntityType?: EntityType;
       snapTargetTag?: string;
       snapAlignment?: SnapAlignmentMode;
-      snapSourceAnchor?: ParticleAnchorPreset;
-      snapTargetAnchor?: ParticleAnchorPreset;
+      snapSourceAnchor?: SnapAnchorPreset;
+      snapTargetAnchor?: SnapAnchorPreset;
+      snapCustomSourceAnchor?: Position;
+      snapCustomTargetAnchor?: Position;
       snapOffsetX?: number;
       snapOffsetY?: number;
       snapMatchRotation?: boolean;
       snapRotationOffset?: number;
       snapAttachBehavior?: SnapAttachBehavior;
+      snapJointConfig?: Partial<ParentOffset>;
       unsnapImpulseSpeed?: number;
       unsnapImpulseAngle?: number;
       unsnapCooldownSec?: number;
@@ -382,6 +398,15 @@ export interface WizardData {
   particleSpinSpeed?: number;
   particleSpread?: number;
   particleAngle?: number;
+  particleDirectionMode?: ParticleDirectionMode;
+  particleDirectionTargetMode?: 'subject' | 'target' | 'entity' | 'type' | 'tag' | 'last_spawned' | 'mouse';
+  particleDirectionTargetEntityId?: EntityId;
+  particleDirectionTargetEntityType?: EntityType;
+  particleDirectionTargetTag?: string;
+  particleEmitDuration?: number;
+  particleEmitRate?: number;
+  particleBurstCount?: number;
+  particleBurstInterval?: number;
   particleEmissionShape?: ParticleEmissionShape;
   particleEmissionRadius?: number;
   particleEmissionWidth?: number;
@@ -427,6 +452,7 @@ export interface WizardData {
 
   // Set Entity Enabled config
   enabledActionMode?: 'enable' | 'disable' | 'toggle';
+  enabledScope?: SetEntityEnabledScope;
 
   // Configuration Minuteurs, Clavier, Proximité, Bords, Score
   timerInterval?: number;
@@ -472,13 +498,16 @@ export interface WizardData {
   snapTargetEntityType?: EntityType;
   snapTargetTag?: string;
   snapAlignment?: SnapAlignmentMode;
-  snapSourceAnchor?: ParticleAnchorPreset;
-  snapTargetAnchor?: ParticleAnchorPreset;
+  snapSourceAnchor?: SnapAnchorPreset;
+  snapTargetAnchor?: SnapAnchorPreset;
+  snapCustomSourceAnchor?: Position;
+  snapCustomTargetAnchor?: Position;
   snapOffsetX?: number;
   snapOffsetY?: number;
   snapMatchRotation?: boolean;
   snapRotationOffset?: number;
   snapAttachBehavior?: SnapAttachBehavior;
+  snapJointConfig?: Partial<ParentOffset>;
   unsnapImpulseSpeed?: number;
   unsnapImpulseAngle?: number;
   unsnapCooldownSec?: number;

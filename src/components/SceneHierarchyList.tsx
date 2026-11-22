@@ -37,6 +37,7 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
   const setEntityParent = useSceneStore((state) => state.setEntityParent);
   const detachEntity = useSceneStore((state) => state.detachEntity);
   const updateEntityDetails = useSceneStore((state) => state.updateEntityDetails);
+  const setEntityDisabledCascade = useSceneStore((state) => state.setEntityDisabledCascade);
 
   const [draggedEntityId, setDraggedEntityId] = useState<string | null>(null);
   const [dragOverTarget, setDragOverTarget] = useState<{ id: string; position: DropPosition } | null>(null);
@@ -322,14 +323,18 @@ export function SceneHierarchyList({ onOpenCreateModal, onOpenDrawLayerModal }: 
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    updateEntityDetails(entity.id, { disabled: !isDisabled }, { instanceOnly: true });
+                    setEntityDisabledCascade(entity.id, !isDisabled, 'with_children');
                   }}
                   className={`p-1 rounded-lg transition-colors cursor-pointer ${
                     isDisabled
                       ? 'text-rose-700 bg-rose-100 hover:bg-rose-200/80'
                       : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
                   }`}
-                  title={isDisabled ? 'Activer l’objet (logique, physique, rendu)' : 'Désactiver l’objet (aucune logique, physique ou rendu en jeu)'}
+                  title={
+                    isDisabled
+                      ? 'Activer l’objet et ses enfants (logique, physique, rendu)'
+                      : 'Désactiver l’objet et ses enfants (aucune logique, physique ou rendu en jeu)'
+                  }
                 >
                   <Power className="w-3.5 h-3.5" />
                 </button>

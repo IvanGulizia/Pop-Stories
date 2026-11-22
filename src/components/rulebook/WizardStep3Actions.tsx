@@ -34,6 +34,7 @@ import { SnapActionConfigEditor } from './SnapActionConfigEditor';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 import { useSceneStore, EMPTY_RECORD, EMPTY_LIST } from '../../store/useSceneStore';
 import { ParticleActionOriginSection } from '../particles/ParticleActionOriginSection';
+import { ParticleActionEmissionExtrasSection } from '../particles/ParticleActionEmissionExtrasSection';
 
 interface WizardStep3ActionsProps {
   activeWizard: WizardData;
@@ -273,6 +274,7 @@ export function WizardStep3Actions({
                             actionSubStep: 'set_entity_enabled_picker',
                             actionTargetMode: 'subject',
                             enabledActionMode: activeWizard.enabledActionMode || 'disable',
+                            enabledScope: activeWizard.enabledScope || 'with_children',
                           });
                         }}
                         className="w-full p-3.5 bg-white hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -441,6 +443,7 @@ export function WizardStep3Actions({
                           actionTargetMode: 'instance',
                           actionTargetId: Object.keys(entities)[0] || '',
                           enabledActionMode: activeWizard.enabledActionMode || 'disable',
+                          enabledScope: activeWizard.enabledScope || 'with_children',
                         })
                       }
                       className="w-full p-3.5 bg-white hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -612,6 +615,7 @@ export function WizardStep3Actions({
                           actionSubStep: 'set_entity_enabled_picker',
                           actionTargetMode: 'target',
                           enabledActionMode: activeWizard.enabledActionMode || 'disable',
+                          enabledScope: activeWizard.enabledScope || 'with_children',
                         });
                       }}
                       className="w-full p-3.5 bg-white hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -953,6 +957,11 @@ export function WizardStep3Actions({
                         particleGravity: 220,
                         particleSpread: 360,
                         particleAngle: -90,
+                        particleDirectionMode: 'angle',
+                        particleEmitDuration: 0,
+                        particleEmitRate: 20,
+                        particleBurstCount: 12,
+                        particleBurstInterval: 0,
                       });
                     }}
                     className="w-full p-3.5 bg-white hover:bg-amber-50/70 border-2 border-slate-200 hover:border-amber-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -1073,6 +1082,7 @@ export function WizardStep3Actions({
                         actionTargetMode: 'instance',
                         actionTargetId: activeWizard.actionTargetId || Object.keys(entities)[0] || '',
                         enabledActionMode: activeWizard.enabledActionMode || 'disable',
+                        enabledScope: activeWizard.enabledScope || 'with_children',
                       });
                     }}
                     className="w-full p-3.5 bg-white hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -1103,6 +1113,9 @@ export function WizardStep3Actions({
                         snapTargetEntityId: activeWizard.snapTargetEntityId || Object.keys(entities)[0] || '',
                         snapAlignment: activeWizard.snapAlignment || 'center',
                         snapAttachBehavior: activeWizard.snapAttachBehavior || 'parent_rigid',
+                        snapCustomSourceAnchor: activeWizard.snapCustomSourceAnchor,
+                        snapCustomTargetAnchor: activeWizard.snapCustomTargetAnchor,
+                        snapJointConfig: activeWizard.snapJointConfig,
                       });
                     }}
                     className="w-full p-3.5 bg-white hover:bg-cyan-50/70 border-2 border-slate-200 hover:border-cyan-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
@@ -2248,6 +2261,16 @@ export function WizardStep3Actions({
                 className="w-40 accent-indigo-600"
               />
             </div>
+
+            <ParticleActionEmissionExtrasSection
+              draft={activeWizard}
+              allowTarget={activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity'}
+              entities={entities}
+              availableEntityOptions={availableEntityOptions}
+              allProjectTags={allProjectTags}
+              datalistId="wizard-particle-dir-tags"
+              onPatch={(patch) => setActiveWizard({ ...activeWizard, ...patch })}
+            />
           </div>
 
           <button
@@ -2311,6 +2334,17 @@ export function WizardStep3Actions({
                 particleSpinSpeed: activeWizard.particleSpinSpeed,
                 particleSpread: activeWizard.particleSpread ?? 360,
                 particleAngle: activeWizard.particleAngle ?? -90,
+                particleDirectionMode: activeWizard.particleDirectionMode,
+                particleDirectionTargetMode: activeWizard.particleDirectionTargetMode,
+                particleDirectionTargetEntityId: activeWizard.particleDirectionTargetEntityId,
+                particleDirectionTargetEntityType: activeWizard.particleDirectionTargetEntityType,
+                particleDirectionTargetTag: activeWizard.particleDirectionTargetTag
+                  ? activeWizard.particleDirectionTargetTag.trim().replace(/^#/, '')
+                  : undefined,
+                particleEmitDuration: activeWizard.particleEmitDuration,
+                particleEmitRate: activeWizard.particleEmitRate,
+                particleBurstCount: activeWizard.particleBurstCount,
+                particleBurstInterval: activeWizard.particleBurstInterval,
                 particleEmissionShape: activeWizard.particleEmissionShape,
                 particleEmissionRadius: activeWizard.particleEmissionRadius,
                 particleEmissionWidth: activeWizard.particleEmissionWidth,

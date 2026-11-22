@@ -1,10 +1,11 @@
 import React from 'react';
 import { Check } from 'lucide-react';
-import { ActionTargetMode, Entity, EntityType, RuleAction } from '../../types';
+import { ActionTargetMode, Entity, EntityType, RuleAction, SetEntityEnabledScope } from '../../types';
 import { EntityOption } from './ruleBookTypes';
 
 export interface SetEntityEnabledConfigDraft {
   enabledActionMode?: 'enable' | 'disable' | 'toggle';
+  enabledScope?: SetEntityEnabledScope;
   targetMode?: ActionTargetMode;
   targetId?: string;
   targetType?: EntityType;
@@ -41,6 +42,7 @@ export const SetEntityEnabledConfigEditor: React.FC<SetEntityEnabledConfigEditor
   const firstEntityType = availableEntityOptions[0]?.type || '';
 
   const enabledMode = draft.enabledActionMode || 'disable';
+  const enabledScope: SetEntityEnabledScope = draft.enabledScope || 'with_children';
   const tMode: ActionTargetMode =
     draft.targetMode || (isGlobal ? 'instance' : 'subject');
 
@@ -158,6 +160,25 @@ export const SetEntityEnabledConfigEditor: React.FC<SetEntityEnabledConfigEditor
             </datalist>
           </div>
         )}
+        {/* Portée hiérarchique (Enfants / Parent / Toute la hiérarchie) */}
+        <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Portée hiérarchique</span>
+            <select
+              value={enabledScope}
+              onChange={(e) => onPatch({ enabledScope: e.target.value as SetEntityEnabledScope })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[230px]"
+            >
+              <option value="self">Objet seul uniquement</option>
+              <option value="with_children">Objet + ses enfants (recommandé)</option>
+              <option value="with_parent">Objet + son parent direct</option>
+              <option value="entire_hierarchy">Toute la hiérarchie liée (racine → enfants)</option>
+            </select>
+          </div>
+          <p className="text-[10px] text-slate-400">
+            Permet de propager l’activation ou la désactivation aux objets attachés.
+          </p>
+        </div>
       </div>
 
       <button
@@ -166,6 +187,7 @@ export const SetEntityEnabledConfigEditor: React.FC<SetEntityEnabledConfigEditor
           onConfirm({
             type: 'set_entity_enabled',
             enabledActionMode: enabledMode,
+            enabledScope,
             targetMode: tMode,
             targetId: tMode === 'instance' ? draft.targetId || firstEntityId : undefined,
             targetType:

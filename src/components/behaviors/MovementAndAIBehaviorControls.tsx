@@ -23,6 +23,8 @@ export function PatrolBehaviorControls({
   b,
   update,
   targetEntityOptions = [],
+  entityTypeOptions = [],
+  availableTags = [],
   stateList = [],
   onQuickCreateState,
   onEditStateDrawing,
@@ -33,6 +35,8 @@ export function PatrolBehaviorControls({
   b: PatrolBehaviorConfig;
   update: (partial: any) => void;
   targetEntityOptions?: Entity[];
+  entityTypeOptions?: { type: string; label: string }[];
+  availableTags?: string[];
   stateList?: EntityState[];
   onQuickCreateState?: (suggestedName: string, folderName?: string) => string;
   onEditStateDrawing?: (stateId: string) => void;
@@ -386,6 +390,124 @@ export function PatrolBehaviorControls({
             onChange={(e) => update({ turnOnWall: e.target.checked })}
             className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
           />
+        </div>
+
+        {/* Demi-tour sur collision d'entités (#11) */}
+        <div className="pt-1.5 border-t border-slate-100 space-y-1.5">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="font-bold text-slate-700 text-xs">Demi-tour sur collision d&apos;entités</div>
+              <div className="text-[10px] text-slate-400">Inverse le sens au contact d&apos;autres entités</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={Boolean(b.turnOnCollision)}
+              onChange={(e) => update({ turnOnCollision: e.target.checked })}
+              className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+            />
+          </div>
+
+          {b.turnOnCollision && (
+            <div className="pl-2 border-l-2 border-blue-200 space-y-1.5 text-[11px]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-slate-600">Cibles concernées</span>
+                <select
+                  value={b.collisionTargetType || 'any'}
+                  onChange={(e) => update({ collisionTargetType: e.target.value as any })}
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800"
+                >
+                  <option value="any">Toute entité</option>
+                  <option value="type">Par Type d&apos;objet</option>
+                  <option value="tag">Par #Tag</option>
+                  <option value="entity">Entité précise</option>
+                </select>
+              </div>
+
+              {b.collisionTargetType === 'entity' && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-slate-600">Entité cible</span>
+                  <select
+                    value={b.collisionTargetEntityId || targetEntityOptions[0]?.id || ''}
+                    onChange={(e) => update({ collisionTargetEntityId: e.target.value })}
+                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800 max-w-[155px]"
+                  >
+                    {targetEntityOptions.map((ent) => (
+                      <option key={ent.id} value={ent.id}>
+                        {ent.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {b.collisionTargetType === 'type' && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-slate-600">Type cible</span>
+                  <select
+                    value={b.collisionTargetEntityType || entityTypeOptions[0]?.type || ''}
+                    onChange={(e) => update({ collisionTargetEntityType: e.target.value })}
+                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800 max-w-[155px]"
+                  >
+                    {entityTypeOptions.map((opt) => (
+                      <option key={opt.type} value={opt.type}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {b.collisionTargetType === 'tag' && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-slate-600">Tag (#tag)</span>
+                    <input
+                      type="text"
+                      list="patrol-collision-tags"
+                      value={b.collisionTargetTag || ''}
+                      onChange={(e) => update({ collisionTargetTag: e.target.value.replace(/^#/, '') })}
+                      placeholder="ex: ennemi, mur"
+                      className="w-32 bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800"
+                    />
+                    <datalist id="patrol-collision-tags">
+                      {availableTags.map((t) => (
+                        <option key={t} value={t} />
+                      ))}
+                    </datalist>
+                  </div>
+                </div>
+              )}
+
+              <label className="flex items-center justify-between gap-2 cursor-pointer">
+                <span className="font-semibold text-slate-600">Ignorer capteurs (sensors)</span>
+                <input
+                  type="checkbox"
+                  checked={b.collisionIgnoreSensors !== false}
+                  onChange={(e) => update({ collisionIgnoreSensors: e.target.checked })}
+                  className="w-3.5 h-3.5 accent-blue-600 rounded cursor-pointer"
+                />
+              </label>
+
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-slate-600">Cooldown anti-oscillation</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    step="any"
+                    value={b.collisionTurnCooldownSec ?? 0.25}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v)) {
+                        update({ collisionTurnCooldownSec: Math.max(0, v) });
+                      }
+                    }}
+                    className="w-16 bg-slate-50 border border-slate-300 rounded-lg px-1.5 py-0.5 font-mono font-bold text-[11px] text-right text-slate-800"
+                  />
+                  <span className="text-slate-400">s</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {((patrolMode !== 'waypoints' && b.axis === 'horizontal') ||

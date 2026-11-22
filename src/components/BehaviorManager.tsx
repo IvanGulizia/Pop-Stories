@@ -97,6 +97,8 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
   const addCustomParticle = useSceneStore((state) => state.addCustomParticle);
   const updateCustomParticle = useSceneStore((state) => state.updateCustomParticle);
   const deleteCustomParticle = useSceneStore((state) => state.deleteCustomParticle);
+  const expandedBehaviorCards = useSceneStore((state) => state.expandedBehaviorCards || EMPTY_RECORD);
+  const setBehaviorCardExpanded = useSceneStore((state) => state.setBehaviorCardExpanded);
 
   const baseBehaviors = entity.behaviors || [];
   const stateList = Object.values(entity.states);
@@ -104,7 +106,10 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
   const [activeStateId, setActiveStateId] = useState<string>(
     selectedStateId || entity.currentStateId
   );
-  const [expandedBehaviorId, setExpandedBehaviorId] = useState<string | null>(baseBehaviors[0]?.id || null);
+  const hasAnyStoredCardForEntity = React.useMemo(
+    () => Object.keys(expandedBehaviorCards).some((k) => k.startsWith(`${entity.id}:`)),
+    [expandedBehaviorCards, entity.id]
+  );
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [particleDrawerState, setParticleDrawerState] = useState<{
     behaviorId: string;
@@ -180,14 +185,13 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
     const newBehavior = createDefaultBehaviorConfig(type, entity);
     const updated = [...baseBehaviors, newBehavior];
     updateEntityBehaviors(entity.id, updated);
-    setExpandedBehaviorId(newBehavior.id);
+    setBehaviorCardExpanded(`${entity.id}:${newBehavior.id}`, true);
     setIsAddModalOpen(false);
   };
 
   const handleDeleteBehavior = (behaviorId: string) => {
     const updated = baseBehaviors.filter((b) => b.id !== behaviorId);
     updateEntityBehaviors(entity.id, updated);
-    if (expandedBehaviorId === behaviorId) setExpandedBehaviorId(null);
   };
 
   const handleUpdateBaseBehavior = (behaviorId: string, partial: Partial<EntityBehavior>) => {
@@ -302,8 +306,10 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
 
       {/* Liste des Composants attachés (+ carte Hitbox & Collider par défaut) */}
       <div className="space-y-2">
-        {baseBehaviors.map((behavior) => {
-          const isExpanded = expandedBehaviorId === behavior.id;
+        {baseBehaviors.map((behavior, behIdx) => {
+          const cardKey = `${entity.id}:${behavior.id}`;
+          const isExpanded =
+            expandedBehaviorCards[cardKey] ?? (!hasAnyStoredCardForEntity && behIdx === 0);
           const overrides = targetState?.behaviorOverrides || {};
           const override = overrides[behavior.id];
           const hasOverride = Boolean(override);
@@ -322,7 +328,7 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
             >
               {/* Carte En-tête */}
               <div
-                onClick={() => setExpandedBehaviorId(isExpanded ? null : behavior.id)}
+                onClick={() => setBehaviorCardExpanded(cardKey, !isExpanded)}
                 className="p-2.5 flex items-center justify-between gap-2 cursor-pointer select-none"
               >
                 <div className="flex items-center gap-2 min-w-0">
@@ -448,6 +454,8 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
 
                   {/* Formulaire des attributs empilés ligne par ligne */}
                   {renderBehaviorControls({
+                    entityId: entity.id,
+                    stateId: hasOverride ? targetState?.id : undefined,
                     behavior,
                     override,
                     isOverridden: hasOverride,
@@ -492,9 +500,12 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
           targetState={targetState}
           stateList={stateList}
           activeStateId={activeStateId}
-          isExpanded={expandedBehaviorId === '__hitbox__'}
+          isExpanded={Boolean(expandedBehaviorCards[`${entity.id}:__hitbox__`])}
           onToggleExpand={() =>
-            setExpandedBehaviorId(expandedBehaviorId === '__hitbox__' ? null : '__hitbox__')
+            setBehaviorCardExpanded(
+              `${entity.id}:__hitbox__`,
+              !Boolean(expandedBehaviorCards[`${entity.id}:__hitbox__`])
+            )
           }
           updateEntityDetails={updateEntityDetails}
           updateStateProperties={updateStateProperties}
@@ -607,6 +618,11 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
               spinSpeed: effective.spinSpeed,
               spread: effective.spread ?? 60,
               angle: effective.angle ?? -90,
+              directionMode: effective.directionMode,
+              directionTargetMode: effective.directionTargetMode,
+              directionTargetEntityId: effective.directionTargetEntityId,
+              directionTargetEntityType: effective.directionTargetEntityType,
+              directionTargetTag: effective.directionTargetTag,
               offsetX: effective.offsetX ?? 0,
               offsetY: effective.offsetY ?? 0,
               anchor: effective.anchor,
@@ -647,6 +663,11 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
                 spinSpeed: cfg.spinSpeed,
                 spread: cfg.spread,
                 angle: cfg.angle,
+                directionMode: cfg.directionMode,
+                directionTargetMode: cfg.directionTargetMode,
+                directionTargetEntityId: cfg.directionTargetEntityId,
+                directionTargetEntityType: cfg.directionTargetEntityType,
+                directionTargetTag: cfg.directionTargetTag,
                 offsetX: cfg.offsetX ?? 0,
                 offsetY: cfg.offsetY ?? 0,
                 anchor: cfg.anchor,
@@ -677,6 +698,8 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
 }
 
 function renderBehaviorControls({
+  entityId,
+  stateId,
   behavior,
   override,
   isOverridden,
@@ -696,6 +719,8 @@ function renderBehaviorControls({
   hasFrozenRotation,
   onActivateGroundedPhysics,
 }: {
+  entityId: string;
+  stateId?: string;
   behavior: EntityBehavior;
   override?: BehaviorOverride;
   isOverridden: boolean;
@@ -761,6 +786,8 @@ function renderBehaviorControls({
           b={{ ...behavior, ...(override || {}) } as PatrolBehaviorConfig}
           update={update}
           targetEntityOptions={targetEntityOptions}
+          entityTypeOptions={entityTypeOptions}
+          availableTags={availableTags}
           stateList={stateList}
           onQuickCreateState={onQuickCreateState}
           onEditStateDrawing={onEditStateDrawing}
@@ -842,6 +869,9 @@ function renderBehaviorControls({
           onOpenParticleDrawer={onOpenParticleDrawer}
           onOpenParticleEditor={onOpenParticleEditor}
           onDeleteCustomParticle={onDeleteCustomParticle}
+          targetEntityOptions={targetEntityOptions}
+          entityTypeOptions={entityTypeOptions}
+          availableTags={availableTags}
         />
       );
     case 'health':
@@ -868,6 +898,9 @@ function renderBehaviorControls({
         <SnapBehaviorControls
           b={{ ...behavior, ...(override || {}) } as SnapBehaviorConfig}
           update={update}
+          entityId={entityId}
+          behaviorId={behavior.id}
+          stateId={stateId}
           targetEntityOptions={targetEntityOptions}
           entityTypeOptions={entityTypeOptions}
           availableTags={availableTags}

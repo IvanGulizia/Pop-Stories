@@ -39,6 +39,7 @@ import {
 } from '../utils/physics/jointAngularSolver';
 import { resolveEffectiveParentOffset } from '../store/parentingHelpers';
 import { computeRelativeParticleOrigin } from '../utils/particleSystem';
+import { getSnapAnchorWorldPoint, matchesSnapFilter } from '../utils/physics/snapSolver';
 
 interface SceneGizmoOverlayProps {
   mousePosRef: React.MutableRefObject<{ x: number; y: number } | null>;
@@ -975,29 +976,129 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
           if (snapBeh) {
             const snapR = Math.max(4, snapBeh.snapRadius ?? 48);
             const snapLink = runtimeDebug?.snapLinks?.[entity.id];
+            const magnetDebug = runtimeDebug?.snapMagnets?.[entity.id];
+            const isReceptacle = snapBeh.snapRole === 'receptacle' || Boolean(magnetDebug?.isReceptacle);
+            const showMagnetAura = Boolean(snapBeh.magnetEnabled || magnetDebug);
+            const magnetR = Math.max(snapR, magnetDebug?.radius ?? snapBeh.magnetRadius ?? 120);
+            const isApproaching = Boolean(magnetDebug?.approaching);
+            const maxCap = Math.max(1, magnetDebug?.maxCapacity ?? snapBeh.maxCapacity ?? 1);
+            const activeCount = magnetDebug?.activeCount ?? 0;
+            const alignMode = snapBeh.snapAlignment || 'center';
+            const showSourcePin =
+              alignMode === 'anchor_offset' &&
+              (snapBeh.sourceAnchor === 'custom_canvas' || snapBeh.sourceAnchor === 'pivot');
+            const srcPinWorld = showSourcePin
+              ? getSnapAnchorWorldPoint(
+                  entity,
+                  snapBeh.sourceAnchor || 'center',
+                  snapBeh.customSourceAnchor
+                )
+              : null;
+            const targetPinRef =
+              alignMode === 'anchor_offset' && snapBeh.targetAnchor === 'custom_canvas'
+                ? Object.values(entities).find((cand) => matchesSnapFilter(entity.id, cand, snapBeh))
+                : undefined;
+            const targetPinWorld = targetPinRef
+              ? getSnapAnchorWorldPoint(targetPinRef, 'custom_canvas', snapBeh.customTargetAnchor)
+              : null;
+
             elements.push(
               <g key={`ai-snap-${entity.id}`}>
+                {showMagnetAura && (
+                  <circle
+                    cx={center.x}
+                    cy={center.y}
+                    r={magnetR}
+                    fill={isApproaching ? 'rgba(139, 92, 246, 0.12)' : 'rgba(139, 92, 246, 0.04)'}
+                    stroke="#8b5cf6"
+                    strokeWidth={isApproaching ? '2' : '1.25'}
+                    strokeDasharray={isApproaching ? '6 3' : '3 5'}
+                    strokeOpacity={isApproaching ? 0.95 : 0.6}
+                  />
+                )}
                 <circle
                   cx={center.x}
                   cy={center.y}
                   r={snapR}
-                  fill="rgba(6, 182, 212, 0.04)"
-                  stroke="#06b6d4"
+                  fill={isReceptacle ? 'rgba(139, 92, 246, 0.05)' : 'rgba(6, 182, 212, 0.04)'}
+                  stroke={isReceptacle ? '#8b5cf6' : '#06b6d4'}
                   strokeWidth="1.4"
                   strokeDasharray="4 4"
-                  strokeOpacity={0.75}
+                  strokeOpacity={0.78}
                 />
                 <text
                   x={center.x}
-                  y={center.y - snapR - 4}
+                  y={center.y - (showMagnetAura ? magnetR : snapR) - 5}
                   textAnchor="middle"
-                  fill="#0e7490"
+                  fill={isReceptacle ? '#6d28d9' : '#0e7490'}
                   fontSize="9"
                   fontFamily="monospace"
                   fontWeight="700"
                 >
-                  Snap {snapR}px
+                  {isReceptacle
+                    ? isPlayMode
+                      ? `Réceptacle ${activeCount}/${maxCap} · ${snapR}px`
+                      : `Réceptacle (Cap. ${maxCap}) · ${snapR}px`
+                    : showMagnetAura
+                    ? `Aimant ${magnetR}px · Snap ${snapR}px`
+                    : `Snap ${snapR}px`}
                 </text>
+                {srcPinWorld && (
+                  <g>
+                    <circle
+                      cx={srcPinWorld.x}
+                      cy={srcPinWorld.y}
+                      r={5.5}
+                      fill="rgba(6, 182, 212, 0.22)"
+                      stroke="#0891b2"
+                      strokeWidth="1.5"
+                    />
+                    <line
+                      x1={srcPinWorld.x - 8}
+                      y1={srcPinWorld.y}
+                      x2={srcPinWorld.x + 8}
+                      y2={srcPinWorld.y}
+                      stroke="#0891b2"
+                      strokeWidth="1.25"
+                    />
+                    <line
+                      x1={srcPinWorld.x}
+                      y1={srcPinWorld.y - 8}
+                      x2={srcPinWorld.x}
+                      y2={srcPinWorld.y + 8}
+                      stroke="#0891b2"
+                      strokeWidth="1.25"
+                    />
+                  </g>
+                )}
+                {targetPinWorld && (
+                  <g>
+                    <circle
+                      cx={targetPinWorld.x}
+                      cy={targetPinWorld.y}
+                      r={5.5}
+                      fill="rgba(99, 102, 241, 0.22)"
+                      stroke="#4f46e5"
+                      strokeWidth="1.5"
+                    />
+                    <line
+                      x1={targetPinWorld.x - 7}
+                      y1={targetPinWorld.y}
+                      x2={targetPinWorld.x + 7}
+                      y2={targetPinWorld.y}
+                      stroke="#4f46e5"
+                      strokeWidth="1.25"
+                    />
+                    <line
+                      x1={targetPinWorld.x}
+                      y1={targetPinWorld.y - 7}
+                      x2={targetPinWorld.x}
+                      y2={targetPinWorld.y + 7}
+                      stroke="#4f46e5"
+                      strokeWidth="1.25"
+                    />
+                  </g>
+                )}
                 {snapLink && (
                   <>
                     <line

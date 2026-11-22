@@ -1758,32 +1758,6 @@ export function DrawingCanvas({
               </g>
             )}
 
-            {/* Aperçu du Collider actif (Auto ou Manuel interactif) */}
-            <DrawingCanvasColliderOverlay
-              showColliderPreview={showColliderPreview}
-              isSharedColliderEntity={isSharedColliderEntity}
-              isReferenceStateForSharedCollider={isReferenceStateForSharedCollider}
-              overrideCollider={overrideCollider}
-              colliderMode={colliderMode}
-              colliderType={colliderType}
-              manualCollider={manualCollider}
-              isColliderBodyDraggable={isColliderBodyDraggable}
-              isLocked={isColliderLocked}
-              overallBounds={overallBounds}
-              onStartColliderDrag={(action, e) => {
-                if (isColliderLocked) return;
-                e.stopPropagation();
-                try {
-                  (e.target as Element).setPointerCapture?.(e.pointerId);
-                } catch (_) {}
-                setColliderDragAction(action);
-                colliderDragOriginRef.current = {
-                  mouse: getSVGCoordinates(e),
-                  initial: { ...manualCollider },
-                };
-              }}
-            />
-
             {/* Tracés existants groupés par calques (rendus de bas en haut) */}
             {[...layers].reverse().map((layer) => {
               if (!layer.visible) return null;
@@ -2124,6 +2098,31 @@ export function DrawingCanvas({
                 </g>
               </g>
             )}
+            {/* Aperçu du Collider actif au-dessus du dessin (Auto ou Manuel interactif) */}
+            <DrawingCanvasColliderOverlay
+              showColliderPreview={showColliderPreview}
+              isSharedColliderEntity={isSharedColliderEntity}
+              isReferenceStateForSharedCollider={isReferenceStateForSharedCollider}
+              overrideCollider={overrideCollider}
+              colliderMode={colliderMode}
+              colliderType={colliderType}
+              manualCollider={manualCollider}
+              isColliderBodyDraggable={isColliderBodyDraggable}
+              isLocked={isColliderLocked}
+              overallBounds={overallBounds}
+              onStartColliderDrag={(action, e) => {
+                if (isColliderLocked) return;
+                e.stopPropagation();
+                try {
+                  (e.target as Element).setPointerCapture?.(e.pointerId);
+                } catch (_) {}
+                setColliderDragAction(action);
+                colliderDragOriginRef.current = {
+                  mouse: getSVGCoordinates(e),
+                  initial: { ...manualCollider },
+                };
+              }}
+            />
             {/* Repère visuel interactif du Pivot (Centre de rotation & d'attachement) */}
             {enablePivotEditing && !isCursorMode && (
               <DrawingCanvasPivotOverlay

@@ -302,6 +302,20 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
           ? `${selectedCustomIds.length} dessins`
           : customParticles.find((p) => p.id === selectedCustomIds[0])?.name || 'Dessin'
         : countLabel;
+    const durationBadge =
+      (act.particleEmitDuration ?? 0) > 0
+        ? ` • ${Number(act.particleEmitDuration!.toFixed(2))}s`
+        : '';
+    const dirBadge =
+      act.particleDirectionMode === 'facing'
+        ? ' • Sens'
+        : act.particleDirectionMode === 'mouse'
+        ? ' • ➔Souris'
+        : act.particleDirectionMode === 'toward_target'
+        ? ' • ➔Cible'
+        : act.particleDirectionMode === 'away_target'
+        ? ' • Opposé'
+        : '';
     return (
       <div
         role={canJump ? 'button' : undefined}
@@ -316,7 +330,7 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         </div>
         <span className="text-xs truncate">Particules</span>
         <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded font-medium truncate">
-          ({shapeBadge}{originBadge})
+          ({shapeBadge}{durationBadge}{dirBadge}{originBadge})
         </span>
       </div>
     );
@@ -445,7 +459,7 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         </div>
         <span className="text-xs truncate">{srcLabel}</span>
         <span className="text-[10px] text-cyan-700 bg-cyan-50 px-1.5 py-0.2 rounded font-medium truncate">
-          (→ {dstLabel})
+          (→ {dstLabel}{act.snapAttachBehavior === 'parent_physics_joint' ? ' • Joint' : ''})
         </span>
       </div>
     );
@@ -601,6 +615,16 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         : act.enabledActionMode === 'toggle'
         ? 'Basculer'
         : 'Désactiver';
+    const scopeLabel =
+      act.enabledScope === 'self'
+        ? 'seul'
+        : act.enabledScope === 'with_parent'
+        ? '+parent'
+        : act.enabledScope === 'with_children'
+        ? '+enfants'
+        : act.enabledScope === 'entire_hierarchy'
+        ? 'toute la hiérarchie'
+        : '';
     return (
       <div
         role={canJump ? 'button' : undefined}
@@ -615,7 +639,7 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         </div>
         <span className="text-xs truncate">{targetLabel}</span>
         <span className="text-[10px] text-slate-700 bg-slate-100 px-1.5 py-0.2 rounded font-medium truncate">
-          ({modeLabel})
+          ({modeLabel}{scopeLabel ? ` • ${scopeLabel}` : ''})
         </span>
       </div>
     );

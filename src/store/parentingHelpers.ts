@@ -1,4 +1,4 @@
-import { Entity, EntityId, EntityPivot, EntityState, EntityType, ParentOffset, Position, SpawnReferenceMode } from '../types';
+import { Entity, EntityId, EntityPivot, EntityState, EntityType, ParentOffset, Position, SetEntityEnabledScope, SpawnReferenceMode } from '../types';
 import {
   getParentAnchorWorldPosition,
   getPivotWorldPosition,
@@ -60,6 +60,63 @@ export function collectDescendantIds(entities: Record<EntityId, Entity>, rootId:
     });
   }
   return result;
+}
+
+/**
+ * Résout la liste dédupliquée des IDs d'entités concernés selon la portée hiérarchique :
+ * - 'self' : l'entité uniquement
+ * - 'with_children' : l'entité + tous ses descendants
+ * - 'with_parent' : l'entité + son parent direct (si existant)
+ * - 'entire_hierarchy' : toute la famille depuis l'ancêtre racine + tous ses descendants
+ */
+export function resolveEntityHierarchyScopeIds(
+  entities: Record<EntityId, Entity>,
+  rootId: EntityId,
+  scope: SetEntityEnabledScope = 'self'
+): EntityId[] {
+  if (!entities[rootId]) return [];
+  if (scope === 'self') return [rootId];
+
+  if (scope === 'with_children') {
+    const seen = new Set<EntityId>([rootId]);
+    const out: EntityId[] = [rootId];
+    for (const dId of collectDescendantIds(entities, rootId)) {
+      if (!seen.has(dId) && entities[dId]) {
+        seen.add(dId);
+        out.push(dId);
+      }
+    }
+    return out;
+  }
+
+  if (scope === 'with_parent') {
+    const out: EntityId[] = [rootId];
+    const pId = entities[rootId]?.parentId;
+    if (pId && pId !== rootId && entities[pId]) {
+      out.push(pId);
+    }
+    return out;
+  }
+
+  // 'entire_hierarchy' : remonter jusqu'au parent racine sans boucle puis collecter toute l'arborescence
+  let topId: EntityId = rootId;
+  const climbVisited = new Set<EntityId>([rootId]);
+  while (entities[topId]?.parentId) {
+    const parentId = entities[topId].parentId!;
+    if (!entities[parentId] || climbVisited.has(parentId)) break;
+    climbVisited.add(parentId);
+    topId = parentId;
+  }
+
+  const seen = new Set<EntityId>([topId]);
+  const out: EntityId[] = [topId];
+  for (const dId of collectDescendantIds(entities, topId)) {
+    if (!seen.has(dId) && entities[dId]) {
+      seen.add(dId);
+      out.push(dId);
+    }
+  }
+  return out;
 }
 
 export function computeRelativeParentOffset(

@@ -1,12 +1,16 @@
 import { useEffect, useRef } from 'react';
 import {
   clearParticles,
+  getLatestMouseWorldPos,
   hasActiveParticles,
+  hasActiveTimedEmitters,
   stepAndRenderParticles,
+  stepTimedRuleEmitters,
   syncCustomParticlePresets,
 } from '../utils/particleSystem';
 import { useSceneStore } from '../store/useSceneStore';
 import { getActiveCameraView } from '../utils/cameraRuntime';
+import { getLastSpawnedEntityId } from '../store/ruleExecutionEngine';
 
 interface ParticleCanvasOverlayProps {
   active: boolean;
@@ -63,8 +67,17 @@ export function ParticleCanvasOverlay({ active }: ParticleCanvasOverlayProps) {
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const cssW = canvas.width / dpr;
         const cssH = canvas.height / dpr;
+        const storeSnap = useSceneStore.getState();
+        const hasTimed = hasActiveTimedEmitters();
+        if (hasTimed) {
+          stepTimedRuleEmitters(
+            dt,
+            storeSnap.entities,
+            getLatestMouseWorldPos(),
+            getLastSpawnedEntityId()
+          );
+        }
         if (hasActiveParticles() || dirty) {
-          const storeSnap = useSceneStore.getState();
           const camView = getActiveCameraView(storeSnap.appMode, storeSnap.editorCamera);
           dirty = stepAndRenderParticles(ctx, cssW, cssH, dt, camView);
         }

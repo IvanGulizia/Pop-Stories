@@ -1,20 +1,25 @@
 import React from 'react';
-import { Magnet, Paintbrush, Plus } from 'lucide-react';
+import { Crosshair, Magnet, Paintbrush, Plus } from 'lucide-react';
 import {
   Entity,
   EntityState,
-  ParticleAnchorPreset,
   SnapAlignmentMode,
+  SnapAnchorPreset,
   SnapAnimationMode,
   SnapAttachBehavior,
   SnapBehaviorConfig,
+  SnapRole,
   SnapTargetType,
   SnapTriggerMode,
 } from '../../types';
+import { EMPTY_RECORD, useSceneStore } from '../../store/useSceneStore';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
+import { SnapJointConfigFields } from '../shared/SnapJointConfigFields';
 
-const ANCHOR_OPTIONS: { value: ParticleAnchorPreset; label: string }[] = [
+const ANCHOR_OPTIONS: { value: SnapAnchorPreset; label: string }[] = [
   { value: 'center', label: 'Centre' },
+  { value: 'pivot', label: 'Point de Pivot' },
+  { value: 'custom_canvas', label: 'Repère sur canvas' },
   { value: 'top', label: 'Haut' },
   { value: 'bottom', label: 'Bas' },
   { value: 'left', label: 'Gauche' },
@@ -28,6 +33,9 @@ const ANCHOR_OPTIONS: { value: ParticleAnchorPreset; label: string }[] = [
 export function SnapBehaviorControls({
   b,
   update,
+  entityId,
+  behaviorId,
+  stateId,
   targetEntityOptions,
   entityTypeOptions,
   availableTags,
@@ -37,6 +45,9 @@ export function SnapBehaviorControls({
 }: {
   b: SnapBehaviorConfig;
   update: (partial: Partial<SnapBehaviorConfig>) => void;
+  entityId?: string;
+  behaviorId?: string;
+  stateId?: string;
   targetEntityOptions: Entity[];
   entityTypeOptions: { type: string; label: string }[];
   availableTags: string[];
@@ -44,23 +55,114 @@ export function SnapBehaviorControls({
   onQuickCreateState: (suggestedName: string, folderName?: string) => string;
   onEditStateDrawing?: (stateId: string) => void;
 }) {
+  const sceneEntities = useSceneStore((s) => s.entities || EMPTY_RECORD);
+  const startSnapPinCanvasPick = useSceneStore((s) => s.startSnapPinCanvasPick);
+
+  const snapRole: SnapRole = b.snapRole || 'magnet_object';
+  const isReceptacle = snapRole === 'receptacle';
   const targetType: SnapTargetType = b.targetType || 'any';
   const snapTrigger: SnapTriggerMode = b.snapTrigger || 'on_release';
   const snapMode: SnapAnimationMode = b.snapMode || 'magnetic_smooth';
   const snapAlignment: SnapAlignmentMode = b.snapAlignment || 'center';
   const attachBehavior: SnapAttachBehavior = b.attachBehavior || 'position_only';
   const radius = b.snapRadius ?? 48;
+  const magnetRadius = Math.max(radius, b.magnetRadius ?? 120);
+  const magnetForce = b.magnetForce ?? 260;
   const unsnapDist = b.unsnapDistance ?? Math.round(radius * 1.5);
   const allowPullUnsnap = b.allowPullUnsnap !== false;
   const reSnapCooldown = b.reSnapCooldownSec ?? 0.35;
 
+  const canPickSourceOnCanvas = Boolean(entityId && behaviorId && sceneEntities[entityId]);
+
+  const resolvedTargetEntityId = React.useMemo(() => {
+    const candidates = Object.values(sceneEntities).filter((ent) => ent.id !== entityId);
+    if (candidates.length === 0) return undefined;
+    if (targetType === 'entity' && b.targetEntityId && sceneEntities[b.targetEntityId]) {
+      return b.targetEntityId;
+    }
+    if (targetType === 'type' && b.targetEntityType) {
+      return candidates.find((c) => c.type === b.targetEntityType)?.id;
+    }
+    if (targetType === 'tag' && b.targetTag) {
+      const clean = b.targetTag.trim().replace(/^#/, '').toLowerCase();
+      return candidates.find((c) =>
+        (c.tags || []).some((t) => t.trim().replace(/^#/, '').toLowerCase() === clean)
+      )?.id;
+    }
+    return candidates[0]?.id;
+  }, [sceneEntities, entityId, targetType, b.targetEntityId, b.targetEntityType, b.targetTag]);
+
+  const canPickTargetOnCanvas = Boolean(entityId && behaviorId && resolvedTargetEntityId);
+
   return (
     <div className="space-y-2.5">
+      {/* 0. Rôle du Snap : Objet aimanté vs Réceptacle */}
+      <div className="p-2.5 bg-white rounded-xl border border-slate-200 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-bold text-slate-700">Rôle de cet objet</span>
+          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[10px] font-bold">
+            <button
+              type="button"
+              onClick={() => update({ snapRole: 'magnet_object' })}
+              className={`px-2 py-1 rounded-md cursor-pointer transition-colors ${
+                !isReceptacle
+                  ? 'bg-cyan-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Objet aimanté
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                update({
+                  snapRole: 'receptacle',
+                  maxCapacity: b.maxCapacity ?? 1,
+                })
+              }
+              className={`px-2 py-1 rounded-md cursor-pointer transition-colors ${
+                isReceptacle
+                  ? 'bg-violet-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Réceptacle (Socle)
+            </button>
+          </div>
+        </div>
+
+        <div className="text-[10px] text-slate-500">
+          {isReceptacle
+            ? 'Attire et capture automatiquement les objets correspondants jusqu’à sa capacité max.'
+            : 'Cet objet vient se coller automatiquement vers une cible ou un socle.'}
+        </div>
+
+        {isReceptacle && (
+          <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-100">
+            <span className="text-[11px] font-bold text-violet-900">
+              Capacité max (nb d&apos;objets)
+            </span>
+            <input
+              type="number"
+              step="any"
+              value={b.maxCapacity ?? 1}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                if (Number.isFinite(v)) {
+                  update({ maxCapacity: Math.max(1, Math.round(v)) });
+                }
+              }}
+              className="w-20 bg-violet-50 border border-violet-200 rounded-lg px-2 py-1 text-xs font-mono font-bold text-right text-violet-900"
+            />
+          </div>
+        )}
+      </div>
+
       {/* 1. Cible de l'aimant */}
       <div className="p-2.5 bg-white rounded-xl border border-slate-200 space-y-2">
         <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
           <Magnet className="w-3.5 h-3.5 text-cyan-600" />
-          <span>Cible d'aimantation</span>
+          <span>{isReceptacle ? 'Objets acceptés par le réceptacle' : "Cible d'aimantation"}</span>
         </div>
 
         <select
@@ -68,9 +170,9 @@ export function SnapBehaviorControls({
           onChange={(e) => update({ targetType: e.target.value as SnapTargetType })}
           className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-800"
         >
-          <option value="any">N'importe quel objet à portée</option>
+          <option value="any">N&apos;importe quel objet à portée</option>
           <option value="entity">Une instance précise</option>
-          <option value="type">Un type d'objet</option>
+          <option value="type">Un type d&apos;objet</option>
           <option value="tag">Un #Tag spécifique</option>
         </select>
 
@@ -80,7 +182,7 @@ export function SnapBehaviorControls({
             onChange={(e) => update({ targetEntityId: e.target.value || undefined })}
             className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-800"
           >
-            <option value="">-- Choisir l'objet cible --</option>
+            <option value="">-- Choisir l&apos;objet cible --</option>
             {targetEntityOptions.map((ent) => (
               <option key={ent.id} value={ent.id}>
                 {ent.name}
@@ -135,7 +237,7 @@ export function SnapBehaviorControls({
         )}
       </div>
 
-      {/* 2. Déclenchement & Zone d'aimantation */}
+      {/* 2. Déclenchement, Zone de snap & Champ d'attraction magnétique */}
       <div className="p-2.5 bg-white rounded-xl border border-slate-200 space-y-2">
         <div className="grid grid-cols-2 gap-1.5">
           <div>
@@ -146,7 +248,7 @@ export function SnapBehaviorControls({
               className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-800"
             >
               <option value="on_release">Au relâcher</option>
-              <option value="always_when_near">Dès qu'il s'approche</option>
+              <option value="always_when_near">Dès qu&apos;il s&apos;approche</option>
             </select>
           </div>
           <div>
@@ -164,7 +266,7 @@ export function SnapBehaviorControls({
 
         <div>
           <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
-            <span className="font-bold">Rayon d'aimantation</span>
+            <span className="font-bold">Rayon de capture (Snap)</span>
             <EditableNumericValue
               value={radius}
               unit="px"
@@ -187,7 +289,7 @@ export function SnapBehaviorControls({
         {snapMode === 'magnetic_smooth' && (
           <div>
             <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
-              <span className="font-bold">Vitesse d'aspiration</span>
+              <span className="font-bold">Vitesse d&apos;aspiration</span>
               <EditableNumericValue
                 value={Math.round((b.smoothSpeed ?? 0.3) * 100)}
                 unit="%"
@@ -207,6 +309,80 @@ export function SnapBehaviorControls({
             />
           </div>
         )}
+
+        {/* Champ d'attraction magnétique (#10) */}
+        <div className="pt-2 border-t border-slate-100 space-y-2">
+          <label className="flex items-center justify-between gap-2 cursor-pointer">
+            <div>
+              <div className="text-[11px] font-bold text-violet-900">
+                Champ d&apos;attraction magnétique
+              </div>
+              <div className="text-[10px] text-slate-400">
+                Attire doucement l&apos;objet avant d&apos;atteindre le snap
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={Boolean(b.magnetEnabled)}
+              onChange={(e) =>
+                update({
+                  magnetEnabled: e.target.checked,
+                  magnetRadius: b.magnetRadius ?? Math.max(radius + 40, 120),
+                  magnetForce: b.magnetForce ?? 260,
+                })
+              }
+              className="w-4 h-4 accent-violet-600 rounded cursor-pointer shrink-0"
+            />
+          </label>
+
+          {b.magnetEnabled && (
+            <div className="p-2 bg-violet-50/70 rounded-xl border border-violet-200/80 space-y-1.5">
+              <div>
+                <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
+                  <span className="font-bold">Rayon du champ magnétique</span>
+                  <EditableNumericValue
+                    value={magnetRadius}
+                    unit="px"
+                    precision={0}
+                    onChange={(v) => update({ magnetRadius: v })}
+                    className="font-mono font-bold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded cursor-text tabular-nums"
+                  />
+                </div>
+                <input
+                  type="range"
+                  min={Math.max(16, Math.round(radius))}
+                  max="420"
+                  step="5"
+                  value={Math.max(radius, Math.min(420, magnetRadius))}
+                  onChange={(e) => update({ magnetRadius: parseInt(e.target.value, 10) })}
+                  className="w-full accent-violet-600"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center text-[11px] text-slate-700 mb-0.5">
+                  <span className="font-bold">Force d&apos;attraction</span>
+                  <EditableNumericValue
+                    value={magnetForce}
+                    unit="px/s"
+                    precision={0}
+                    onChange={(v) => update({ magnetForce: v })}
+                    className="font-mono font-bold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded cursor-text tabular-nums"
+                  />
+                </div>
+                <input
+                  type="range"
+                  min="20"
+                  max="800"
+                  step="10"
+                  value={Math.max(20, Math.min(800, magnetForce))}
+                  onChange={(e) => update({ magnetForce: parseInt(e.target.value, 10) })}
+                  className="w-full accent-violet-600"
+                />
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 3. Alignement & Ancre */}
@@ -219,41 +395,214 @@ export function SnapBehaviorControls({
             className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-800"
           >
             <option value="center">Centre sur centre</option>
-            <option value="anchor_offset">Par points d'ancrage (Haut/Bas/Côtés…)</option>
+            <option value="anchor_offset">Par points d&apos;ancrage (Pivot / Repère canvas / Côtés…)</option>
             <option value="edge_closest">Bord le plus proche (aimant bord à bord)</option>
           </select>
         </div>
 
         {snapAlignment === 'anchor_offset' && (
-          <div className="grid grid-cols-2 gap-1.5">
-            <div>
-              <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Ancre de cet objet</span>
-              <select
-                value={b.sourceAnchor || 'center'}
-                onChange={(e) => update({ sourceAnchor: e.target.value as ParticleAnchorPreset })}
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800"
-              >
-                {ANCHOR_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-1.5">
+              <div>
+                <span className="text-[10px] font-bold text-slate-500 block mb-0.5">
+                  {isReceptacle ? 'Ancre du réceptacle' : 'Ancre de cet objet'}
+                </span>
+                <select
+                  value={b.sourceAnchor || 'center'}
+                  onChange={(e) => {
+                    const next = e.target.value as SnapAnchorPreset;
+                    update({
+                      sourceAnchor: next,
+                      ...(next === 'custom_canvas' && !b.customSourceAnchor
+                        ? { customSourceAnchor: { x: 0.5, y: 0.5 } }
+                        : {}),
+                    });
+                  }}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800"
+                >
+                  {ANCHOR_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <span className="text-[10px] font-bold text-slate-500 block mb-0.5">
+                  {isReceptacle ? 'Ancre objet capturé' : 'Ancre de la cible'}
+                </span>
+                <select
+                  value={b.targetAnchor || 'center'}
+                  onChange={(e) => {
+                    const next = e.target.value as SnapAnchorPreset;
+                    update({
+                      targetAnchor: next,
+                      ...(next === 'custom_canvas' && !b.customTargetAnchor
+                        ? { customTargetAnchor: { x: 0.5, y: 0.5 } }
+                        : {}),
+                    });
+                  }}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800"
+                >
+                  {ANCHOR_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div>
-              <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Ancre de la cible</span>
-              <select
-                value={b.targetAnchor || 'center'}
-                onChange={(e) => update({ targetAnchor: e.target.value as ParticleAnchorPreset })}
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800"
-              >
-                {ANCHOR_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+
+            {b.sourceAnchor === 'custom_canvas' && (
+              <div className="p-2 bg-cyan-50/70 rounded-xl border border-cyan-200 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-bold text-cyan-900">
+                    Repère {isReceptacle ? 'réceptacle' : 'objet'} (0..1)
+                  </span>
+                  <button
+                    type="button"
+                    disabled={!canPickSourceOnCanvas}
+                    onClick={() => {
+                      if (!entityId || !behaviorId) return;
+                      startSnapPinCanvasPick({
+                        entityId,
+                        behaviorId,
+                        stateId,
+                        pinRole: 'source',
+                        referenceEntityId: entityId,
+                      });
+                    }}
+                    className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors ${
+                      canPickSourceOnCanvas
+                        ? 'bg-cyan-600 hover:bg-cyan-700 text-white cursor-pointer shadow-2xs'
+                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    }`}
+                    title={
+                      canPickSourceOnCanvas
+                        ? 'Cliquer directement sur le canvas pour poser le repère'
+                        : 'Disponible sur une instance placée dans la scène'
+                    }
+                  >
+                    <Crosshair className="w-3 h-3" />
+                    <span>Placer sur le canvas</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div className="flex items-center justify-between gap-1 bg-white px-2 py-1 rounded-lg border border-cyan-200">
+                    <span className="text-[10px] font-bold text-slate-500">X</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={b.customSourceAnchor?.x ?? 0.5}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          update({
+                            customSourceAnchor: { x: v, y: b.customSourceAnchor?.y ?? 0.5 },
+                          });
+                        }
+                      }}
+                      className="w-16 text-right font-mono font-bold text-[11px] text-slate-800 outline-none"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-1 bg-white px-2 py-1 rounded-lg border border-cyan-200">
+                    <span className="text-[10px] font-bold text-slate-500">Y</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={b.customSourceAnchor?.y ?? 0.5}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          update({
+                            customSourceAnchor: { x: b.customSourceAnchor?.x ?? 0.5, y: v },
+                          });
+                        }
+                      }}
+                      className="w-16 text-right font-mono font-bold text-[11px] text-slate-800 outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {b.targetAnchor === 'custom_canvas' && (
+              <div className="p-2 bg-indigo-50/70 rounded-xl border border-indigo-200 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-bold text-indigo-900">
+                    Repère {isReceptacle ? 'objet capturé' : 'cible'} (0..1)
+                  </span>
+                  <button
+                    type="button"
+                    disabled={!canPickTargetOnCanvas}
+                    onClick={() => {
+                      if (!entityId || !behaviorId || !resolvedTargetEntityId) return;
+                      startSnapPinCanvasPick({
+                        entityId,
+                        behaviorId,
+                        stateId,
+                        pinRole: 'target',
+                        referenceEntityId: resolvedTargetEntityId,
+                      });
+                    }}
+                    className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors ${
+                      canPickTargetOnCanvas
+                        ? 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer shadow-2xs'
+                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    }`}
+                    title={
+                      canPickTargetOnCanvas
+                        ? `Cliquer sur la scène (réf: ${sceneEntities[resolvedTargetEntityId!]?.name})`
+                        : 'Aucune entité cible correspondante trouvée sur la scène'
+                    }
+                  >
+                    <Crosshair className="w-3 h-3" />
+                    <span>Placer sur le canvas</span>
+                  </button>
+                </div>
+                {!canPickTargetOnCanvas && (
+                  <div className="text-[10px] text-indigo-700/80 italic">
+                    Placez une entité cible correspondante sur la scène pour utiliser la visée directe.
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div className="flex items-center justify-between gap-1 bg-white px-2 py-1 rounded-lg border border-indigo-200">
+                    <span className="text-[10px] font-bold text-slate-500">X</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={b.customTargetAnchor?.x ?? 0.5}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          update({
+                            customTargetAnchor: { x: v, y: b.customTargetAnchor?.y ?? 0.5 },
+                          });
+                        }
+                      }}
+                      className="w-16 text-right font-mono font-bold text-[11px] text-slate-800 outline-none"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-1 bg-white px-2 py-1 rounded-lg border border-indigo-200">
+                    <span className="text-[10px] font-bold text-slate-500">Y</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={b.customTargetAnchor?.y ?? 0.5}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          update({
+                            customTargetAnchor: { x: b.customTargetAnchor?.x ?? 0.5, y: v },
+                          });
+                        }
+                      }}
+                      className="w-16 text-right font-mono font-bold text-[11px] text-slate-800 outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -266,7 +615,7 @@ export function SnapBehaviorControls({
               value={b.offsetX ?? 0}
               onChange={(e) => {
                 const v = parseFloat(e.target.value);
-                update({ offsetX: Number.isFinite(v) ? v : 0 });
+                if (Number.isFinite(v)) update({ offsetX: v });
               }}
               className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-slate-800"
             />
@@ -279,7 +628,7 @@ export function SnapBehaviorControls({
               value={b.offsetY ?? 0}
               onChange={(e) => {
                 const v = parseFloat(e.target.value);
-                update({ offsetY: Number.isFinite(v) ? v : 0 });
+                if (Number.isFinite(v)) update({ offsetY: v });
               }}
               className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-slate-800"
             />
@@ -305,7 +654,7 @@ export function SnapBehaviorControls({
               value={b.rotationOffset ?? 0}
               onChange={(e) => {
                 const v = parseFloat(e.target.value);
-                update({ rotationOffset: Number.isFinite(v) ? v : 0 });
+                if (Number.isFinite(v)) update({ rotationOffset: v });
               }}
               className="w-24 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-slate-800 text-right"
             />
@@ -328,6 +677,7 @@ export function SnapBehaviorControls({
             <option value="freeze_physics">Poser et figer la physique (statique)</option>
             <option value="parent_rigid">Parenter solidement (suit la cible)</option>
             <option value="parent_spring">Parenter avec ressort souple</option>
+            <option value="parent_physics_joint">Parenter avec Joint Physique (Break Joint)</option>
           </select>
         </div>
 
@@ -376,10 +726,24 @@ export function SnapBehaviorControls({
           </div>
         )}
 
+        {attachBehavior === 'parent_physics_joint' && (
+          <SnapJointConfigFields
+            config={b.jointConfig || {}}
+            onChange={(patch) =>
+              update({
+                jointConfig: {
+                  ...(b.jointConfig || {}),
+                  ...patch,
+                },
+              })
+            }
+          />
+        )}
+
         <div className="flex items-center justify-between pt-1 border-t border-slate-100">
           <div>
             <div className="text-[11px] font-bold text-slate-700">Détacher en tirant à la souris</div>
-            <div className="text-[10px] text-slate-400">Permet de retirer l'objet aimanté</div>
+            <div className="text-[10px] text-slate-400">Permet de retirer l&apos;objet aimanté</div>
           </div>
           <input
             type="checkbox"
@@ -393,7 +757,7 @@ export function SnapBehaviorControls({
           <div className="space-y-1.5 pt-1">
             <div>
               <div className="flex justify-between items-center text-[11px] text-slate-700">
-                <span className="font-bold">Distance d'arrachement</span>
+                <span className="font-bold">Distance d&apos;arrachement</span>
                 <EditableNumericValue
                   value={unsnapDist}
                   unit="px"
@@ -420,7 +784,7 @@ export function SnapBehaviorControls({
                 value={reSnapCooldown}
                 onChange={(e) => {
                   const v = parseFloat(e.target.value);
-                  update({ reSnapCooldownSec: Number.isFinite(v) ? v : 0 });
+                  if (Number.isFinite(v)) update({ reSnapCooldownSec: v });
                 }}
                 className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-slate-800 text-right"
               />
@@ -429,10 +793,11 @@ export function SnapBehaviorControls({
         )}
       </div>
 
-      {/* 5. États visuels automatiques Snap / Unsnap */}
+      {/* 5. États visuels automatiques Approche / Snap / Unsnap */}
       <div className="p-2.5 bg-cyan-50/50 rounded-xl border border-cyan-200/80 space-y-1.5">
         <div className="text-[11px] font-bold text-cyan-950">États automatiques (optionnel)</div>
         {[
+          { key: 'approachingStateId' as const, label: "À l'approche (aimant)", suggested: 'Approche', val: b.approachingStateId },
           { key: 'snappedStateId' as const, label: 'État quand aimanté', suggested: 'Aimanté', val: b.snappedStateId },
           { key: 'unsnappedStateId' as const, label: 'État au détachement', suggested: 'Libre', val: b.unsnappedStateId },
         ].map((slot) => (

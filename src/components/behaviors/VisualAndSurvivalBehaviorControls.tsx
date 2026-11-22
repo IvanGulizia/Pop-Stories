@@ -10,6 +10,7 @@ import {
   LookAtBehaviorConfig,
   ParticleAnchorPreset,
   ParticleColorMode,
+  ParticleDirectionMode,
   ParticleEffectPreset,
   ParticleEmissionShape,
   ParticleEmitterBehaviorConfig,
@@ -387,6 +388,9 @@ export function ParticleEmitterBehaviorControls({
   onOpenParticleDrawer,
   onOpenParticleEditor,
   onDeleteCustomParticle,
+  targetEntityOptions = [],
+  entityTypeOptions = [],
+  availableTags = [],
 }: {
   b: ParticleEmitterBehaviorConfig;
   update: (partial: any) => void;
@@ -394,6 +398,9 @@ export function ParticleEmitterBehaviorControls({
   onOpenParticleDrawer: (editingPreset?: CustomParticlePreset) => void;
   onOpenParticleEditor: () => void;
   onDeleteCustomParticle: (presetId: string) => void;
+  targetEntityOptions?: Entity[];
+  entityTypeOptions?: { type: string; label: string }[];
+  availableTags?: string[];
 }) {
   const projectPresets = useSceneStore((s) => s.projectParticlePresets || EMPTY_LIST);
   const localCollection = useSceneStore((s) => s.localParticleCollection || EMPTY_RECORD);
@@ -477,6 +484,11 @@ export function ParticleEmitterBehaviorControls({
                 spinSpeed: mapped.spinSpeed,
                 spread: mapped.spread,
                 angle: mapped.angle,
+                directionMode: mapped.directionMode,
+                directionTargetMode: mapped.directionTargetMode,
+                directionTargetEntityId: mapped.directionTargetEntityId,
+                directionTargetEntityType: mapped.directionTargetEntityType,
+                directionTargetTag: mapped.directionTargetTag,
                 offsetX: mapped.offsetX ?? b.offsetX,
                 offsetY: mapped.offsetY ?? b.offsetY,
                 anchor: mapped.anchor ?? b.anchor,
@@ -795,26 +807,127 @@ export function ParticleEmitterBehaviorControls({
       </div>
 
       {/* Ligne 9: Direction */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200">
-        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-          <span className="font-bold">Direction d'émission</span>
-          <EditableNumericValue
-            value={b.angle ?? -90}
-            unit="°"
-            precision={0}
-            onChange={(val) => update({ angle: val })}
-            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
-          />
+      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+        <div className="flex items-center justify-between gap-2 text-xs text-slate-700">
+          <span className="font-bold">Direction d&apos;émission</span>
+          <select
+            value={b.directionMode || 'angle'}
+            onChange={(e) => {
+              const nextMode = e.target.value as ParticleDirectionMode;
+              const patch: Record<string, any> = { directionMode: nextMode };
+              if (
+                (nextMode === 'toward_target' || nextMode === 'away_target') &&
+                !b.directionTargetMode
+              ) {
+                patch.directionTargetMode = 'entity';
+                patch.directionTargetEntityId = b.directionTargetEntityId || targetEntityOptions[0]?.id || '';
+              }
+              update(patch);
+            }}
+            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800 max-w-[155px]"
+          >
+            <option value="angle">Angle fixe (°)</option>
+            <option value="facing">Sens de l&apos;entité</option>
+            <option value="mouse">Vers la souris</option>
+            <option value="toward_target">Vers une cible</option>
+            <option value="away_target">Opposé à une cible</option>
+          </select>
         </div>
-        <input
-          type="range"
-          min="-180"
-          max="180"
-          step="5"
-          value={Math.max(-180, Math.min(180, b.angle ?? -90))}
-          onChange={(e) => update({ angle: parseFloat(e.target.value) })}
-          className="w-full accent-indigo-600"
-        />
+
+        {(b.directionMode || 'angle') === 'angle' && (
+          <div className="pt-1 border-t border-slate-100">
+            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <span className="text-[11px] font-semibold text-slate-600">Angle (°)</span>
+              <EditableNumericValue
+                value={b.angle ?? -90}
+                unit="°"
+                precision={0}
+                onChange={(val) => update({ angle: val })}
+                className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+              />
+            </div>
+            <input
+              type="range"
+              min="-180"
+              max="180"
+              step="5"
+              value={Math.max(-180, Math.min(180, b.angle ?? -90))}
+              onChange={(e) => update({ angle: parseFloat(e.target.value) })}
+              className="w-full accent-indigo-600"
+            />
+          </div>
+        )}
+
+        {(b.directionMode === 'toward_target' || b.directionMode === 'away_target') && (
+          <div className="pt-1 border-t border-slate-100 space-y-1.5 text-[11px]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-semibold text-slate-600">Cible</span>
+              <select
+                value={b.directionTargetMode || 'entity'}
+                onChange={(e) => update({ directionTargetMode: e.target.value as any })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800"
+              >
+                <option value="entity">Entité de la scène</option>
+                <option value="type">Par Type</option>
+                <option value="tag">Par #Tag</option>
+                <option value="mouse">Curseur souris</option>
+              </select>
+            </div>
+
+            {(b.directionTargetMode || 'entity') === 'entity' && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-slate-500">Entité</span>
+                <select
+                  value={b.directionTargetEntityId || targetEntityOptions[0]?.id || ''}
+                  onChange={(e) => update({ directionTargetEntityId: e.target.value })}
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800 max-w-[155px]"
+                >
+                  {targetEntityOptions.map((ent) => (
+                    <option key={ent.id} value={ent.id}>
+                      {ent.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {b.directionTargetMode === 'type' && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-slate-500">Type</span>
+                <select
+                  value={b.directionTargetEntityType || entityTypeOptions[0]?.type || ''}
+                  onChange={(e) => update({ directionTargetEntityType: e.target.value })}
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800 max-w-[155px]"
+                >
+                  {entityTypeOptions.map((opt) => (
+                    <option key={opt.type} value={opt.type}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {b.directionTargetMode === 'tag' && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-slate-500">Tag (#tag)</span>
+                <input
+                  type="text"
+                  list="emitter-dir-tags"
+                  value={b.directionTargetTag || ''}
+                  onChange={(e) => update({ directionTargetTag: e.target.value.replace(/^#/, '') })}
+                  placeholder="ex: joueur"
+                  className="w-32 bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800"
+                />
+                <datalist id="emitter-dir-tags">
+                  {availableTags.map((t) => (
+                    <option key={t} value={t} />
+                  ))}
+                </datalist>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Ligne 10: Cône de dispersion */}

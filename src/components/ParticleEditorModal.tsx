@@ -18,11 +18,12 @@ import {
   CustomParticleUsageMode,
   ParticleAnchorPreset,
   ParticleColorMode,
+  ParticleDirectionMode,
   ParticleEffectConfig,
   ParticleEmissionShape,
   ParticleShape,
 } from '../types';
-import { useSceneStore, EMPTY_LIST } from '../store/useSceneStore';
+import { useSceneStore, EMPTY_LIST, EMPTY_RECORD } from '../store/useSceneStore';
 import {
   createParticlePool,
   invalidateCustomParticleSprite,
@@ -339,9 +340,26 @@ export function ParticleEditorModal({
   onClose,
 }: ParticleEditorModalProps) {
   const customParticles = useSceneStore((state) => state.customParticles || EMPTY_LIST);
+  const entities = useSceneStore((state) => state.entities || EMPTY_RECORD);
+  const customArchetypes = useSceneStore((state) => state.customArchetypes || EMPTY_RECORD);
   const addCustomParticle = useSceneStore((state) => state.addCustomParticle);
   const updateCustomParticle = useSceneStore((state) => state.updateCustomParticle);
   const deleteCustomParticle = useSceneStore((state) => state.deleteCustomParticle);
+
+  const entityList = Object.values(entities);
+  const typeOptions = React.useMemo(() => {
+    const map = new Map<string, string>();
+    entityList.forEach((e) => map.set(e.type, e.name));
+    Object.values(customArchetypes).forEach((a) => {
+      if (!map.has(a.type)) map.set(a.type, a.name);
+    });
+    return Array.from(map.entries()).map(([type, label]) => ({ type, label }));
+  }, [entityList, customArchetypes]);
+  const allTags = React.useMemo(() => {
+    const s = new Set<string>();
+    entityList.forEach((e) => e.tags?.forEach((t) => s.add(t)));
+    return Array.from(s);
+  }, [entityList]);
 
   const [config, setConfig] = useState<ParticleEditorConfig>(() => {
     const initialIds =
@@ -382,6 +400,11 @@ export function ParticleEditorModal({
       spinSpeed: initialConfig.spinSpeed,
       spread: initialConfig.spread ?? (mode === 'burst' ? 360 : 60),
       angle: initialConfig.angle ?? -90,
+      directionMode: initialConfig.directionMode || 'angle',
+      directionTargetMode: initialConfig.directionTargetMode,
+      directionTargetEntityId: initialConfig.directionTargetEntityId,
+      directionTargetEntityType: initialConfig.directionTargetEntityType,
+      directionTargetTag: initialConfig.directionTargetTag,
       offsetX: initialConfig.offsetX ?? 0,
       offsetY: initialConfig.offsetY ?? 0,
       anchor: initialConfig.anchor || 'center',
@@ -408,6 +431,7 @@ export function ParticleEditorModal({
   const configRef = useRef(config);
   const isAutoRef = useRef(isAutoEmitting);
   const isPointerDownRef = useRef(false);
+  const backdropPointerDownRef = useRef(false);
   const simStateRef = useRef({
     emitAcc: 0,
     elapsedSec: 0,
@@ -657,7 +681,15 @@ export function ParticleEditorModal({
       data-modal-open="true"
       className="fixed inset-0 z-[10000] bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 select-none"
       style={{ isolation: 'isolate' }}
-      onClick={onClose}
+      onPointerDown={(e) => {
+        backdropPointerDownRef.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && backdropPointerDownRef.current && !drawerTarget) {
+          onClose();
+        }
+        backdropPointerDownRef.current = false;
+      }}
     >
       <div
         className="bg-white rounded-3xl max-w-5xl w-full shadow-2xl border border-slate-200 flex flex-col max-h-[92vh] overflow-hidden animate-in zoom-in-95 duration-150"
@@ -1422,26 +1454,123 @@ export function ParticleEditorModal({
 
             {/* Direction & Dispersion */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200">
-                <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+              <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5">
+                <div className="flex justify-between items-center text-xs text-slate-700 gap-1">
                   <span className="font-bold">Direction</span>
-                  <EditableNumericValue
-                    value={config.angle}
-                    unit="°"
-                    precision={0}
-                    onChange={(v) => update({ angle: v })}
-                    className="font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
-                  />
+                  <select
+                    value={config.directionMode || 'angle'}
+                    onChange={(e) => {
+                      const nextMode = e.target.value as ParticleDirectionMode;
+                      const patch: Partial<ParticleEditorConfig> = { directionMode: nextMode };
+                      if (
+                        (nextMode === 'toward_target' || nextMode === 'away_target') &&
+                        !config.directionTargetMode
+                      ) {
+                        patch.directionTargetMode = mode === 'burst' ? 'target' : 'entity';
+                        patch.directionTargetEntityId =
+                          config.directionTargetEntityId || entityList[0]?.id || '';
+                      }
+                      update(patch);
+                    }}
+                    className="bg-white border border-slate-300 rounded-lg px-1.5 py-0.5 text-[11px] font-semibold text-slate-800 max-w-[135px]"
+                  >
+                    <option value="angle">Angle fixe (°)</option>
+                    <option value="facing">Sens de l&apos;entité</option>
+                    <option value="mouse">Vers la souris</option>
+                    <option value="toward_target">Vers une cible</option>
+                    <option value="away_target">Opposé à cible</option>
+                  </select>
                 </div>
-                <input
-                  type="range"
-                  min={-180}
-                  max={180}
-                  step={5}
-                  value={Math.max(-180, Math.min(180, config.angle))}
-                  onChange={(e) => update({ angle: parseFloat(e.target.value) })}
-                  className="w-full accent-indigo-600 cursor-pointer h-1.5"
-                />
+
+                {(config.directionMode || 'angle') === 'angle' ? (
+                  <>
+                    <div className="flex justify-end">
+                      <EditableNumericValue
+                        value={config.angle}
+                        unit="°"
+                        precision={0}
+                        onChange={(v) => update({ angle: v })}
+                        className="font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min={-180}
+                      max={180}
+                      step={5}
+                      value={Math.max(-180, Math.min(180, config.angle))}
+                      onChange={(e) => update({ angle: parseFloat(e.target.value) })}
+                      className="w-full accent-indigo-600 cursor-pointer h-1.5"
+                    />
+                  </>
+                ) : (config.directionMode === 'toward_target' || config.directionMode === 'away_target') ? (
+                  <div className="space-y-1 text-[11px] pt-0.5">
+                    <select
+                      value={config.directionTargetMode || 'entity'}
+                      onChange={(e) => update({ directionTargetMode: e.target.value as any })}
+                      className="w-full bg-white border border-slate-300 rounded-lg px-1.5 py-0.5 font-medium text-slate-800"
+                    >
+                      {mode === 'burst' && <option value="subject">Sujet de la règle</option>}
+                      {mode === 'burst' && <option value="target">Cible touchée</option>}
+                      <option value="entity">Entité de la scène</option>
+                      <option value="type">Par Type</option>
+                      <option value="tag">Par #Tag</option>
+                      {mode === 'burst' && <option value="last_spawned">Dernier objet créé</option>}
+                      <option value="mouse">Curseur souris</option>
+                    </select>
+                    {(config.directionTargetMode || 'entity') === 'entity' && (
+                      <select
+                        value={config.directionTargetEntityId || entityList[0]?.id || ''}
+                        onChange={(e) => update({ directionTargetEntityId: e.target.value })}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-1.5 py-0.5 font-medium text-slate-800"
+                      >
+                        {entityList.map((ent) => (
+                          <option key={ent.id} value={ent.id}>
+                            {ent.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {config.directionTargetMode === 'type' && (
+                      <select
+                        value={config.directionTargetEntityType || typeOptions[0]?.type || ''}
+                        onChange={(e) => update({ directionTargetEntityType: e.target.value })}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-1.5 py-0.5 font-medium text-slate-800"
+                      >
+                        {typeOptions.map((opt) => (
+                          <option key={opt.type} value={opt.type}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {config.directionTargetMode === 'tag' && (
+                      <>
+                        <input
+                          type="text"
+                          list="particle-editor-dir-tags"
+                          value={config.directionTargetTag || ''}
+                          onChange={(e) =>
+                            update({ directionTargetTag: e.target.value.replace(/^#/, '') })
+                          }
+                          placeholder="#tag"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-1.5 py-0.5 font-medium text-slate-800"
+                        />
+                        <datalist id="particle-editor-dir-tags">
+                          {allTags.map((t) => (
+                            <option key={t} value={t} />
+                          ))}
+                        </datalist>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-slate-500 italic pt-1">
+                    {config.directionMode === 'facing'
+                      ? 'Suit la rotation / flipX de l’émetteur en jeu.'
+                      : 'Vise dynamiquement le curseur en jeu.'}
+                  </div>
+                )}
               </div>
 
               <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200">
@@ -1584,52 +1713,59 @@ export function ParticleEditorModal({
 
       {/* Atelier de dessin plein écran pour particule custom */}
       {drawerTarget && (
-        <FullScreenDrawingModal
-          title={
-            drawerTarget.editingPreset
-              ? `Modifier particule : ${drawerTarget.editingPreset.name}`
-              : 'Dessiner une particule'
-          }
-          subtitle="Dessinez votre particule personnalisée"
-          enableFlipbook={false}
-          initialPaths={drawerTarget.editingPreset?.vectorPaths || []}
-          currentEditingStateName={
-            drawerTarget.editingPreset?.name || `Particule ${customParticles.length + 1}`
-          }
-          onSave={(paths, _dataUrl, _colliderType, customName) => {
-            const finalName = (customName || '').trim() || `Particule ${customParticles.length + 1}`;
-            let targetPresetId = drawerTarget.editingPreset?.id;
-            if (targetPresetId) {
-              updateCustomParticle(targetPresetId, {
-                name: finalName,
-                vectorPaths: paths,
-              });
-              invalidateCustomParticleSprite(targetPresetId);
-            } else {
-              targetPresetId = addCustomParticle({
-                name: finalName,
-                vectorPaths: paths,
-                useTint: false,
-              });
+        <div
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+        >
+          <FullScreenDrawingModal
+            title={
+              drawerTarget.editingPreset
+                ? `Modifier particule : ${drawerTarget.editingPreset.name}`
+                : 'Dessiner une particule'
             }
-            const existingIds =
-              config.customParticleIds && config.customParticleIds.length > 0
-                ? config.customParticleIds
-                : config.customParticleId
-                ? [config.customParticleId]
-                : [];
-            const nextIds = existingIds.includes(targetPresetId)
-              ? existingIds
-              : [...existingIds, targetPresetId];
-            update({
-              shape: 'custom',
-              customParticleId: nextIds[0] || targetPresetId,
-              customParticleIds: nextIds,
-            });
-            setDrawerTarget(null);
-          }}
-          onClose={() => setDrawerTarget(null)}
-        />
+            subtitle="Dessinez votre particule personnalisée"
+            enableFlipbook={false}
+            initialPaths={drawerTarget.editingPreset?.vectorPaths || []}
+            currentEditingStateName={
+              drawerTarget.editingPreset?.name || `Particule ${customParticles.length + 1}`
+            }
+            onSave={(paths, _dataUrl, _colliderType, customName) => {
+              const finalName = (customName || '').trim() || `Particule ${customParticles.length + 1}`;
+              let targetPresetId = drawerTarget.editingPreset?.id;
+              if (targetPresetId) {
+                updateCustomParticle(targetPresetId, {
+                  name: finalName,
+                  vectorPaths: paths,
+                });
+                invalidateCustomParticleSprite(targetPresetId);
+              } else {
+                targetPresetId = addCustomParticle({
+                  name: finalName,
+                  vectorPaths: paths,
+                  useTint: false,
+                });
+              }
+              const existingIds =
+                config.customParticleIds && config.customParticleIds.length > 0
+                  ? config.customParticleIds
+                  : config.customParticleId
+                  ? [config.customParticleId]
+                  : [];
+              const nextIds = existingIds.includes(targetPresetId)
+                ? existingIds
+                : [...existingIds, targetPresetId];
+              update({
+                shape: 'custom',
+                customParticleId: nextIds[0] || targetPresetId,
+                customParticleIds: nextIds,
+              });
+              setDrawerTarget(null);
+            }}
+            onClose={() => setDrawerTarget(null)}
+          />
+        </div>
       )}
     </div>,
     document.body

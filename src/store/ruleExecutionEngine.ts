@@ -29,12 +29,19 @@ import {
   computeRelativeParticleOrigin,
   emitParticlesBurst,
   getLatestMouseWorldPos,
+  resolveParticleDirectionAngle,
+  startTimedRuleParticleEmitter,
 } from '../utils/particleSystem';
 import { soundSynth } from '../utils/sound';
 import { dispatchPlayCameraAction } from '../utils/cameraRuntime';
 import { resolveWorldBounds } from '../utils/cameraSolver';
 import { getCollisionContactPoint } from './collisionHelpers';
-import { computeRelativeParentOffset, resolveEntityReference } from './parentingHelpers';
+import {
+  computeRelativeParentOffset,
+  resolveEntityHierarchyScopeIds,
+  resolveEntityReference,
+} from './parentingHelpers';
+import { isSnapParentAttachBehavior } from '../utils/physics/snapSolver';
 import { computeRandomSpawnPosition } from '../utils/spawnHelpers';
 import {
   canRuleFireWithGate,
@@ -442,6 +449,7 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
     let originX = 300;
     let originY = 200;
     let emitAngle = act.particleAngle ?? -90;
+    let originEntity: Entity | undefined;
 
     if (originMode === 'coordinates') {
       originX = act.particleCoords?.x ?? 300;
@@ -469,6 +477,7 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
         helpers.target;
 
       if (origin) {
+        originEntity = origin;
         const rel = computeRelativeParticleOrigin({
           entity: origin,
           anchor: act.particleAnchor || 'center',
@@ -486,15 +495,32 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
       }
     }
 
-    emitParticlesBurst({
-      x: originX,
-      y: originY,
+    const mouseNow = getLatestMouseWorldPos();
+    const resolvedAngle = resolveParticleDirectionAngle({
+      directionMode: act.particleDirectionMode || 'angle',
+      baseAngleDeg: emitAngle,
+      originX,
+      originY,
+      originEntity,
+      targetMode: act.particleDirectionTargetMode || (helpers.target ? 'target' : 'mouse'),
+      targetEntityId: act.particleDirectionTargetEntityId,
+      targetEntityType: act.particleDirectionTargetEntityType,
+      targetTag: act.particleDirectionTargetTag,
+      entities: liveEntities,
+      subject: helpers.subject,
+      target: helpers.target,
+      eventPosition: helpers.eventPosition,
+      mousePos: mouseNow,
+      lastSpawnedId: lastSpawnedEntityId,
+    });
+
+    const burstBaseOpts = {
       count: act.particleCount ?? 18,
       countMax: act.particleCountMax,
       color: act.particleColor ?? '#f59e0b',
       color2: act.particleColor2,
       colorMode: act.particleColorMode,
-      shape: act.particleShape ?? 'circle',
+      shape: act.particleShape ?? ('circle' as const),
       customParticleId: act.customParticleId,
       customParticleIds: act.customParticleIds,
       customParticleMode: act.customParticleMode,
@@ -512,11 +538,52 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
       opacityEnd: act.particleOpacityEnd,
       spinSpeed: act.particleSpinSpeed,
       spread: act.particleSpread ?? 360,
-      angle: emitAngle,
       emissionShape: act.particleEmissionShape,
       emissionRadius: act.particleEmissionRadius,
       emissionWidth: act.particleEmissionWidth,
       emissionHeight: act.particleEmissionHeight,
+    };
+
+    const emitDuration = act.particleEmitDuration ?? 0;
+    if (emitDuration > 0) {
+      startTimedRuleParticleEmitter(
+        {
+          burstBaseOpts,
+          fallbackOriginX: originX,
+          fallbackOriginY: originY,
+          fallbackAngleDeg: resolvedAngle,
+          durationSec: emitDuration,
+          rate: act.particleEmitRate ?? 0,
+          burstCount: act.particleBurstCount ?? 0,
+          burstInterval: act.particleBurstInterval ?? 0,
+          originMode,
+          originEntityId: originEntity?.id,
+          anchor: act.particleAnchor || 'center',
+          offsetX: act.particleOffsetX ?? 0,
+          offsetY: act.particleOffsetY ?? 0,
+          followRotation: act.particleMatchOriginRotation !== false,
+          baseAngleDeg: act.particleAngle ?? -90,
+          directionMode: act.particleDirectionMode || 'angle',
+          directionTargetMode: act.particleDirectionTargetMode || (helpers.target ? 'target' : 'mouse'),
+          directionTargetEntityId: act.particleDirectionTargetEntityId,
+          directionTargetEntityType: act.particleDirectionTargetEntityType,
+          directionTargetTag: act.particleDirectionTargetTag,
+          subjectId: helpers.subject?.id,
+          targetId: helpers.target?.id,
+          eventPosition: helpers.eventPosition,
+        },
+        liveEntities,
+        mouseNow,
+        lastSpawnedEntityId
+      );
+      return;
+    }
+
+    emitParticlesBurst({
+      ...burstBaseOpts,
+      x: originX,
+      y: originY,
+      angle: resolvedAngle,
     });
     return;
   }
@@ -727,7 +794,14 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
       const mode = act.enabledActionMode || 'disable';
       const nextDisabled =
         mode === 'enable' ? false : mode === 'disable' ? true : !Boolean(entity.disabled);
-      helpers.updateEntityDetails(entity.id, { disabled: nextDisabled }, { instanceOnly: true });
+      const scopeIds = resolveEntityHierarchyScopeIds(
+        liveEntities,
+        entity.id,
+        act.enabledScope || 'with_children'
+      );
+      scopeIds.forEach((targetId) => {
+        helpers.updateEntityDetails(targetId, { disabled: nextDisabled }, { instanceOnly: true });
+      });
       return;
     }
 
@@ -1053,11 +1127,14 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
         snapAlignment: act.snapAlignment,
         sourceAnchor: act.snapSourceAnchor,
         targetAnchor: act.snapTargetAnchor,
+        customSourceAnchor: act.snapCustomSourceAnchor,
+        customTargetAnchor: act.snapCustomTargetAnchor,
         offsetX: act.snapOffsetX,
         offsetY: act.snapOffsetY,
         matchTargetRotation: act.snapMatchRotation,
         rotationOffset: act.snapRotationOffset,
         attachBehavior: act.snapAttachBehavior,
+        jointConfig: act.snapJointConfig,
       });
 
       const snapBridge = getBridgeState();
@@ -1077,10 +1154,7 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
           { instanceOnly: true }
         );
       }
-      if (
-        (snapRes.attachBehavior === 'parent_rigid' || snapRes.attachBehavior === 'parent_spring') &&
-        snapRes.parentOffset
-      ) {
+      if (isSnapParentAttachBehavior(snapRes.attachBehavior) && snapRes.parentOffset) {
         snapBridge?.setEntityParent(entity.id, targetEnt.id, snapRes.parentOffset);
       }
     } else if (act.type === 'unsnap') {

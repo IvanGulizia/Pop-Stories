@@ -1,5 +1,10 @@
 # Backlog & Suivi Technique (`TODO`)
 
+## Vague Intermédiaire 3 (3A, 3B, 3C — Complétée)
+- [x] **3A — Correctifs & UX (`#1, #2, #3, #4, #7`)** : Flip instantané sur demi-tour `Patrol`, cascade hiérarchique Scène + `enabledScope` sur `set_entity_enabled`, overlay collider/pivot au-dessus du tracé, correction sauvegarde trait particule perso, mémorisation plié/déplié des comportements (`expandedBehaviorCards`).
+- [x] **3B — Particules & Collision Patrouille (`#5, #6, #11`)** : Direction d'émission (`angle | facing | toward_target | away_target | mouse`), émission temporisée en jet continu ou multi-salves (`particleEmitDuration`, `particleEmitRate`, `particleBurstInterval`, `particleBurstCount`), et `turnOnCollision` filtrable sur `Patrol`.
+- [x] **3C — Snap 2.0 (`#8, #9, #10, #12`)** : Ancres `pivot` & `custom_canvas` avec placement/glisser direct sur le canvas, mode `Réceptacle` intégré avec `maxCapacity`, champ magnétique d'approche (`magnetEnabled`, `magnetRadius`, `magnetForce`, `approachingStateId`), et mode `parent_physics_joint` avec réglages de joint et `Break Joint`.
+
 ## Vague Intermédiaire 2 (Sous-phases A → D)
 - [x] **Sous-phase A — Quick Wins UI, Ergonomie & Santé** :
   - `HealthBehaviorConfig.blinkOnDamage` (désactivé par défaut) + création/dessin 1-clic des états Santé (`Blessé` / `Mort`)
@@ -19,7 +24,7 @@
   - Ratio caméra dédié au Play (`playAspectRatio`) avec cadrage d'aperçu en Édition sans bandes noires
   - Drag & drop de réorganisation des cartes d'actions individuelles dans une règle (`RuleBook`)
   - Comportement Snap / Aimant + événements/actions compagnons (`snap` enter/exit, `snap_to`, `unsnap`)
-- [ ] **Décision en attente (#17)** : Modèle *Prefab vs Instance séparée* pour la modification des doublons sur scène (piste privilégiée : Solution 2 — Prefab partagé + surcharge 1 niveau optionnelle, sans collision UX avec les overrides d'états).
+- [ ] **Décision en attente (#17) — Duplicata / Prefabs vs Overrides d'Instance (gardé pour plus tard)** : Orientation vers la **Solution 2** (Prefab partagé permettant de modifier les comportements de toutes les instances partagées tout en autorisant une surcharge à 1 niveau par instance), **à condition** de garder l'interface et la lecture des états parfaitement légères sans confusion entre surcharge d'instance et surcharge d'état.
 
 ## En cours / Récent
 - [x] Système global de Gizmos sur scène (`SceneGizmoOverlay`) + section Settings dédiée

@@ -1,3 +1,19 @@
+## [Phase 10.45 — Vague Intermédiaire 3] - 2026-11-22
+### Ajouté & Corrigé (UX, Particules directionnelles/temporisées, Collision Patrouille & Snap 2.0)
+- **Correctifs & UX (3A : `#1, #2, #3, #4, #7`)** :
+  - `Patrol` (`patrolSolver.ts`, `flipHelpers.ts`) : Application immédiate du `flipX` sur le tick exact de fin de délai demi-tour (fin de la latence visuelle sans flip).
+  - Hiérarchie (`parentingHelpers.ts`, `SceneHierarchyList.tsx`, `Inspector.tsx`, `SetEntityEnabledConfigEditor.tsx`, `ruleExecutionEngine.ts`) : Désactivation en cascade dans Scène (`with_children` par défaut) et choix complet de portée (`self`, `with_children`, `with_parent`, `entire_hierarchy`) dans l'action RuleBook `set_entity_enabled`.
+  - Atelier de dessin (`DrawingCanvas.tsx`, `ParticleEditorModal.tsx`) : Collider et pivot rendus au-dessus des tracés lorsqu'ils sont visibles ; correction de la fermeture prématurée au tracé d'une particule personnalisée.
+  - Persistance d'affichage (`useSceneStore.ts`, `BehaviorManager.tsx`) : Sauvegarde persistante `expandedBehaviorCards` de l'état plié/déplié des comportements entre changements d'entités, fenêtres et transitions Édition/Play.
+- **Particules 2.0 & Collision Patrouille (3B : `#5, #6, #11`)** :
+  - `resolveParticleDirectionAngle` (`particleSystem.ts`, `ParticleActionEmissionExtrasSection.tsx`, `ParticleEditorModal.tsx`, `VisualAndSurvivalBehaviorControls.tsx`) : Choix de direction d'émission (`angle`, `facing`, `toward_target`, `away_target`, `mouse`) avec sélecteur de cible dynamique.
+  - Émission temporisée dans le `RuleBook` (`startTimedRuleParticleEmitter`, `stepTimedRuleEmitters`) : Durée finie (`particleEmitDuration`), débit continu (`particleEmitRate`), intervalle et volume de salves (`particleBurstInterval`, `particleBurstCount`).
+  - `Patrol` (`patrolSolver.ts`, `matterPhysicsEngine.ts`, `MovementAndAIBehaviorControls.tsx`) : Option `turnOnCollision` avec filtres (`any | entity | type | tag`), `collisionIgnoreSensors` et `collisionTurnCooldownSec`.
+- **Snap 2.0 (3C : `#8, #9, #10, #12`)** :
+  - Ancres `pivot` et `custom_canvas` (`snapSolver.ts`, `useSceneStore.ts`, `Scene.tsx`, `SceneGizmoOverlay.tsx`) : Support complet `flipX` / rotation, visée directe sur scène (`snapPinCanvasPick`) et poignées déplaçables en Mode Édition.
+  - Mode Réceptacle intégré (`snapRole: 'receptacle'`, `maxCapacity`) & champ magnétique progressif (`magnetEnabled`, `magnetRadius`, `magnetForce`, `approachingStateId`) avec aura violette et jauge capacité dans les gizmos.
+  - Attachement `parent_physics_joint` (`SnapJointConfigFields.tsx`, `SnapBehaviorControls.tsx`, `SnapActionConfigEditor.tsx`, `matterPhysicsEngine.ts`) : Ressorts, butées angulaires et rupture (`Break Joint`) avec dé-snap propre vers `unsnappedStateId` + suite Vitest (`src/__tests__/wave3_features.test.ts`).
+
 ## [Phase 10.44 — Sous-phase D] - 2026-11-22
 ### Ajouté & Amélioré (Ratio Caméra Play, Drag & Drop RuleBook & Comportement Snap)
 - **Ratio Caméra dédié au Mode Play (`cameraSolver.ts`, `SceneCameraModal.tsx`, `Scene.tsx`, `types/index.ts`)** :

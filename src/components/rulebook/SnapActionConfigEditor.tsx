@@ -5,15 +5,20 @@ import {
   Entity,
   EntityId,
   EntityType,
-  ParticleAnchorPreset,
+  ParentOffset,
+  Position,
   RuleAction,
   SnapAlignmentMode,
+  SnapAnchorPreset,
   SnapAttachBehavior,
 } from '../../types';
 import { EntityOption } from './ruleBookTypes';
+import { SnapJointConfigFields } from '../shared/SnapJointConfigFields';
 
-const ANCHOR_OPTIONS: { value: ParticleAnchorPreset; label: string }[] = [
+const ANCHOR_OPTIONS: { value: SnapAnchorPreset; label: string }[] = [
   { value: 'center', label: 'Centre' },
+  { value: 'pivot', label: 'Point de Pivot' },
+  { value: 'custom_canvas', label: 'Repère personnalisé' },
   { value: 'top', label: 'Haut' },
   { value: 'bottom', label: 'Bas' },
   { value: 'left', label: 'Gauche' },
@@ -34,13 +39,16 @@ export interface SnapActionConfigDraft {
   snapTargetEntityType?: EntityType;
   snapTargetTag?: string;
   snapAlignment?: SnapAlignmentMode;
-  snapSourceAnchor?: ParticleAnchorPreset;
-  snapTargetAnchor?: ParticleAnchorPreset;
+  snapSourceAnchor?: SnapAnchorPreset;
+  snapTargetAnchor?: SnapAnchorPreset;
+  snapCustomSourceAnchor?: Position;
+  snapCustomTargetAnchor?: Position;
   snapOffsetX?: number;
   snapOffsetY?: number;
   snapMatchRotation?: boolean;
   snapRotationOffset?: number;
   snapAttachBehavior?: SnapAttachBehavior;
+  snapJointConfig?: Partial<ParentOffset>;
   unsnapImpulseSpeed?: number;
   unsnapImpulseAngle?: number;
   unsnapCooldownSec?: number;
@@ -446,39 +454,143 @@ export const SnapActionConfigEditor: React.FC<SnapActionConfigEditorProps> = ({
           </div>
 
           {alignment === 'anchor_offset' && (
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Ancre objet</span>
-                <select
-                  value={draft.snapSourceAnchor || 'center'}
-                  onChange={(e) =>
-                    onPatch({ snapSourceAnchor: e.target.value as ParticleAnchorPreset })
-                  }
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                >
-                  {ANCHOR_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Ancre objet</span>
+                  <select
+                    value={draft.snapSourceAnchor || 'center'}
+                    onChange={(e) => {
+                      const next = e.target.value as SnapAnchorPreset;
+                      onPatch({
+                        snapSourceAnchor: next,
+                        ...(next === 'custom_canvas' && !draft.snapCustomSourceAnchor
+                          ? { snapCustomSourceAnchor: { x: 0.5, y: 0.5 } }
+                          : {}),
+                      });
+                    }}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                  >
+                    {ANCHOR_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Ancre cible</span>
+                  <select
+                    value={draft.snapTargetAnchor || 'center'}
+                    onChange={(e) => {
+                      const next = e.target.value as SnapAnchorPreset;
+                      onPatch({
+                        snapTargetAnchor: next,
+                        ...(next === 'custom_canvas' && !draft.snapCustomTargetAnchor
+                          ? { snapCustomTargetAnchor: { x: 0.5, y: 0.5 } }
+                          : {}),
+                      });
+                    }}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+                  >
+                    {ANCHOR_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              <div>
-                <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Ancre cible</span>
-                <select
-                  value={draft.snapTargetAnchor || 'center'}
-                  onChange={(e) =>
-                    onPatch({ snapTargetAnchor: e.target.value as ParticleAnchorPreset })
-                  }
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-                >
-                  {ANCHOR_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+
+              {draft.snapSourceAnchor === 'custom_canvas' && (
+                <div className="grid grid-cols-2 gap-2 p-2 bg-cyan-50/70 rounded-xl border border-cyan-200">
+                  <div className="flex items-center justify-between gap-1 text-xs">
+                    <span className="text-[10px] font-bold text-cyan-900">Repère objet X (0..1)</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={draft.snapCustomSourceAnchor?.x ?? 0.5}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          onPatch({
+                            snapCustomSourceAnchor: {
+                              x: v,
+                              y: draft.snapCustomSourceAnchor?.y ?? 0.5,
+                            },
+                          });
+                        }
+                      }}
+                      className="w-16 bg-white border border-cyan-200 rounded px-1.5 py-0.5 font-mono font-bold text-right text-slate-800"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-1 text-xs">
+                    <span className="text-[10px] font-bold text-cyan-900">Repère objet Y (0..1)</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={draft.snapCustomSourceAnchor?.y ?? 0.5}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          onPatch({
+                            snapCustomSourceAnchor: {
+                              x: draft.snapCustomSourceAnchor?.x ?? 0.5,
+                              y: v,
+                            },
+                          });
+                        }
+                      }}
+                      className="w-16 bg-white border border-cyan-200 rounded px-1.5 py-0.5 font-mono font-bold text-right text-slate-800"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {draft.snapTargetAnchor === 'custom_canvas' && (
+                <div className="grid grid-cols-2 gap-2 p-2 bg-indigo-50/70 rounded-xl border border-indigo-200">
+                  <div className="flex items-center justify-between gap-1 text-xs">
+                    <span className="text-[10px] font-bold text-indigo-900">Repère cible X (0..1)</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={draft.snapCustomTargetAnchor?.x ?? 0.5}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          onPatch({
+                            snapCustomTargetAnchor: {
+                              x: v,
+                              y: draft.snapCustomTargetAnchor?.y ?? 0.5,
+                            },
+                          });
+                        }
+                      }}
+                      className="w-16 bg-white border border-indigo-200 rounded px-1.5 py-0.5 font-mono font-bold text-right text-slate-800"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-1 text-xs">
+                    <span className="text-[10px] font-bold text-indigo-900">Repère cible Y (0..1)</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={draft.snapCustomTargetAnchor?.y ?? 0.5}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) {
+                          onPatch({
+                            snapCustomTargetAnchor: {
+                              x: draft.snapCustomTargetAnchor?.x ?? 0.5,
+                              y: v,
+                            },
+                          });
+                        }
+                      }}
+                      className="w-16 bg-white border border-indigo-200 rounded px-1.5 py-0.5 font-mono font-bold text-right text-slate-800"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -539,18 +651,35 @@ export const SnapActionConfigEditor: React.FC<SnapActionConfigEditorProps> = ({
         </div>
 
         {/* Liaison après snap */}
-        <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-          <span className="font-bold text-slate-700 text-xs">Liaison après snap</span>
-          <select
-            value={attachBehavior}
-            onChange={(e) => onPatch({ snapAttachBehavior: e.target.value as SnapAttachBehavior })}
-            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-          >
-            <option value="parent_rigid">Parenter solidement</option>
-            <option value="parent_spring">Parenter avec ressort</option>
-            <option value="position_only">Placer uniquement</option>
-            <option value="freeze_physics">Poser et figer la physique</option>
-          </select>
+        <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-700 text-xs">Liaison après snap</span>
+            <select
+              value={attachBehavior}
+              onChange={(e) => onPatch({ snapAttachBehavior: e.target.value as SnapAttachBehavior })}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
+            >
+              <option value="parent_rigid">Parenter solidement</option>
+              <option value="parent_spring">Parenter avec ressort</option>
+              <option value="parent_physics_joint">Parenter avec Joint Physique (Break Joint)</option>
+              <option value="position_only">Placer uniquement</option>
+              <option value="freeze_physics">Poser et figer la physique</option>
+            </select>
+          </div>
+
+          {attachBehavior === 'parent_physics_joint' && (
+            <SnapJointConfigFields
+              config={draft.snapJointConfig || {}}
+              onChange={(patch) =>
+                onPatch({
+                  snapJointConfig: {
+                    ...(draft.snapJointConfig || {}),
+                    ...patch,
+                  },
+                })
+              }
+            />
+          )}
         </div>
       </div>
 
@@ -578,11 +707,21 @@ export const SnapActionConfigEditor: React.FC<SnapActionConfigEditorProps> = ({
             snapAlignment: alignment,
             snapSourceAnchor: alignment === 'anchor_offset' ? draft.snapSourceAnchor || 'center' : undefined,
             snapTargetAnchor: alignment === 'anchor_offset' ? draft.snapTargetAnchor || 'center' : undefined,
+            snapCustomSourceAnchor:
+              alignment === 'anchor_offset' && draft.snapSourceAnchor === 'custom_canvas'
+                ? draft.snapCustomSourceAnchor || { x: 0.5, y: 0.5 }
+                : undefined,
+            snapCustomTargetAnchor:
+              alignment === 'anchor_offset' && draft.snapTargetAnchor === 'custom_canvas'
+                ? draft.snapCustomTargetAnchor || { x: 0.5, y: 0.5 }
+                : undefined,
             snapOffsetX: draft.snapOffsetX ?? 0,
             snapOffsetY: draft.snapOffsetY ?? 0,
             snapMatchRotation: Boolean(draft.snapMatchRotation),
             snapRotationOffset: draft.snapMatchRotation ? draft.snapRotationOffset ?? 0 : 0,
             snapAttachBehavior: attachBehavior,
+            snapJointConfig:
+              attachBehavior === 'parent_physics_joint' ? draft.snapJointConfig : undefined,
           });
         }}
         className="w-full py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-black text-xs rounded-2xl shadow-md cursor-pointer flex items-center justify-center gap-2"

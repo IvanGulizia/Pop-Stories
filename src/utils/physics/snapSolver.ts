@@ -2,13 +2,14 @@ import {
   Entity,
   EntityId,
   ParentOffset,
-  ParticleAnchorPreset,
   Position,
+  SnapAnchorPreset,
   SnapAttachBehavior,
   SnapBehaviorConfig,
   StateId,
 } from '../../types';
 import { computeRelativeParentOffset } from '../../store/parentingHelpers';
+import { getPivotWorldPosition, resolveEffectivePivot } from './pivotHelpers';
 
 export interface SnapRuntimeEntry {
   isSnapped: boolean;
@@ -16,6 +17,7 @@ export interface SnapRuntimeEntry {
   attachBehavior: SnapAttachBehavior | null;
   cooldownRemaining: number;
   snappedAtPos?: Position;
+  isApproaching?: boolean;
 }
 
 export interface SnapCandidateMatch {
@@ -25,6 +27,7 @@ export interface SnapCandidateMatch {
   goalRotationDeg?: number;
   sourceAnchorWorld: Position;
   targetAnchorWorld: Position;
+  desiredTargetPoint: Position;
 }
 
 export interface SnapStepInput {
@@ -62,6 +65,15 @@ export interface SnapStepResult {
     snapped: boolean;
     targetId: string;
   };
+  magnetPull?: {
+    vxPxPerSec: number;
+    vyPxPerSec: number;
+    distance: number;
+    magnetRadius: number;
+    targetId: string;
+    from: Position;
+    to: Position;
+  };
 }
 
 export function createInitialSnapRuntimeEntry(): SnapRuntimeEntry {
@@ -70,32 +82,31 @@ export function createInitialSnapRuntimeEntry(): SnapRuntimeEntry {
     snappedTargetId: null,
     attachBehavior: null,
     cooldownRemaining: 0,
+    isApproaching: false,
   };
 }
 
-function getLocalAnchorOffset(size: { width: number; height: number }, anchor: ParticleAnchorPreset = 'center'): Position {
-  const hw = size.width / 2;
-  const hh = size.height / 2;
+function getNormalizedPresetAnchor(anchor: SnapAnchorPreset = 'center'): Position {
   switch (anchor) {
     case 'top':
-      return { x: 0, y: -hh };
+      return { x: 0.5, y: 0 };
     case 'bottom':
-      return { x: 0, y: hh };
+      return { x: 0.5, y: 1 };
     case 'left':
-      return { x: -hw, y: 0 };
+      return { x: 0, y: 0.5 };
     case 'right':
-      return { x: hw, y: 0 };
+      return { x: 1, y: 0.5 };
     case 'top_left':
-      return { x: -hw, y: -hh };
+      return { x: 0, y: 0 };
     case 'top_right':
-      return { x: hw, y: -hh };
+      return { x: 1, y: 0 };
     case 'bottom_left':
-      return { x: -hw, y: hh };
+      return { x: 0, y: 1 };
     case 'bottom_right':
-      return { x: hw, y: hh };
+      return { x: 1, y: 1 };
     case 'center':
     default:
-      return { x: 0, y: 0 };
+      return { x: 0.5, y: 0.5 };
   }
 }
 
@@ -110,19 +121,182 @@ function rotateVec(x: number, y: number, deg: number): Position {
   };
 }
 
-export function getEntityAnchorPoint(
-  entity: Pick<Entity, 'position' | 'size' | 'states' | 'currentStateId'>,
-  anchor: ParticleAnchorPreset = 'center',
+export function resolveEntitySnapAnchorNorm(
+  entity: Pick<
+    Entity,
+    'size' | 'states' | 'currentStateId' | 'pivot' | 'runtimePivot' | 'flipX' | 'parentId' | 'parentOffset'
+  >,
+  anchor: SnapAnchorPreset = 'center',
+  customNorm?: Position
+): Position {
+  if (anchor === 'pivot') {
+    const st = entity.states?.[entity.currentStateId];
+    return resolveEffectivePivot(entity, st);
+  }
+  if (anchor === 'custom_canvas') {
+    const rawX = typeof customNorm?.x === 'number' && Number.isFinite(customNorm.x) ? customNorm.x : 0.5;
+    const rawY = typeof customNorm?.y === 'number' && Number.isFinite(customNorm.y) ? customNorm.y : 0.5;
+    return {
+      x: entity.flipX ? 1 - rawX : rawX,
+      y: rawY,
+    };
+  }
+  return getNormalizedPresetAnchor(anchor);
+}
+
+/**
+ * Retourne la position monde d'un point d'ancre Snap sur une entité
+ * en tenant compte du pivot effectif, de `flipX` et de la rotation.
+ */
+export function getSnapAnchorWorldPoint(
+  entity: Pick<
+    Entity,
+    'position' | 'size' | 'states' | 'currentStateId' | 'pivot' | 'runtimePivot' | 'flipX' | 'parentId' | 'parentOffset'
+  >,
+  anchor: SnapAnchorPreset = 'center',
+  customNorm?: Position,
   rotationOverrideDeg?: number
 ): Position {
-  const cx = entity.position.x + entity.size.width / 2;
-  const cy = entity.position.y + entity.size.height / 2;
-  const local = getLocalAnchorOffset(entity.size, anchor);
-  const rotDeg = rotationOverrideDeg ?? entity.states[entity.currentStateId]?.rotation ?? 0;
-  const rotated = rotateVec(local.x, local.y, rotDeg);
+  const st = entity.states?.[entity.currentStateId];
+  const effPivot = resolveEffectivePivot(entity, st);
+  const pivotWorld = getPivotWorldPosition(entity.position, entity.size, effPivot);
+  const norm = resolveEntitySnapAnchorNorm(entity, anchor, customNorm);
+  const dx = (norm.x - effPivot.x) * entity.size.width;
+  const dy = (norm.y - effPivot.y) * entity.size.height;
+  const rotDeg = rotationOverrideDeg ?? st?.rotation ?? 0;
+  const rotated = rotateVec(dx, dy, rotDeg);
   return {
-    x: cx + rotated.x,
-    y: cy + rotated.y,
+    x: pivotWorld.x + rotated.x,
+    y: pivotWorld.y + rotated.y,
+  };
+}
+
+/**
+ * Compatibilité héritée : alias vers `getSnapAnchorWorldPoint` sans repère custom.
+ */
+export function getEntityAnchorPoint(
+  entity: Pick<
+    Entity,
+    'position' | 'size' | 'states' | 'currentStateId' | 'pivot' | 'runtimePivot' | 'flipX' | 'parentId' | 'parentOffset'
+  >,
+  anchor: SnapAnchorPreset = 'center',
+  rotationOverrideDeg?: number,
+  customNorm?: Position
+): Position {
+  return getSnapAnchorWorldPoint(entity, anchor, customNorm, rotationOverrideDeg);
+}
+
+/**
+ * Convertit un point monde cliqué/glissé sur le canvas en coordonnées normalisées brutes
+ * (avant `flipX`) relatives à une entité donnée, pour les repères custom Snap.
+ */
+export function computeSnapCustomAnchorFromWorld(
+  entity: Pick<
+    Entity,
+    'position' | 'size' | 'states' | 'currentStateId' | 'pivot' | 'runtimePivot' | 'flipX' | 'parentId' | 'parentOffset'
+  >,
+  worldPt: Position
+): Position {
+  const st = entity.states?.[entity.currentStateId];
+  const effPivot = resolveEffectivePivot(entity, st);
+  const pivotWorld = getPivotWorldPosition(entity.position, entity.size, effPivot);
+  const rotDeg = st?.rotation ?? 0;
+  const unrot = rotateVec(worldPt.x - pivotWorld.x, worldPt.y - pivotWorld.y, -rotDeg);
+  const safeW = Math.max(1, entity.size.width);
+  const safeH = Math.max(1, entity.size.height);
+  const effU = effPivot.x + unrot.x / safeW;
+  const effV = effPivot.y + unrot.y / safeH;
+  const rawX = entity.flipX ? 1 - effU : effU;
+  return {
+    x: Math.round(rawX * 1000) / 1000,
+    y: Math.round(effV * 1000) / 1000,
+  };
+}
+
+export function isSnapParentAttachBehavior(attachBehavior?: SnapAttachBehavior | null): boolean {
+  return (
+    attachBehavior === 'parent_rigid' ||
+    attachBehavior === 'parent_spring' ||
+    attachBehavior === 'parent_physics_joint'
+  );
+}
+
+export function buildSnapParentOffset(params: {
+  alignedChild: Entity;
+  target: Entity;
+  config: SnapBehaviorConfig;
+  attachBehavior: SnapAttachBehavior;
+}): ParentOffset {
+  const { alignedChild, target, config, attachBehavior } = params;
+
+  if (attachBehavior === 'parent_physics_joint') {
+    const jc = config.jointConfig || {};
+    let derivedJointChildPivot = jc.jointChildPivot;
+    if (!derivedJointChildPivot && config.snapAlignment === 'anchor_offset') {
+      const srcAnchor = config.sourceAnchor || 'center';
+      if (srcAnchor === 'custom_canvas') {
+        derivedJointChildPivot = config.customSourceAnchor
+          ? { x: config.customSourceAnchor.x, y: config.customSourceAnchor.y }
+          : { x: 0.5, y: 0.5 };
+      } else if (srcAnchor !== 'pivot') {
+        derivedJointChildPivot = getNormalizedPresetAnchor(srcAnchor);
+      }
+    }
+
+    const baseSeed: ParentOffset = {
+      x: 0,
+      y: 0,
+      ...jc,
+      ...(derivedJointChildPivot ? { jointChildPivot: derivedJointChildPivot } : {}),
+      attachmentMode: 'physics_joint',
+      inheritRotation: Boolean(config.matchTargetRotation),
+      rotationOffset: config.rotationOffset ?? 0,
+      collideWithWorld: jc.collideWithWorld !== undefined ? jc.collideWithWorld : true,
+    };
+
+    const childWithPivot = derivedJointChildPivot
+      ? {
+          ...alignedChild,
+          parentOffset: {
+            ...(alignedChild.parentOffset || { x: 0, y: 0 }),
+            jointChildPivot: derivedJointChildPivot,
+          },
+        }
+      : alignedChild;
+
+    return computeRelativeParentOffset(childWithPivot, target, baseSeed);
+  }
+
+  return computeRelativeParentOffset(alignedChild, target, {
+    x: 0,
+    y: 0,
+    attachmentMode: attachBehavior === 'parent_spring' ? 'spring' : 'rigid',
+    inheritRotation: Boolean(config.matchTargetRotation),
+    rotationOffset: config.rotationOffset ?? 0,
+    springStiffness: config.springStiffness ?? 0.25,
+    springDamping: config.springDamping ?? 0.18,
+  });
+}
+
+function solveTopLeftForAlignedAnchor(params: {
+  entity: Entity;
+  srcAnchor: SnapAnchorPreset;
+  customSourceAnchor?: Position;
+  desiredTargetPoint: Position;
+  goalRotationDeg: number;
+}): Position {
+  const { entity, srcAnchor, customSourceAnchor, desiredTargetPoint, goalRotationDeg } = params;
+  const st = entity.states?.[entity.currentStateId];
+  const effPivot = resolveEffectivePivot(entity, st);
+  const srcNorm = resolveEntitySnapAnchorNorm(entity, srcAnchor, customSourceAnchor);
+  const dx = (srcNorm.x - effPivot.x) * entity.size.width;
+  const dy = (srcNorm.y - effPivot.y) * entity.size.height;
+  const rotatedLocalFromPivot = rotateVec(dx, dy, goalRotationDeg);
+  const goalPivotWorldX = desiredTargetPoint.x - rotatedLocalFromPivot.x;
+  const goalPivotWorldY = desiredTargetPoint.y - rotatedLocalFromPivot.y;
+  return {
+    x: Math.round((goalPivotWorldX - effPivot.x * entity.size.width) * 100) / 100,
+    y: Math.round((goalPivotWorldY - effPivot.y * entity.size.height) * 100) / 100,
   };
 }
 
@@ -137,6 +311,7 @@ export function computeSnapGoalForTarget(
   goalRotationDeg?: number;
   sourceAnchorWorld: Position;
   targetAnchorWorld: Position;
+  desiredTargetPoint: Position;
   metricDistance: number;
 } {
   const targetRot = currentTargetRotDeg ?? target.states[target.currentStateId]?.rotation ?? 0;
@@ -159,33 +334,41 @@ export function computeSnapGoalForTarget(
   const alignment = config.snapAlignment || 'center';
 
   if (alignment === 'anchor_offset') {
-    const srcAnchor = config.sourceAnchor || 'center';
-    const tarAnchor = config.targetAnchor || 'center';
-    const sourceAnchorWorld = getEntityAnchorPoint(entity, srcAnchor, entityRot);
-    const targetAnchorWorld = getEntityAnchorPoint(target, tarAnchor, targetRot);
+    const srcAnchor: SnapAnchorPreset = config.sourceAnchor || 'center';
+    const tarAnchor: SnapAnchorPreset = config.targetAnchor || 'center';
+    const sourceAnchorWorld = getSnapAnchorWorldPoint(
+      entity,
+      srcAnchor,
+      config.customSourceAnchor,
+      entityRot
+    );
+    const targetAnchorWorld = getSnapAnchorWorldPoint(
+      target,
+      tarAnchor,
+      config.customTargetAnchor,
+      targetRot
+    );
     const desiredTargetPoint = {
       x: targetAnchorWorld.x + rotatedOffset.x,
       y: targetAnchorWorld.y + rotatedOffset.y,
     };
-    const srcLocalAtGoal = rotateVec(
-      getLocalAnchorOffset(entity.size, srcAnchor).x,
-      getLocalAnchorOffset(entity.size, srcAnchor).y,
-      effectiveGoalRot
-    );
-    const goalCenterX = desiredTargetPoint.x - srcLocalAtGoal.x;
-    const goalCenterY = desiredTargetPoint.y - srcLocalAtGoal.y;
+    const goalTopLeft = solveTopLeftForAlignedAnchor({
+      entity,
+      srcAnchor,
+      customSourceAnchor: config.customSourceAnchor,
+      desiredTargetPoint,
+      goalRotationDeg: effectiveGoalRot,
+    });
     const metricDistance = Math.hypot(
       sourceAnchorWorld.x - desiredTargetPoint.x,
       sourceAnchorWorld.y - desiredTargetPoint.y
     );
     return {
-      goalTopLeft: {
-        x: Math.round((goalCenterX - entity.size.width / 2) * 100) / 100,
-        y: Math.round((goalCenterY - entity.size.height / 2) * 100) / 100,
-      },
+      goalTopLeft,
       goalRotationDeg,
       sourceAnchorWorld,
       targetAnchorWorld,
+      desiredTargetPoint,
       metricDistance,
     };
   }
@@ -198,8 +381,8 @@ export function computeSnapGoalForTarget(
     const nx = dx / sumHalfW;
     const ny = dy / sumHalfH;
 
-    let srcAnchor: ParticleAnchorPreset = 'left';
-    let tarAnchor: ParticleAnchorPreset = 'right';
+    let srcAnchor: SnapAnchorPreset = 'left';
+    let tarAnchor: SnapAnchorPreset = 'right';
     if (Math.abs(nx) >= Math.abs(ny)) {
       if (dx >= 0) {
         srcAnchor = 'left';
@@ -216,49 +399,47 @@ export function computeSnapGoalForTarget(
       tarAnchor = 'top';
     }
 
-    const sourceAnchorWorld = getEntityAnchorPoint(entity, srcAnchor, entityRot);
-    const targetAnchorWorld = getEntityAnchorPoint(target, tarAnchor, targetRot);
+    const sourceAnchorWorld = getSnapAnchorWorldPoint(entity, srcAnchor, undefined, entityRot);
+    const targetAnchorWorld = getSnapAnchorWorldPoint(target, tarAnchor, undefined, targetRot);
     const desiredTargetPoint = {
       x: targetAnchorWorld.x + rotatedOffset.x,
       y: targetAnchorWorld.y + rotatedOffset.y,
     };
-    const srcLocalAtGoal = rotateVec(
-      getLocalAnchorOffset(entity.size, srcAnchor).x,
-      getLocalAnchorOffset(entity.size, srcAnchor).y,
-      effectiveGoalRot
-    );
-    const goalCenterX = desiredTargetPoint.x - srcLocalAtGoal.x;
-    const goalCenterY = desiredTargetPoint.y - srcLocalAtGoal.y;
+    const goalTopLeft = solveTopLeftForAlignedAnchor({
+      entity,
+      srcAnchor,
+      desiredTargetPoint,
+      goalRotationDeg: effectiveGoalRot,
+    });
     const metricDistance = Math.hypot(
       sourceAnchorWorld.x - desiredTargetPoint.x,
       sourceAnchorWorld.y - desiredTargetPoint.y
     );
     return {
-      goalTopLeft: {
-        x: Math.round((goalCenterX - entity.size.width / 2) * 100) / 100,
-        y: Math.round((goalCenterY - entity.size.height / 2) * 100) / 100,
-      },
+      goalTopLeft,
       goalRotationDeg,
       sourceAnchorWorld,
       targetAnchorWorld,
+      desiredTargetPoint,
       metricDistance,
     };
   }
 
   // 'center'
-  const desiredCenter = {
+  const desiredTargetPoint = {
     x: tarCx + rotatedOffset.x,
     y: tarCy + rotatedOffset.y,
   };
-  const metricDistance = Math.hypot(entCx - desiredCenter.x, entCy - desiredCenter.y);
+  const metricDistance = Math.hypot(entCx - desiredTargetPoint.x, entCy - desiredTargetPoint.y);
   return {
     goalTopLeft: {
-      x: Math.round((desiredCenter.x - entity.size.width / 2) * 100) / 100,
-      y: Math.round((desiredCenter.y - entity.size.height / 2) * 100) / 100,
+      x: Math.round((desiredTargetPoint.x - entity.size.width / 2) * 100) / 100,
+      y: Math.round((desiredTargetPoint.y - entity.size.height / 2) * 100) / 100,
     },
     goalRotationDeg,
     sourceAnchorWorld: { x: entCx, y: entCy },
     targetAnchorWorld: { x: tarCx, y: tarCy },
+    desiredTargetPoint,
     metricDistance,
   };
 }
@@ -291,14 +472,15 @@ export function matchesSnapFilter(
   return false;
 }
 
-export function findBestSnapCandidate(
+export function findSnapCandidateWithinRadius(
   entity: Entity,
   allEntities: Record<EntityId, Entity>,
   config: SnapBehaviorConfig,
+  searchRadius: number,
   positionOverride?: Position | null,
   currentEntityRotDeg?: number
 ): SnapCandidateMatch | null {
-  const radius = Math.max(4, Number.isFinite(config.snapRadius) ? config.snapRadius : 48);
+  const radius = Math.max(4, Number.isFinite(searchRadius) ? searchRadius : 48);
   const probeEntity: Entity = positionOverride
     ? { ...entity, position: positionOverride }
     : entity;
@@ -321,11 +503,30 @@ export function findBestSnapCandidate(
           goalRotationDeg: goal.goalRotationDeg,
           sourceAnchorWorld: goal.sourceAnchorWorld,
           targetAnchorWorld: goal.targetAnchorWorld,
+          desiredTargetPoint: goal.desiredTargetPoint,
         };
       }
     }
   }
   return best;
+}
+
+export function findBestSnapCandidate(
+  entity: Entity,
+  allEntities: Record<EntityId, Entity>,
+  config: SnapBehaviorConfig,
+  positionOverride?: Position | null,
+  currentEntityRotDeg?: number
+): SnapCandidateMatch | null {
+  const radius = Math.max(4, Number.isFinite(config.snapRadius) ? config.snapRadius : 48);
+  return findSnapCandidateWithinRadius(
+    entity,
+    allEntities,
+    config,
+    radius,
+    positionOverride,
+    currentEntityRotDeg
+  );
 }
 
 export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
@@ -361,12 +562,12 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
 
   // 1. Si déjà snappé : vérifier que la cible existe toujours & gérer l'arrachement (pull-unsnap)
   if (nextRuntime.isSnapped && nextRuntime.snappedTargetId) {
+    nextRuntime.isApproaching = false;
     const snappedTarget = allEntities[nextRuntime.snappedTargetId];
     if (!snappedTarget || snappedTarget.disabled || snappedTarget.visible === false) {
       const wasParented =
         entity.parentId === nextRuntime.snappedTargetId ||
-        nextRuntime.attachBehavior === 'parent_rigid' ||
-        nextRuntime.attachBehavior === 'parent_spring';
+        isSnapParentAttachBehavior(nextRuntime.attachBehavior);
       const oldTargetId = nextRuntime.snappedTargetId;
       nextRuntime.isSnapped = false;
       nextRuntime.snappedTargetId = null;
@@ -403,8 +604,7 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
       if (pullDist > unsnapDist) {
         const wasParented =
           entity.parentId === snappedTarget.id ||
-          nextRuntime.attachBehavior === 'parent_rigid' ||
-          nextRuntime.attachBehavior === 'parent_spring';
+          isSnapParentAttachBehavior(nextRuntime.attachBehavior);
         nextRuntime.isSnapped = false;
         nextRuntime.snappedTargetId = null;
         nextRuntime.attachBehavior = null;
@@ -432,7 +632,7 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
     }
 
     // Maintien du snap actif
-    const isParentMode = attachBehavior === 'parent_rigid' || attachBehavior === 'parent_spring';
+    const isParentMode = isSnapParentAttachBehavior(attachBehavior);
     const isFreezeMode = attachBehavior === 'freeze_physics';
     const isPosOnlyMode = attachBehavior === 'position_only';
 
@@ -443,14 +643,11 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
     if (isParentMode) {
       if (entity.parentId !== snappedTarget.id) {
         const alignedChild = { ...entity, position: goal.goalTopLeft };
-        const computed = computeRelativeParentOffset(alignedChild, snappedTarget, {
-          x: 0,
-          y: 0,
-          attachmentMode: attachBehavior === 'parent_spring' ? 'spring' : 'rigid',
-          inheritRotation: Boolean(config.matchTargetRotation),
-          rotationOffset: config.rotationOffset ?? 0,
-          springStiffness: config.springStiffness ?? 0.25,
-          springDamping: config.springDamping ?? 0.18,
+        const computed = buildSnapParentOffset({
+          alignedChild,
+          target: snappedTarget,
+          config,
+          attachBehavior,
         });
         nextPosition = goal.goalTopLeft;
         nextRotationDeg = goal.goalRotationDeg;
@@ -488,10 +685,7 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
       freezeStatic: isFreezeMode,
       parentMutation,
       activeLink: {
-        from: {
-          x: (nextPosition?.x ?? entity.position.x) + entity.size.width / 2,
-          y: (nextPosition?.y ?? entity.position.y) + entity.size.height / 2,
-        },
+        from: goal.sourceAnchorWorld,
         to: goal.targetAnchorWorld,
         snapped: true,
         targetId: snappedTarget.id,
@@ -499,7 +693,11 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
     };
   }
 
-  // 2. Non snappé : vérifier si un candidat est à portée
+  // 2. Non snappé : vérifier champ d'attraction magnétique & portée de snap
+  const magnetEnabled = Boolean(config.magnetEnabled);
+  const magnetRadius = Math.max(radius, Number.isFinite(config.magnetRadius as number) ? (config.magnetRadius as number) : 120);
+  const magnetForce = Math.max(0, Number.isFinite(config.magnetForce as number) ? (config.magnetForce as number) : 260);
+
   const candidate = findBestSnapCandidate(
     probeEntity,
     allEntities,
@@ -508,11 +706,74 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
     currentRotationDeg
   );
 
+  const magnetCandidate =
+    magnetEnabled && nextRuntime.cooldownRemaining <= 0
+      ? candidate ||
+        findSnapCandidateWithinRadius(
+          probeEntity,
+          allEntities,
+          config,
+          magnetRadius,
+          probePos,
+          currentRotationDeg
+        )
+      : candidate;
+
+  const isApproachingNow = Boolean(magnetCandidate);
+  let approachStateChange: StateId | undefined;
+  if (
+    isApproachingNow &&
+    !runtime.isApproaching &&
+    config.approachingStateId &&
+    entity.states[config.approachingStateId]
+  ) {
+    approachStateChange = config.approachingStateId;
+  }
+  nextRuntime.isApproaching = isApproachingNow;
+
+  let magnetPull: SnapStepResult['magnetPull'];
+  if (
+    magnetEnabled &&
+    magnetCandidate &&
+    !isDragging &&
+    nextRuntime.cooldownRemaining <= 0 &&
+    magnetForce > 0
+  ) {
+    const dx = magnetCandidate.goalTopLeft.x - entity.position.x;
+    const dy = magnetCandidate.goalTopLeft.y - entity.position.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 0.5) {
+      const falloff = 0.4 + 0.6 * Math.max(0, 1 - magnetCandidate.distance / Math.max(1, magnetRadius));
+      const speedPx = magnetForce * falloff;
+      magnetPull = {
+        vxPxPerSec: (dx / d) * speedPx,
+        vyPxPerSec: (dy / d) * speedPx,
+        distance: magnetCandidate.distance,
+        magnetRadius,
+        targetId: magnetCandidate.target.id,
+        from: magnetCandidate.sourceAnchorWorld,
+        to: magnetCandidate.targetAnchorWorld,
+      };
+    }
+  }
+
   if (!candidate) {
     return {
       nextRuntime,
       zeroVelocity: false,
       freezeStatic: false,
+      stateChange: approachStateChange,
+      ...(magnetCandidate
+        ? {
+            activeLink: {
+              from: magnetCandidate.sourceAnchorWorld,
+              to: magnetCandidate.targetAnchorWorld,
+              snapped: false,
+              targetId: magnetCandidate.target.id,
+            },
+          }
+        : {}),
+      ...(magnetPull ? { magnetPull } : {}),
     };
   }
 
@@ -522,27 +783,29 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
     (triggerMode === 'always_when_near' || (triggerMode === 'on_release' && justReleased));
 
   if (!canTriggerNow) {
-    // Retourner le lien visuel de prévisualisation pendant l'approche
     return {
       nextRuntime,
       zeroVelocity: false,
       freezeStatic: false,
+      stateChange: approachStateChange,
       activeLink: {
         from: candidate.sourceAnchorWorld,
         to: candidate.targetAnchorWorld,
         snapped: false,
         targetId: candidate.target.id,
       },
+      ...(magnetPull ? { magnetPull } : {}),
     };
   }
 
   // Déclenchement d'un nouveau snap !
   nextRuntime.isSnapped = true;
+  nextRuntime.isApproaching = false;
   nextRuntime.snappedTargetId = candidate.target.id;
   nextRuntime.attachBehavior = attachBehavior;
   nextRuntime.snappedAtPos = candidate.goalTopLeft;
 
-  const isParentMode = attachBehavior === 'parent_rigid' || attachBehavior === 'parent_spring';
+  const isParentMode = isSnapParentAttachBehavior(attachBehavior);
   const isFreezeMode = attachBehavior === 'freeze_physics';
 
   let nextPosition: Position = candidate.goalTopLeft;
@@ -558,14 +821,11 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
   let parentMutation: SnapStepResult['parentMutation'];
   if (isParentMode && entity.parentId !== candidate.target.id) {
     const alignedChild = { ...entity, position: candidate.goalTopLeft };
-    const computed = computeRelativeParentOffset(alignedChild, candidate.target, {
-      x: 0,
-      y: 0,
-      attachmentMode: attachBehavior === 'parent_spring' ? 'spring' : 'rigid',
-      inheritRotation: Boolean(config.matchTargetRotation),
-      rotationOffset: config.rotationOffset ?? 0,
-      springStiffness: config.springStiffness ?? 0.25,
-      springDamping: config.springDamping ?? 0.18,
+    const computed = buildSnapParentOffset({
+      alignedChild,
+      target: candidate.target,
+      config,
+      attachBehavior,
     });
     parentMutation = {
       childId: entity.id,
@@ -594,10 +854,7 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
         ? config.snappedStateId
         : undefined,
     activeLink: {
-      from: {
-        x: nextPosition.x + entity.size.width / 2,
-        y: nextPosition.y + entity.size.height / 2,
-      },
+      from: candidate.targetAnchorWorld,
       to: candidate.targetAnchorWorld,
       snapped: true,
       targetId: candidate.target.id,

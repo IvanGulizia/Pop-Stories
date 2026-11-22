@@ -9,6 +9,7 @@ export interface PatrolRuntimeState {
   waypointDir: 1 | -1;
   wallTurnCooldown: number;
   ledgeTurnCooldown: number;
+  entityCollisionTurnCooldown?: number;
   lastLegDistance?: number;
 }
 
@@ -73,6 +74,7 @@ export function stepPatrolBehavior(params: {
   dt: number;
   wallHit?: { left: boolean; right: boolean; up: boolean; down: boolean };
   ledgeAhead?: boolean; // true = vide détecté devant le sens de déplacement actuel
+  entityCollisionHit?: boolean; // true = collision avec une entité filtrée par turnOnCollision
 }): {
   vx: number;
   vy: number;
@@ -80,7 +82,7 @@ export function stepPatrolBehavior(params: {
   turned: boolean;
   facingDirX: 1 | -1 | 0;
 } {
-  const { state, currentCenter, config, entities, dt, wallHit, ledgeAhead } = params;
+  const { state, currentCenter, config, entities, dt, wallHit, ledgeAhead, entityCollisionHit } = params;
   const safeDt = Math.max(0.001, Math.min(0.05, dt));
   const speed = Math.max(0, config.speed ?? 120);
   const pauseDuration = Math.max(0, config.pauseAtEnds ?? config.pauseDuration ?? 0.3);
@@ -90,16 +92,21 @@ export function stepPatrolBehavior(params: {
 
   state.wallTurnCooldown = Math.max(0, state.wallTurnCooldown - safeDt);
   state.ledgeTurnCooldown = Math.max(0, state.ledgeTurnCooldown - safeDt);
+  state.entityCollisionTurnCooldown = Math.max(0, (state.entityCollisionTurnCooldown ?? 0) - safeDt);
 
   if (state.timer > 0) {
     state.timer = Math.max(0, state.timer - safeDt);
-    return {
-      vx: 0,
-      vy: 0,
-      preserveVerticalVelocity: (axis === 'horizontal' && patrolMode !== 'waypoints') || isGroundedWaypoints,
-      turned: false,
-      facingDirX: 0,
-    };
+    // Ne rester en pause que s'il reste réellement du temps ; si timer vient d'atteindre 0,
+    // enchaîner immédiatement sur le déplacement + flip dans la même frame (0 frame de latence).
+    if (state.timer > 0) {
+      return {
+        vx: 0,
+        vy: 0,
+        preserveVerticalVelocity: (axis === 'horizontal' && patrolMode !== 'waypoints') || isGroundedWaypoints,
+        turned: false,
+        facingDirX: 0,
+      };
+    }
   }
 
   // Mode 3 : Multi-points (Waypoints)
@@ -127,14 +134,30 @@ export function stepPatrolBehavior(params: {
         state.ledgeTurnCooldown <= 0 &&
         Boolean(ledgeAhead);
 
-      // Demi-tour mur / vide en mode waypoints si configuré
-      if (hitWallInWpDir || hitLedgeInWpDir) {
+      const hitEntityInWpDir =
+        Boolean(config.turnOnCollision) &&
+        (state.entityCollisionTurnCooldown ?? 0) <= 0 &&
+        Boolean(entityCollisionHit);
+
+      // Demi-tour mur / vide / collision entité en mode waypoints si configuré
+      if (hitWallInWpDir || hitLedgeInWpDir || hitEntityInWpDir) {
         if (hitWallInWpDir) state.wallTurnCooldown = 0.16;
         if (hitLedgeInWpDir) state.ledgeTurnCooldown = 0.22;
+        if (hitEntityInWpDir) {
+          state.entityCollisionTurnCooldown = Math.max(0.05, config.collisionTurnCooldownSec ?? 0.25);
+        }
         if (waypoints.length >= 2) {
           state.waypointDir = state.waypointDir === 1 ? -1 : 1;
           state.waypointIndex = Math.max(0, Math.min(waypoints.length - 1, state.waypointIndex + state.waypointDir));
-          return { vx: 0, vy: 0, preserveVerticalVelocity: isGroundedWaypoints, turned: true, facingDirX: 0 };
+          const nextPt = waypoints[state.waypointIndex];
+          const nextDirX: 1 | -1 | 0 = nextPt
+            ? Math.abs(nextPt.x - currentCenter.x) > 1
+              ? nextPt.x > currentCenter.x
+                ? 1
+                : -1
+              : 0
+            : 0;
+          return { vx: 0, vy: 0, preserveVerticalVelocity: isGroundedWaypoints, turned: true, facingDirX: nextDirX };
         }
         state.timer = Math.max(0.2, pauseDuration * 0.5);
         return { vx: 0, vy: 0, preserveVerticalVelocity: isGroundedWaypoints, turned: true, facingDirX: 0 };
@@ -195,7 +218,12 @@ export function stepPatrolBehavior(params: {
       ? currentCenter.x - state.originCenter.x
       : currentCenter.y - state.originCenter.y;
 
-  // Vérification collision mur latéral ou vide sur l'axe horizontal
+  // Vérification collision mur latéral, vide ou entité sur l'axe horizontal
+  const hitEntityCollision =
+    Boolean(config.turnOnCollision) &&
+    (state.entityCollisionTurnCooldown ?? 0) <= 0 &&
+    Boolean(entityCollisionHit);
+
   if (axis === 'horizontal') {
     const hitWallInMoveDir =
       Boolean(config.turnOnWall) &&
@@ -204,11 +232,14 @@ export function stepPatrolBehavior(params: {
     const hitLedgeInMoveDir =
       Boolean(config.detectLedges) && state.ledgeTurnCooldown <= 0 && Boolean(ledgeAhead);
 
-    if (hitWallInMoveDir || hitLedgeInMoveDir) {
+    if (hitWallInMoveDir || hitLedgeInMoveDir || hitEntityCollision) {
       state.direction = state.direction === 1 ? -1 : 1;
       state.timer = pauseDuration * 0.4;
       if (hitWallInMoveDir) state.wallTurnCooldown = 0.18;
       if (hitLedgeInMoveDir) state.ledgeTurnCooldown = 0.22;
+      if (hitEntityCollision) {
+        state.entityCollisionTurnCooldown = Math.max(0.05, config.collisionTurnCooldownSec ?? 0.25);
+      }
       return {
         vx: 0,
         vy: 0,
@@ -218,13 +249,18 @@ export function stepPatrolBehavior(params: {
       };
     }
   } else if (
-    config.turnOnWall &&
-    state.wallTurnCooldown <= 0 &&
-    ((state.direction === 1 && wallHit?.down) || (state.direction === -1 && wallHit?.up))
+    (config.turnOnWall &&
+      state.wallTurnCooldown <= 0 &&
+      ((state.direction === 1 && wallHit?.down) || (state.direction === -1 && wallHit?.up))) ||
+    hitEntityCollision
   ) {
     state.direction = state.direction === 1 ? -1 : 1;
     state.timer = pauseDuration * 0.4;
-    state.wallTurnCooldown = 0.18;
+    if (hitEntityCollision) {
+      state.entityCollisionTurnCooldown = Math.max(0.05, config.collisionTurnCooldownSec ?? 0.25);
+    } else {
+      state.wallTurnCooldown = 0.18;
+    }
     return {
       vx: 0,
       vy: 0,

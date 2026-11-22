@@ -291,19 +291,22 @@ export default function App() {
         } else {
           (document.activeElement as HTMLElement | null)?.blur?.();
           if (st.selectedLayerId) st.selectLayer(null);
+          if (st.snapPinCanvasPick) st.cancelSnapPinCanvasPick();
           st.setAppMode('play');
           setActiveView('canvas');
         }
         return;
       }
 
-      // Échap : Annuler visée spawn/joint -> Quitter Play -> Quitter dessin calque -> Désélectionner entité
+      // Échap : Annuler visée spawn/joint/snap -> Quitter Play -> Quitter dessin calque -> Désélectionner entité
       if (e.key === 'Escape') {
         const st = useSceneStore.getState();
         if (st.spawnCanvasPick) {
           st.cancelSpawnCanvasPick();
         } else if (st.jointCanvasPick) {
           st.cancelJointCanvasPick();
+        } else if (st.snapPinCanvasPick) {
+          st.cancelSnapPinCanvasPick();
         } else if (st.appMode === 'play') {
           st.setAppMode('edit');
         } else if (st.selectedLayerId) {
@@ -473,6 +476,9 @@ export default function App() {
                 if (useSceneStore.getState().jointCanvasPick) {
                   useSceneStore.getState().cancelJointCanvasPick();
                 }
+                if (useSceneStore.getState().snapPinCanvasPick) {
+                  useSceneStore.getState().cancelSnapPinCanvasPick();
+                }
                 if (useSceneStore.getState().pendingCatalogSpawnType) {
                   useSceneStore.getState().setPendingCatalogSpawnType(null);
                 }
@@ -519,6 +525,9 @@ export default function App() {
                 } else {
                   (document.activeElement as HTMLElement | null)?.blur?.();
                   if (selectedLayerId) selectLayer(null);
+                  if (useSceneStore.getState().snapPinCanvasPick) {
+                    useSceneStore.getState().cancelSnapPinCanvasPick();
+                  }
                   setAppMode('play');
                   setActiveView('canvas');
                 }
