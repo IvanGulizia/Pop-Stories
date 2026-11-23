@@ -430,7 +430,9 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         if (result.brokenJointEvents && result.brokenJointEvents.length > 0) {
           const { detachEntity, triggerJointBreak } = useSceneStore.getState();
           result.brokenJointEvents.forEach((ev) => {
-            detachEntity(ev.childId);
+            if (!ev.isWorldPin) {
+              detachEntity(ev.childId);
+            }
             triggerJointBreak(ev.childId, ev.parentId, ev.breakPoint);
           });
         }

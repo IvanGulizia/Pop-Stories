@@ -1879,6 +1879,123 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
               </g>
             ))}
 
+          {/* A-ter. Épingles au monde (World Pin avec résistance & rupture) */}
+          {isPlayMode &&
+            runtimeDebug?.worldPins &&
+            Object.entries(runtimeDebug.worldPins).map(([entId, pin]) => {
+              if (filterOnlySelected && selectedEntityId !== entId) return null;
+              const strokeCol =
+                pin.breakable && pin.stressRatio > 0.72
+                  ? '#ef4444'
+                  : pin.breakable && pin.stressRatio > 0.42
+                  ? '#f59e0b'
+                  : '#d97706';
+              return (
+                <g key={`gizmo-world-pin-live-${entId}`}>
+                  {pin.breakable && (
+                    <circle
+                      cx={pin.anchor.x}
+                      cy={pin.anchor.y}
+                      r={pin.breakDistance}
+                      fill="rgba(245, 158, 11, 0.04)"
+                      stroke={strokeCol}
+                      strokeWidth="1.15"
+                      strokeDasharray="4 4"
+                      strokeOpacity={0.65}
+                    />
+                  )}
+                  <polyline
+                    points={buildSpringZigzagPoints(
+                      pin.anchor.x,
+                      pin.anchor.y,
+                      pin.current.x,
+                      pin.current.y,
+                      6,
+                      4.5
+                    )}
+                    fill="none"
+                    stroke={strokeCol}
+                    strokeWidth={pin.stressRatio > 0.42 ? '2.2' : '1.75'}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <line
+                    x1={pin.anchor.x - 5}
+                    y1={pin.anchor.y}
+                    x2={pin.anchor.x + 5}
+                    y2={pin.anchor.y}
+                    stroke={strokeCol}
+                    strokeWidth="2"
+                  />
+                  <line
+                    x1={pin.anchor.x}
+                    y1={pin.anchor.y - 5}
+                    x2={pin.anchor.x}
+                    y2={pin.anchor.y + 5}
+                    stroke={strokeCol}
+                    strokeWidth="2"
+                  />
+                  <circle
+                    cx={pin.anchor.x}
+                    cy={pin.anchor.y}
+                    r={4}
+                    fill="#ffffff"
+                    stroke={strokeCol}
+                    strokeWidth="2"
+                  />
+                  <circle
+                    cx={pin.current.x}
+                    cy={pin.current.y}
+                    r={3.5}
+                    fill={strokeCol}
+                    stroke="#ffffff"
+                    strokeWidth="1.25"
+                  />
+                </g>
+              );
+            })}
+
+          {!isPlayMode &&
+            targetEntities.map((entity) => {
+              if (entity.parentId && entities[entity.parentId]) return null;
+              const currentState = entity.states[entity.currentStateId];
+              const physics = getEffectiveBehaviors(entity, currentState).find(
+                (b): b is PhysicsBehaviorConfig => b.type === 'physics'
+              );
+              if (!physics || physics.enabled === false || physics.isStatic || !physics.worldPinEnabled) {
+                return null;
+              }
+              const effPivot = resolveEffectivePivot(entity, currentState, undefined, Boolean(entity.flipX));
+              const pinWorld = getPivotWorldPosition(entity.position, entity.size, effPivot);
+              const breakable = physics.worldPinBreakable !== false;
+              const breakDist = Math.max(10, physics.worldPinBreakDistance ?? 60);
+              return (
+                <g key={`gizmo-world-pin-edit-${entity.id}`}>
+                  {breakable && (
+                    <circle
+                      cx={pinWorld.x}
+                      cy={pinWorld.y}
+                      r={breakDist}
+                      fill="rgba(245, 158, 11, 0.04)"
+                      stroke="#d97706"
+                      strokeWidth="1.2"
+                      strokeDasharray="4 4"
+                      strokeOpacity={0.65}
+                    />
+                  )}
+                  <circle
+                    cx={pinWorld.x}
+                    cy={pinWorld.y}
+                    r={4.5}
+                    fill="#ffffff"
+                    stroke="#d97706"
+                    strokeWidth="2"
+                  />
+                  <circle cx={pinWorld.x} cy={pinWorld.y} r={2} fill="#d97706" />
+                </g>
+              );
+            })}
+
           {/* B. Follow en mode Ressort / Damping */}
           {targetEntities.map((entity) => {
             const currentState = entity.states[entity.currentStateId];

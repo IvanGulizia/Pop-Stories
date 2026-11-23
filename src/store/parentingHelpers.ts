@@ -9,7 +9,7 @@ import {
 
 /**
  * Résout le ParentOffset effectif d'un enfant en fusionnant sa configuration de base
- * avec une éventuelle surcharge définie sur son état actif (parentOffsetOverride).
+ * avec un éventuel override défini sur son état actif (parentOffsetOverride).
  * Ne mute jamais entity.parentOffset.
  */
 export function resolveEffectiveParentOffset(

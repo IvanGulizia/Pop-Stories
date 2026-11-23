@@ -310,7 +310,7 @@ export function HitboxColliderCard({
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <div className="text-[11px] font-bold text-indigo-950">
-                            Surcharger sur « {targetState.name} »
+                            Créer un override sur « {targetState.name} »
                           </div>
                           <div className="text-[10px] text-slate-500">
                             Utiliser une hitbox propre pour cet état uniquement

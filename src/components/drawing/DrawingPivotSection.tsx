@@ -99,7 +99,7 @@ export function DrawingPivotSection({
         <div className="p-2 rounded-xl bg-fuchsia-50/70 border border-fuchsia-200/80 flex items-center justify-between gap-2">
           <div className="text-[10px] font-bold text-fuchsia-900 leading-tight">
             {hasStateOverride
-              ? '✏️ Surcharge active pour cet état'
+              ? '✏️ Override actif pour cet état'
               : `🔗 Pivot objet (${Math.round((baseEntityPivot?.x ?? 0.5) * 100)}%, ${Math.round((baseEntityPivot?.y ?? 0.5) * 100)}%)`}
           </div>
           <button
@@ -111,7 +111,7 @@ export function DrawingPivotSection({
                 : 'bg-white text-fuchsia-700 border-fuchsia-300 hover:bg-fuchsia-100'
             }`}
           >
-            {hasStateOverride ? 'Surchargé ✓' : 'Surcharger'}
+            {hasStateOverride ? 'Overridé ✓' : 'Créer un override'}
           </button>
         </div>
       )}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, Paintbrush, Plus, RotateCcw } from 'lucide-react';
+import { Layers, Paintbrush, Pin, Plus, RotateCcw } from 'lucide-react';
 import {
   AutoDestroyBehaviorConfig,
   BoundaryBehaviorConfig,
@@ -26,9 +26,15 @@ export function DraggableBehaviorControls({
 export function PhysicsBehaviorControls({
   b,
   update,
+  stateList = [],
+  onQuickCreateState,
+  onEditStateDrawing,
 }: {
   b: PhysicsBehaviorConfig;
   update: (partial: any) => void;
+  stateList?: EntityState[];
+  onQuickCreateState?: (suggestedName: string, folderName?: string) => string;
+  onEditStateDrawing?: (stateId: string) => void;
 }) {
   return (
     <div className="space-y-1.5">
@@ -60,7 +66,12 @@ export function PhysicsBehaviorControls({
         <input
           type="checkbox"
           checked={b.isStatic === true}
-          onChange={(e) => update({ isStatic: e.target.checked })}
+          onChange={(e) =>
+            update({
+              isStatic: e.target.checked,
+              ...(e.target.checked ? { worldPinEnabled: false } : {}),
+            })
+          }
           className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
           title="Cocher pour un mur, un sol ou une plateforme infranchissable"
         />
@@ -241,6 +252,196 @@ export function PhysicsBehaviorControls({
             className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
             title="Empêche l'objet de pivoter lors des collisions physiques"
           />
+        </div>
+      )}
+
+      {/* Ligne 8: Épingle au monde (World Pin avec résistance & rupture) */}
+      {!b.isStatic && (
+        <div className="p-2 bg-amber-50/40 rounded-xl border border-amber-200 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <div className="font-bold text-amber-950 text-xs flex items-center gap-1.5">
+                <Pin className="w-3.5 h-3.5 text-amber-600" />
+                <span>Épingle au monde (Résistance & Rupture)</span>
+              </div>
+              <div className="text-[10px] text-amber-800/75 leading-snug">
+                Maintient l'objet à son ancre avec une résistance élastique ; utilisable en override d'état pour fixer puis décoller au drag.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={b.worldPinEnabled === true}
+              onChange={(e) =>
+                update({
+                  worldPinEnabled: e.target.checked,
+                  ...(e.target.checked
+                    ? {
+                        isStatic: false,
+                        worldPinStiffness: b.worldPinStiffness ?? 0.25,
+                        worldPinDamping: b.worldPinDamping ?? 0.15,
+                        worldPinBreakable: b.worldPinBreakable !== false,
+                        worldPinBreakDistance: b.worldPinBreakDistance ?? 60,
+                      }
+                    : {}),
+                })
+              }
+              className="w-4 h-4 accent-amber-600 rounded cursor-pointer shrink-0"
+            />
+          </div>
+
+          {b.worldPinEnabled && (
+            <div className="space-y-1.5 pt-1.5 border-t border-amber-200/70">
+              <div className="p-2 bg-white rounded-xl border border-slate-200">
+                <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                  <div>
+                    <span className="font-bold">Raideur du maintien</span>
+                    <span className="text-[10px] text-slate-400 block">
+                      Force de rappel vers le point d'ancrage
+                    </span>
+                  </div>
+                  <EditableNumericValue
+                    value={Math.round((b.worldPinStiffness ?? 0.25) * 100)}
+                    unit="%"
+                    precision={0}
+                    onChange={(v) => update({ worldPinStiffness: v / 100 })}
+                    className="font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+                  />
+                </div>
+                <input
+                  type="range"
+                  min="0.05"
+                  max="0.95"
+                  step="0.05"
+                  value={Math.max(0.05, Math.min(0.95, b.worldPinStiffness ?? 0.25))}
+                  onChange={(e) => update({ worldPinStiffness: parseFloat(e.target.value) })}
+                  className="w-full accent-amber-600"
+                />
+              </div>
+
+              <div className="p-2 bg-white rounded-xl border border-slate-200">
+                <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                  <div>
+                    <span className="font-bold">Amortissement</span>
+                    <span className="text-[10px] text-slate-400 block">
+                      Calme les oscillations autour de l'épingle
+                    </span>
+                  </div>
+                  <EditableNumericValue
+                    value={Math.round((b.worldPinDamping ?? 0.15) * 100)}
+                    unit="%"
+                    precision={0}
+                    onChange={(v) => update({ worldPinDamping: v / 100 })}
+                    className="font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+                  />
+                </div>
+                <input
+                  type="range"
+                  min="0.02"
+                  max="0.6"
+                  step="0.02"
+                  value={Math.max(0.02, Math.min(0.6, b.worldPinDamping ?? 0.15))}
+                  onChange={(e) => update({ worldPinDamping: parseFloat(e.target.value) })}
+                  className="w-full accent-amber-600"
+                />
+              </div>
+
+              <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-bold text-slate-700 text-xs">Cassable à la traction</div>
+                  <div className="text-[10px] text-slate-400">
+                    Libère l'objet et émet un événement « Rupture de Joint » si on tire assez fort
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={b.worldPinBreakable !== false}
+                  onChange={(e) => update({ worldPinBreakable: e.target.checked })}
+                  className="w-4 h-4 accent-amber-600 rounded cursor-pointer shrink-0"
+                />
+              </div>
+
+              {b.worldPinBreakable !== false && (
+                <>
+                  <div className="p-2 bg-white rounded-xl border border-slate-200">
+                    <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
+                      <div>
+                        <span className="font-bold">Distance d'arrachement</span>
+                        <span className="text-[10px] text-slate-400 block">
+                          Étirement avant que l'épingle ne cède
+                        </span>
+                      </div>
+                      <EditableNumericValue
+                        value={b.worldPinBreakDistance ?? 60}
+                        unit="px"
+                        precision={0}
+                        onChange={(v) => update({ worldPinBreakDistance: v })}
+                        className="font-mono font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 px-1.5 py-0.5 rounded text-[11px] cursor-text tabular-nums"
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min="15"
+                      max="250"
+                      step="5"
+                      value={Math.max(15, Math.min(250, b.worldPinBreakDistance ?? 60))}
+                      onChange={(e) => update({ worldPinBreakDistance: parseFloat(e.target.value) })}
+                      className="w-full accent-rose-600"
+                    />
+                  </div>
+
+                  {stateList.length > 0 && (
+                    <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-slate-700 text-xs">État après arrachement</span>
+                        <div className="flex items-center gap-1 min-w-0">
+                          <select
+                            value={b.worldPinBrokenStateId || ''}
+                            onChange={(e) =>
+                              update({ worldPinBrokenStateId: e.target.value || undefined })
+                            }
+                            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[140px]"
+                          >
+                            <option value="">Aucun changement</option>
+                            {stateList.map((st) => (
+                              <option key={st.id} value={st.id}>
+                                {st.name}
+                              </option>
+                            ))}
+                          </select>
+                          {b.worldPinBrokenStateId && onEditStateDrawing && (
+                            <button
+                              type="button"
+                              onClick={() => onEditStateDrawing(b.worldPinBrokenStateId!)}
+                              className="p-1 text-indigo-600 hover:bg-indigo-50 rounded-lg border border-indigo-200 cursor-pointer shrink-0"
+                              title="Dessiner / modifier cet état"
+                            >
+                              <Paintbrush className="w-3 h-3" />
+                            </button>
+                          )}
+                          {onQuickCreateState && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const createdId = onQuickCreateState('Arraché', 'Physique');
+                                update({ worldPinBrokenStateId: createdId });
+                              }}
+                              className="p-1 text-amber-700 hover:bg-amber-50 rounded-lg border border-amber-200 cursor-pointer shrink-0"
+                              title="Créer rapidement un état « Arraché »"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-slate-400 leading-snug">
+                        Astuce : réglez Gravité = 0 px/s² pour qu'un objet épinglé reste parfaitement droit sans pendre avant d'être arraché.
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

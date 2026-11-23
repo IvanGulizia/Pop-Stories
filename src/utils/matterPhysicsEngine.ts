@@ -404,6 +404,19 @@ const prevCollidingJiggle = new Set<string>();
 const parentJointConstraints = new Map<string, Matter.Constraint>();
 const jointBreakStates = new Map<string, JointBreakRuntimeState>();
 const brokenJointDynamicIds = new Set<string>();
+const worldPinConstraints = new Map<string, Matter.Constraint>();
+const worldPinRuntimeMeta = new Map<
+  string,
+  {
+    anchorWorld: Position;
+    localPointB: Position;
+    stateId: string;
+    breakDistance: number;
+    breakable: boolean;
+    brokenStateId?: string;
+  }
+>();
+const brokenWorldPinStateIds = new Map<string, string>();
 
 export interface PhysicsGrabOptions {
   rotationMode?: GrabRotationMode;
@@ -429,6 +442,10 @@ const mouseGrabConstraints = new Map<string, MouseGrabRuntime>();
 
 const debugSpringAnchors = new Map<string, Position>();
 const debugJointStressRatios = new Map<string, number>();
+const debugWorldPins = new Map<
+  string,
+  { anchor: Position; current: Position; breakDistance: number; stressRatio: number; breakable: boolean }
+>();
 const debugGrabPins = new Map<string, { target: Position; grabWorld: Position }>();
 const debugJiggleInfos = new Map<
   string,
@@ -732,6 +749,10 @@ export function isEntityPhysicsGrabbed(entityId: string): boolean {
   return mouseGrabConstraints.has(entityId);
 }
 
+export function hasActiveWorldPin(entityId: string): boolean {
+  return worldPinConstraints.has(entityId) && !brokenWorldPinStateIds.has(entityId);
+}
+
 /**
  * Saisit un corps Matter.js dynamique exactement au point monde cliqué (contrainte ressort 0-longueur),
  * permettant au corps de pencher/pivoter naturellement sous gravité et collisions ou de tirer un joint.
@@ -847,6 +868,10 @@ export function getGizmoRuntimeDebugData(): {
   lookAtTargets: Record<string, Position>;
   springAnchors: Record<string, Position>;
   jointStressRatios: Record<string, number>;
+  worldPins: Record<
+    string,
+    { anchor: Position; current: Position; breakDistance: number; stressRatio: number; breakable: boolean }
+  >;
   grabPins: Record<string, { target: Position; grabWorld: Position }>;
   jigglePivots: Record<string, { world: Position; angleDeg: number; restDeg: number; squashX: number; squashY: number }>;
     sliderTracks: Record<string, { geom: SliderTrackGeometry; config: SliderBehaviorConfig; valueX: number; valueY: number; stepIndex: number }>;
@@ -944,12 +969,20 @@ export function getGizmoRuntimeDebugData(): {
   debugSnapMagnets.forEach((v, k) => {
     snapMagnets[k] = v;
   });
+  const worldPins: Record<
+    string,
+    { anchor: Position; current: Position; breakDistance: number; stressRatio: number; breakable: boolean }
+  > = {};
+  debugWorldPins.forEach((v, k) => {
+    worldPins[k] = v;
+  });
   return {
     wanderOrigins,
     patrolOrigins,
     lookAtTargets,
     springAnchors,
     jointStressRatios,
+    worldPins,
     grabPins,
     jigglePivots,
     sliderTracks,
@@ -1119,9 +1152,13 @@ export function resetMatterPhysicsRuntime() {
   parentJointConstraints.clear();
   jointBreakStates.clear();
   brokenJointDynamicIds.clear();
+  worldPinConstraints.clear();
+  worldPinRuntimeMeta.clear();
+  brokenWorldPinStateIds.clear();
   mouseGrabConstraints.clear();
   debugSpringAnchors.clear();
   debugJointStressRatios.clear();
+  debugWorldPins.clear();
   debugGrabPins.clear();
   debugJiggleInfos.clear();
   sliderStates.clear();
@@ -1342,6 +1379,7 @@ export interface PhysicsTickResult {
     parentId: string;
     breakPoint: Position;
     reason: 'force' | 'shake';
+    isWorldPin?: boolean;
   }[];
   arrivedTargetEvents?: {
     subjectId: string;
@@ -1652,6 +1690,13 @@ function ensurePhysicsWorld(
         World.remove(engine.world, jc);
         parentJointConstraints.delete(id);
       }
+      const wpc = worldPinConstraints.get(id);
+      if (wpc) {
+        World.remove(engine.world, wpc);
+        worldPinConstraints.delete(id);
+      }
+      worldPinRuntimeMeta.delete(id);
+      brokenWorldPinStateIds.delete(id);
       World.remove(engine.world, body);
       bodyMap.delete(id);
       colliderOffsets.delete(id);
@@ -1690,6 +1735,13 @@ function ensurePhysicsWorld(
         World.remove(engine.world, existingConstraint);
         parentJointConstraints.delete(entity.id);
       }
+      const existingPin = worldPinConstraints.get(entity.id);
+      if (existingPin) {
+        World.remove(engine.world, existingPin);
+        worldPinConstraints.delete(entity.id);
+      }
+      worldPinRuntimeMeta.delete(entity.id);
+      brokenWorldPinStateIds.delete(entity.id);
       const existing = bodyMap.get(entity.id);
       if (existing) {
         rebuildingBodyIds.add(entity.id);
@@ -2050,6 +2102,7 @@ export function stepMatterPhysics(params: {
   debugLookAtTargets.clear();
   debugSpringAnchors.clear();
   debugJointStressRatios.clear();
+  debugWorldPins.clear();
   debugGrabPins.clear();
   debugJiggleInfos.clear();
   debugSliderTracks.clear();
@@ -2308,6 +2361,111 @@ export function stepMatterPhysics(params: {
       isJoint: attachMode === 'physics_joint',
       freezeRotation: physics?.freezeRotation === true,
     });
+  }
+
+  // Pré-passe 2 : Épingles au monde cassables (World Pin sur PhysicsBehaviorConfig)
+  for (const entity of topoPrepassEntities) {
+    if (entity.disabled) continue;
+    const currentState = entity.states[entity.currentStateId];
+    const effBehs = getEffectiveBehaviors(entity, currentState);
+    const physics = effBehs.find((b) => b.type === 'physics') as PhysicsBehaviorConfig | undefined;
+    const hasAttachedParent = Boolean(
+      entity.parentId && liveEntities[entity.parentId] && !liveEntities[entity.parentId].disabled
+    );
+    const body = bodyMap.get(entity.id);
+    const wantsWorldPin = Boolean(
+      !hasAttachedParent &&
+        body &&
+        !body.isStatic &&
+        physics &&
+        physics.enabled !== false &&
+        !physics.isStatic &&
+        physics.worldPinEnabled === true
+    );
+
+    const brokenInState = brokenWorldPinStateIds.get(entity.id);
+    if (!wantsWorldPin || (brokenInState && brokenInState !== entity.currentStateId)) {
+      if (brokenInState && (!wantsWorldPin || brokenInState !== entity.currentStateId)) {
+        brokenWorldPinStateIds.delete(entity.id);
+      }
+      const existingPin = worldPinConstraints.get(entity.id);
+      if (existingPin) {
+        World.remove(engine.world, existingPin);
+        worldPinConstraints.delete(entity.id);
+      }
+      worldPinRuntimeMeta.delete(entity.id);
+      continue;
+    }
+
+    if (brokenInState === entity.currentStateId) {
+      const existingPin = worldPinConstraints.get(entity.id);
+      if (existingPin) {
+        World.remove(engine.world, existingPin);
+        worldPinConstraints.delete(entity.id);
+      }
+      worldPinRuntimeMeta.delete(entity.id);
+      continue;
+    }
+
+    const effPivot = resolveEffectivePivot(entity, currentState, undefined, Boolean(entity.flipX));
+    const cOffset = colliderOffsets.get(entity.id) || {
+      relCenterX: entity.size.width / 2,
+      relCenterY: entity.size.height / 2,
+    };
+    const localPointB = {
+      x: effPivot.x * entity.size.width - cOffset.relCenterX,
+      y: effPivot.y * entity.size.height - cOffset.relCenterY,
+    };
+    const rotatedPointB = rotateVector(localPointB.x, localPointB.y, body!.angle);
+    const stiffness = Math.max(0.05, Math.min(0.95, physics!.worldPinStiffness ?? 0.25));
+    const damping = Math.max(0.02, Math.min(0.6, physics!.worldPinDamping ?? 0.15));
+    const breakable = physics!.worldPinBreakable !== false;
+    const breakDistance = Math.max(10, physics!.worldPinBreakDistance ?? 60);
+
+    let meta = worldPinRuntimeMeta.get(entity.id);
+    let pinConstraint = worldPinConstraints.get(entity.id);
+
+    if (!pinConstraint || !meta || pinConstraint.bodyB !== body) {
+      if (pinConstraint) {
+        World.remove(engine.world, pinConstraint);
+      }
+      const anchorWorld = getPivotWorldPosition(entity.position, entity.size, effPivot);
+      const nextPinDef: Record<string, unknown> = {
+        pointA: { x: anchorWorld.x, y: anchorWorld.y },
+        bodyB: body!,
+        pointB: rotatedPointB,
+        angleB: body!.angle,
+        length: 0,
+        stiffness,
+        damping,
+      };
+      pinConstraint = Constraint.create(nextPinDef as unknown as Matter.IConstraintDefinition);
+      (pinConstraint as unknown as { angleB: number }).angleB = body!.angle;
+      worldPinConstraints.set(entity.id, pinConstraint);
+      World.add(engine.world, pinConstraint);
+      meta = {
+        anchorWorld,
+        localPointB,
+        stateId: entity.currentStateId,
+        breakDistance,
+        breakable,
+        brokenStateId: physics!.worldPinBrokenStateId,
+      };
+      worldPinRuntimeMeta.set(entity.id, meta);
+    } else {
+      meta.localPointB = localPointB;
+      meta.stateId = entity.currentStateId;
+      meta.breakDistance = breakDistance;
+      meta.breakable = breakable;
+      meta.brokenStateId = physics!.worldPinBrokenStateId;
+      pinConstraint.pointA.x = meta.anchorWorld.x;
+      pinConstraint.pointA.y = meta.anchorWorld.y;
+      pinConstraint.pointB.x = rotatedPointB.x;
+      pinConstraint.pointB.y = rotatedPointB.y;
+      (pinConstraint as unknown as { angleB: number }).angleB = body!.angle;
+      pinConstraint.stiffness = stiffness;
+      pinConstraint.damping = damping;
+    }
   }
 
   for (const entity of entityList) {
@@ -3482,6 +3640,67 @@ export function stepMatterPhysics(params: {
         }
       } else {
         jointBreakStates.delete(entry.entity.id);
+      }
+    }
+
+    // Post-pas rupture des épingles au monde (World Pin)
+    for (const [pinEntId, meta] of Array.from(worldPinRuntimeMeta.entries())) {
+      const pinBody = bodyMap.get(pinEntId);
+      const pinConstraint = worldPinConstraints.get(pinEntId);
+      const pinEntity = liveEntities[pinEntId];
+      if (!pinBody || !pinConstraint || !pinEntity) continue;
+
+      const rotB = rotateVector(meta.localPointB.x, meta.localPointB.y, pinBody.angle);
+      const pinWorldB = {
+        x: pinBody.position.x + rotB.x,
+        y: pinBody.position.y + rotB.y,
+      };
+      const pinStretchPx = Math.hypot(
+        pinWorldB.x - meta.anchorWorld.x,
+        pinWorldB.y - meta.anchorWorld.y
+      );
+      const activeGrab = mouseGrabConstraints.get(pinEntId);
+      const cursorPullPx = activeGrab
+        ? Math.hypot(
+            activeGrab.targetWorld.x - meta.anchorWorld.x,
+            activeGrab.targetWorld.y - meta.anchorWorld.y
+          ) * 0.55
+        : 0;
+      const effectiveTensionPx = Math.max(pinStretchPx, cursorPullPx);
+      const stressRatio =
+        meta.breakable && meta.breakDistance > 0
+          ? Math.min(1, effectiveTensionPx / meta.breakDistance)
+          : 0;
+
+      if (meta.breakable && effectiveTensionPx >= meta.breakDistance) {
+        World.remove(engine.world, pinConstraint);
+        worldPinConstraints.delete(pinEntId);
+        worldPinRuntimeMeta.delete(pinEntId);
+        debugWorldPins.delete(pinEntId);
+        brokenWorldPinStateIds.set(pinEntId, meta.stateId);
+
+        brokenJointEvents.push({
+          childId: pinEntId,
+          parentId: pinEntId,
+          breakPoint: {
+            x: Math.round(pinWorldB.x * 10) / 10,
+            y: Math.round(pinWorldB.y * 10) / 10,
+          },
+          reason: 'force',
+          isWorldPin: true,
+        });
+
+        if (meta.brokenStateId && pinEntity.states[meta.brokenStateId]) {
+          stateChanges[pinEntId] = meta.brokenStateId;
+        }
+      } else {
+        debugWorldPins.set(pinEntId, {
+          anchor: { x: meta.anchorWorld.x, y: meta.anchorWorld.y },
+          current: pinWorldB,
+          breakDistance: meta.breakDistance,
+          stressRatio,
+          breakable: meta.breakable,
+        });
       }
     }
   }

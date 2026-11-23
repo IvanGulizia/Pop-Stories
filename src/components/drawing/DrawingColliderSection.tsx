@@ -90,18 +90,18 @@ export function DrawingColliderSection({
         </div>
       </div>
 
-      {/* Statut Partagé / Surcharge d'état */}
+      {/* Statut Partagé / Override d'état */}
       {isSharedColliderEntity && (
         <div className="p-2 rounded-xl bg-indigo-50/70 border border-indigo-200/80 space-y-1.5">
           {isReferenceStateForSharedCollider ? (
             <div className="text-[10px] font-bold text-indigo-800 leading-snug">
-              🔗 État de référence du collider partagé : toute modification ici s'applique aux états qui n'ont pas de surcharge.
+              🔗 État de référence du collider partagé : toute modification ici s'applique aux états qui n'ont pas d'override.
             </div>
           ) : (
             <div className="flex items-center justify-between gap-2">
               <div className="text-[10px] font-bold text-indigo-900 leading-tight">
                 {overrideCollider
-                  ? '✏️ Surcharge active pour cet état'
+                  ? '✏️ Override actif pour cet état'
                   : '🔗 Hérite du collider partagé'}
               </div>
               <button
@@ -113,14 +113,14 @@ export function DrawingColliderSection({
                     : 'bg-white text-indigo-700 border-indigo-300 hover:bg-indigo-100'
                 }`}
               >
-                {overrideCollider ? 'Surchargé ✓' : 'Surcharger'}
+                {overrideCollider ? 'Overridé ✓' : 'Créer un override'}
               </button>
             </div>
           )}
         </div>
       )}
 
-      {/* Sélecteur Mode Auto vs Manuel (masqué uniquement si héritage strict sans surcharge) */}
+      {/* Sélecteur Mode Auto vs Manuel (masqué uniquement si héritage strict sans override) */}
       {!(isSharedColliderEntity && !isReferenceStateForSharedCollider && !overrideCollider) && (
         <>
           <div className="grid grid-cols-2 p-0.5 bg-slate-100 rounded-xl gap-1">

@@ -11,7 +11,7 @@ import {
 
 /**
  * Résout les comportements effectifs d'une entité pour son état actuel
- * en fusionnant la configuration de base avec les surcharges de l'état.
+ * en fusionnant la configuration de base avec les overrides de l'état.
  */
 export function getEffectiveBehaviors(
   entity: Entity,

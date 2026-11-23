@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useDragControls, useMotionValue } from 'motion/react';
-import { Entity, EntityState, HealthBehaviorConfig, RotateDragBehaviorConfig } from '../types';
+import { Entity, EntityState, HealthBehaviorConfig, PhysicsBehaviorConfig, RotateDragBehaviorConfig } from '../types';
 import { useSceneStore } from '../store/useSceneStore';
 import {
   EntityHitTestContext,
@@ -20,6 +20,7 @@ import {
   endPhysicsGrab,
   getEffectiveBehaviors,
   getEntityRuntimeHealth,
+  hasActiveWorldPin,
   isEntityDraggable,
   notifyEntityDragLifecycle,
   notifyEntityHoverState,
@@ -853,8 +854,21 @@ export function useEntityPointerInteraction({
         }
       }
 
-      // Mode 1 : Saisie physique (contrainte Matter.js au point cliqué si precisePhysicsGrab ou enfant articulé dynamique)
-      if (canDragTarget && (liveDragInfo.precisePhysicsGrab || isDynamicAttachedChild) && pt) {
+      const effPhysicsForGrab = getEffectiveBehaviors(liveTarget, liveTargetState).find(
+        (b): b is PhysicsBehaviorConfig => b.type === 'physics'
+      );
+      const hasLiveWorldPin =
+        hasActiveWorldPin(liveTarget.id) ||
+        Boolean(
+          !isDynamicAttachedChild &&
+            effPhysicsForGrab &&
+            effPhysicsForGrab.enabled !== false &&
+            !effPhysicsForGrab.isStatic &&
+            effPhysicsForGrab.worldPinEnabled
+        );
+
+      // Mode 1 : Saisie physique (contrainte Matter.js au point cliqué si precisePhysicsGrab, enfant articulé ou World Pin actif)
+      if (canDragTarget && (liveDragInfo.precisePhysicsGrab || isDynamicAttachedChild || hasLiveWorldPin) && pt) {
         const grabOptions = liveDragInfo.precisePhysicsGrab
           ? {
               rotationMode: liveDragInfo.grabRotationMode,

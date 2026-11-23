@@ -1,5 +1,12 @@
 # Backlog & Suivi Technique (`TODO`)
 
+## Étape Intermédiaire 4 (Complétée)
+- [x] **#1 Sauvegardes** : Écrasement direct en 1 clic sans demande de confirmation dans `ProjectSlotsModal`.
+- [x] **#2 & #3 UX Overrides & Terminologie** : Carte `Parenting & Attachement` alignée sur `BehaviorManager` (bannière unifiée + surbrillance ambre) et remplacement général de « surcharge » par « override ».
+- [x] **#4 Nouveau Projet** : Désactivation automatique du mode dessin sur calque (`selectedLayerId: null` dans `clearProject`).
+- [x] **#5 Piste B — Épingle au monde cassable (`worldPin`)** : Contrainte souple Matter.js sur `PhysicsBehaviorConfig` utilisable par override d'état (fixation/résistance au drag sur parent racine, arrachement avec événement `joint_break` + état après rupture, ré-épinglage au retour et gizmos dédiés).
+- [x] **#6 Compatibilité `Jiggle` + `Joint Physique`** : Encart explicatif dans `JiggleBehaviorControls` lorsque l'entité utilise `physics_joint`.
+
 ## Vague Intermédiaire 3 (3A, 3B, 3C — Complétée)
 - [x] **3A — Correctifs & UX (`#1, #2, #3, #4, #7`)** : Flip instantané sur demi-tour `Patrol`, cascade hiérarchique Scène + `enabledScope` sur `set_entity_enabled`, overlay collider/pivot au-dessus du tracé, correction sauvegarde trait particule perso, mémorisation plié/déplié des comportements (`expandedBehaviorCards`).
 - [x] **3B — Particules & Collision Patrouille (`#5, #6, #11`)** : Direction d'émission (`angle | facing | toward_target | away_target | mouse`), émission temporisée en jet continu ou multi-salves (`particleEmitDuration`, `particleEmitRate`, `particleBurstInterval`, `particleBurstCount`), et `turnOnCollision` filtrable sur `Patrol`.

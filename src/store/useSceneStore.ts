@@ -3941,7 +3941,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       activeSceneTransition: null,
       projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
       selectedEntityId: null,
-      selectedLayerId: 'layer-bg-1',
+      selectedLayerId: null,
       activeCollisions: {},
       snapshotEntities: null,
       snapshotEntityOrder: null,

@@ -75,7 +75,7 @@ export function resolveColliderState(
   currentState?: EntityState
 ): EntityState | undefined {
   const activeState = currentState || entity.states[entity.currentStateId];
-  // Si cet état possède explicitement une surcharge de collider, il est prioritaire même en mode Collider commun
+  // Si cet état possède explicitement un override de collider, il est prioritaire même en mode Collider commun
   if (activeState?.overrideCollider) {
     return activeState;
   }

@@ -80,7 +80,6 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
   const [newSlotName, setNewSlotName] = useState('');
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
-  const [confirmingOverwriteId, setConfirmingOverwriteId] = useState<string | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [quotaAlert, setQuotaAlert] = useState<{ message: string; pending: PendingQuotaAction } | null>(null);
@@ -139,10 +138,8 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
     if (res.success) {
       setQuotaAlert(null);
       showNotice('success', res.message);
-      setConfirmingOverwriteId(null);
       refreshStats();
     } else if (res.quotaExceeded) {
-      setConfirmingOverwriteId(null);
       setQuotaAlert({
         message: res.message,
         pending: { kind: 'overwrite', slot },
@@ -599,34 +596,14 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
                       <span>Charger</span>
                     </button>
 
-                    {confirmingOverwriteId === slot.id ? (
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleOverwrite(slot)}
-                          className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs animate-in zoom-in-95 flex items-center gap-1"
-                          title="Confirmer l'écrasement de cette sauvegarde"
-                        >
-                          <Save className="w-3.5 h-3.5" />
-                          <span>Confirmer ?</span>
-                        </button>
-                        <button
-                          onClick={() => setConfirmingOverwriteId(null)}
-                          className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer"
-                          title="Annuler"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => setConfirmingOverwriteId(slot.id)}
-                        className="px-2.5 py-1.5 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 hover:border-indigo-300 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
-                        title="Écraser ce slot avec l'état actuel de votre projet"
-                      >
-                        <Save className="w-3.5 h-3.5 text-indigo-600" />
-                        <span>Écraser</span>
-                      </button>
-                    )}
+                    <button
+                      onClick={() => handleOverwrite(slot)}
+                      className="px-2.5 py-1.5 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 hover:border-indigo-300 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                      title="Écraser ce slot avec l'état actuel de votre projet"
+                    >
+                      <Save className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Écraser</span>
+                    </button>
 
                     <button
                       onClick={() => handleDuplicate(slot)}

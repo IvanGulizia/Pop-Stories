@@ -127,6 +127,12 @@ export interface PhysicsBehaviorConfig extends BaseBehaviorConfig {
   isStatic?: boolean;    // true = obstacle fixe infranchissable
   freezeRotation?: boolean; // Rigidbody2D Freeze Rotation (empêche la rotation sous les chocs)
   oneWayPlatform?: boolean; // Plateforme traversable par le bas (atterrissage uniquement par le haut)
+  worldPinEnabled?: boolean;        // Épingle souple dans le monde (résiste au drag jusqu'à rupture)
+  worldPinStiffness?: number;       // Raideur 0.05..0.95 (défaut 0.25)
+  worldPinDamping?: number;         // Amortissement 0.02..0.6 (défaut 0.15)
+  worldPinBreakable?: boolean;      // Cassable par traction/drag (défaut true)
+  worldPinBreakDistance?: number;   // Distance d'étirement avant rupture en px (défaut 60)
+  worldPinBrokenStateId?: StateId;  // État déclenché automatiquement lors de l'arrachement
 }
 
 export interface AutoDestroyBehaviorConfig extends BaseBehaviorConfig {
@@ -607,7 +613,7 @@ export interface JiggleBehaviorConfig extends BaseBehaviorConfig {
   initialAngleOffset?: number; // Angle de départ au lancement Play en degrés (défaut 0 = égal au repos)
   squashIntensity?: number;    // Déformation élastique MudBun 0..1.5 (défaut 0.25)
   collideWithWorld?: boolean; // Réagir aux impacts contre murs/sols/objets (défaut true)
-  useCustomPivot?: boolean; // Surcharger le pivot de l'entité pour ce jiggle
+  useCustomPivot?: boolean; // Overrider le pivot de l'entité pour ce jiggle
   pivotOverride?: EntityPivot;
 }
 
@@ -770,7 +776,7 @@ export interface EntityState {
   color: string;
   scale: number;
   rotation: number;
-  pivot?: EntityPivot; // Surcharge optionnelle du pivot pour cet état
+  pivot?: EntityPivot; // Override optionnel du pivot pour cet état
   folderId?: string;
   colliderType?: ColliderType;
   colliderBounds?: ColliderBounds;
@@ -783,9 +789,9 @@ export interface EntityState {
   frames?: AnimationFrame[];
   frameRate?: number;
   animationLoop?: AnimationLoopMode;
-  // Surcharges de comportements par état
+  // Overrides de comportements par état
   behaviorOverrides?: Record<string, BehaviorOverride>;
-  // Surcharge optionnelle des paramètres d'attachement / joint physique pour cet état
+  // Override optionnel des paramètres d'attachement / joint physique pour cet état
   parentOffsetOverride?: Partial<ParentOffset>;
   // Specific visual properties for drawing customization
   stemHeight?: number;

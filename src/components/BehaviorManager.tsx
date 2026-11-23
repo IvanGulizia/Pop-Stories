@@ -42,6 +42,7 @@ import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { ParticleEditorModal } from './ParticleEditorModal';
 import { InteractivePuppetControls } from './InteractivePuppetControls';
 import { invalidateCustomParticleSprite } from '../utils/particleSystem';
+import { resolveEffectiveParentOffset } from '../store/parentingHelpers';
 import {
   createDefaultBehaviorConfig,
   getBehaviorIcon,
@@ -226,6 +227,12 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
     physicsBehavior && physicsBehavior.enabled !== false && !physicsBehavior.isStatic
   );
   const hasFrozenRotation = Boolean(physicsBehavior?.freezeRotation);
+  const effParentOffset = entity.parentId
+    ? resolveEffectiveParentOffset(entity, targetState)
+    : undefined;
+  const hasPhysicsJointParent = Boolean(
+    entity.parentId && effParentOffset?.attachmentMode === 'physics_joint'
+  );
 
   const handleActivateGroundedPhysics = () => {
     if (physicsBehavior) {
@@ -485,6 +492,7 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
                     onEditStateDrawing,
                     hasGroundedPhysics,
                     hasFrozenRotation,
+                    hasPhysicsJointParent,
                     onActivateGroundedPhysics: handleActivateGroundedPhysics,
                   })}
                 </div>
@@ -717,6 +725,7 @@ function renderBehaviorControls({
   onEditStateDrawing,
   hasGroundedPhysics,
   hasFrozenRotation,
+  hasPhysicsJointParent,
   onActivateGroundedPhysics,
 }: {
   entityId: string;
@@ -738,6 +747,7 @@ function renderBehaviorControls({
   onEditStateDrawing?: (stateId: string) => void;
   hasGroundedPhysics: boolean;
   hasFrozenRotation: boolean;
+  hasPhysicsJointParent: boolean;
   onActivateGroundedPhysics: () => void;
 }) {
   const update = (partial: any) => {
@@ -765,7 +775,15 @@ function renderBehaviorControls({
         />
       );
     case 'physics':
-      return <PhysicsBehaviorControls b={{ ...behavior, ...(override || {}) } as PhysicsBehaviorConfig} update={update} />;
+      return (
+        <PhysicsBehaviorControls
+          b={{ ...behavior, ...(override || {}) } as PhysicsBehaviorConfig}
+          update={update}
+          stateList={stateList}
+          onQuickCreateState={onQuickCreateState}
+          onEditStateDrawing={onEditStateDrawing}
+        />
+      );
     case 'auto_destroy':
       return <AutoDestroyBehaviorControls b={{ ...behavior, ...(override || {}) } as AutoDestroyBehaviorConfig} update={update} />;
     case 'constant_velocity':
@@ -886,7 +904,13 @@ function renderBehaviorControls({
         />
       );
     case 'jiggle':
-      return <JiggleBehaviorControls b={{ ...behavior, ...(override || {}) } as JiggleBehaviorConfig} update={update} />;
+      return (
+        <JiggleBehaviorControls
+          b={{ ...behavior, ...(override || {}) } as JiggleBehaviorConfig}
+          update={update}
+          hasPhysicsJointParent={hasPhysicsJointParent}
+        />
+      );
     case 'stroke_wiggle':
       return <StrokeWiggleBehaviorControls b={{ ...behavior, ...(override || {}) } as StrokeWiggleBehaviorConfig} update={update} />;
     case 'slider':

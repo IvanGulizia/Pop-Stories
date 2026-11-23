@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useSceneStore, EMPTY_RECORD } from '../store/useSceneStore';
-import { Entity, EntityPivot, EntityState } from '../types';
+import { Entity, EntityPivot, EntityState, ParentOffset } from '../types';
 import {
   Sparkles,
   Plus,
@@ -23,6 +23,7 @@ import {
   Eye,
   EyeOff,
   Power,
+  Undo2,
 } from 'lucide-react';
 import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { OnionStateOption } from './DrawingCanvas';
@@ -560,8 +561,50 @@ export function Inspector() {
           inheritFlip: true,
         };
 
+        const curState = selectedEntity.states[selectedEntity.currentStateId];
+        const stateCount = Object.keys(selectedEntity.states).length;
+        const hasParentOverride = Boolean(activeParent && curState?.parentOffsetOverride);
+        const effectiveOffset: ParentOffset = hasParentOverride
+          ? {
+              ...offset,
+              ...(curState?.parentOffsetOverride || {}),
+            }
+          : offset;
+
+        const updateEffectiveParentOffset = (patch: Partial<ParentOffset>) => {
+          if (hasParentOverride && curState) {
+            updateStateProperties(selectedEntity.id, curState.id, {
+              parentOffsetOverride: {
+                ...(curState.parentOffsetOverride || {}),
+                ...patch,
+              },
+            });
+          } else {
+            updateEntityParentOffset(selectedEntity.id, patch);
+          }
+        };
+
+        const handleToggleParentOverride = () => {
+          if (!curState) return;
+          if (hasParentOverride) {
+            updateStateProperties(selectedEntity.id, curState.id, {
+              parentOffsetOverride: undefined,
+            });
+          } else {
+            updateStateProperties(selectedEntity.id, curState.id, {
+              parentOffsetOverride: { ...JSON.parse(JSON.stringify(offset)) },
+            });
+          }
+        };
+
         return (
-          <div className="space-y-2 bg-slate-50/70 p-3 rounded-2xl border border-slate-200">
+          <div
+            className={`space-y-2 p-3 rounded-2xl border transition-all ${
+              hasParentOverride
+                ? 'bg-amber-50/30 border-amber-300 ring-2 ring-amber-100/80'
+                : 'bg-slate-50/70 border-slate-200'
+            }`}
+          >
             <div
               onClick={() => setIsParentingCollapsed((v) => !v)}
               className="flex items-center justify-between gap-2 cursor-pointer select-none"
@@ -574,10 +617,23 @@ export function Inspector() {
                     <ChevronDown className="w-3.5 h-3.5" />
                   )}
                 </span>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5 truncate">
-                  <Link2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  <span>Parenting & Attachement</span>
-                </span>
+                <div className="min-w-0">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5 truncate">
+                    <Link2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span>Parenting & Attachement</span>
+                  </span>
+                  {activeParent && (
+                    <div className="text-[10px] text-slate-400 flex items-center gap-1 truncate pl-5">
+                      {hasParentOverride ? (
+                        <span className="text-amber-700 font-semibold flex items-center gap-0.5">
+                          <Sparkles className="w-2.5 h-2.5 text-amber-500" /> Override {curState?.name}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">Partagé</span>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {isParentingCollapsed && (
                   <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-600 truncate max-w-[125px]">
                     {activeParent ? `→ ${activeParent.name}` : 'Indépendant'}
@@ -619,15 +675,74 @@ export function Inspector() {
 
               {activeParent && (
                 <>
+                  {/* Bannière d'Override identique aux Composants & Physique */}
+                  {curState && (
+                    <div
+                      className={`p-2 rounded-xl flex items-center justify-between text-xs border ${
+                        hasParentOverride
+                          ? 'bg-amber-50 border-amber-300 text-amber-950 shadow-2xs'
+                          : 'bg-slate-100/80 border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {hasParentOverride ? (
+                          <>
+                            <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span className="truncate">
+                              <strong className="text-amber-950 font-bold">Override actif</strong> pour l'état{' '}
+                              <strong className="text-amber-800 underline decoration-amber-400">
+                                {curState.name}
+                              </strong>
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <Layers className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="truncate text-slate-600">Valeur partagée (tous les états)</span>
+                          </>
+                        )}
+                      </div>
+
+                      {stateCount > 1 && (
+                        <button
+                          type="button"
+                          onClick={handleToggleParentOverride}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0 ml-2 ${
+                            hasParentOverride
+                              ? 'bg-amber-200 hover:bg-amber-300 text-amber-950 border border-amber-300 shadow-2xs'
+                              : 'bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 border border-slate-300 shadow-2xs'
+                          }`}
+                          title={
+                            hasParentOverride
+                              ? `Annuler l'override pour l'état ${curState.name} (revenir au réglage partagé)`
+                              : `Créer un override spécifique pour l'état ${curState.name}`
+                          }
+                        >
+                          {hasParentOverride ? (
+                            <>
+                              <Undo2 className="w-3 h-3 text-amber-800" />
+                              <span>Annuler l'override</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3 h-3 text-indigo-500" />
+                              <span>Créer un override</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   {/* Placement interactif du point d'attache sur le canvas (7-2) */}
                   <div className="p-2 bg-sky-50/50 rounded-xl border border-sky-200 space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-bold text-slate-700 text-xs">Point d'attache sur scène</span>
-                      {offset.jointChildPivot && (
+                      {effectiveOffset.jointChildPivot && (
                         <button
                           type="button"
                           onClick={() =>
-                            updateEntityParentOffset(selectedEntity.id, {
+                            updateEffectiveParentOffset({
                               jointChildPivot: undefined,
                             })
                           }
@@ -665,9 +780,9 @@ export function Inspector() {
 
                     <div className="flex items-center justify-between text-[10px] text-slate-500">
                       <span>Vous pouvez aussi glisser le pin cyan directement sur la scène.</span>
-                      {offset.jointChildPivot && (
+                      {effectiveOffset.jointChildPivot && (
                         <span className="font-mono tabular-nums font-bold text-sky-700 bg-white border border-sky-200 px-1.5 py-0.5 rounded whitespace-nowrap shrink-0">
-                          {offset.jointChildPivot.x.toFixed(2)}, {offset.jointChildPivot.y.toFixed(2)}
+                          {effectiveOffset.jointChildPivot.x.toFixed(2)}, {effectiveOffset.jointChildPivot.y.toFixed(2)}
                         </span>
                       )}
                     </div>
@@ -677,10 +792,10 @@ export function Inspector() {
                   <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
                     <span className="font-bold text-slate-700 text-xs">Décalage relatif X</span>
                     <EditableNumericValue
-                      value={offset.x}
+                      value={effectiveOffset.x}
                       unit="px"
                       precision={1}
-                      onChange={(v) => updateEntityParentOffset(selectedEntity.id, { x: v })}
+                      onChange={(v) => updateEffectiveParentOffset({ x: v })}
                       className="bg-slate-50 hover:bg-indigo-50 border border-slate-300 rounded-lg px-2 py-1 font-mono tabular-nums font-bold text-xs text-slate-800 cursor-text"
                     />
                   </div>
@@ -689,10 +804,10 @@ export function Inspector() {
                   <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
                     <span className="font-bold text-slate-700 text-xs">Décalage relatif Y</span>
                     <EditableNumericValue
-                      value={offset.y}
+                      value={effectiveOffset.y}
                       unit="px"
                       precision={1}
-                      onChange={(v) => updateEntityParentOffset(selectedEntity.id, { y: v })}
+                      onChange={(v) => updateEffectiveParentOffset({ y: v })}
                       className="bg-slate-50 hover:bg-indigo-50 border border-slate-300 rounded-lg px-2 py-1 font-mono tabular-nums font-bold text-xs text-slate-800 cursor-text"
                     />
                   </div>
@@ -701,95 +816,20 @@ export function Inspector() {
                   <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
                     <span className="font-bold text-slate-700 text-xs">Angle relatif</span>
                     <EditableNumericValue
-                      value={offset.rotationOffset ?? 0}
+                      value={effectiveOffset.rotationOffset ?? 0}
                       unit="°"
                       precision={1}
-                      onChange={(v) =>
-                        updateEntityParentOffset(selectedEntity.id, { rotationOffset: v })
-                      }
+                      onChange={(v) => updateEffectiveParentOffset({ rotationOffset: v })}
                       className="bg-slate-50 hover:bg-indigo-50 border border-slate-300 rounded-lg px-2 py-1 font-mono tabular-nums font-bold text-xs text-slate-800 cursor-text"
                     />
                   </div>
 
-                  {/* Paramètres partagés du mode d'attache, ressort & joint */}
+                  {/* Paramètres du mode d'attache, ressort & joint (partagés ou override actif) */}
                   <ParentOffsetFieldsEditor
-                    offset={offset}
+                    offset={effectiveOffset}
                     parentName={activeParent.name}
-                    onChange={(patch) => updateEntityParentOffset(selectedEntity.id, patch)}
+                    onChange={updateEffectiveParentOffset}
                   />
-
-                  {/* Surcharge de parenting spécifique à l'état actif */}
-                  {(() => {
-                    const curState = selectedEntity.states[selectedEntity.currentStateId];
-                    if (!curState) return null;
-                    const hasParentOverride = Boolean(curState.parentOffsetOverride);
-                    const mergedStateOffset = {
-                      ...offset,
-                      ...(curState.parentOffsetOverride || {}),
-                    };
-                    return (
-                      <div className="p-2 bg-violet-50/50 rounded-xl border border-violet-200 space-y-2 mt-1.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="font-bold text-violet-950 text-xs truncate">
-                              Surcharger dans l'état « {curState.name} »
-                            </div>
-                            <div className="text-[10px] text-violet-800/75">
-                              Modifie décalage, mode d'attache ou joint uniquement quand cet état est actif
-                            </div>
-                          </div>
-                          <input
-                            type="checkbox"
-                            checked={hasParentOverride}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                updateStateProperties(selectedEntity.id, curState.id, {
-                                  parentOffsetOverride: {
-                                    attachmentMode: offset.attachmentMode || 'rigid',
-                                  },
-                                });
-                              } else {
-                                updateStateProperties(selectedEntity.id, curState.id, {
-                                  parentOffsetOverride: undefined,
-                                });
-                              }
-                            }}
-                            className="w-4 h-4 accent-violet-600 rounded cursor-pointer shrink-0"
-                          />
-                        </div>
-
-                        {hasParentOverride && (
-                          <div className="space-y-1.5 pt-1 border-t border-violet-200/70">
-                            <ParentOffsetFieldsEditor
-                              offset={mergedStateOffset}
-                              parentName={activeParent.name}
-                              showOffsets={true}
-                              compact={true}
-                              onChange={(patch) =>
-                                updateStateProperties(selectedEntity.id, curState.id, {
-                                  parentOffsetOverride: {
-                                    ...(curState.parentOffsetOverride || {}),
-                                    ...patch,
-                                  },
-                                })
-                              }
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                updateStateProperties(selectedEntity.id, curState.id, {
-                                  parentOffsetOverride: undefined,
-                                })
-                              }
-                              className="w-full py-1 px-2 text-[10px] font-bold text-slate-600 hover:text-rose-700 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                            >
-                              <RotateCcw className="w-3 h-3" /> Réinitialiser la surcharge de cet état
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
                 </>
               )}
             </div>

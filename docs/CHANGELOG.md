@@ -1,3 +1,18 @@
+## [Phase 10.46 — Étape Intermédiaire 4] - 2026-11-22
+### Ajouté & Amélioré (Ergonomie Sauvegarde/Overrides, Nouveau Projet, Épingle au monde cassable & Info Jiggle)
+- **Ergonomie Sauvegarde & Nouveau Projet (`#1`, `#4`)** :
+  - `ProjectSlotsModal.tsx` : L'action **Écraser** met désormais à jour le slot sélectionné en un seul clic sans étape de confirmation intermédiaire (confirmation maintenue sur **Supprimer**).
+  - `useSceneStore.ts` : `clearProject()` initialise `selectedLayerId: null` pour quitter automatiquement le mode dessin sur calque lors de la création d'un nouveau projet.
+- **UX Override Parenting & Terminologie (`#2`, `#3`)** :
+  - `Inspector.tsx` : Alignement visuel et fonctionnel de l'override `parentOffsetOverride` sur le modèle exact des composants (`BehaviorManager.tsx`) avec bannière *Valeur partagée (tous les états)* / *Override actif pour l'état*, encadrement ambre et formulaire unique partagé/overridé.
+  - `Inspector.tsx`, `DrawingColliderSection.tsx`, `DrawingPivotSection.tsx`, `HitboxColliderCard.tsx` : Remplacement de « Surcharge / Surcharger / Surchargé » par « Override / Créer un override / Overridé ».
+- **Épingle au monde cassable (`worldPin`) — Piste B (`#5`)** :
+  - `types/index.ts`, `PhysicsAndCoreBehaviorControls.tsx`, `matterPhysicsEngine.ts`, `useEntityPointerInteraction.ts`, `Scene.tsx`, `SceneGizmoOverlay.tsx` : Ajout sur `PhysicsBehaviorConfig` des paramètres `worldPinEnabled`, `worldPinStiffness`, `worldPinDamping`, `worldPinBreakable`, `worldPinBreakDistance` et `worldPinBrokenStateId`.
+  - Maintien souple à l'ancre du pivot monde (compatible parent racine & overrides d'état), activation automatique du grab physique Matter.js (`hasActiveWorldPin`) lors du drag, gizmos de contrainte/tension en Édition & Play, arrachement déclenchant `joint_break` (sans détacher le parent) + changement d'état optionnel, et ré-épinglage propre au retour dans un état épinglé.
+- **Compatibilité `Jiggle` + `Joint Physique` (`#6`)** :
+  - `BehaviorManager.tsx`, `JiggleBehaviorControls.tsx` : Affichage d'un message contextuel dès qu'une entité parentée en `physics_joint` utilise `Jiggle`.
+- **Tests Vitest (`src/__tests__/intermediateStep4.test.ts`)** : Couverture `clearProject`, `parentOffsetOverride` et cycle complet du `worldPin` (résistance, rupture, transition, ré-épinglage).
+
 ## [Phase 10.45 — Vague Intermédiaire 3] - 2026-11-22
 ### Ajouté & Corrigé (UX, Particules directionnelles/temporisées, Collision Patrouille & Snap 2.0)
 - **Correctifs & UX (3A : `#1, #2, #3, #4, #7`)** :

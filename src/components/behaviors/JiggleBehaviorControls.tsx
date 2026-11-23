@@ -1,5 +1,5 @@
 import React from 'react';
-import { Crosshair, RotateCcw } from 'lucide-react';
+import { AlertTriangle, Crosshair, RotateCcw } from 'lucide-react';
 import { EntityPivot, JiggleBehaviorConfig } from '../../types';
 import { DEFAULT_PIVOT, sanitizePivot } from '../../utils/physics/pivotHelpers';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
@@ -19,9 +19,11 @@ const PIVOT_PRESETS: { label: string; x: number; y: number }[] = [
 export function JiggleBehaviorControls({
   b,
   update,
+  hasPhysicsJointParent = false,
 }: {
   b: JiggleBehaviorConfig;
   update: (partial: any) => void;
+  hasPhysicsJointParent?: boolean;
 }) {
   const stiffness = b.stiffness ?? 180;
   const damping = b.damping ?? 9;
@@ -37,6 +39,18 @@ export function JiggleBehaviorControls({
 
   return (
     <div className="space-y-1.5">
+      {hasPhysicsJointParent && (
+        <div className="p-2 bg-amber-50/90 rounded-xl border border-amber-300 flex items-start gap-2 text-[10px] text-amber-950 leading-snug">
+          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-bold block">Compatibilité Joint Physique + Jiggle :</span>
+            <span>
+              Votre entité utilise déjà un <strong>Joint Physique</strong> (pivot et collisions réelles Matter.js).{' '}
+              <strong>Jiggle</strong> ajoute par-dessus un rebond/squash purement visuel : gardez les deux pour un effet cartoon, ou désactivez Jiggle si la rotation oscille trop.
+            </span>
+          </div>
+        </div>
+      )}
       {/* Raideur angulaire */}
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
@@ -237,7 +251,7 @@ export function JiggleBehaviorControls({
         />
       </div>
 
-      {/* Surcharge de pivot dédiée au Jiggle */}
+      {/* Override de pivot dédié au Jiggle */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
