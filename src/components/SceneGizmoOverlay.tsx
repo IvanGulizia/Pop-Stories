@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { EMPTY_LIST, useSceneStore } from '../store/useSceneStore';
 import {
   ConstantVelocityBehaviorConfig,
+  DrivenAnimationBehaviorConfig,
   Entity,
   FleeBehaviorConfig,
   FollowBehaviorConfig,
@@ -182,6 +183,7 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
   const showPhysicsVectors = isGizmoCategoryVisible(settings, 'physicsVectors', isPlayMode);
   const showSpringsAndJiggle = isGizmoCategoryVisible(settings, 'springsAndJiggle', isPlayMode);
   const showSliders = isGizmoCategoryVisible(settings, 'sliders', isPlayMode);
+  const showDrivenAnim = isGizmoCategoryVisible(settings, 'drivenAnim', isPlayMode);
 
   const anyVisible =
     showHitboxes ||
@@ -192,7 +194,8 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
     showAiZones ||
     showPhysicsVectors ||
     showSpringsAndJiggle ||
-    showSliders;
+    showSliders ||
+    showDrivenAnim;
 
   // Rafraîchissement fluide en Mode Play pour cibles souris / orbites / zones IA / ressorts & sliders
   const [, setTick] = useState(0);
@@ -200,7 +203,12 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
     if (
       !isPlayMode ||
       !anyVisible ||
-      (!showLookAt && !showAiZones && !showPuppetZones && !showSpringsAndJiggle && !showSliders)
+      (!showLookAt &&
+        !showAiZones &&
+        !showPuppetZones &&
+        !showSpringsAndJiggle &&
+        !showSliders &&
+        !showDrivenAnim)
     ) {
       return;
     }
@@ -2540,6 +2548,121 @@ export function SceneGizmoOverlay({ mousePosRef }: SceneGizmoOverlayProps) {
                   </text>
                 </g>
               )}
+            </g>
+          );
+        })}
+
+      {/* 10. ANIMATIONS PILOTÉES (LIENS CAUSAUX KITTY) */}
+      {showDrivenAnim &&
+        targetEntities.map((entity) => {
+          const currentState = entity.states[entity.currentStateId];
+          const effective = getEffectiveBehaviors(entity, currentState);
+          const driven = effective.find((b) => b.type === 'driven_animation') as
+            | DrivenAnimationBehaviorConfig
+            | undefined;
+          if (!driven) return null;
+
+          const center = getEntityCenter(entity);
+          const rtLink = runtimeDebug?.drivenAnimLinks?.[entity.id];
+          let targetPt: Position | null = rtLink?.targetPoint || null;
+          if (!targetPt && driven.targetType === 'entity' && driven.targetEntityId && entities[driven.targetEntityId]) {
+            targetPt = getEntityCenter(entities[driven.targetEntityId]);
+          } else if (!targetPt && driven.targetType === 'mouse' && liveMousePos) {
+            targetPt = liveMousePos;
+          }
+
+          const frameCount = currentState?.frames?.length ?? 0;
+          const pct = rtLink ? Math.round(rtLink.progress * 100) : 0;
+          const badgeText = rtLink
+            ? frameCount > 1
+              ? `F${rtLink.frameIndex + 1}/${frameCount} · ${pct}%`
+              : `${pct}%`
+            : `${driven.progressionMode === 'irreversible' ? 'Cliquet' : 'Live'} · ${driven.sourceType}`;
+
+          let curvePath = '';
+          if (targetPt) {
+            const mx = (targetPt.x + center.x) / 2;
+            const my = (targetPt.y + center.y) / 2 - Math.min(45, Math.hypot(center.x - targetPt.x, center.y - targetPt.y) * 0.25);
+            curvePath = `M ${targetPt.x} ${targetPt.y} Q ${mx} ${my} ${center.x} ${center.y}`;
+          }
+
+          return (
+            <g key={`gizmo-driven-${entity.id}`}>
+              {driven.sourceType === 'proximity' && (
+                <>
+                  <circle
+                    cx={center.x}
+                    cy={center.y}
+                    r={Math.max(4, driven.proximityDistanceStart ?? 260)}
+                    fill="none"
+                    stroke="#8b5cf6"
+                    strokeWidth="1.2"
+                    strokeDasharray="5 4"
+                    strokeOpacity={0.55}
+                  />
+                  <circle
+                    cx={center.x}
+                    cy={center.y}
+                    r={Math.max(4, driven.proximityDistanceEnd ?? 50)}
+                    fill="rgba(139, 92, 246, 0.08)"
+                    stroke="#7c3aed"
+                    strokeWidth="1.5"
+                    strokeDasharray="3 3"
+                  />
+                </>
+              )}
+
+              {targetPt && curvePath && (
+                <>
+                  <path
+                    d={curvePath}
+                    fill="none"
+                    stroke={driven.progressionMode === 'irreversible' ? '#d97706' : '#7c3aed'}
+                    strokeWidth="2"
+                    strokeDasharray="6 4"
+                    strokeOpacity={0.85}
+                  />
+                  <circle
+                    cx={targetPt.x}
+                    cy={targetPt.y}
+                    r={4.5}
+                    fill={driven.progressionMode === 'irreversible' ? '#d97706' : '#7c3aed'}
+                    stroke="#ffffff"
+                    strokeWidth="1.5"
+                  />
+                  <circle
+                    cx={center.x}
+                    cy={center.y}
+                    r={4.5}
+                    fill="#ffffff"
+                    stroke={driven.progressionMode === 'irreversible' ? '#d97706' : '#7c3aed'}
+                    strokeWidth="2"
+                  />
+                </>
+              )}
+
+              <g transform={`translate(${center.x}, ${entity.position.y - 14})`}>
+                <rect
+                  x={-52}
+                  y={-10}
+                  width={104}
+                  height={14}
+                  rx={4}
+                  fill={driven.progressionMode === 'irreversible' ? '#b45309' : '#6d28d9'}
+                  fillOpacity={0.92}
+                />
+                <text
+                  x={0}
+                  y={0}
+                  textAnchor="middle"
+                  fill="#ffffff"
+                  fontSize="8.5"
+                  fontFamily="monospace"
+                  fontWeight="700"
+                >
+                  {badgeText}
+                </text>
+              </g>
             </g>
           );
         })}

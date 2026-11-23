@@ -17,6 +17,7 @@ import {
 import {
   applyEntityImpulseAction,
   applyEntityMoveAction,
+  controlEntityAnimationRuntime,
   getActiveDragPositions,
   getEffectiveBehaviors,
   queueEntityInitialVelocity,
@@ -63,6 +64,17 @@ export interface RuleEngineStoreSnapshot {
   setEntityParent: (childId: EntityId, parentId: EntityId | null, customOffset?: ParentOffset) => void;
   detachEntity: (childId: EntityId) => void;
   updateEntityPosition: (id: EntityId, position: Position) => void;
+  batchUpdateEntityTransforms?: (
+    updates: Record<
+      EntityId,
+      {
+        runtimeAnimFrameIndex?: number | null;
+        runtimeAnimScale?: number;
+        runtimeAnimRotation?: number;
+        runtimeAnimOpacity?: number;
+      }
+    >
+  ) => void;
   changeSceneInPlay: (targetSceneId: string, transition?: SceneTransitionType, duration?: number) => void;
 }
 
@@ -1180,6 +1192,22 @@ export function executeAction(act: RuleAction, helpers: RuleActionExecutionHelpe
           physicsCfg?.isStatic === true
         );
       }
+    } else if (act.type === 'control_animation') {
+      const animBridge = getBridgeState();
+      const latestEntity = animBridge?.entities?.[entity.id] || entity;
+      const animRes = controlEntityAnimationRuntime({
+        entity: latestEntity,
+        mode: act.animControlMode || 'step_frame',
+        frameNumber: act.animFrameNumber,
+        stepDelta: act.animStepDelta,
+        progressPercent: act.animProgressPercent,
+        loop: act.animLoopOnStep,
+      });
+      animBridge?.batchUpdateEntityTransforms?.({
+        [entity.id]: {
+          runtimeAnimFrameIndex: animRes.frameIndex,
+        },
+      });
     } else if (act.type === 'delete_entity') {
       helpers.deleteEntity(entity.id);
     }

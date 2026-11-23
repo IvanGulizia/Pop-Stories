@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Activity,
   ArrowRight,
+  Clapperboard,
   Clock,
   Compass,
   Gamepad2,
@@ -332,6 +333,22 @@ export function AddBehaviorModal({ isOpen, onClose, onAddBehavior }: AddBehavior
             <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
               Effets Visuels & Particules
             </span>
+            <button
+              type="button"
+              onClick={() => onAddBehavior('driven_animation')}
+              className="w-full p-2.5 rounded-2xl border border-violet-200 bg-violet-50/20 hover:border-violet-400 hover:bg-violet-50/60 flex items-center gap-3 transition-all text-left cursor-pointer group"
+            >
+              <div className="w-8 h-8 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Clapperboard className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="font-bold text-slate-800 text-xs">Animation Pilotée (Variable / Proximité / Contact)</div>
+                <div className="text-[11px] text-slate-500">
+                  Pilote les frames Flipbook ou l’échelle selon une variable, proximité ou passage collider (réversible ou irréversible).
+                </div>
+              </div>
+            </button>
+
             <button
               type="button"
               onClick={() => onAddBehavior('stroke_wiggle')}

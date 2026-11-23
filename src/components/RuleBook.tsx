@@ -313,6 +313,8 @@ export function RuleBook() {
         ? 'choose_snap_to'
         : act.type === 'unsnap'
         ? 'choose_unsnap'
+        : act.type === 'control_animation'
+        ? 'choose_control_animation'
         : act.type === 'move_entity'
         ? 'choose_move_entity'
         : act.type === 'apply_impulse'
@@ -462,6 +464,11 @@ export function RuleBook() {
       unsnapImpulseSpeed: act.unsnapImpulseSpeed,
       unsnapImpulseAngle: act.unsnapImpulseAngle,
       unsnapCooldownSec: act.unsnapCooldownSec,
+      animControlMode: act.animControlMode,
+      animFrameNumber: act.animFrameNumber,
+      animStepDelta: act.animStepDelta,
+      animProgressPercent: act.animProgressPercent,
+      animLoopOnStep: act.animLoopOnStep,
     });
   };
 
@@ -2389,6 +2396,19 @@ export function RuleBook() {
                               (act.unsnapImpulseSpeed || 0) > 0
                                 ? `Éjecter ${Math.round(act.unsnapImpulseSpeed!)}px/s`
                                 : 'Libérer aimant';
+                          } else if (act.type === 'control_animation') {
+                            actionBadge = 'Animation (Frames)';
+                            const mode = act.animControlMode || 'step_frame';
+                            actionDetail =
+                              mode === 'set_frame'
+                                ? `Aller à la Frame ${Math.max(1, Math.round(act.animFrameNumber ?? 1))}`
+                                : mode === 'set_progress'
+                                ? `Fixer à ${Math.round(act.animProgressPercent ?? 50)}%`
+                                : mode === 'reset'
+                                ? 'Réinitialiser à 0%'
+                                : `Avancer de ${(act.animStepDelta ?? 1) >= 0 ? '+' : ''}${Math.round(
+                                    act.animStepDelta ?? 1
+                                  )} frame${act.animLoopOnStep ? ' (loop)' : ''}`;
                           } else if (act.type === 'move_entity') {
                             actionBadge = 'Déplacer';
                             const dist = act.moveDistance ?? 40;
@@ -2541,6 +2561,8 @@ export function RuleBook() {
                               ? 'choose_snap_to'
                               : act.type === 'unsnap'
                               ? 'choose_unsnap'
+                              : act.type === 'control_animation'
+                              ? 'choose_control_animation'
                               : act.type === 'move_entity'
                               ? 'choose_move_entity'
                               : act.type === 'apply_impulse'
@@ -2743,6 +2765,10 @@ export function RuleBook() {
                                 ) : act.type === 'unsnap' ? (
                                   <div className="w-14 h-14 rounded-2xl bg-cyan-50 border border-cyan-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
                                     🔓
+                                  </div>
+                                ) : act.type === 'control_animation' ? (
+                                  <div className="w-14 h-14 rounded-2xl bg-violet-50 border border-violet-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">
+                                    🎞️
                                   </div>
                                 ) : act.type === 'move_entity' ? (
                                   <div className="w-14 h-14 rounded-2xl bg-sky-50 border border-sky-200 flex items-center justify-center text-2xl shadow-2xs group-hover:scale-105 transition-transform">

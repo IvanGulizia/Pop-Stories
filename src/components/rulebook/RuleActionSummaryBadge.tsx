@@ -500,6 +500,49 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
       </div>
     );
   }
+  if (act.type === 'control_animation') {
+    const targetLabel =
+      act.targetMode === 'subject'
+        ? 'Sujet'
+        : act.targetMode === 'target'
+        ? 'Cible'
+        : act.targetMode === 'last_spawned'
+        ? 'Dernier créé'
+        : act.targetMode === 'instance' && act.targetId
+        ? entities[act.targetId]?.name || 'Entité'
+        : act.targetMode === 'tag' && act.targetTag
+        ? `#${act.targetTag}`
+        : getEntityObj(act.targetType)?.name || 'Objet';
+    const mode = act.animControlMode || 'step_frame';
+    const modeTxt =
+      mode === 'set_frame'
+        ? `Frame ${Math.max(1, Math.round(act.animFrameNumber ?? 1))}`
+        : mode === 'set_progress'
+        ? `${Math.round(act.animProgressPercent ?? 50)}%`
+        : mode === 'reset'
+        ? 'Reset 0%'
+        : `${(act.animStepDelta ?? 1) >= 0 ? '+' : ''}${Math.round(act.animStepDelta ?? 1)} frame${
+            act.animLoopOnStep ? ' (loop)' : ''
+          }`;
+    return (
+      <div
+        role={canJump ? 'button' : undefined}
+        tabIndex={canJump ? 0 : undefined}
+        onClick={canJump ? (e) => jumpSub(e, 'choose_control_animation') : undefined}
+        className={`flex items-center gap-1.5 font-bold text-slate-800 bg-white border border-slate-200/90 rounded-xl px-2 py-1 shadow-2xs shrink-0 ${
+          canJump ? 'hover:border-violet-400 hover:bg-violet-50/40 cursor-pointer transition-colors' : ''
+        }`}
+      >
+        <div className="w-5 h-5 rounded-md bg-violet-100 text-violet-700 flex items-center justify-center text-[10px] shrink-0 font-black">
+          🎞️
+        </div>
+        <span className="text-xs truncate">{targetLabel}</span>
+        <span className="text-[10px] text-violet-700 bg-violet-50 px-1.5 py-0.2 rounded font-medium truncate">
+          ({modeTxt})
+        </span>
+      </div>
+    );
+  }
   if (act.type === 'move_entity') {
     const targetLabel =
       act.targetMode === 'subject'

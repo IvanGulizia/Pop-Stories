@@ -534,6 +534,10 @@ interface SceneState {
         runtimeScaleX?: number;
         runtimeScaleY?: number;
         runtimePivot?: EntityPivot | null;
+        runtimeAnimFrameIndex?: number | null;
+        runtimeAnimScale?: number;
+        runtimeAnimRotation?: number;
+        runtimeAnimOpacity?: number;
       }
     >
   ) => void;
@@ -2917,6 +2921,36 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           modified = true;
         }
 
+        const hasAnimFrameChange =
+          transform.runtimeAnimFrameIndex !== undefined &&
+          ((transform.runtimeAnimFrameIndex === null && entity.runtimeAnimFrameIndex !== undefined) ||
+            (transform.runtimeAnimFrameIndex !== null &&
+              entity.runtimeAnimFrameIndex !== transform.runtimeAnimFrameIndex));
+        if (hasAnimFrameChange) {
+          modified = true;
+        }
+
+        if (
+          transform.runtimeAnimScale !== undefined &&
+          (entity.runtimeAnimScale ?? 1) !== transform.runtimeAnimScale
+        ) {
+          modified = true;
+        }
+
+        if (
+          transform.runtimeAnimRotation !== undefined &&
+          (entity.runtimeAnimRotation ?? 0) !== transform.runtimeAnimRotation
+        ) {
+          modified = true;
+        }
+
+        if (
+          transform.runtimeAnimOpacity !== undefined &&
+          (entity.runtimeAnimOpacity ?? 1) !== transform.runtimeAnimOpacity
+        ) {
+          modified = true;
+        }
+
         if (modified) {
           hasChanges = true;
           const updatedEnt: Entity = {
@@ -2933,9 +2967,22 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
             ...(transform.runtimePivot && transform.runtimePivot !== null
               ? { runtimePivot: transform.runtimePivot }
               : {}),
+            ...(transform.runtimeAnimFrameIndex !== undefined && transform.runtimeAnimFrameIndex !== null
+              ? { runtimeAnimFrameIndex: transform.runtimeAnimFrameIndex }
+              : {}),
+            ...(transform.runtimeAnimScale !== undefined ? { runtimeAnimScale: transform.runtimeAnimScale } : {}),
+            ...(transform.runtimeAnimRotation !== undefined
+              ? { runtimeAnimRotation: transform.runtimeAnimRotation }
+              : {}),
+            ...(transform.runtimeAnimOpacity !== undefined
+              ? { runtimeAnimOpacity: transform.runtimeAnimOpacity }
+              : {}),
           };
           if (transform.runtimePivot === null) {
             delete updatedEnt.runtimePivot;
+          }
+          if (transform.runtimeAnimFrameIndex === null) {
+            delete updatedEnt.runtimeAnimFrameIndex;
           }
           nextEntities[id] = updatedEnt;
         }

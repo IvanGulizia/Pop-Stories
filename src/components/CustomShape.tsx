@@ -57,9 +57,11 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
   const stateFrames = currentState?.frames;
   const hasFlipbook = Boolean(stateFrames && stateFrames.length > 1);
 
+  const hasDrivenFrame = appMode === 'play' && entity.runtimeAnimFrameIndex !== undefined;
+
   useEffect(() => {
     setAnimFrameIndex(0);
-    if (appMode !== 'play' || !stateFrames || stateFrames.length <= 1) return;
+    if (appMode !== 'play' || !stateFrames || stateFrames.length <= 1 || hasDrivenFrame) return;
 
     const total = stateFrames.length;
     const fps = Math.max(1, Math.min(24, currentState.frameRate || 8));
@@ -90,11 +92,12 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
     }, Math.max(35, Math.round(1000 / fps)));
 
     return () => window.clearInterval(timer);
-  }, [appMode, currentState.id, stateFrames?.length, currentState.frameRate, currentState.animationLoop]);
+  }, [appMode, currentState.id, stateFrames?.length, currentState.frameRate, currentState.animationLoop, hasDrivenFrame]);
 
+  const effectiveFrameIdx = hasDrivenFrame ? (entity.runtimeAnimFrameIndex as number) : animFrameIndex;
   const activeAnimFrame =
     appMode === 'play' && hasFlipbook && stateFrames
-      ? stateFrames[Math.max(0, Math.min(animFrameIndex, stateFrames.length - 1))]
+      ? stateFrames[Math.max(0, Math.min(effectiveFrameIdx, stateFrames.length - 1))]
       : undefined;
   const activeVectorPaths = activeAnimFrame?.vectorPaths || currentState?.vectorPaths;
   const activeDrawingLayers =
@@ -176,11 +179,15 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
 
   const effPivot = resolveEffectivePivot(entity, currentState);
   const baseScale = currentState.scale ?? 1;
-  const runtimeScaleX = appMode === 'play' ? (entity.runtimeScaleX ?? 1) : 1;
-  const runtimeScaleY = appMode === 'play' ? (entity.runtimeScaleY ?? 1) : 1;
+  const animScaleMult = appMode === 'play' ? (entity.runtimeAnimScale ?? 1) : 1;
+  const runtimeScaleX = (appMode === 'play' ? (entity.runtimeScaleX ?? 1) : 1) * animScaleMult;
+  const runtimeScaleY = (appMode === 'play' ? (entity.runtimeScaleY ?? 1) : 1) * animScaleMult;
+  const runtimeOpacity = appMode === 'play' ? (entity.runtimeAnimOpacity ?? 1) : 1;
   const totalRotation =
     (currentState.rotation ?? 0) +
-    (appMode === 'play' ? (entity.runtimeTilt || 0) + (entity.runtimeJiggleAngle || 0) : 0);
+    (appMode === 'play'
+      ? (entity.runtimeTilt || 0) + (entity.runtimeJiggleAngle || 0) + (entity.runtimeAnimRotation || 0)
+      : 0);
 
   return (
     <motion.div
@@ -195,6 +202,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
         transformOrigin: `${effPivot.x * 100}% ${effPivot.y * 100}%`,
         zIndex: isSelected && appMode !== 'play' ? 30 : undefined,
         pointerEvents: 'none',
+        opacity: runtimeOpacity,
         ...style,
       }}
       drag={appMode === 'play' && hasSlider ? false : canDrag}

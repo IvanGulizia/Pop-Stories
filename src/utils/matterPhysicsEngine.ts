@@ -31,6 +31,7 @@ import {
   GrabRotationMode,
   SceneLayer,
   SceneTransitionType,
+  DrivenAnimationBehaviorConfig,
 } from '../types';
 import { getEntityColliderBounds, getEntityWorldColliderBounds, resolveColliderState } from './collider';
 import {
@@ -129,6 +130,12 @@ import {
   shouldIgnoreOneWayCollision,
 } from '../store/collisionHelpers';
 import { resolveEffectiveParentOffset } from '../store/parentingHelpers';
+import {
+  DrivenAnimationRuntimeState,
+  createInitialDrivenAnimationRuntime,
+  stepDrivenAnimationEntity,
+  applyManualAnimationControl,
+} from './physics/drivenAnimationSolver';
 
 export { getEffectiveBehaviors, isEntityDraggable };
 
@@ -491,6 +498,12 @@ const debugSnapMagnets = new Map<
     approaching: boolean;
   }
 >();
+const drivenAnimationStates = new Map<string, DrivenAnimationRuntimeState>();
+const prevDrivenPositions = new Map<string, Position>();
+const debugDrivenAnimLinks = new Map<
+  string,
+  { targetPoint: Position | null; progress: number; frameIndex: number; frameCount: number; sourceType: string }
+>();
 
 export function startRotateDragGrab(params: {
   entityId: string;
@@ -676,6 +689,47 @@ export function unsnapEntityRuntime(
     wasSnapped,
     previousTargetId,
     wasParented,
+  };
+}
+
+/**
+ * Pilote manuellement la frame ou progression d'une entité depuis une action RuleBook (`control_animation`).
+ */
+export function controlEntityAnimationRuntime(params: {
+  entity: Entity;
+  mode: 'set_frame' | 'step_frame' | 'set_progress' | 'reset';
+  frameNumber?: number;
+  stepDelta?: number;
+  progressPercent?: number;
+  loop?: boolean;
+}): { frameIndex: number; progress01: number } {
+  const { entity, mode, frameNumber, stepDelta, progressPercent, loop } = params;
+  const curState = entity.states[entity.currentStateId];
+  const frameCount = curState?.frames?.length ?? 0;
+  const effBehaviors = getEffectiveBehaviors(entity, curState);
+  const hasDrivenBehavior = effBehaviors.some(
+    (b) => b.type === 'driven_animation' && b.enabled !== false
+  );
+  const prevRt =
+    drivenAnimationStates.get(entity.id) ||
+    createInitialDrivenAnimationRuntime(entity.currentStateId);
+
+  const res = applyManualAnimationControl({
+    runtime: prevRt,
+    currentStateId: entity.currentStateId,
+    frameCount,
+    hasDrivenBehavior,
+    mode,
+    frameNumber,
+    stepDelta,
+    progressPercent,
+    loop,
+    currentDisplayedFrame: entity.runtimeAnimFrameIndex ?? 0,
+  });
+  drivenAnimationStates.set(entity.id, res.nextRuntime);
+  return {
+    frameIndex: res.frameIndex,
+    progress01: res.progress01,
   };
 }
 
@@ -898,6 +952,10 @@ export function getGizmoRuntimeDebugData(): {
       approaching: boolean;
     }
   >;
+  drivenAnimLinks: Record<
+    string,
+    { targetPoint: Position | null; progress: number; frameIndex: number; frameCount: number; sourceType: string }
+  >;
 } {
   const wanderOrigins: Record<string, { origin: Position; targetPoint: Position | null }> = {};
   wanderingStates.forEach((v, k) => {
@@ -976,6 +1034,13 @@ export function getGizmoRuntimeDebugData(): {
   debugWorldPins.forEach((v, k) => {
     worldPins[k] = v;
   });
+  const drivenAnimLinks: Record<
+    string,
+    { targetPoint: Position | null; progress: number; frameIndex: number; frameCount: number; sourceType: string }
+  > = {};
+  debugDrivenAnimLinks.forEach((v, k) => {
+    drivenAnimLinks[k] = v;
+  });
   return {
     wanderOrigins,
     patrolOrigins,
@@ -989,6 +1054,7 @@ export function getGizmoRuntimeDebugData(): {
     rotateDragTracks,
     snapLinks,
     snapMagnets,
+    drivenAnimLinks,
   };
 }
 
@@ -1172,6 +1238,9 @@ export function resetMatterPhysicsRuntime() {
   justReleasedDragIds.clear();
   debugSnapLinks.clear();
   debugSnapMagnets.clear();
+  drivenAnimationStates.clear();
+  prevDrivenPositions.clear();
+  debugDrivenAnimLinks.clear();
   nextNegativeGroupId = -100;
 }
 
@@ -1369,6 +1438,10 @@ export interface PhysicsTickResult {
       runtimeScaleX?: number;
       runtimeScaleY?: number;
       runtimePivot?: EntityPivot | null;
+      runtimeAnimFrameIndex?: number | null;
+      runtimeAnimScale?: number;
+      runtimeAnimRotation?: number;
+      runtimeAnimOpacity?: number;
     }
   >;
   entitiesToDestroy?: string[];
@@ -1723,6 +1796,9 @@ function ensurePhysicsWorld(
       justReleasedDragIds.delete(id);
       debugSnapLinks.delete(id);
       debugSnapMagnets.delete(id);
+      drivenAnimationStates.delete(id);
+      prevDrivenPositions.delete(id);
+      debugDrivenAnimLinks.delete(id);
     }
   }
 
@@ -2045,8 +2121,17 @@ export function stepMatterPhysics(params: {
   viewportRect?: { x: number; y: number; width: number; height: number };
   mousePos?: { x: number; y: number } | null;
   colliderLayers?: SceneLayer[];
+  gameVariables?: Record<string, number>;
 }): PhysicsTickResult {
-  const { entities, deltaTime, canvasBounds, viewportRect, mousePos, colliderLayers = [] } = params;
+  const {
+    entities,
+    deltaTime,
+    canvasBounds,
+    viewportRect,
+    mousePos,
+    colliderLayers = [],
+    gameVariables = {},
+  } = params;
   setLatestMouseWorldPos(mousePos ?? null);
   const dt = Math.min(deltaTime, 0.05);
 
@@ -2109,6 +2194,7 @@ export function stepMatterPhysics(params: {
   debugRotateDragTracks.clear();
   debugSnapLinks.clear();
   debugSnapMagnets.clear();
+  debugDrivenAnimLinks.clear();
 
   // Pré-calcul des rectangles solides pour la détection du vide (Patrouille & Errance)
   const solidRectsForLedge: Array<{ id: string; x: number; y: number; width: number; height: number }> = [];
@@ -5710,6 +5796,286 @@ export function stepMatterPhysics(params: {
           }
         }
       }
+    }
+
+    // Cas 4b : Animation Pilotée façon Kitty / Draco (Variable, Proximité, Collision, Vitesse, Santé)
+    const drivenBeh = effectiveBehaviors.find((b) => b.type === 'driven_animation') as
+      | DrivenAnimationBehaviorConfig
+      | undefined;
+    const curFrameCount = currentState?.frames?.length ?? 0;
+    const existingDrivenRt = drivenAnimationStates.get(entity.id);
+
+    if (drivenBeh && drivenBeh.enabled !== false) {
+      const rtState =
+        existingDrivenRt || createInitialDrivenAnimationRuntime(entity.currentStateId);
+      const liveSelf = snapLiveEntities[entity.id] || entity;
+      const selfCenterX = liveSelf.position.x + liveSelf.size.width / 2;
+      const selfCenterY = liveSelf.position.y + liveSelf.size.height / 2;
+
+      let proximityDistance: number | null = null;
+      let linkTargetPt: Position | null = null;
+
+      if (drivenBeh.sourceType === 'proximity') {
+        const tgtType = drivenBeh.targetType || 'mouse';
+        if (tgtType === 'any') {
+          let bestDist = Infinity;
+          for (const other of Object.values(snapLiveEntities)) {
+            if (!other || other.disabled || other.id === entity.id) continue;
+            const ocx = other.position.x + other.size.width / 2;
+            const ocy = other.position.y + other.size.height / 2;
+            const d = Math.hypot(ocx - selfCenterX, ocy - selfCenterY);
+            if (d < bestDist) {
+              bestDist = d;
+              linkTargetPt = { x: ocx, y: ocy };
+            }
+          }
+          if (bestDist < Infinity) proximityDistance = bestDist;
+        } else {
+          const normalizedProxTgt: 'mouse' | 'entity' | 'nearest_type' | 'nearest_tag' =
+            tgtType === 'type'
+              ? 'nearest_type'
+              : tgtType === 'tag'
+              ? 'nearest_tag'
+              : (tgtType as 'mouse' | 'entity' | 'nearest_type' | 'nearest_tag');
+          const pt = resolveTargetWorldPoint(
+            entity.id,
+            selfCenterX,
+            selfCenterY,
+            normalizedProxTgt,
+            drivenBeh.targetEntityId,
+            drivenBeh.targetEntityType,
+            drivenBeh.targetTag,
+            snapLiveEntities,
+            mousePos
+          );
+          if (pt) {
+            linkTargetPt = pt;
+            proximityDistance = Math.hypot(pt.x - selfCenterX, pt.y - selfCenterY);
+          }
+        }
+      }
+
+      let isTouchingTarget = false;
+      if (drivenBeh.sourceType === 'collision_step' || drivenBeh.sourceType === 'collision_hold') {
+        const ignoreSensors = drivenBeh.collisionIgnoreSensors === true;
+        const rawTgtType = drivenBeh.targetType || 'any';
+        const tgtType =
+          rawTgtType === 'nearest_type'
+            ? 'type'
+            : rawTgtType === 'nearest_tag'
+            ? 'tag'
+            : rawTgtType;
+        const cleanTag = (drivenBeh.targetTag || '').trim().replace(/^#/, '').toLowerCase();
+        const bSelf = getEntityWorldColliderBounds(liveSelf);
+
+        for (const other of Object.values(snapLiveEntities)) {
+          if (!other || other.disabled || other.id === entity.id) continue;
+          if (other.colliderMode === 'disabled') continue;
+          if (ignoreSensors) {
+            const otherBody = bodyMap.get(other.id);
+            if (other.colliderMode === 'trigger_only' || otherBody?.isSensor) continue;
+          }
+          if (tgtType === 'entity' && other.id !== drivenBeh.targetEntityId) continue;
+          if (tgtType === 'type' && other.type !== drivenBeh.targetEntityType) continue;
+          if (tgtType === 'tag') {
+            if (!cleanTag) continue;
+            const hasTag = (other.tags || []).some(
+              (t) => t.trim().replace(/^#/, '').toLowerCase() === cleanTag
+            );
+            if (!hasTag) continue;
+          }
+
+          let touching =
+            activePhysicsCollisionPairs.has(`${entity.id}:::${other.id}`) ||
+            activePhysicsCollisionPairs.has(`${other.id}:::${entity.id}`);
+          if (!touching) {
+            const bOther = getEntityWorldColliderBounds(other);
+            const tol = 2;
+            if (bSelf.colliderType === 'circle' && bOther.colliderType === 'circle') {
+              const rSum = bSelf.radius + bOther.radius + tol;
+              touching =
+                Math.hypot(bSelf.centerX - bOther.centerX, bSelf.centerY - bOther.centerY) <= rSum;
+            } else if (bSelf.colliderType === 'circle' && bOther.colliderType !== 'circle') {
+              const cx = Math.max(bOther.x, Math.min(bSelf.centerX, bOther.x + bOther.width));
+              const cy = Math.max(bOther.y, Math.min(bSelf.centerY, bOther.y + bOther.height));
+              touching = Math.hypot(bSelf.centerX - cx, bSelf.centerY - cy) <= bSelf.radius + tol;
+            } else if (bSelf.colliderType !== 'circle' && bOther.colliderType === 'circle') {
+              const cx = Math.max(bSelf.x, Math.min(bOther.centerX, bSelf.x + bSelf.width));
+              const cy = Math.max(bSelf.y, Math.min(bOther.centerY, bSelf.y + bSelf.height));
+              touching = Math.hypot(bOther.centerX - cx, bOther.centerY - cy) <= bOther.radius + tol;
+            } else {
+              touching =
+                bSelf.x <= bOther.x + bOther.width + tol &&
+                bSelf.x + bSelf.width + tol >= bOther.x &&
+                bSelf.y <= bOther.y + bOther.height + tol &&
+                bSelf.y + bSelf.height + tol >= bOther.y;
+            }
+          }
+          if (touching) {
+            isTouchingTarget = true;
+            linkTargetPt = {
+              x: other.position.x + other.size.width / 2,
+              y: other.position.y + other.size.height / 2,
+            };
+            break;
+          }
+        }
+        if (!linkTargetPt && tgtType === 'entity' && drivenBeh.targetEntityId && snapLiveEntities[drivenBeh.targetEntityId]) {
+          const te = snapLiveEntities[drivenBeh.targetEntityId];
+          linkTargetPt = { x: te.position.x + te.size.width / 2, y: te.position.y + te.size.height / 2 };
+        }
+      }
+
+      const prevP = prevDrivenPositions.get(entity.id);
+      prevDrivenPositions.set(entity.id, { x: liveSelf.position.x, y: liveSelf.position.y });
+      let speedPxPerSec = 0;
+      if (body && !body.isStatic && !activeDragPositions[entity.id]) {
+        speedPxPerSec = Math.hypot(body.velocity.x * 60, body.velocity.y * 60);
+      } else if (prevP && dt > 0) {
+        speedPxPerSec = Math.hypot(liveSelf.position.x - prevP.x, liveSelf.position.y - prevP.y) / dt;
+      }
+
+      const hRt = healthRuntimeMap.get(entity.id);
+      const healthRatio = hRt && hRt.maxHp > 0 ? hRt.hp / hRt.maxHp : 1;
+
+      const cleanInputVar = (drivenBeh.variableName || '').trim();
+      const variableValue = cleanInputVar ? (gameVariables[cleanInputVar] ?? 0) : 0;
+
+      const stepOut = stepDrivenAnimationEntity({
+        config: drivenBeh,
+        runtime: rtState,
+        currentStateId: entity.currentStateId,
+        frameCount: curFrameCount,
+        dt,
+        inputs: {
+          proximityDistance,
+          variableValue,
+          isTouchingTarget,
+          speedPxPerSec,
+          healthRatio,
+        },
+      });
+      drivenAnimationStates.set(entity.id, stepOut.nextRuntime);
+
+      debugDrivenAnimLinks.set(entity.id, {
+        targetPoint: linkTargetPt,
+        progress: stepOut.effectiveProgress,
+        frameIndex: stepOut.frameIndex ?? 0,
+        frameCount: curFrameCount,
+        sourceType: drivenBeh.sourceType,
+      });
+
+      const patchTarget = updatedTransforms[entity.id] || {};
+      let hasAnimPatch = false;
+      if (stepOut.frameIndex !== undefined && curFrameCount > 1) {
+        if (entity.runtimeAnimFrameIndex !== stepOut.frameIndex) {
+          patchTarget.runtimeAnimFrameIndex = stepOut.frameIndex;
+          hasAnimPatch = true;
+        }
+      } else if (entity.runtimeAnimFrameIndex !== undefined) {
+        patchTarget.runtimeAnimFrameIndex = null;
+        hasAnimPatch = true;
+      }
+
+      if (stepOut.visualScale !== undefined) {
+        if (Math.abs((entity.runtimeAnimScale ?? 1) - stepOut.visualScale) > 0.002) {
+          patchTarget.runtimeAnimScale = stepOut.visualScale;
+          hasAnimPatch = true;
+        }
+      } else if ((entity.runtimeAnimScale ?? 1) !== 1) {
+        patchTarget.runtimeAnimScale = 1;
+        hasAnimPatch = true;
+      }
+
+      if (stepOut.visualRotation !== undefined) {
+        if (Math.abs((entity.runtimeAnimRotation ?? 0) - stepOut.visualRotation) > 0.08) {
+          patchTarget.runtimeAnimRotation = stepOut.visualRotation;
+          hasAnimPatch = true;
+        }
+      } else if ((entity.runtimeAnimRotation ?? 0) !== 0) {
+        patchTarget.runtimeAnimRotation = 0;
+        hasAnimPatch = true;
+      }
+
+      if (stepOut.visualOpacity !== undefined) {
+        if (Math.abs((entity.runtimeAnimOpacity ?? 1) - stepOut.visualOpacity) > 0.005) {
+          patchTarget.runtimeAnimOpacity = stepOut.visualOpacity;
+          hasAnimPatch = true;
+        }
+      } else if ((entity.runtimeAnimOpacity ?? 1) !== 1) {
+        patchTarget.runtimeAnimOpacity = 1;
+        hasAnimPatch = true;
+      }
+
+      if (hasAnimPatch) {
+        updatedTransforms[entity.id] = patchTarget;
+      }
+
+      const outVar = (drivenBeh.outputVariableName || '').trim();
+      if (outVar) {
+        const outMode = drivenBeh.outputVariableMode || 'percent';
+        let nextVarVal = Math.round(stepOut.effectiveProgress * 1000) / 10;
+        if (outMode === 'normalized') {
+          nextVarVal = Math.round(stepOut.effectiveProgress * 1000) / 1000;
+        } else if (outMode === 'frame_number') {
+          nextVarVal = (stepOut.frameIndex ?? 0) + 1;
+        }
+        if (gameVariables[outVar] !== nextVarVal) {
+          variableUpdates[outVar] = nextVarVal;
+        }
+      }
+
+      const outFrameVar = (drivenBeh.outputFrameVariableName || '').trim();
+      if (outFrameVar) {
+        const nextFrameNum = (stepOut.frameIndex ?? 0) + 1;
+        if (gameVariables[outFrameVar] !== nextFrameNum) {
+          variableUpdates[outFrameVar] = nextFrameNum;
+        }
+      }
+
+      if (stepOut.completedJustNow) {
+        if (drivenBeh.destroyOnComplete) {
+          entitiesToDestroy.push(entity.id);
+        } else if (
+          drivenBeh.triggerStateOnCompleteId &&
+          entity.states[drivenBeh.triggerStateOnCompleteId] &&
+          !stateChanges[entity.id]
+        ) {
+          stateChanges[entity.id] = drivenBeh.triggerStateOnCompleteId;
+        }
+      }
+    } else if (existingDrivenRt && existingDrivenRt.manualPinnedFrame !== null) {
+      if (existingDrivenRt.lastStateId !== entity.currentStateId) {
+        existingDrivenRt.lastStateId = entity.currentStateId;
+        existingDrivenRt.manualPinnedFrame = null;
+        if (entity.runtimeAnimFrameIndex !== undefined) {
+          updatedTransforms[entity.id] = {
+            ...(updatedTransforms[entity.id] || {}),
+            runtimeAnimFrameIndex: null,
+          };
+        }
+      } else if (curFrameCount > 1) {
+        const pinned = Math.max(0, Math.min(curFrameCount - 1, existingDrivenRt.manualPinnedFrame));
+        if (entity.runtimeAnimFrameIndex !== pinned) {
+          updatedTransforms[entity.id] = {
+            ...(updatedTransforms[entity.id] || {}),
+            runtimeAnimFrameIndex: pinned,
+          };
+        }
+      }
+    } else if (
+      entity.runtimeAnimFrameIndex !== undefined ||
+      (entity.runtimeAnimScale ?? 1) !== 1 ||
+      (entity.runtimeAnimRotation ?? 0) !== 0 ||
+      (entity.runtimeAnimOpacity ?? 1) !== 1
+    ) {
+      updatedTransforms[entity.id] = {
+        ...(updatedTransforms[entity.id] || {}),
+        ...(entity.runtimeAnimFrameIndex !== undefined ? { runtimeAnimFrameIndex: null } : {}),
+        ...((entity.runtimeAnimScale ?? 1) !== 1 ? { runtimeAnimScale: 1 } : {}),
+        ...((entity.runtimeAnimRotation ?? 0) !== 0 ? { runtimeAnimRotation: 0 } : {}),
+        ...((entity.runtimeAnimOpacity ?? 1) !== 1 ? { runtimeAnimOpacity: 1 } : {}),
+      };
     }
 
     const lockStateByDeath = Boolean(

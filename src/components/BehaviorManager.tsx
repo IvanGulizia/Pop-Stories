@@ -17,6 +17,7 @@ import {
   ConstantVelocityBehaviorConfig,
   CustomParticlePreset,
   DraggableBehaviorConfig,
+  DrivenAnimationBehaviorConfig,
   Entity,
   EntityBehavior,
   EntityState,
@@ -69,6 +70,7 @@ import { JiggleBehaviorControls } from './behaviors/JiggleBehaviorControls';
 import { SliderBehaviorControls } from './behaviors/SliderBehaviorControls';
 import { RotateDragBehaviorControls } from './behaviors/RotateDragBehaviorControls';
 import { SnapBehaviorControls } from './behaviors/SnapBehaviorControls';
+import { DrivenAnimationBehaviorControls } from './behaviors/DrivenAnimationBehaviorControls';
 import {
   HealthBehaviorControls,
   LookAtBehaviorControls,
@@ -925,6 +927,19 @@ function renderBehaviorControls({
           entityId={entityId}
           behaviorId={behavior.id}
           stateId={stateId}
+          targetEntityOptions={targetEntityOptions}
+          entityTypeOptions={entityTypeOptions}
+          availableTags={availableTags}
+          stateList={stateList}
+          onQuickCreateState={onQuickCreateState}
+          onEditStateDrawing={onEditStateDrawing}
+        />
+      );
+    case 'driven_animation':
+      return (
+        <DrivenAnimationBehaviorControls
+          b={{ ...behavior, ...(override || {}) } as DrivenAnimationBehaviorConfig}
+          update={update}
           targetEntityOptions={targetEntityOptions}
           entityTypeOptions={entityTypeOptions}
           availableTags={availableTags}

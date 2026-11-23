@@ -109,3 +109,10 @@
 - **Orientation pressentie (Solution 2) :** Modèle *Prefab partagé par défaut* avec possibilité de *surcharge locale à 1 niveau* sur une instance précise, tout en gardant l'UX suffisamment légère pour ne jamais mélanger surcharge d'instance et surcharge d'état.
 - **Décision :** Conserver le comportement actuel (entités éditées indépendamment + duplication indépendante dans la galerie) jusqu'à conception dédiée de l'UX Prefab/Instance.
 
+## ADR-016 : Animation Pilotée Parametric-First (`drivenAnimationSolver`) & Action Compagnon `control_animation`
+- **Date :** 2026-11-23
+- **Contexte :** Permettre d'animer une entité directement selon une grandeur continue ou des passages discrets (proximité, variable, vitesse, santé, collision par étape type presse à jus ou maintien), tout en restant compatible avec les futurs calques/keyframes (ADR-006) et sans obliger à dupliquer 4 états visuels dans le `RuleBook`.
+- **Décisions :**
+  - **Solveur pur isolé (`drivenAnimationSolver.ts`) + Runtime `runtimeAnimFrameIndex` / `runtimeAnimScale|Rotation|Opacity`** : Tout calcul de progression `[0..1]`, de cliquet irréversible, de courbe et d'interpolation reste purement fonctionnel ; en Play, `CustomShape` suspend son `setInterval` FPS interne dès que `runtimeAnimFrameIndex !== undefined`, tandis que le mode Édition et les flipbooks classiques restent strictement inchangés.
+  - **Détection de collision analytique en repli (`getEntityWorldColliderBounds`)** : Les entités `Draggable` sans composant `Physics` ne génèrent pas de paires de collision Matter.js ; `stepMatterPhysics` vérifie donc les paires physiques puis complète par test géométrique AABB/cercle afin qu'un objet glissé à la souris déclenche immédiatement `collision_step` / `collision_hold` contre un capteur `trigger_only`.
+  - **Compagnon RuleBook `control_animation`** : Fournir un contrôle impératif unifié (`set_frame`, `step_frame`, `set_progress`, `reset`) via `controlEntityAnimationRuntime` et mise à jour immédiate du store dans `ruleExecutionEngine.ts`, utilisable autant sur les animations pilotées que sur les flipbooks ordinaires.

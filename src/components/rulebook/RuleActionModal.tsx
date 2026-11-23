@@ -32,6 +32,7 @@ import { AttachParentConfigEditor } from './AttachParentConfigEditor';
 import { ApplyImpulseConfigEditor } from './ApplyImpulseConfigEditor';
 import { SetEntityEnabledConfigEditor } from './SetEntityEnabledConfigEditor';
 import { SnapActionConfigEditor } from './SnapActionConfigEditor';
+import { ControlAnimationConfigEditor } from './ControlAnimationConfigEditor';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 import { useSceneStore, EMPTY_RECORD, EMPTY_LIST } from '../../store/useSceneStore';
 import { ParticleActionOriginSection } from '../particles/ParticleActionOriginSection';
@@ -352,6 +353,35 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                       </div>
                     </button>
 
+                    {/* 5b. Contrôler l'animation du Sujet */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveModal({
+                          ...activeModal,
+                          subStep: 'choose_control_animation',
+                          targetMode: 'subject',
+                          animControlMode: activeModal.animControlMode || 'step_frame',
+                          animStepDelta: activeModal.animStepDelta ?? 1,
+                          animFrameNumber: activeModal.animFrameNumber ?? 1,
+                          animProgressPercent: activeModal.animProgressPercent ?? 50,
+                        })
+                      }
+                      className="w-full p-3.5 bg-white hover:bg-violet-50/70 border-2 border-slate-200 hover:border-violet-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                        🎞️
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-violet-700 truncate">
+                          Contrôler l&apos;animation (Frames)
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Avancer, choisir une frame ou réinitialiser « {modalSubjectName} »
+                        </div>
+                      </div>
+                    </button>
+
                     {/* 6. Détruire le Sujet */}
                     <button
                       type="button"
@@ -535,6 +565,35 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                           </div>
                           <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                             Désactiver temporairement « {modalTargetName} »
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* 4b. Contrôler l'animation de la Cible */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveModal({
+                            ...activeModal,
+                            subStep: 'choose_control_animation',
+                            targetMode: 'target',
+                            animControlMode: activeModal.animControlMode || 'step_frame',
+                            animStepDelta: activeModal.animStepDelta ?? 1,
+                            animFrameNumber: activeModal.animFrameNumber ?? 1,
+                            animProgressPercent: activeModal.animProgressPercent ?? 50,
+                          })
+                        }
+                        className="w-full p-3.5 bg-white hover:bg-violet-50/70 border-2 border-slate-200 hover:border-violet-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                      >
+                        <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                          🎞️
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-black text-slate-900 group-hover:text-violet-700 truncate">
+                            Contrôler l&apos;animation de la Cible
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                            Avancer, choisir une frame ou reset « {modalTargetName} »
                           </div>
                         </div>
                       </button>
@@ -1048,6 +1107,36 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Libérer d&apos;une aimantation avec impulsion optionnelle
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* 13. Contrôler une animation (Frames / Cliquet) */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveModal({
+                          ...activeModal,
+                          subStep: 'choose_control_animation',
+                          targetMode: isGlobal ? 'instance' : 'subject',
+                          targetId: activeModal.targetId || Object.keys(entities)[0] || '',
+                          animControlMode: activeModal.animControlMode || 'step_frame',
+                          animStepDelta: activeModal.animStepDelta ?? 1,
+                          animFrameNumber: activeModal.animFrameNumber ?? 1,
+                          animProgressPercent: activeModal.animProgressPercent ?? 50,
+                        })
+                      }
+                      className="w-full p-3.5 bg-white hover:bg-violet-50/70 border-2 border-slate-200 hover:border-violet-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                        🎞️
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-violet-700 truncate">
+                          Contrôler une animation (Frames)
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Sauter à une frame, avancer (+1) ou réinitialiser
                         </div>
                       </div>
                     </button>
@@ -2452,6 +2541,22 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
         {(activeModal.subStep === 'choose_snap_to' || activeModal.subStep === 'choose_unsnap') && (
           <SnapActionConfigEditor
             mode={activeModal.subStep === 'choose_unsnap' ? 'unsnap' : 'snap_to'}
+            draft={activeModal}
+            onPatch={(patch) => setActiveModal({ ...activeModal, ...patch })}
+            onConfirm={(actionData) => applyAction(actionData)}
+            isRelational={isCollision}
+            isGlobal={isGlobal}
+            subjectType={subjectType}
+            targetType={targetType}
+            entities={entities}
+            availableEntityOptions={availableEntityOptions}
+            allProjectTags={allProjectTags}
+          />
+        )}
+
+        {/* Modal Action : Contrôler l'animation (Frames / Cliquet) */}
+        {activeModal.subStep === 'choose_control_animation' && (
+          <ControlAnimationConfigEditor
             draft={activeModal}
             onPatch={(patch) => setActiveModal({ ...activeModal, ...patch })}
             onConfirm={(actionData) => applyAction(actionData)}

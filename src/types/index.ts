@@ -107,7 +107,8 @@ export type BehaviorType =
   | 'stroke_wiggle'
   | 'slider'
   | 'rotate_drag'
-  | 'snap';
+  | 'snap'
+  | 'driven_animation';
 
 export interface BaseBehaviorConfig {
   id: string;
@@ -595,7 +596,8 @@ export type EntityBehavior =
   | StrokeWiggleBehaviorConfig
   | SliderBehaviorConfig
   | RotateDragBehaviorConfig
-  | SnapBehaviorConfig;
+  | SnapBehaviorConfig
+  | DrivenAnimationBehaviorConfig;
 
 export interface EntityPivot {
   x: number; // normalisé 0..1 (0.5 = centre horizontal)
@@ -750,6 +752,60 @@ export interface SnapBehaviorConfig extends BaseBehaviorConfig {
   unsnappedStateId?: StateId;
 }
 
+export type DrivenAnimationSourceType =
+  | 'proximity'
+  | 'variable'
+  | 'collision_step'
+  | 'collision_hold'
+  | 'speed'
+  | 'health';
+
+export type DrivenAnimationProgressionMode = 'reversible' | 'irreversible';
+export type DrivenAnimationCurve = 'linear' | 'ease_in' | 'ease_out' | 'ease_in_out';
+export type DrivenAnimationEndBehavior = 'clamp' | 'loop' | 'ping_pong';
+
+export interface DrivenAnimationBehaviorConfig extends BaseBehaviorConfig {
+  type: 'driven_animation';
+  sourceType: DrivenAnimationSourceType;
+  targetType?: 'mouse' | 'entity' | 'type' | 'tag' | 'nearest_type' | 'nearest_tag' | 'any';
+  targetEntityId?: EntityId;
+  targetEntityType?: EntityType;
+  targetTag?: string;
+  proximityDistanceStart?: number;
+  proximityDistanceEnd?: number;
+  collisionRequireExit?: boolean;
+  collisionCooldownSec?: number;
+  collisionStepMode?: 'one_frame' | 'custom_percent';
+  collisionStepPercent?: number;
+  collisionHoldRatePerSec?: number;
+  collisionIgnoreSensors?: boolean;
+  variableName?: string;
+  variableMin?: number;
+  variableMax?: number;
+  speedMin?: number;
+  speedMax?: number;
+  invertHealth?: boolean;
+  progressionMode: DrivenAnimationProgressionMode;
+  smoothing?: number;
+  curve?: DrivenAnimationCurve;
+  invertOutput?: boolean;
+  endBehavior?: DrivenAnimationEndBehavior;
+  resetOnStateChange?: boolean;
+  driveFlipbook?: boolean;
+  driveVisualTransform?: boolean;
+  scaleStart?: number;
+  scaleEnd?: number;
+  rotationStart?: number;
+  rotationEnd?: number;
+  opacityStart?: number;
+  opacityEnd?: number;
+  outputVariableName?: string;
+  outputVariableMode?: 'percent' | 'normalized' | 'frame_number';
+  outputFrameVariableName?: string;
+  triggerStateOnCompleteId?: StateId;
+  destroyOnComplete?: boolean;
+}
+
 export type BehaviorOverride = {
   enabled?: boolean;
   type?: BehaviorType;
@@ -873,6 +929,10 @@ export interface Entity {
   runtimeScaleX?: number;      // Squash & stretch horizontal transitoire en mode Play
   runtimeScaleY?: number;      // Squash & stretch vertical transitoire en mode Play
   runtimePivot?: EntityPivot;  // Pivot effectif temporaire (ex: jiggle pivotOverride) en mode Play
+  runtimeAnimFrameIndex?: number; // Index frame Flipbook piloté par Animation Pilotée / RuleBook en Play
+  runtimeAnimScale?: number;      // Multiplicateur d'échelle animé par Animation Pilotée en Play
+  runtimeAnimRotation?: number;   // Rotation additive (°) animée par Animation Pilotée en Play
+  runtimeAnimOpacity?: number;    // Opacité (0..1) animée par Animation Pilotée en Play
 }
 
 export type TriggerType =
@@ -1045,7 +1105,8 @@ export type ActionType =
   | 'change_scene'
   | 'camera_action'
   | 'snap_to'
-  | 'unsnap';
+  | 'unsnap'
+  | 'control_animation';
 
 export type SpawnLocationMode =
   | 'at_subject'
@@ -1298,6 +1359,13 @@ export interface RuleAction {
   unsnapImpulseSpeed?: number;
   unsnapImpulseAngle?: number;
   unsnapCooldownSec?: number;
+
+  // Champs pour 'control_animation' (Piloter l'animation / frame Flipbook)
+  animControlMode?: 'set_frame' | 'step_frame' | 'set_progress' | 'reset';
+  animFrameNumber?: number;
+  animStepDelta?: number;
+  animProgressPercent?: number;
+  animLoopOnStep?: boolean;
 }
 
 export interface DynamicRule {
@@ -1345,7 +1413,8 @@ export type GizmoCategoryId =
   | 'aiZones'
   | 'physicsVectors'
   | 'springsAndJiggle'
-  | 'sliders';
+  | 'sliders'
+  | 'drivenAnim';
 
 export interface GizmoSettings {
   masterEnabled: boolean;

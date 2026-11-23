@@ -13,6 +13,7 @@ export const DEFAULT_GIZMO_SETTINGS: GizmoSettings = {
     physicsVectors: 'edit',
     springsAndJiggle: 'edit',
     sliders: 'edit',
+    drivenAnim: 'edit',
   },
 };
 
@@ -88,6 +89,13 @@ export const GIZMO_CATEGORY_LIST: GizmoCategoryMeta[] = [
     colorClass: 'text-sky-700',
     dotColor: '#0ea5e9',
   },
+  {
+    id: 'drivenAnim',
+    label: 'Animations Pilotées (Liens Kitty)',
+    description: 'Liens causaux entre sources (cible, proximité, collider) et entités animées',
+    colorClass: 'text-violet-700',
+    dotColor: '#7c3aed',
+  },
 ];
 
 export function resolveGizmoSettings(settings?: AppSettings): GizmoSettings {
@@ -108,6 +116,7 @@ export function resolveGizmoSettings(settings?: AppSettings): GizmoSettings {
       physicsVectors: raw?.categories?.physicsVectors ?? DEFAULT_GIZMO_SETTINGS.categories.physicsVectors,
       springsAndJiggle: raw?.categories?.springsAndJiggle ?? DEFAULT_GIZMO_SETTINGS.categories.springsAndJiggle,
       sliders: raw?.categories?.sliders ?? DEFAULT_GIZMO_SETTINGS.categories.sliders,
+      drivenAnim: raw?.categories?.drivenAnim ?? DEFAULT_GIZMO_SETTINGS.categories.drivenAnim,
     },
   };
 }

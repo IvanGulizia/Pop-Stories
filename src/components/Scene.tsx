@@ -388,6 +388,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
           viewportRect: liveViewportRect,
           mousePos: mousePosRef.current,
           colliderLayers: activeColliderLayers,
+          gameVariables: stateSnapshot.gameVariables,
         });
 
         if (Object.keys(result.updatedTransforms).length > 0) {

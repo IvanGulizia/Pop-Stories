@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Activity,
   ArrowRight,
+  Clapperboard,
   Clock,
   Compass,
   Gamepad2,
@@ -24,6 +25,7 @@ import {
   BoundaryBehaviorConfig,
   ConstantVelocityBehaviorConfig,
   DraggableBehaviorConfig,
+  DrivenAnimationBehaviorConfig,
   Entity,
   EntityBehavior,
   FleeBehaviorConfig,
@@ -356,6 +358,42 @@ export function createDefaultBehaviorConfig(type: BehaviorType, entity: Entity):
         unsnapDistance: 72,
         reSnapCooldownSec: 0.35,
       } as SnapBehaviorConfig;
+    case 'driven_animation':
+      return {
+        id: generateBehaviorId('driven_animation'),
+        type: 'driven_animation',
+        enabled: true,
+        sourceType: 'proximity',
+        targetType: 'mouse',
+        proximityDistanceStart: 260,
+        proximityDistanceEnd: 50,
+        collisionRequireExit: true,
+        collisionCooldownSec: 0.25,
+        collisionStepMode: 'one_frame',
+        collisionStepPercent: 25,
+        collisionHoldRatePerSec: 50,
+        collisionIgnoreSensors: false,
+        variableName: '',
+        variableMin: 0,
+        variableMax: 100,
+        speedMin: 0,
+        speedMax: 300,
+        invertHealth: true,
+        progressionMode: 'reversible',
+        smoothing: 0,
+        curve: 'linear',
+        invertOutput: false,
+        endBehavior: 'clamp',
+        resetOnStateChange: false,
+        driveFlipbook: true,
+        driveVisualTransform: false,
+        scaleStart: 1,
+        scaleEnd: 1,
+        rotationStart: 0,
+        rotationEnd: 0,
+        opacityStart: 1,
+        opacityEnd: 1,
+      } as DrivenAnimationBehaviorConfig;
   }
 }
 
@@ -401,6 +439,8 @@ export function getBehaviorIcon(type: BehaviorType): React.ReactNode {
       return <RotateCw className="w-4 h-4 text-amber-600" />;
     case 'snap':
       return <Magnet className="w-4 h-4 text-cyan-600" />;
+    case 'driven_animation':
+      return <Clapperboard className="w-4 h-4 text-violet-600" />;
   }
 }
 
@@ -446,5 +486,7 @@ export function getBehaviorTitle(type: BehaviorType): string {
       return 'Cadran Rotatif au Drag (Volant)';
     case 'snap':
       return 'Aimant & Snap (Collage sur cible)';
+    case 'driven_animation':
+      return 'Animation Pilotée (Variable / Proximité / Contact)';
   }
 }

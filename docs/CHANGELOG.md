@@ -1,3 +1,13 @@
+## [Phase 10.47 — Animation Pilotée façon Kitty / Draco] - 2026-11-23
+### Ajouté & Amélioré (Comportement `driven_animation`, Gizmos Causaux & Action RuleBook `control_animation`)
+- **Comportement `driven_animation` (`drivenAnimationSolver.ts`, `matterPhysicsEngine.ts`, `DrivenAnimationBehaviorControls.tsx`, `CustomShape.tsx`, `Apple.tsx`, `Plant.tsx`)** :
+  - Liaison directe entre une source d'entrée (`proximity`, `variable`, `collision_step`, `collision_hold`, `speed`, `health`) et les frames d'un état (`EntityState.frames`) et/ou des transformations visuelles (`scale`, `rotation`, `opacity` même sur un dessin à 1 frame).
+  - Modes `reversible` (scrubbing fluide avec lissage `smoothing`) et `irreversible` (cliquet conservant l'état avancé, idéal pour objets transformés par passages successifs dans un capteur `trigger_only`, même sans composant `Physics`).
+  - Courbes (`linear`, `ease_in`, `ease_out`, `ease_in_out`), comportements en bout de course (`clamp`, `loop`, `ping_pong`), export vers `gameVariables` (`outputVariableName`, `outputFrameVariableName`), et déclenchement en fin (`triggerStateOnCompleteId`, `destroyOnComplete`).
+- **Liens Causaux Kitty (`SceneGizmoOverlay.tsx`, `gizmoHelpers.ts`)** : Catégorie dédiée `drivenAnim` dessinant arcs de causalité, cercles de portée `proximity` et pastilles `F# / % / Cliquet`.
+- **Compagnon RuleBook `control_animation` (`ControlAnimationConfigEditor.tsx`, `ruleExecutionEngine.ts`, `RuleActionModal.tsx`, `WizardStep3Actions.tsx`, `RuleActionSummaryBadge.tsx`, `RuleBook.tsx`)** : Action directe `set_frame`, `step_frame` (+ boucle), `set_progress` et `reset` applicable aussi bien aux entités `driven_animation` qu'aux flipbooks classiques.
+- **Tests Vitest (`src/__tests__/drivenAnimation.test.ts`)** : 9 nouveaux tests unitaires et d'intégration couvrant solveur pur, physique sans corps (Draggable sur capteur), variables, gizmos et `control_animation` (161 tests au total).
+
 ## [Phase 10.46 — Étape Intermédiaire 4] - 2026-11-22
 ### Ajouté & Amélioré (Ergonomie Sauvegarde/Overrides, Nouveau Projet, Épingle au monde cassable & Info Jiggle)
 - **Ergonomie Sauvegarde & Nouveau Projet (`#1`, `#4`)** :

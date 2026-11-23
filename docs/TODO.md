@@ -1,5 +1,10 @@
 # Backlog & Suivi Technique (`TODO`)
 
+## Étape Intermédiaire 5 — Animation Pilotée façon Kitty / Draco (Complétée)
+- [x] **Comportement `driven_animation` (`drivenAnimationSolver.ts`)** : 6 sources (`proximity`, `variable`, `collision_step`, `collision_hold`, `speed`, `health`), modes `reversible` vs `irreversible` (cliquet), courbes, `clamp | loop | ping_pong`, transformations visuelles (`driveVisualTransform`), sorties vers `gameVariables` et événements de fin (`triggerStateOnCompleteId`, `destroyOnComplete`).
+- [x] **Gizmos Liens Causaux (`drivenAnim`)** : Courbes source → cible, anneaux de portée et badges d'avancement dans `SceneGizmoOverlay` + réglage dans `SettingsPanel` / `gizmoHelpers`.
+- [x] **Compagnon RuleBook `control_animation`** : Contrôle direct des frames (`set_frame`, `step_frame`, `set_progress`, `reset`) dans `ControlAnimationConfigEditor`, modales/assistant `RuleBook` et `ruleExecutionEngine`.
+
 ## Étape Intermédiaire 4 (Complétée)
 - [x] **#1 Sauvegardes** : Écrasement direct en 1 clic sans demande de confirmation dans `ProjectSlotsModal`.
 - [x] **#2 & #3 UX Overrides & Terminologie** : Carte `Parenting & Attachement` alignée sur `BehaviorManager` (bannière unifiée + surbrillance ambre) et remplacement général de « surcharge » par « override ».

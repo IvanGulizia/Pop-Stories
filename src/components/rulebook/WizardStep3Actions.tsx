@@ -31,6 +31,7 @@ import { AttachParentConfigEditor } from './AttachParentConfigEditor';
 import { ApplyImpulseConfigEditor } from './ApplyImpulseConfigEditor';
 import { SetEntityEnabledConfigEditor } from './SetEntityEnabledConfigEditor';
 import { SnapActionConfigEditor } from './SnapActionConfigEditor';
+import { ControlAnimationConfigEditor } from './ControlAnimationConfigEditor';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 import { useSceneStore, EMPTY_RECORD, EMPTY_LIST } from '../../store/useSceneStore';
 import { ParticleActionOriginSection } from '../particles/ParticleActionOriginSection';
@@ -292,6 +293,35 @@ export function WizardStep3Actions({
                         </div>
                       </button>
 
+                      {/* 5b. Contrôler l'animation du Sujet */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveWizard({
+                            ...activeWizard,
+                            actionSubStep: 'control_animation_picker',
+                            actionTargetMode: 'subject',
+                            animControlMode: activeWizard.animControlMode || 'step_frame',
+                            animStepDelta: activeWizard.animStepDelta ?? 1,
+                            animFrameNumber: activeWizard.animFrameNumber ?? 1,
+                            animProgressPercent: activeWizard.animProgressPercent ?? 50,
+                          });
+                        }}
+                        className="w-full p-3.5 bg-white hover:bg-violet-50/70 border-2 border-slate-200 hover:border-violet-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                      >
+                        <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                          🎞️
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-black text-slate-900 group-hover:text-violet-700 truncate">
+                            Contrôler l&apos;animation (Frames)
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                            Avancer, choisir une frame ou reset « {wizardSubjectName} »
+                          </div>
+                        </div>
+                      </button>
+
                       {/* 6. Détruire le Sujet */}
                       <button
                         type="button"
@@ -457,6 +487,35 @@ export function WizardStep3Actions({
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Faire apparaître / disparaître temporairement →
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveWizard({
+                          ...activeWizard,
+                          actionSubStep: 'control_animation_picker',
+                          actionTargetMode: 'instance',
+                          actionTargetId: Object.keys(entities)[0] || '',
+                          animControlMode: activeWizard.animControlMode || 'step_frame',
+                          animStepDelta: activeWizard.animStepDelta ?? 1,
+                          animFrameNumber: activeWizard.animFrameNumber ?? 1,
+                          animProgressPercent: activeWizard.animProgressPercent ?? 50,
+                        })
+                      }
+                      className="w-full p-3.5 bg-white hover:bg-violet-50/70 border-2 border-slate-200 hover:border-violet-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-lg shrink-0">
+                        🎞️
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-violet-700 truncate">
+                          Contrôler l&apos;animation d&apos;un objet
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Sauter à une frame, avancer ou réinitialiser →
                         </div>
                       </div>
                     </button>
@@ -629,6 +688,35 @@ export function WizardStep3Actions({
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Désactiver temporairement « {wizardTargetName} »
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* 4b. Contrôler l'animation de la Cible */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveWizard({
+                          ...activeWizard,
+                          actionSubStep: 'control_animation_picker',
+                          actionTargetMode: 'target',
+                          animControlMode: activeWizard.animControlMode || 'step_frame',
+                          animStepDelta: activeWizard.animStepDelta ?? 1,
+                          animFrameNumber: activeWizard.animFrameNumber ?? 1,
+                          animProgressPercent: activeWizard.animProgressPercent ?? 50,
+                        });
+                      }}
+                      className="w-full p-3.5 bg-white hover:bg-violet-50/70 border-2 border-slate-200 hover:border-violet-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                        🎞️
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-slate-900 group-hover:text-violet-700 truncate">
+                          Contrôler l&apos;animation de la Cible
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          Avancer, choisir une frame ou reset « {wizardTargetName} »
                         </div>
                       </div>
                     </button>
@@ -1158,6 +1246,36 @@ export function WizardStep3Actions({
                       </div>
                       <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                         Libérer d&apos;une aimantation avec impulsion optionnelle
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* 12. Contrôler une animation (Frames / Cliquet) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveWizard({
+                        ...activeWizard,
+                        actionSubStep: 'control_animation_picker',
+                        actionTargetMode: isWizardGlobal ? 'instance' : 'subject',
+                        actionTargetId: activeWizard.actionTargetId || Object.keys(entities)[0] || '',
+                        animControlMode: activeWizard.animControlMode || 'step_frame',
+                        animStepDelta: activeWizard.animStepDelta ?? 1,
+                        animFrameNumber: activeWizard.animFrameNumber ?? 1,
+                        animProgressPercent: activeWizard.animProgressPercent ?? 50,
+                      });
+                    }}
+                    className="w-full p-3.5 bg-white hover:bg-violet-50/70 border-2 border-slate-200 hover:border-violet-500 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all shadow-xs hover:shadow-md group active:scale-[0.98]"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                      🎞️
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-black text-slate-900 group-hover:text-violet-700 truncate">
+                        Contrôler une animation (Frames)
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                        Sauter à une frame, avancer (+1) ou réinitialiser
                       </div>
                     </div>
                   </button>
@@ -2451,6 +2569,38 @@ export function WizardStep3Actions({
         activeWizard.actionSubStep === 'unsnap_picker') && (
         <SnapActionConfigEditor
           mode={activeWizard.actionSubStep === 'unsnap_picker' ? 'unsnap' : 'snap_to'}
+          draft={{
+            ...activeWizard,
+            targetMode: activeWizard.actionTargetMode,
+            targetId: activeWizard.actionTargetId,
+            targetType: activeWizard.actionTargetType,
+            targetTag: activeWizard.actionTargetTag,
+          }}
+          onPatch={(patch) => {
+            const { targetMode, targetId, targetType: tType, targetTag, ...rest } = patch;
+            setActiveWizard({
+              ...activeWizard,
+              ...rest,
+              ...(targetMode !== undefined ? { actionTargetMode: targetMode } : {}),
+              ...(targetId !== undefined ? { actionTargetId: targetId } : {}),
+              ...(tType !== undefined ? { actionTargetType: tType } : {}),
+              ...(targetTag !== undefined ? { actionTargetTag: targetTag } : {}),
+            });
+          }}
+          onConfirm={(actionData) => completeWizardWithAction(actionData)}
+          isRelational={isWizardRelational}
+          isGlobal={isWizardGlobal}
+          subjectType={activeWizard.subjectType}
+          targetType={activeWizard.targetType}
+          entities={entities}
+          availableEntityOptions={availableEntityOptions}
+          allProjectTags={allProjectTags}
+        />
+      )}
+
+      {/* Sous-étape Wizard : Contrôler l'animation (Frames / Cliquet) */}
+      {activeWizard.actionSubStep === 'control_animation_picker' && (
+        <ControlAnimationConfigEditor
           draft={{
             ...activeWizard,
             targetMode: activeWizard.actionTargetMode,

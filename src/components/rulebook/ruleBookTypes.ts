@@ -128,7 +128,8 @@ export type ActiveModal =
         | 'choose_set_entity_enabled'
         | 'choose_variable_action'
         | 'choose_scene_action'
-        | 'choose_camera_action';
+        | 'choose_camera_action'
+        | 'choose_control_animation';
       actionType?: ActionType;
       targetMode?: ActionTargetMode;
       targetId?: EntityId;
@@ -277,6 +278,12 @@ export type ActiveModal =
       unsnapImpulseSpeed?: number;
       unsnapImpulseAngle?: number;
       unsnapCooldownSec?: number;
+      // Control Animation config
+      animControlMode?: 'set_frame' | 'step_frame' | 'set_progress' | 'reset';
+      animFrameNumber?: number;
+      animStepDelta?: number;
+      animProgressPercent?: number;
+      animLoopOnStep?: boolean;
     }
   | null;
 
@@ -312,7 +319,8 @@ export interface WizardData {
     | 'set_entity_enabled_picker'
     | 'variable_action_picker'
     | 'scene_action_picker'
-    | 'camera_action_picker';
+    | 'camera_action_picker'
+    | 'control_animation_picker';
   delayDuration?: number;
   variableOperation?: 'set' | 'add' | 'subtract' | 'multiply';
   scoreAmount?: number;
@@ -511,6 +519,12 @@ export interface WizardData {
   unsnapImpulseSpeed?: number;
   unsnapImpulseAngle?: number;
   unsnapCooldownSec?: number;
+  // Control Animation config
+  animControlMode?: 'set_frame' | 'step_frame' | 'set_progress' | 'reset';
+  animFrameNumber?: number;
+  animStepDelta?: number;
+  animProgressPercent?: number;
+  animLoopOnStep?: boolean;
 }
 
 export interface EntityOption {
