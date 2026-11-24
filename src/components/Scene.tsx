@@ -265,6 +265,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   useEffect(() => {
     const outer = outerContainerRef.current;
     if (!outer) return;
+    let rafId = 0;
     const measureAvail = () => {
       const cs = window.getComputedStyle(outer);
       const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
@@ -275,13 +276,21 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         prev && prev.width === availW && prev.height === availH ? prev : { width: availW, height: availH }
       );
     };
+    const scheduleMeasure = () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        measureAvail();
+      });
+    };
     measureAvail();
-    const ro = new ResizeObserver(measureAvail);
+    const ro = new ResizeObserver(scheduleMeasure);
     ro.observe(outer);
-    window.addEventListener('resize', measureAvail);
+    window.addEventListener('resize', scheduleMeasure);
     return () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
       ro.disconnect();
-      window.removeEventListener('resize', measureAvail);
+      window.removeEventListener('resize', scheduleMeasure);
     };
   }, []);
 
@@ -289,6 +298,7 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   useEffect(() => {
     const el = canvasContainerRef.current;
     if (!el) return;
+    let rafId = 0;
     const updateBounds = () => {
       const w = el.clientWidth || Math.round(el.getBoundingClientRect().width);
       const h = el.clientHeight || Math.round(el.getBoundingClientRect().height);
@@ -299,15 +309,23 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         }
       }
     };
-    updateBounds();
-    const ro = new ResizeObserver(updateBounds);
-    ro.observe(el);
-    window.addEventListener('resize', updateBounds);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', updateBounds);
+    const scheduleBoundsUpdate = () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        updateBounds();
+      });
     };
-  }, [setSceneBounds, setEditSceneBounds, activeRatio, isPlayMode, outerAvailSize]);
+    updateBounds();
+    const ro = new ResizeObserver(scheduleBoundsUpdate);
+    ro.observe(el);
+    window.addEventListener('resize', scheduleBoundsUpdate);
+    return () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      ro.disconnect();
+      window.removeEventListener('resize', scheduleBoundsUpdate);
+    };
+  }, [setSceneBounds, setEditSceneBounds, activeRatio, isPlayMode]);
 
   // Focus automatique du canvas au passage en mode Play (contrôles clavier immédiats sans clic requis)
   useEffect(() => {

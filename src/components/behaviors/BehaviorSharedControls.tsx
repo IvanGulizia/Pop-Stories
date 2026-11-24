@@ -19,7 +19,7 @@ export interface BehaviorControlsBaseProps {
   stateList: EntityState[];
   customParticles: CustomParticlePreset[];
   onOpenParticleDrawer: (editingPreset?: CustomParticlePreset) => void;
-  onOpenParticleEditor: () => void;
+  onOpenParticleEditor: (initialView?: 'studio' | 'draw_custom') => void;
   onDeleteCustomParticle: (presetId: string) => void;
   onQuickCreateState: (suggestedName: string, folderName?: string) => string;
   onEditStateDrawing?: (stateId: string) => void;

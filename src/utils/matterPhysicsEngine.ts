@@ -89,6 +89,7 @@ import { computeRelativeParentOffset } from '../store/parentingHelpers';
 import {
   SnapRuntimeEntry,
   buildSnapParentOffset,
+  computeDraggedSnapMagneticOffset,
   computeSnapGoalForTarget,
   createInitialSnapRuntimeEntry,
   getSnapAnchorWorldPoint,
@@ -420,7 +421,10 @@ const worldPinRuntimeMeta = new Map<
     stateId: string;
     breakDistance: number;
     breakable: boolean;
+    pullingStateId?: string;
     brokenStateId?: string;
+    isPulling?: boolean;
+    prePullStateId?: string;
   }
 >();
 const brokenWorldPinStateIds = new Map<string, string>();
@@ -805,6 +809,19 @@ export function isEntityPhysicsGrabbed(entityId: string): boolean {
 
 export function hasActiveWorldPin(entityId: string): boolean {
   return worldPinConstraints.has(entityId) && !brokenWorldPinStateIds.has(entityId);
+}
+
+export function computeLiveDragMagneticOffsetForEntity(
+  entity: Entity,
+  rawPos: Position,
+  allEntities: Record<string, Entity>
+): Position {
+  return computeDraggedSnapMagneticOffset({
+    entity,
+    rawPos,
+    allEntities,
+    snapRuntimeStates,
+  });
 }
 
 /**
@@ -2535,7 +2552,10 @@ export function stepMatterPhysics(params: {
         stateId: entity.currentStateId,
         breakDistance,
         breakable,
+        pullingStateId: physics!.worldPinPullingStateId,
         brokenStateId: physics!.worldPinBrokenStateId,
+        isPulling: false,
+        prePullStateId: undefined,
       };
       worldPinRuntimeMeta.set(entity.id, meta);
     } else {
@@ -2543,6 +2563,7 @@ export function stepMatterPhysics(params: {
       meta.stateId = entity.currentStateId;
       meta.breakDistance = breakDistance;
       meta.breakable = breakable;
+      meta.pullingStateId = physics!.worldPinPullingStateId;
       meta.brokenStateId = physics!.worldPinBrokenStateId;
       pinConstraint.pointA.x = meta.anchorWorld.x;
       pinConstraint.pointA.y = meta.anchorWorld.y;
@@ -3776,10 +3797,30 @@ export function stepMatterPhysics(params: {
           isWorldPin: true,
         });
 
+        const prevBeforePull = meta.prePullStateId;
+        meta.isPulling = false;
+        meta.prePullStateId = undefined;
+
         if (meta.brokenStateId && pinEntity.states[meta.brokenStateId]) {
           stateChanges[pinEntId] = meta.brokenStateId;
+        } else if (prevBeforePull && pinEntity.states[prevBeforePull]) {
+          stateChanges[pinEntId] = prevBeforePull;
         }
       } else {
+        const wasPulling = Boolean(meta.isPulling);
+        if (!wasPulling && activeGrab && stressRatio > 0.12) {
+          meta.isPulling = true;
+          meta.prePullStateId = pinEntity.currentStateId;
+          if (meta.pullingStateId && pinEntity.states[meta.pullingStateId] && !stateChanges[pinEntId]) {
+            stateChanges[pinEntId] = meta.pullingStateId;
+          }
+        } else if (wasPulling && (!activeGrab || stressRatio < 0.05)) {
+          meta.isPulling = false;
+          if (meta.prePullStateId && pinEntity.states[meta.prePullStateId] && !stateChanges[pinEntId]) {
+            stateChanges[pinEntId] = meta.prePullStateId;
+          }
+          meta.prePullStateId = undefined;
+        }
         debugWorldPins.set(pinEntId, {
           anchor: { x: meta.anchorWorld.x, y: meta.anchorWorld.y },
           current: pinWorldB,
@@ -3914,7 +3955,7 @@ export function stepMatterPhysics(params: {
       if (snapRes.stateChange && !stateChanges[entity.id]) {
         stateChanges[entity.id] = snapRes.stateChange;
       }
-      if (snapRes.magnetPull && body && !body.isStatic && !isSnapDragging) {
+      if (snapRes.magnetPull && body && !body.isStatic && !activeDragPositions[entity.id]) {
         const pullTargetVx = snapRes.magnetPull.vxPxPerSec / 60;
         const pullTargetVy = snapRes.magnetPull.vyPxPerSec / 60;
         const blend = Math.min(0.45, Math.max(0.08, dt * 12));
@@ -4601,6 +4642,8 @@ export function stepMatterPhysics(params: {
         const currentlySnappedIds = new Set<string>();
         let anyApproaching = false;
 
+        let anyPulling = false;
+
         const applyCandResult = (cand: Entity, cRes: ReturnType<typeof stepSnapSolver>) => {
           snapRuntimeStates.set(cand.id, cRes.nextRuntime);
           if (cRes.activeLink) {
@@ -4657,7 +4700,7 @@ export function stepMatterPhysics(params: {
             if (cRes.freezeStatic && !candBody.isStatic) {
               Body.setStatic(candBody, true);
             }
-            if (cRes.magnetPull && !candBody.isStatic && !currentDragIds.has(cand.id)) {
+            if (cRes.magnetPull && !candBody.isStatic && !activeDragPositions[cand.id]) {
               const pullTargetVx = cRes.magnetPull.vxPxPerSec / 60;
               const pullTargetVy = cRes.magnetPull.vyPxPerSec / 60;
               const blend = Math.min(0.45, Math.max(0.08, dt * 12));
@@ -4676,6 +4719,9 @@ export function stepMatterPhysics(params: {
               subjectId: cand.id,
               ...cRes.snapEvent,
             });
+          }
+          if (cRes.stateChange && !stateChanges[cand.id]) {
+            stateChanges[cand.id] = cRes.stateChange;
           }
         };
 
@@ -4708,6 +4754,9 @@ export function stepMatterPhysics(params: {
           applyCandResult(cand, cRes);
           if (cRes.nextRuntime.isSnapped) {
             currentlySnappedIds.add(cand.id);
+            if (cRes.nextRuntime.isPulling) {
+              anyPulling = true;
+            }
           } else if (
             snapBeh.unsnappedStateId &&
             entity.states[snapBeh.unsnappedStateId] &&
@@ -4778,6 +4827,32 @@ export function stepMatterPhysics(params: {
         }
 
         const recRt = snapRuntimeStates.get(entity.id) || createInitialSnapRuntimeEntry();
+        const wasRecPulling = Boolean(recRt.isPulling);
+        let nextRecPulling = false;
+        let nextRecPrePull = recRt.prePullStateId;
+        if (anyPulling && activeCount > 0) {
+          nextRecPulling = true;
+          if (!wasRecPulling) {
+            nextRecPrePull = entity.currentStateId;
+            if (snapBeh.pullingStateId && entity.states[snapBeh.pullingStateId] && !stateChanges[entity.id]) {
+              stateChanges[entity.id] = snapBeh.pullingStateId;
+            }
+          }
+        } else if (wasRecPulling) {
+          nextRecPulling = false;
+          if (activeCount > 0 && !stateChanges[entity.id]) {
+            const restoreId =
+              snapBeh.snappedStateId && entity.states[snapBeh.snappedStateId]
+                ? snapBeh.snappedStateId
+                : nextRecPrePull && entity.states[nextRecPrePull]
+                ? nextRecPrePull
+                : undefined;
+            if (restoreId && restoreId !== entity.currentStateId) {
+              stateChanges[entity.id] = restoreId;
+            }
+          }
+          nextRecPrePull = undefined;
+        }
         if (
           anyApproaching &&
           !recRt.isApproaching &&
@@ -4791,6 +4866,8 @@ export function stepMatterPhysics(params: {
         snapRuntimeStates.set(entity.id, {
           ...recRt,
           isApproaching: anyApproaching,
+          isPulling: nextRecPulling,
+          prePullStateId: nextRecPrePull,
         });
 
         const recCenter = getSnapAnchorWorldPoint(

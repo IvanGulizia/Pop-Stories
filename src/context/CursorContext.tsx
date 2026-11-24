@@ -7,6 +7,8 @@ interface CursorContextType {
   setCursorState: (state: CursorState) => void;
   isDragging: boolean;
   setIsDragging: (dragging: boolean) => void;
+  isDragCursorLocked: () => boolean;
+  setDragCursorLocked: (locked: boolean) => void;
   hoveredEntityId: string | null;
   setHoveredEntityId: (id: string | null) => void;
 }
@@ -16,6 +18,8 @@ const CursorContext = createContext<CursorContextType>({
   setCursorState: () => {},
   isDragging: false,
   setIsDragging: () => {},
+  isDragCursorLocked: () => false,
+  setDragCursorLocked: () => {},
   hoveredEntityId: null,
   setHoveredEntityId: () => {},
 });
@@ -23,13 +27,42 @@ const CursorContext = createContext<CursorContextType>({
 export const useAppCursor = () => useContext(CursorContext);
 
 export function CursorProvider({ children }: { children: React.ReactNode }) {
-  const [cursorState, setCursorState] = useState<CursorState>('idle');
-  const [isDragging, setIsDragging] = useState(false);
+  const [cursorState, setCursorStateRaw] = useState<CursorState>('idle');
+  const [isDragging, setIsDraggingState] = useState(false);
   const [hoveredEntityId, setHoveredEntityId] = useState<string | null>(null);
   const [isPointerOverScene, setIsPointerOverScene] = useState(false);
 
   const pointerPosRef = useRef({ x: -100, y: -100 });
   const cursorElRef = useRef<HTMLDivElement>(null);
+  const dragLockRef = useRef(false);
+  const releaseTimerRef = useRef<number | null>(null);
+
+  const setDragCursorLocked = (locked: boolean) => {
+    dragLockRef.current = locked;
+    if (locked && releaseTimerRef.current !== null) {
+      window.clearTimeout(releaseTimerRef.current);
+      releaseTimerRef.current = null;
+    }
+    setIsDraggingState(locked);
+  };
+
+  const isDragCursorLocked = () => dragLockRef.current;
+
+  const setIsDragging = (dragging: boolean) => {
+    setDragCursorLocked(dragging);
+  };
+
+  const setCursorState = (next: CursorState) => {
+    // While drag is locked, never allow hover/idle/pointer updates to overwrite the drag cursor
+    if (dragLockRef.current && next !== 'drag') {
+      return;
+    }
+    if (releaseTimerRef.current !== null && next !== 'idle' && next !== 'release') {
+      window.clearTimeout(releaseTimerRef.current);
+      releaseTimerRef.current = null;
+    }
+    setCursorStateRaw(next);
+  };
 
   const appMode = useSceneStore((state) => state.appMode);
   const settings = useSceneStore((state) => state.settings);
@@ -105,22 +138,31 @@ export function CursorProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    const handleWindowPointerUp = () => {
-      if (isDragging) {
-        setIsDragging(false);
-        setCursorState('release');
-        setTimeout(() => {
-          setCursorState('idle');
+    const handleWindowRelease = () => {
+      if (dragLockRef.current || isDragging) {
+        dragLockRef.current = false;
+        setIsDraggingState(false);
+        setCursorStateRaw('release');
+        if (releaseTimerRef.current !== null) {
+          window.clearTimeout(releaseTimerRef.current);
+        }
+        releaseTimerRef.current = window.setTimeout(() => {
+          releaseTimerRef.current = null;
+          if (!dragLockRef.current) {
+            setCursorStateRaw('idle');
+          }
         }, 150);
       }
     };
 
     window.addEventListener('pointermove', handleWindowPointerMove, { passive: true });
-    window.addEventListener('pointerup', handleWindowPointerUp);
+    window.addEventListener('pointerup', handleWindowRelease);
+    window.addEventListener('pointercancel', handleWindowRelease);
 
     return () => {
       window.removeEventListener('pointermove', handleWindowPointerMove);
-      window.removeEventListener('pointerup', handleWindowPointerUp);
+      window.removeEventListener('pointerup', handleWindowRelease);
+      window.removeEventListener('pointercancel', handleWindowRelease);
     };
   }, [isDragging, isCursorActive]);
 
@@ -131,6 +173,8 @@ export function CursorProvider({ children }: { children: React.ReactNode }) {
         setCursorState,
         isDragging,
         setIsDragging,
+        isDragCursorLocked,
+        setDragCursorLocked,
         hoveredEntityId,
         setHoveredEntityId,
       }}

@@ -39,7 +39,6 @@ import {
   WanderingBehaviorConfig,
 } from '../types';
 import { useSceneStore, EMPTY_LIST, EMPTY_RECORD } from '../store/useSceneStore';
-import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { ParticleEditorModal } from './ParticleEditorModal';
 import { InteractivePuppetControls } from './InteractivePuppetControls';
 import { invalidateCustomParticleSprite } from '../utils/particleSystem';
@@ -97,8 +96,6 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
   const rules = useSceneStore((state) => state.rules || EMPTY_LIST);
   const layerGroups = useSceneStore((state) => state.layerGroups || EMPTY_LIST);
   const customParticles = useSceneStore((state) => state.customParticles || EMPTY_LIST);
-  const addCustomParticle = useSceneStore((state) => state.addCustomParticle);
-  const updateCustomParticle = useSceneStore((state) => state.updateCustomParticle);
   const deleteCustomParticle = useSceneStore((state) => state.deleteCustomParticle);
   const expandedBehaviorCards = useSceneStore((state) => state.expandedBehaviorCards || EMPTY_RECORD);
   const setBehaviorCardExpanded = useSceneStore((state) => state.setBehaviorCardExpanded);
@@ -114,14 +111,11 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
     [expandedBehaviorCards, entity.id]
   );
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [particleDrawerState, setParticleDrawerState] = useState<{
-    behaviorId: string;
-    isOverridden: boolean;
-    editingPreset?: CustomParticlePreset;
-  } | null>(null);
   const [particleEditorState, setParticleEditorState] = useState<{
     behaviorId: string;
     isOverridden: boolean;
+    initialView?: 'studio' | 'draw_custom';
+    editingPreset?: CustomParticlePreset;
   } | null>(null);
 
   // Sync with selectedStateId if it changes from parent Inspector
@@ -476,15 +470,17 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
                     stateList,
                     customParticles,
                     onOpenParticleDrawer: (editingPreset) =>
-                      setParticleDrawerState({
-                        behaviorId: behavior.id,
-                        isOverridden: hasOverride,
-                        editingPreset,
-                      }),
-                    onOpenParticleEditor: () =>
                       setParticleEditorState({
                         behaviorId: behavior.id,
                         isOverridden: hasOverride,
+                        initialView: 'draw_custom',
+                        editingPreset,
+                      }),
+                    onOpenParticleEditor: (initialView) =>
+                      setParticleEditorState({
+                        behaviorId: behavior.id,
+                        isOverridden: hasOverride,
+                        initialView,
                       }),
                     onDeleteCustomParticle: (presetId) => {
                       deleteCustomParticle(presetId);
@@ -530,68 +526,7 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
         onAddBehavior={handleAddBehavior}
       />
 
-      {/* Atelier de dessin plein écran pour particule personnalisée */}
-      {particleDrawerState && (
-        <FullScreenDrawingModal
-          title={
-            particleDrawerState.editingPreset
-              ? `Modifier particule : ${particleDrawerState.editingPreset.name}`
-              : 'Dessiner une particule'
-          }
-          subtitle="Dessinez votre particule personnalisée"
-          enableFlipbook={false}
-          initialPaths={particleDrawerState.editingPreset?.vectorPaths || []}
-          currentEditingStateName={
-            particleDrawerState.editingPreset?.name || `Particule ${customParticles.length + 1}`
-          }
-          onSave={(paths, _dataUrl, _colliderType, customName) => {
-            const finalName = (customName || '').trim() || `Particule ${customParticles.length + 1}`;
-            let targetPresetId = particleDrawerState.editingPreset?.id;
-            if (targetPresetId) {
-              updateCustomParticle(targetPresetId, {
-                name: finalName,
-                vectorPaths: paths,
-              });
-              invalidateCustomParticleSprite(targetPresetId);
-            } else {
-              targetPresetId = addCustomParticle({
-                name: finalName,
-                vectorPaths: paths,
-                useTint: false,
-              });
-            }
-            const curBeh = baseBehaviors.find((bh) => bh.id === particleDrawerState.behaviorId);
-            const curOv = particleDrawerState.isOverridden
-              ? targetState?.behaviorOverrides?.[particleDrawerState.behaviorId]
-              : undefined;
-            const curEffective = { ...(curBeh || {}), ...(curOv || {}) } as ParticleEmitterBehaviorConfig;
-            const existingIds =
-              curEffective.customParticleIds && curEffective.customParticleIds.length > 0
-                ? curEffective.customParticleIds
-                : curEffective.customParticleId
-                ? [curEffective.customParticleId]
-                : [];
-            const nextIds = existingIds.includes(targetPresetId)
-              ? existingIds
-              : [...existingIds, targetPresetId];
-            const patch: Partial<ParticleEmitterBehaviorConfig> = {
-              shape: 'custom',
-              customParticleId: nextIds[0],
-              customParticleIds: nextIds,
-              customParticleMode: curEffective.customParticleMode || 'random',
-            };
-            if (particleDrawerState.isOverridden) {
-              handleUpdateOverride(particleDrawerState.behaviorId, patch);
-            } else {
-              handleUpdateBaseBehavior(particleDrawerState.behaviorId, patch);
-            }
-            setParticleDrawerState(null);
-          }}
-          onClose={() => setParticleDrawerState(null)}
-        />
-      )}
-
-      {/* Éditeur & Testeur interactif de particules */}
+      {/* Éditeur & Studio unifié de particules */}
       {particleEditorState && (() => {
         const base = baseBehaviors.find((bh) => bh.id === particleEditorState.behaviorId);
         if (!base || base.type !== 'particle_emitter') return null;
@@ -603,6 +538,8 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
           <ParticleEditorModal
             isOpen={true}
             mode="emitter"
+            initialView={particleEditorState.initialView}
+            initialEditingPreset={particleEditorState.editingPreset}
             initialConfig={{
               shape: effective.shape || 'circle',
               customParticleId: effective.customParticleId,
@@ -743,7 +680,7 @@ function renderBehaviorControls({
   stateList: EntityState[];
   customParticles: CustomParticlePreset[];
   onOpenParticleDrawer: (editingPreset?: CustomParticlePreset) => void;
-  onOpenParticleEditor: () => void;
+  onOpenParticleEditor: (initialView?: 'studio' | 'draw_custom') => void;
   onDeleteCustomParticle: (presetId: string) => void;
   onQuickCreateState: (suggestedName: string, folderName?: string) => string;
   onEditStateDrawing?: (stateId: string) => void;

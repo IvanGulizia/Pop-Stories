@@ -400,6 +400,140 @@ export function SnapBehaviorControls({
           </select>
         </div>
 
+        {snapAlignment === 'center' && (
+          <div className="p-2 bg-cyan-50/70 rounded-xl border border-cyan-200/80 space-y-1.5">
+            <div className="text-[10px] font-bold text-cyan-900 flex items-center gap-1">
+              <Crosshair className="w-3 h-3" />
+              <span>Repère direct sur le canvas (tige, slot, bord…)</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                disabled={!canPickSourceOnCanvas}
+                onClick={() => {
+                  if (!entityId || !behaviorId) return;
+                  update({
+                    snapAlignment: 'anchor_offset',
+                    sourceAnchor: 'custom_canvas',
+                    ...(b.customSourceAnchor ? {} : { customSourceAnchor: { x: 0.5, y: 0.5 } }),
+                  });
+                  startSnapPinCanvasPick({
+                    entityId,
+                    behaviorId,
+                    stateId,
+                    pinRole: 'source',
+                    referenceEntityId: entityId,
+                  });
+                }}
+                className={`px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-colors ${
+                  canPickSourceOnCanvas
+                    ? 'bg-cyan-600 hover:bg-cyan-700 text-white cursor-pointer shadow-2xs'
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                }`}
+                title={
+                  canPickSourceOnCanvas
+                    ? 'Passer en repère canvas et cliquer le point exact sur cet objet'
+                    : 'Disponible sur une instance placée dans la scène'
+                }
+              >
+                <Crosshair className="w-3 h-3 shrink-0" />
+                <span className="truncate">{isReceptacle ? 'Repère réceptacle' : 'Repère objet'}</span>
+              </button>
+              <button
+                type="button"
+                disabled={!canPickTargetOnCanvas}
+                onClick={() => {
+                  if (!entityId || !behaviorId || !resolvedTargetEntityId) return;
+                  update({
+                    snapAlignment: 'anchor_offset',
+                    targetAnchor: 'custom_canvas',
+                    ...(b.customTargetAnchor ? {} : { customTargetAnchor: { x: 0.5, y: 0.5 } }),
+                  });
+                  startSnapPinCanvasPick({
+                    entityId,
+                    behaviorId,
+                    stateId,
+                    pinRole: 'target',
+                    referenceEntityId: resolvedTargetEntityId,
+                  });
+                }}
+                className={`px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-colors ${
+                  canPickTargetOnCanvas
+                    ? 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer shadow-2xs'
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                }`}
+                title={
+                  canPickTargetOnCanvas
+                    ? `Passer en repère canvas et cliquer sur la cible (${sceneEntities[resolvedTargetEntityId!]?.name})`
+                    : 'Aucune entité cible correspondante trouvée sur la scène'
+                }
+              >
+                <Crosshair className="w-3 h-3 shrink-0" />
+                <span className="truncate">{isReceptacle ? 'Repère capturé' : 'Repère cible'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {snapAlignment !== 'center' && snapAlignment !== 'anchor_offset' && (
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              type="button"
+              disabled={!canPickSourceOnCanvas}
+              onClick={() => {
+                if (!entityId || !behaviorId) return;
+                update({
+                  snapAlignment: 'anchor_offset',
+                  sourceAnchor: 'custom_canvas',
+                  ...(b.customSourceAnchor ? {} : { customSourceAnchor: { x: 0.5, y: 0.5 } }),
+                });
+                startSnapPinCanvasPick({
+                  entityId,
+                  behaviorId,
+                  stateId,
+                  pinRole: 'source',
+                  referenceEntityId: entityId,
+                });
+              }}
+              className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-colors ${
+                canPickSourceOnCanvas
+                  ? 'bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200 cursor-pointer'
+                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+              }`}
+            >
+              <Crosshair className="w-3 h-3 shrink-0" />
+              <span className="truncate">{isReceptacle ? 'Poser repère réceptacle' : 'Poser repère objet'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={!canPickTargetOnCanvas}
+              onClick={() => {
+                if (!entityId || !behaviorId || !resolvedTargetEntityId) return;
+                update({
+                  snapAlignment: 'anchor_offset',
+                  targetAnchor: 'custom_canvas',
+                  ...(b.customTargetAnchor ? {} : { customTargetAnchor: { x: 0.5, y: 0.5 } }),
+                });
+                startSnapPinCanvasPick({
+                  entityId,
+                  behaviorId,
+                  stateId,
+                  pinRole: 'target',
+                  referenceEntityId: resolvedTargetEntityId,
+                });
+              }}
+              className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-colors ${
+                canPickTargetOnCanvas
+                  ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 cursor-pointer'
+                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+              }`}
+            >
+              <Crosshair className="w-3 h-3 shrink-0" />
+              <span className="truncate">{isReceptacle ? 'Poser repère capturé' : 'Poser repère cible'}</span>
+            </button>
+          </div>
+        )}
+
         {snapAlignment === 'anchor_offset' && (
           <div className="space-y-2">
             <div className="grid grid-cols-2 gap-1.5">
@@ -799,6 +933,7 @@ export function SnapBehaviorControls({
         {[
           { key: 'approachingStateId' as const, label: "À l'approche (aimant)", suggested: 'Approche', val: b.approachingStateId },
           { key: 'snappedStateId' as const, label: 'État quand aimanté', suggested: 'Aimanté', val: b.snappedStateId },
+          { key: 'pullingStateId' as const, label: 'En traction (résistance)', suggested: 'Traction', val: b.pullingStateId },
           { key: 'unsnappedStateId' as const, label: 'État au détachement', suggested: 'Libre', val: b.unsnappedStateId },
         ].map((slot) => (
           <div

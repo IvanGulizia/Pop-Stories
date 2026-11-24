@@ -3,26 +3,19 @@ import {
   Check,
   ChevronRight,
   Mic,
-  Paintbrush,
-  Pencil,
-  Sliders,
   X,
 } from 'lucide-react';
 import {
   CustomParticlePreset,
-  CustomParticleUsageMode,
   CustomSound,
   Entity,
-  ParticleShape,
   RuleAction,
 } from '../../types';
 import { EntityMiniPreview } from '../EntityMiniPreview';
 import { SpawnLocationPicker } from '../SpawnLocationPicker';
-import { invalidateCustomParticleSprite } from '../../utils/particleSystem';
 import { soundSynth } from '../../utils/sound';
 import {
   EntityOption,
-  ParticleDrawingTarget,
   SCENE_TRANSITION_OPTIONS,
   WizardData,
 } from './ruleBookTypes';
@@ -34,8 +27,7 @@ import { SnapActionConfigEditor } from './SnapActionConfigEditor';
 import { ControlAnimationConfigEditor } from './ControlAnimationConfigEditor';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 import { useSceneStore, EMPTY_RECORD, EMPTY_LIST } from '../../store/useSceneStore';
-import { ParticleActionOriginSection } from '../particles/ParticleActionOriginSection';
-import { ParticleActionEmissionExtrasSection } from '../particles/ParticleActionEmissionExtrasSection';
+import { ParticleInspectorSummary } from '../particles/ParticleInspectorSummary';
 
 interface WizardStep3ActionsProps {
   activeWizard: WizardData;
@@ -47,10 +39,10 @@ interface WizardStep3ActionsProps {
   allProjectTags: string[];
   customSounds: CustomSound[];
   customParticles: CustomParticlePreset[];
-  deleteCustomParticle: (id: string) => void;
   setIsSoundModalOpen: (open: boolean) => void;
-  setParticleDrawingTarget: React.Dispatch<React.SetStateAction<ParticleDrawingTarget | null>>;
-  setParticleEditorContext: React.Dispatch<React.SetStateAction<'wizard' | 'modal' | null>>;
+  setParticleEditorContext: React.Dispatch<
+    React.SetStateAction<{ target: 'wizard' | 'modal'; initialView?: 'studio' | 'draw_custom' } | null>
+  >;
   getEntityObj: (type?: string) => Entity | undefined;
   completeWizardWithAction: (action?: Omit<RuleAction, 'id'>) => void;
 }
@@ -65,9 +57,7 @@ export function WizardStep3Actions({
   allProjectTags,
   customSounds,
   customParticles,
-  deleteCustomParticle,
   setIsSoundModalOpen,
-  setParticleDrawingTarget,
   setParticleEditorContext,
   getEntityObj,
   completeWizardWithAction,
@@ -2054,340 +2044,96 @@ export function WizardStep3Actions({
       {/* Sous-étape Wizard : Émettre des Particules */}
       {activeWizard.actionSubStep === 'particle_picker' && (
         <div className="space-y-4 max-w-xl mx-auto py-2">
-          <div className="flex flex-wrap gap-2">
-            {[
-              { label: '🔥 Étincelles', count: 16, color: '#f59e0b', color2: '#ef4444', shape: 'spark' as ParticleShape, speed: 220, gravity: 280, spread: 140 },
-              { label: '💥 Explosion', count: 28, color: '#ef4444', color2: '#fbbf24', shape: 'circle' as ParticleShape, speed: 260, gravity: 180, spread: 360 },
-              { label: '✨ Magie', count: 20, color: '#8b5cf6', color2: '#ec4899', shape: 'star' as ParticleShape, speed: 140, gravity: -60, spread: 360 },
-              { label: '🎉 Confettis', count: 32, color: '#10b981', color2: '#3b82f6', shape: 'square' as ParticleShape, speed: 210, gravity: 240, spread: 180 },
-            ].map((preset) => (
-              <button
-                key={preset.label}
-                type="button"
-                onClick={() =>
-                  setActiveWizard({
-                    ...activeWizard,
-                    particleCount: preset.count,
-                    particleColor: preset.color,
-                    particleColor2: preset.color2,
-                    particleShape: preset.shape,
-                    particleSpeed: preset.speed,
-                    particleGravity: preset.gravity,
-                    particleSpread: preset.spread,
-                  })
-                }
-                className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl text-xs font-bold text-amber-900 cursor-pointer transition-colors"
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="space-y-1.5 bg-slate-50 p-3 rounded-2xl border border-slate-200">
-            <ParticleActionOriginSection
-              draft={activeWizard}
+          <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200">
+            <ParticleInspectorSummary
+              mode="burst"
+              customParticles={customParticles}
               allowTarget={activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity'}
-              entities={entities}
-              availableEntityOptions={availableEntityOptions}
-              allProjectTags={allProjectTags}
-              datalistId="wizard-particle-tags"
-              onPatch={(patch) => setActiveWizard({ ...activeWizard, ...patch })}
-            />
-
-            <button
-              type="button"
-              onClick={() => setParticleEditorContext('wizard')}
-              className="w-full py-2 px-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-all active:scale-[0.99]"
-            >
-              <Sliders className="w-3.5 h-3.5" />
-              <span>Studio Particules &amp; Collection (Plages, Zones...)</span>
-            </button>
-
-            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-700 text-xs">Forme</span>
-              <select
-                value={activeWizard.particleShape || 'circle'}
-                onChange={(e) => {
-                  const nextShape = e.target.value as ParticleShape;
-                  const existing =
-                    activeWizard.customParticleIds && activeWizard.customParticleIds.length > 0
-                      ? activeWizard.customParticleIds
-                      : activeWizard.customParticleId
-                      ? [activeWizard.customParticleId]
-                      : [];
-                  const nextIds =
-                    nextShape === 'custom' && existing.length === 0 && customParticles.length > 0
-                      ? [customParticles[0].id]
-                      : existing;
-                  setActiveWizard({
-                    ...activeWizard,
-                    particleShape: nextShape,
-                    customParticleId: nextIds[0],
-                    customParticleIds: nextIds,
-                  });
-                }}
-                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-              >
-                <option value="circle">Rond</option>
-                <option value="square">Carré</option>
-                <option value="spark">Étincelle</option>
-                <option value="star">Étoile</option>
-                <option value="custom">Particule dessinée ✨</option>
-              </select>
-            </div>
-
-            {activeWizard.particleShape === 'custom' && (() => {
-              const wizSelectedIds: string[] =
-                activeWizard.customParticleIds && activeWizard.customParticleIds.length > 0
-                  ? activeWizard.customParticleIds
-                  : activeWizard.customParticleId
-                  ? [activeWizard.customParticleId]
-                  : [];
-              const toggleWizPreset = (pid: string) => {
-                const nextIds = wizSelectedIds.includes(pid)
-                  ? wizSelectedIds.filter((id) => id !== pid)
-                  : [...wizSelectedIds, pid];
+              originDraft={activeWizard}
+              summary={{
+                shape: activeWizard.particleShape || 'circle',
+                customParticleIds:
+                  activeWizard.customParticleIds && activeWizard.customParticleIds.length > 0
+                    ? activeWizard.customParticleIds
+                    : activeWizard.customParticleId
+                    ? [activeWizard.customParticleId]
+                    : undefined,
+                color: activeWizard.particleColor || '#f59e0b',
+                color2: activeWizard.particleColor2 || '#ef4444',
+                colorMode: activeWizard.particleColorMode,
+                count: activeWizard.particleCount ?? 20,
+                countMax: activeWizard.particleCountMax,
+                speed: activeWizard.particleSpeed ?? 180,
+                speedMax: activeWizard.particleSpeedMax,
+                size: activeWizard.particleSize ?? 6,
+                sizeMax: activeWizard.particleSizeMax,
+                lifetime: activeWizard.particleLifetime ?? 0.7,
+                lifetimeMax: activeWizard.particleLifetimeMax,
+                gravity: activeWizard.particleGravity ?? 220,
+                spread: activeWizard.particleSpread ?? 360,
+                angle: activeWizard.particleAngle ?? -90,
+                directionMode: activeWizard.particleDirectionMode,
+                emissionShape: activeWizard.particleEmissionShape,
+                emitterDuration: activeWizard.particleEmitDuration,
+                burstInterval: activeWizard.particleBurstInterval,
+                burstCount: activeWizard.particleBurstCount,
+              }}
+              onOpenStudio={(view) =>
+                setParticleEditorContext({ target: 'wizard', initialView: view })
+              }
+              onQuickChangeOriginMode={(nextMode) =>
+                setActiveWizard({ ...activeWizard, particleOriginMode: nextMode })
+              }
+              onApplyQuickBurstPreset={(preset) =>
                 setActiveWizard({
                   ...activeWizard,
-                  customParticleIds: nextIds,
-                  customParticleId: nextIds[0],
-                });
-              };
-              return (
-                <div className="p-2.5 bg-amber-50/70 rounded-xl border border-amber-200 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold text-amber-950">
-                      Particules ({wizSelectedIds.length} sél.) :
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setParticleDrawingTarget({ context: 'wizard' })}
-                      className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
-                    >
-                      <Paintbrush className="w-3 h-3" />
-                      <span>+ Dessiner une particule</span>
-                    </button>
-                  </div>
-                  {customParticles.length === 0 ? (
-                    <div className="text-[11px] text-amber-800 bg-white/80 rounded-lg p-2 border border-amber-200 text-center">
-                      Aucune particule dessinée. Cliquez sur <strong>+ Dessiner une particule</strong>.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {customParticles.map((preset) => {
-                        const selIdx = wizSelectedIds.indexOf(preset.id);
-                        const isSel = selIdx !== -1;
-                        return (
-                          <div
-                            key={preset.id}
-                            onClick={() => toggleWizPreset(preset.id)}
-                            className={`relative group p-1.5 rounded-xl border flex flex-col items-center gap-1 cursor-pointer transition-all ${
-                              isSel
-                                ? 'bg-white border-amber-500 ring-2 ring-amber-300/60 shadow-xs'
-                                : 'bg-white/80 border-slate-200 hover:border-amber-300'
-                            }`}
-                          >
-                            {isSel && (
-                              <span className="absolute -top-1.5 -left-1.5 px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[9px] font-black shadow-2xs">
-                                #{selIdx + 1}
-                              </span>
-                            )}
-                            <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden">
-                              <svg viewBox="0 0 100 100" className="w-7 h-7">
-                                {preset.vectorPaths.map((p) => (
-                                  <path
-                                    key={p.id}
-                                    d={p.d}
-                                    stroke={p.stroke}
-                                    strokeWidth={p.strokeWidth}
-                                    fill={p.fill || 'none'}
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                ))}
-                              </svg>
-                            </div>
-                            <span className="text-[9px] font-bold text-slate-700 truncate w-full text-center">
-                              {preset.name}
-                            </span>
-                            <div className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center gap-0.5">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setParticleDrawingTarget({ context: 'wizard', editingPreset: preset });
-                                }}
-                                className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
-                                title="Modifier"
-                              >
-                                <Pencil className="w-2.5 h-2.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  deleteCustomParticle(preset.id);
-                                  invalidateCustomParticleSprite(preset.id);
-                                  if (isSel) {
-                                    const nextIds = wizSelectedIds.filter((id) => id !== preset.id);
-                                    setActiveWizard({
-                                      ...activeWizard,
-                                      customParticleIds: nextIds,
-                                      customParticleId: nextIds[0],
-                                    });
-                                  }
-                                }}
-                                className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
-                                title="Supprimer"
-                              >
-                                <X className="w-2.5 h-2.5" />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  {wizSelectedIds.length > 1 && (
-                    <div className="p-2 bg-white rounded-xl border border-amber-200 flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-bold text-slate-700">Utilisation :</span>
-                      <select
-                        value={activeWizard.customParticleMode || 'random'}
-                        onChange={(e) =>
-                          setActiveWizard({
-                            ...activeWizard,
-                            customParticleMode: e.target.value as CustomParticleUsageMode,
-                          })
-                        }
-                        className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800"
-                      >
-                        <option value="random">Aléatoire</option>
-                        <option value="sequence">Séquence (#1 → #2 → ...)</option>
-                        <option value="lifetime_anim">Animation sur durée de vie</option>
-                      </select>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between pt-1 border-t border-amber-200/70">
-                    <span className="text-[11px] font-bold text-slate-700">Teinter avec les couleurs d'émission</span>
-                    <input
-                      type="checkbox"
-                      checked={activeWizard.useParticleTint === true}
-                      onChange={(e) => setActiveWizard({ ...activeWizard, useParticleTint: e.target.checked })}
-                      className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
-                    />
-                  </div>
-                </div>
-              );
-            })()}
-
-            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5">
-                <span className="font-bold text-slate-700 text-xs">Nombre</span>
-                <EditableNumericValue
-                  value={activeWizard.particleCount ?? 20}
-                  precision={0}
-                  onChange={(v) => setActiveWizard({ ...activeWizard, particleCount: Math.round(v) })}
-                />
-              </div>
-              <input
-                type="range"
-                min="4"
-                max="50"
-                step="2"
-                value={Math.max(4, Math.min(50, activeWizard.particleCount ?? 20))}
-                onChange={(e) => setActiveWizard({ ...activeWizard, particleCount: parseInt(e.target.value, 10) })}
-                className="w-40 accent-amber-500"
-              />
-            </div>
-
-            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-700 text-xs">Couleurs (Mix)</span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={activeWizard.particleColor || '#f59e0b'}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, particleColor: e.target.value })}
-                  className="w-8 h-6 rounded border border-slate-300 cursor-pointer"
-                />
-                <input
-                  type="color"
-                  value={activeWizard.particleColor2 || '#ef4444'}
-                  onChange={(e) => setActiveWizard({ ...activeWizard, particleColor2: e.target.value })}
-                  className="w-8 h-6 rounded border border-slate-300 cursor-pointer"
-                />
-              </div>
-            </div>
-
-            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5">
-                <span className="font-bold text-slate-700 text-xs">Taille</span>
-                <EditableNumericValue
-                  value={activeWizard.particleSize ?? 6}
-                  unit="px"
-                  precision={1}
-                  onChange={(v) => setActiveWizard({ ...activeWizard, particleSize: v })}
-                />
-              </div>
-              <input
-                type="range"
-                min="2"
-                max="24"
-                step="1"
-                value={Math.max(2, Math.min(24, activeWizard.particleSize ?? 6))}
-                onChange={(e) => setActiveWizard({ ...activeWizard, particleSize: parseFloat(e.target.value) })}
-                className="w-40 accent-indigo-600"
-              />
-            </div>
-
-            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5">
-                <span className="font-bold text-slate-700 text-xs">Vitesse</span>
-                <EditableNumericValue
-                  value={activeWizard.particleSpeed ?? 180}
-                  unit="px/s"
-                  precision={1}
-                  onChange={(v) => setActiveWizard({ ...activeWizard, particleSpeed: v })}
-                />
-              </div>
-              <input
-                type="range"
-                min="40"
-                max="450"
-                step="10"
-                value={Math.max(40, Math.min(450, activeWizard.particleSpeed ?? 180))}
-                onChange={(e) => setActiveWizard({ ...activeWizard, particleSpeed: parseFloat(e.target.value) })}
-                className="w-40 accent-indigo-600"
-              />
-            </div>
-
-            <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5">
-                <span className="font-bold text-slate-700 text-xs">Gravité</span>
-                <EditableNumericValue
-                  value={activeWizard.particleGravity ?? 220}
-                  precision={1}
-                  onChange={(v) => setActiveWizard({ ...activeWizard, particleGravity: v })}
-                />
-              </div>
-              <input
-                type="range"
-                min="-200"
-                max="500"
-                step="20"
-                value={Math.max(-200, Math.min(500, activeWizard.particleGravity ?? 220))}
-                onChange={(e) => setActiveWizard({ ...activeWizard, particleGravity: parseFloat(e.target.value) })}
-                className="w-40 accent-indigo-600"
-              />
-            </div>
-
-            <ParticleActionEmissionExtrasSection
-              draft={activeWizard}
-              allowTarget={activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity'}
-              entities={entities}
-              availableEntityOptions={availableEntityOptions}
-              allProjectTags={allProjectTags}
-              datalistId="wizard-particle-dir-tags"
-              onPatch={(patch) => setActiveWizard({ ...activeWizard, ...patch })}
+                  particleCount: preset.count,
+                  particleColor: preset.color,
+                  particleColor2: preset.color2,
+                  particleShape: preset.shape,
+                  particleSpeed: preset.speed,
+                  particleGravity: preset.gravity,
+                  particleSpread: preset.spread,
+                })
+              }
+              onApplySavedPreset={(mapped) =>
+                setActiveWizard({
+                  ...activeWizard,
+                  particleShape: mapped.shape,
+                  customParticleId: mapped.customParticleId,
+                  customParticleIds: mapped.customParticleIds,
+                  customParticleMode: mapped.customParticleMode,
+                  useParticleTint: mapped.useParticleTint,
+                  particleColor: mapped.color,
+                  particleColor2: mapped.color2,
+                  particleColorMode: mapped.colorMode,
+                  particleCount: mapped.count ?? 22,
+                  particleCountMax: mapped.countMax,
+                  particleSpeed: mapped.speed,
+                  particleSpeedMax: mapped.speedMax,
+                  particleSize: mapped.size,
+                  particleSizeMax: mapped.sizeMax,
+                  particleEndSizeScale: mapped.endSizeScale,
+                  particleLifetime: mapped.lifetime,
+                  particleLifetimeMax: mapped.lifetimeMax,
+                  particleGravity: mapped.gravity,
+                  particleDrag: mapped.drag,
+                  particleOpacityStart: mapped.opacityStart,
+                  particleOpacityEnd: mapped.opacityEnd,
+                  particleSpinSpeed: mapped.spinSpeed,
+                  particleSpread: mapped.spread,
+                  particleAngle: mapped.angle,
+                  particleDirectionMode: mapped.directionMode,
+                  particleDirectionTargetMode: mapped.directionTargetMode,
+                  particleDirectionTargetEntityId: mapped.directionTargetEntityId,
+                  particleDirectionTargetEntityType: mapped.directionTargetEntityType,
+                  particleDirectionTargetTag: mapped.directionTargetTag,
+                  particleEmissionShape: mapped.emissionShape,
+                  particleEmissionRadius: mapped.emissionRadius,
+                  particleEmissionWidth: mapped.emissionWidth,
+                  particleEmissionHeight: mapped.emissionHeight,
+                })
+              }
             />
           </div>
 

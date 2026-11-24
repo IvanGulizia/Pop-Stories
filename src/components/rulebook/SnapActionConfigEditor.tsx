@@ -1,5 +1,5 @@
-import React from 'react';
-import { Check, Magnet, Unlink } from 'lucide-react';
+import React, { useEffect, useId } from 'react';
+import { Check, Crosshair, Magnet, Unlink } from 'lucide-react';
 import {
   ActionTargetMode,
   Entity,
@@ -12,6 +12,7 @@ import {
   SnapAnchorPreset,
   SnapAttachBehavior,
 } from '../../types';
+import { useSceneStore } from '../../store/useSceneStore';
 import { EntityOption } from './ruleBookTypes';
 import { SnapJointConfigFields } from '../shared/SnapJointConfigFields';
 
@@ -81,6 +82,11 @@ export const SnapActionConfigEditor: React.FC<SnapActionConfigEditorProps> = ({
   availableEntityOptions,
   allProjectTags,
 }) => {
+  const pickerRequestId = useId();
+  const startSnapPinCanvasPick = useSceneStore((s) => s.startSnapPinCanvasPick);
+  const snapPinCanvasPickResult = useSceneStore((s) => s.snapPinCanvasPickResult);
+  const clearSnapPinCanvasPickResult = useSceneStore((s) => s.clearSnapPinCanvasPickResult);
+
   const entityList = Object.values(entities);
   const firstEntityId = entityList[0]?.id || '';
   const firstEntityType = availableEntityOptions[0]?.type || '';
@@ -98,6 +104,97 @@ export const SnapActionConfigEditor: React.FC<SnapActionConfigEditorProps> = ({
     if (tMode === 'target') return targetType;
     if (tMode === 'subject') return subjectType;
     return undefined;
+  };
+
+  const resolvedSourceEntityId = React.useMemo(() => {
+    if (tMode === 'instance') {
+      return (draft.targetId && entities[draft.targetId]) ? draft.targetId : firstEntityId || undefined;
+    }
+    if (tMode === 'subject') {
+      return entityList.find((e) => e.type === subjectType)?.id || firstEntityId || undefined;
+    }
+    if (tMode === 'target') {
+      return entityList.find((e) => e.type === targetType)?.id || firstEntityId || undefined;
+    }
+    if (tMode === 'type') {
+      const tt = draft.targetType || firstEntityType;
+      return entityList.find((e) => e.type === tt)?.id;
+    }
+    if (tMode === 'tag' && draft.targetTag) {
+      const clean = draft.targetTag.trim().replace(/^#/, '').toLowerCase();
+      return entityList.find((e) =>
+        (e.tags || []).some((t) => t.trim().replace(/^#/, '').toLowerCase() === clean)
+      )?.id;
+    }
+    return undefined;
+  }, [tMode, draft.targetId, draft.targetType, draft.targetTag, subjectType, targetType, entities, entityList, firstEntityId, firstEntityType]);
+
+  const resolvedTargetEntityId = React.useMemo(() => {
+    if (snapTargetMode === 'entity') {
+      return (draft.snapTargetEntityId && entities[draft.snapTargetEntityId])
+        ? draft.snapTargetEntityId
+        : firstEntityId || undefined;
+    }
+    if (snapTargetMode === 'subject') {
+      return entityList.find((e) => e.type === subjectType)?.id || firstEntityId || undefined;
+    }
+    if (snapTargetMode === 'target') {
+      return entityList.find((e) => e.type === targetType)?.id || firstEntityId || undefined;
+    }
+    if (snapTargetMode === 'type') {
+      const tt = draft.snapTargetEntityType || firstEntityType;
+      return entityList.find((e) => e.type === tt)?.id;
+    }
+    if (snapTargetMode === 'tag' && draft.snapTargetTag) {
+      const clean = draft.snapTargetTag.trim().replace(/^#/, '').toLowerCase();
+      return entityList.find((e) =>
+        (e.tags || []).some((t) => t.trim().replace(/^#/, '').toLowerCase() === clean)
+      )?.id;
+    }
+    return undefined;
+  }, [snapTargetMode, draft.snapTargetEntityId, draft.snapTargetEntityType, draft.snapTargetTag, subjectType, targetType, entities, entityList, firstEntityId, firstEntityType]);
+
+  useEffect(() => {
+    if (!snapPinCanvasPickResult || snapPinCanvasPickResult.requestId !== pickerRequestId) {
+      return;
+    }
+    if (snapPinCanvasPickResult.pinRole === 'source') {
+      onPatch({
+        snapAlignment: 'anchor_offset',
+        snapSourceAnchor: 'custom_canvas',
+        snapCustomSourceAnchor: snapPinCanvasPickResult.anchor,
+      });
+    } else {
+      onPatch({
+        snapAlignment: 'anchor_offset',
+        snapTargetAnchor: 'custom_canvas',
+        snapCustomTargetAnchor: snapPinCanvasPickResult.anchor,
+      });
+    }
+    clearSnapPinCanvasPickResult();
+  }, [snapPinCanvasPickResult, pickerRequestId, onPatch, clearSnapPinCanvasPickResult]);
+
+  const handleLaunchCanvasPin = (pinRole: 'source' | 'target') => {
+    const refId = pinRole === 'source' ? resolvedSourceEntityId : resolvedTargetEntityId;
+    if (!refId) return;
+    if (pinRole === 'source') {
+      onPatch({
+        snapAlignment: 'anchor_offset',
+        snapSourceAnchor: 'custom_canvas',
+        ...(draft.snapCustomSourceAnchor ? {} : { snapCustomSourceAnchor: { x: 0.5, y: 0.5 } }),
+      });
+    } else {
+      onPatch({
+        snapAlignment: 'anchor_offset',
+        snapTargetAnchor: 'custom_canvas',
+        ...(draft.snapCustomTargetAnchor ? {} : { snapCustomTargetAnchor: { x: 0.5, y: 0.5 } }),
+      });
+    }
+    startSnapPinCanvasPick({
+      requestId: pickerRequestId,
+      pinRole,
+      referenceEntityId: refId,
+    });
   };
 
   if (mode === 'unsnap') {
@@ -453,6 +550,43 @@ export const SnapActionConfigEditor: React.FC<SnapActionConfigEditorProps> = ({
             </select>
           </div>
 
+          {alignment !== 'anchor_offset' && (
+            <div className="p-2 bg-cyan-50/70 rounded-xl border border-cyan-200/80 space-y-1.5">
+              <div className="text-[10px] font-bold text-cyan-900 flex items-center gap-1">
+                <Crosshair className="w-3 h-3" />
+                <span>Repère direct sur le canvas</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  disabled={!resolvedSourceEntityId}
+                  onClick={() => handleLaunchCanvasPin('source')}
+                  className={`px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-colors ${
+                    resolvedSourceEntityId
+                      ? 'bg-cyan-600 hover:bg-cyan-700 text-white cursor-pointer shadow-2xs'
+                      : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  }`}
+                >
+                  <Crosshair className="w-3 h-3 shrink-0" />
+                  <span>Placer repère objet</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!resolvedTargetEntityId}
+                  onClick={() => handleLaunchCanvasPin('target')}
+                  className={`px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-colors ${
+                    resolvedTargetEntityId
+                      ? 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer shadow-2xs'
+                      : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  }`}
+                >
+                  <Crosshair className="w-3 h-3 shrink-0" />
+                  <span>Placer repère cible</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {alignment === 'anchor_offset' && (
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
@@ -503,91 +637,127 @@ export const SnapActionConfigEditor: React.FC<SnapActionConfigEditorProps> = ({
               </div>
 
               {draft.snapSourceAnchor === 'custom_canvas' && (
-                <div className="grid grid-cols-2 gap-2 p-2 bg-cyan-50/70 rounded-xl border border-cyan-200">
-                  <div className="flex items-center justify-between gap-1 text-xs">
-                    <span className="text-[10px] font-bold text-cyan-900">Repère objet X (0..1)</span>
-                    <input
-                      type="number"
-                      step="any"
-                      value={draft.snapCustomSourceAnchor?.x ?? 0.5}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        if (Number.isFinite(v)) {
-                          onPatch({
-                            snapCustomSourceAnchor: {
-                              x: v,
-                              y: draft.snapCustomSourceAnchor?.y ?? 0.5,
-                            },
-                          });
-                        }
-                      }}
-                      className="w-16 bg-white border border-cyan-200 rounded px-1.5 py-0.5 font-mono font-bold text-right text-slate-800"
-                    />
+                <div className="p-2 bg-cyan-50/70 rounded-xl border border-cyan-200 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold text-cyan-900">Repère objet (0..1)</span>
+                    <button
+                      type="button"
+                      disabled={!resolvedSourceEntityId}
+                      onClick={() => handleLaunchCanvasPin('source')}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors ${
+                        resolvedSourceEntityId
+                          ? 'bg-cyan-600 hover:bg-cyan-700 text-white cursor-pointer shadow-2xs'
+                          : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      }`}
+                    >
+                      <Crosshair className="w-3 h-3" />
+                      <span>Placer sur le canvas</span>
+                    </button>
                   </div>
-                  <div className="flex items-center justify-between gap-1 text-xs">
-                    <span className="text-[10px] font-bold text-cyan-900">Repère objet Y (0..1)</span>
-                    <input
-                      type="number"
-                      step="any"
-                      value={draft.snapCustomSourceAnchor?.y ?? 0.5}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        if (Number.isFinite(v)) {
-                          onPatch({
-                            snapCustomSourceAnchor: {
-                              x: draft.snapCustomSourceAnchor?.x ?? 0.5,
-                              y: v,
-                            },
-                          });
-                        }
-                      }}
-                      className="w-16 bg-white border border-cyan-200 rounded px-1.5 py-0.5 font-mono font-bold text-right text-slate-800"
-                    />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex items-center justify-between gap-1 text-xs">
+                      <span className="text-[10px] font-bold text-cyan-900">X</span>
+                      <input
+                        type="number"
+                        step="any"
+                        value={draft.snapCustomSourceAnchor?.x ?? 0.5}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (Number.isFinite(v)) {
+                            onPatch({
+                              snapCustomSourceAnchor: {
+                                x: v,
+                                y: draft.snapCustomSourceAnchor?.y ?? 0.5,
+                              },
+                            });
+                          }
+                        }}
+                        className="w-16 bg-white border border-cyan-200 rounded px-1.5 py-0.5 font-mono font-bold text-right text-slate-800"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-1 text-xs">
+                      <span className="text-[10px] font-bold text-cyan-900">Y</span>
+                      <input
+                        type="number"
+                        step="any"
+                        value={draft.snapCustomSourceAnchor?.y ?? 0.5}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (Number.isFinite(v)) {
+                            onPatch({
+                              snapCustomSourceAnchor: {
+                                x: draft.snapCustomSourceAnchor?.x ?? 0.5,
+                                y: v,
+                              },
+                            });
+                          }
+                        }}
+                        className="w-16 bg-white border border-cyan-200 rounded px-1.5 py-0.5 font-mono font-bold text-right text-slate-800"
+                      />
+                    </div>
                   </div>
                 </div>
               )}
 
               {draft.snapTargetAnchor === 'custom_canvas' && (
-                <div className="grid grid-cols-2 gap-2 p-2 bg-indigo-50/70 rounded-xl border border-indigo-200">
-                  <div className="flex items-center justify-between gap-1 text-xs">
-                    <span className="text-[10px] font-bold text-indigo-900">Repère cible X (0..1)</span>
-                    <input
-                      type="number"
-                      step="any"
-                      value={draft.snapCustomTargetAnchor?.x ?? 0.5}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        if (Number.isFinite(v)) {
-                          onPatch({
-                            snapCustomTargetAnchor: {
-                              x: v,
-                              y: draft.snapCustomTargetAnchor?.y ?? 0.5,
-                            },
-                          });
-                        }
-                      }}
-                      className="w-16 bg-white border border-indigo-200 rounded px-1.5 py-0.5 font-mono font-bold text-right text-slate-800"
-                    />
+                <div className="p-2 bg-indigo-50/70 rounded-xl border border-indigo-200 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold text-indigo-900">Repère cible (0..1)</span>
+                    <button
+                      type="button"
+                      disabled={!resolvedTargetEntityId}
+                      onClick={() => handleLaunchCanvasPin('target')}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors ${
+                        resolvedTargetEntityId
+                          ? 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer shadow-2xs'
+                          : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      }`}
+                    >
+                      <Crosshair className="w-3 h-3" />
+                      <span>Placer sur le canvas</span>
+                    </button>
                   </div>
-                  <div className="flex items-center justify-between gap-1 text-xs">
-                    <span className="text-[10px] font-bold text-indigo-900">Repère cible Y (0..1)</span>
-                    <input
-                      type="number"
-                      step="any"
-                      value={draft.snapCustomTargetAnchor?.y ?? 0.5}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        if (Number.isFinite(v)) {
-                          onPatch({
-                            snapCustomTargetAnchor: {
-                              x: draft.snapCustomTargetAnchor?.x ?? 0.5,
-                              y: v,
-                            },
-                          });
-                        }
-                      }}
-                      className="w-16 bg-white border border-indigo-200 rounded px-1.5 py-0.5 font-mono font-bold text-right text-slate-800"
-                    />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex items-center justify-between gap-1 text-xs">
+                      <span className="text-[10px] font-bold text-indigo-900">X</span>
+                      <input
+                        type="number"
+                        step="any"
+                        value={draft.snapCustomTargetAnchor?.x ?? 0.5}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (Number.isFinite(v)) {
+                            onPatch({
+                              snapCustomTargetAnchor: {
+                                x: v,
+                                y: draft.snapCustomTargetAnchor?.y ?? 0.5,
+                              },
+                            });
+                          }
+                        }}
+                        className="w-16 bg-white border border-indigo-200 rounded px-1.5 py-0.5 font-mono font-bold text-right text-slate-800"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-1 text-xs">
+                      <span className="text-[10px] font-bold text-indigo-900">Y</span>
+                      <input
+                        type="number"
+                        step="any"
+                        value={draft.snapCustomTargetAnchor?.y ?? 0.5}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (Number.isFinite(v)) {
+                            onPatch({
+                              snapCustomTargetAnchor: {
+                                x: draft.snapCustomTargetAnchor?.x ?? 0.5,
+                                y: v,
+                              },
+                            });
+                          }
+                        }}
+                        className="w-16 bg-white border border-indigo-200 rounded px-1.5 py-0.5 font-mono font-bold text-right text-slate-800"
+                      />
+                    </div>
                   </div>
                 </div>
               )}

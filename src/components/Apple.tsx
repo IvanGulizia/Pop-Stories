@@ -22,6 +22,7 @@ export function Apple({ entity, style }: AppleProps) {
     canDrag,
     x,
     y,
+    dragMagnetStyle,
     dragControls,
     handleDragStart,
     handleDrag,
@@ -73,6 +74,7 @@ export function Apple({ entity, style }: AppleProps) {
         zIndex: isSelected && appMode !== 'play' ? 30 : undefined,
         pointerEvents: 'none',
         opacity: runtimeOpacity,
+        ...dragMagnetStyle,
         ...style,
       }}
       drag={appMode === 'play' && hasSlider ? false : canDrag}

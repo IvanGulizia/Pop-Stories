@@ -6,7 +6,7 @@ import {
   Entity,
   RuleAction,
 } from '../../types';
-import { EntityOption, ParticleDrawingTarget, WizardData } from './ruleBookTypes';
+import { EntityOption, WizardData } from './ruleBookTypes';
 import { WizardStep1Condition } from './WizardStep1Condition';
 import { WizardStep2Objects } from './WizardStep2Objects';
 import { WizardStep3Actions } from './WizardStep3Actions';
@@ -21,10 +21,10 @@ interface RuleCreationWizardModalProps {
   allProjectTags: string[];
   customSounds: CustomSound[];
   customParticles: CustomParticlePreset[];
-  deleteCustomParticle: (id: string) => void;
   setIsSoundModalOpen: (open: boolean) => void;
-  setParticleDrawingTarget: React.Dispatch<React.SetStateAction<ParticleDrawingTarget | null>>;
-  setParticleEditorContext: React.Dispatch<React.SetStateAction<'wizard' | 'modal' | null>>;
+  setParticleEditorContext: React.Dispatch<
+    React.SetStateAction<{ target: 'wizard' | 'modal'; initialView?: 'studio' | 'draw_custom' } | null>
+  >;
   getEntityObj: (type?: string) => Entity | undefined;
   completeWizardWithAction: (action?: Omit<RuleAction, 'id'>) => void;
 }
@@ -38,9 +38,7 @@ export function RuleCreationWizardModal({
   allProjectTags,
   customSounds,
   customParticles,
-  deleteCustomParticle,
   setIsSoundModalOpen,
-  setParticleDrawingTarget,
   setParticleEditorContext,
   getEntityObj,
   completeWizardWithAction,
@@ -54,7 +52,7 @@ export function RuleCreationWizardModal({
   const wizardObjectPhase = activeWizard.objectPhase || 'subject';
   const hasWizardParams = true;
 
-  const isPickingSpawnOnCanvas = useSceneStore((s) => Boolean(s.spawnCanvasPick));
+  const isPickingSpawnOnCanvas = useSceneStore((s) => Boolean(s.spawnCanvasPick || s.snapPinCanvasPick));
 
   return (
     <div
@@ -407,9 +405,7 @@ export function RuleCreationWizardModal({
               allProjectTags={allProjectTags}
               customSounds={customSounds}
               customParticles={customParticles}
-              deleteCustomParticle={deleteCustomParticle}
               setIsSoundModalOpen={setIsSoundModalOpen}
-              setParticleDrawingTarget={setParticleDrawingTarget}
               setParticleEditorContext={setParticleEditorContext}
               getEntityObj={getEntityObj}
               completeWizardWithAction={completeWizardWithAction}

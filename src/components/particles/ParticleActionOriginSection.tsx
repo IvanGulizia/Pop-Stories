@@ -39,6 +39,7 @@ interface ParticleActionOriginSectionProps {
   availableEntityOptions: EntityOption[];
   allProjectTags: string[];
   datalistId: string;
+  hideSavedCollection?: boolean;
   onPatch: (patch: Record<string, any>) => void;
 }
 
@@ -49,6 +50,7 @@ export const ParticleActionOriginSection: React.FC<ParticleActionOriginSectionPr
   availableEntityOptions,
   allProjectTags,
   datalistId,
+  hideSavedCollection = false,
   onPatch,
 }) => {
   const projectPresets = useSceneStore((s) => s.projectParticlePresets || EMPTY_LIST);
@@ -71,7 +73,7 @@ export const ParticleActionOriginSection: React.FC<ParticleActionOriginSectionPr
 
   return (
     <div className="space-y-1.5">
-      {savedList.length > 0 && (
+      {!hideSavedCollection && savedList.length > 0 && (
         <div className="p-2 bg-amber-50/70 rounded-xl border border-amber-200 flex items-center justify-between gap-2">
           <span className="font-bold text-amber-950 text-xs flex items-center gap-1.5">
             <FolderOpen className="w-3.5 h-3.5 text-amber-600" />

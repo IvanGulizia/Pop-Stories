@@ -10,7 +10,6 @@ import {
   ActiveModal,
   ActionModalSubStep,
   EntityOption,
-  ParticleDrawingTarget,
 } from './ruleBookTypes';
 import { RuleSubjectTargetModal } from './RuleSubjectTargetModal';
 import { RuleEventModal } from './RuleEventModal';
@@ -28,10 +27,10 @@ interface RuleSlotEditModalProps {
   allProjectTags: string[];
   customSounds: CustomSound[];
   customParticles: CustomParticlePreset[];
-  deleteCustomParticle: (id: string) => void;
   setIsSoundModalOpen: (open: boolean) => void;
-  setParticleDrawingTarget: (target: ParticleDrawingTarget) => void;
-  setParticleEditorContext: (ctx: 'wizard' | 'modal' | null) => void;
+  setParticleEditorContext: (
+    ctx: { target: 'wizard' | 'modal'; initialView?: 'studio' | 'draw_custom' } | null
+  ) => void;
   getEntityObj: (type?: string) => Entity | undefined;
   openRuleSubjectModal: (rule: DynamicRule, subStep?: 'choose_object' | 'choose_state') => void;
   openRuleTargetModal: (rule: DynamicRule, subStep?: 'choose_object' | 'choose_state') => void;
@@ -58,9 +57,7 @@ export const RuleSlotEditModal: React.FC<RuleSlotEditModalProps> = ({
   allProjectTags,
   customSounds,
   customParticles,
-  deleteCustomParticle,
   setIsSoundModalOpen,
-  setParticleDrawingTarget,
   setParticleEditorContext,
   getEntityObj,
   openRuleSubjectModal,
@@ -97,7 +94,7 @@ export const RuleSlotEditModal: React.FC<RuleSlotEditModalProps> = ({
       Object.keys(getEntityObj(modalTargetType)?.states || {}).length > 1
     : false;
 
-  const isPickingSpawnOnCanvas = useSceneStore((s) => Boolean(s.spawnCanvasPick));
+  const isPickingSpawnOnCanvas = useSceneStore((s) => Boolean(s.spawnCanvasPick || s.snapPinCanvasPick));
 
   return (
     <div
@@ -287,9 +284,7 @@ export const RuleSlotEditModal: React.FC<RuleSlotEditModalProps> = ({
             allProjectTags={allProjectTags}
             customSounds={customSounds}
             customParticles={customParticles}
-            deleteCustomParticle={deleteCustomParticle}
             setIsSoundModalOpen={setIsSoundModalOpen}
-            setParticleDrawingTarget={setParticleDrawingTarget}
             setParticleEditorContext={setParticleEditorContext}
             getEntityObj={getEntityObj}
           />

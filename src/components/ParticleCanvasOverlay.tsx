@@ -28,6 +28,7 @@ export function ParticleCanvasOverlay({ active }: ParticleCanvasOverlayProps) {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    let resizeRafId = 0;
     const resizeCanvas = () => {
       const parent = canvas.parentElement;
       if (!parent) return;
@@ -43,15 +44,26 @@ export function ParticleCanvasOverlay({ active }: ParticleCanvasOverlayProps) {
       }
     };
 
+    const scheduleResizeCanvas = () => {
+      if (resizeRafId) window.cancelAnimationFrame(resizeRafId);
+      resizeRafId = window.requestAnimationFrame(() => {
+        resizeRafId = 0;
+        resizeCanvas();
+      });
+    };
+
     resizeCanvas();
-    const ro = new ResizeObserver(resizeCanvas);
+    const ro = new ResizeObserver(scheduleResizeCanvas);
     if (canvas.parentElement) ro.observe(canvas.parentElement);
 
     if (!active) {
       clearParticles();
       const ctx = canvas.getContext('2d');
       if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-      return () => ro.disconnect();
+      return () => {
+        if (resizeRafId) window.cancelAnimationFrame(resizeRafId);
+        ro.disconnect();
+      };
     }
 
     let animId = 0;
@@ -89,6 +101,7 @@ export function ParticleCanvasOverlay({ active }: ParticleCanvasOverlayProps) {
     animId = requestAnimationFrame(loop);
 
     return () => {
+      if (resizeRafId) window.cancelAnimationFrame(resizeRafId);
       cancelAnimationFrame(animId);
       ro.disconnect();
       clearParticles();

@@ -17,6 +17,7 @@ import {
   resolveNativeHitboxCursorClass,
 } from '../utils/cursorResolution';
 import {
+  computeLiveDragMagneticOffsetForEntity,
   endPhysicsGrab,
   getEffectiveBehaviors,
   getEntityRuntimeHealth,
@@ -100,9 +101,11 @@ export function useEntityPointerInteraction({
   const upHandledForPointerRef = useRef<boolean>(false);
   const isHoveringRef = useRef(false);
   const dragSamplesRef = useRef<{ x: number; y: number; time: number }[]>([]);
+  const dragMagOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [dragMagOffset, setDragMagOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const dragControls = useDragControls();
-  const { setCursorState, setIsDragging } = useAppCursor();
+  const { setCursorState, setIsDragging, isDragCursorLocked, setDragCursorLocked } = useAppCursor();
 
   const isSelected = selectedEntityId === entity.id;
   const isSameTypeSibling = useSceneStore(
@@ -194,9 +197,11 @@ export function useEntityPointerInteraction({
     const sBase = targetSt?.scale ?? 1;
     const rawX = targetEnt.id === entity.id ? Number(x.get()) : targetEnt.position.x;
     const rawY = targetEnt.id === entity.id ? Number(y.get()) : targetEnt.position.y;
+    const magX = targetEnt.id === entity.id ? dragMagOffsetRef.current.x : 0;
+    const magY = targetEnt.id === entity.id ? dragMagOffsetRef.current.y : 0;
     const livePos = {
-      x: Number.isFinite(rawX) ? rawX : targetEnt.position.x,
-      y: Number.isFinite(rawY) ? rawY : targetEnt.position.y,
+      x: (Number.isFinite(rawX) ? rawX : targetEnt.position.x) + magX,
+      y: (Number.isFinite(rawY) ? rawY : targetEnt.position.y) + magY,
     };
     const container =
       typeof document !== 'undefined' ? document.getElementById('scene-canvas-container') : null;
@@ -288,19 +293,46 @@ export function useEntityPointerInteraction({
     }
 
     isDraggingRef.current = true;
+    setDragCursorLocked(true);
     setCursorState('drag');
 
     if (!isNaN(numX) && !isNaN(numY)) {
-      setActiveDragPosition(entity.id, { x: numX, y: numY });
+      let effectiveX = numX;
+      let effectiveY = numY;
+      if (appMode === 'play') {
+        const snapState = useSceneStore.getState();
+        const liveEnt = snapState.entities[entity.id] || entity;
+        const mag = computeLiveDragMagneticOffsetForEntity(
+          liveEnt,
+          { x: numX, y: numY },
+          snapState.entities
+        );
+        dragMagOffsetRef.current = mag;
+        setDragMagOffset((prev) => (prev.x === mag.x && prev.y === mag.y ? prev : mag));
+        effectiveX = numX + mag.x;
+        effectiveY = numY + mag.y;
+      } else if (dragMagOffsetRef.current.x !== 0 || dragMagOffsetRef.current.y !== 0) {
+        dragMagOffsetRef.current = { x: 0, y: 0 };
+        setDragMagOffset({ x: 0, y: 0 });
+      }
+
+      setActiveDragPosition(entity.id, { x: effectiveX, y: effectiveY });
       if (appMode === 'play') {
         const liveEnt = useSceneStore.getState().entities[entity.id] || entity;
         const liveSt = liveEnt.states[liveEnt.currentStateId] || currentState;
         const effPivot = resolveEffectivePivot(liveEnt, liveSt);
-        syncEntityDragPosition(entity.id, numX, numY, liveEnt.size.width, liveEnt.size.height, effPivot);
+        syncEntityDragPosition(
+          entity.id,
+          effectiveX,
+          effectiveY,
+          liveEnt.size.width,
+          liveEnt.size.height,
+          effPivot
+        );
         notifyEntityDragLifecycle(
           entity.id,
           'move',
-          { x: numX, y: numY },
+          { x: effectiveX, y: effectiveY },
           hasMovedBeyondDragThresholdRef.current
         );
       }
@@ -311,10 +343,10 @@ export function useEntityPointerInteraction({
             pushedDragHistoryRef.current = true;
             useSceneStore.getState().pushSceneHistory();
           }
-          updateEntityPosition(entity.id, { x: numX, y: numY });
+          updateEntityPosition(entity.id, { x: effectiveX, y: effectiveY });
         }
         evaluateRulesWithTemp({
-          [entity.id]: { x: numX, y: numY },
+          [entity.id]: { x: effectiveX, y: effectiveY },
         });
       }
     }
@@ -326,13 +358,18 @@ export function useEntityPointerInteraction({
     const currentY = y.get();
     const numX = typeof currentX === 'string' ? parseFloat(currentX) : currentX;
     const numY = typeof currentY === 'string' ? parseFloat(currentY) : currentY;
+    const mag = dragMagOffsetRef.current;
+    dragMagOffsetRef.current = { x: 0, y: 0 };
+    setDragMagOffset({ x: 0, y: 0 });
+    const finalX = !isNaN(numX) ? numX + (appMode === 'play' ? mag.x : 0) : numX;
+    const finalY = !isNaN(numY) ? numY + (appMode === 'play' ? mag.y : 0) : numY;
 
     // Verrouiller la position finale du corps Matter avant de relâcher le verrou pour éviter toute téléportation
-    if (appMode === 'play' && !isNaN(numX) && !isNaN(numY)) {
+    if (appMode === 'play' && !isNaN(finalX) && !isNaN(finalY)) {
       const liveEnt = useSceneStore.getState().entities[entity.id] || entity;
       const liveSt = liveEnt.states[liveEnt.currentStateId] || currentState;
       const effPivot = resolveEffectivePivot(liveEnt, liveSt);
-      syncEntityDragPosition(entity.id, numX, numY, liveEnt.size.width, liveEnt.size.height, effPivot);
+      syncEntityDragPosition(entity.id, finalX, finalY, liveEnt.size.width, liveEnt.size.height, effPivot);
     }
 
     // Libérer immédiatement le verrou de synchro visuelle pour que la physique poursuive sans aucun freeze
@@ -345,18 +382,18 @@ export function useEntityPointerInteraction({
       notifyEntityDragLifecycle(entity.id, 'end', undefined, hasMovedBeyondDragThresholdRef.current);
     }
 
-    if (!isNaN(numX) && !isNaN(numY)) {
-      x.set(numX);
-      y.set(numY);
+    if (!isNaN(finalX) && !isNaN(finalY)) {
+      x.set(finalX);
+      y.set(finalY);
       updateEntityPosition(entity.id, {
-        x: numX,
-        y: numY,
+        x: finalX,
+        y: finalY,
       });
       evaluateRulesWithTemp();
       if (hasMovedBeyondDragThresholdRef.current) {
         triggerDragRelease(entity.id, {
-          x: Math.round(numX + entity.size.width / 2),
-          y: Math.round(numY + entity.size.height / 2),
+          x: Math.round(finalX + entity.size.width / 2),
+          y: Math.round(finalY + entity.size.height / 2),
         });
       }
 
@@ -368,8 +405,8 @@ export function useEntityPointerInteraction({
         // Si la main s'est arrêtée plus de 90ms avant de relâcher le bouton, annuler le lancer
         if (now - lastRaw.time <= 90) {
           const last =
-            now - lastRaw.time >= 4 && Math.hypot(numX - lastRaw.x, numY - lastRaw.y) > 0.5
-              ? { x: numX, y: numY, time: now }
+            now - lastRaw.time >= 4 && Math.hypot(finalX - lastRaw.x, finalY - lastRaw.y) > 0.5
+              ? { x: finalX, y: finalY, time: now }
               : lastRaw;
           let first = samples[0];
           for (let i = samples.length - 2; i >= 0; i--) {
@@ -395,11 +432,11 @@ export function useEntityPointerInteraction({
       }
     }
 
-    setIsDragging(false);
+    setDragCursorLocked(false);
     setCursorState('release');
     setTimeout(() => {
       hasMovedBeyondDragThresholdRef.current = false;
-      if (!isDraggingRef.current) {
+      if (!isDraggingRef.current && !isDragCursorLocked()) {
         setCursorState(getHoverState());
       }
     }, 120);
@@ -505,7 +542,16 @@ export function useEntityPointerInteraction({
   };
 
   const handlePointerHoverCheck = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (isPlayDisabled || isDraggingRef.current || performance.now() - lastDragEndTimeRef.current < 130 || appMode !== 'play') return;
+    if (
+      isPlayDisabled ||
+      isDraggingRef.current ||
+      isPhysicsGrabbingRef.current ||
+      isDragCursorLocked() ||
+      performance.now() - lastDragEndTimeRef.current < 130 ||
+      appMode !== 'play'
+    ) {
+      return;
+    }
     const pt = getSceneEventPosition(e.clientX, e.clientY);
     const isInside = isPointInsideEntityCollider(
       e.clientX,
@@ -573,7 +619,7 @@ export function useEntityPointerInteraction({
     onPointerMove: handlePointerHoverCheck,
     onPointerLeave: (e) => {
       if (appMode === 'play') {
-        if (!isDraggingRef.current && !isPhysicsGrabbingRef.current) {
+        if (!isDraggingRef.current && !isPhysicsGrabbingRef.current && !isDragCursorLocked()) {
           setCursorState('idle');
         }
         if (isHoveringRef.current) {
@@ -1033,6 +1079,7 @@ export function useEntityPointerInteraction({
 
       if (target.id !== entity.id) {
         if (canDragTarget) {
+          setDragCursorLocked(true);
           getEntityDragControls(target.id)?.start(e);
           setCursorState('drag');
         } else {
@@ -1045,6 +1092,7 @@ export function useEntityPointerInteraction({
           );
         }
       } else if (canDrag) {
+        setDragCursorLocked(true);
         dragControls.start(e);
         setCursorState('drag');
       } else {
@@ -1061,6 +1109,9 @@ export function useEntityPointerInteraction({
         window.removeEventListener('pointerup', handleGlobalUp);
         window.removeEventListener('pointercancel', handleGlobalUp);
         releasePuppetGrabHold(liveTarget.id);
+        if (isDragCursorLocked() && !isDraggingRef.current && !isPhysicsGrabbingRef.current) {
+          setDragCursorLocked(false);
+        }
         if (upHandledForPointerRef.current) return;
         upHandledForPointerRef.current = true;
         const upPt = getSceneEventPosition(upEvent.clientX, upEvent.clientY);
@@ -1109,10 +1160,11 @@ export function useEntityPointerInteraction({
         selectEntity(target.id);
         triggerPointerEvent(target.id, 'click', pt);
         triggerPointerEvent(target.id, 'mouse_up', pt);
+        setDragCursorLocked(false);
         setCursorState(getHoverStateFor(target));
-      } else if (!hasMovedBeyondDragThresholdRef.current) {
+      } else if (!hasMovedBeyondDragThresholdRef.current && dist < 6) {
         isDraggingRef.current = false;
-        setIsDragging(false);
+        setDragCursorLocked(false);
         if (isInside) {
           setCursorState(getHoverStateFor(target));
           triggerPointerEvent(target.id, 'mouse_up', pt);
@@ -1158,6 +1210,11 @@ export function useEntityPointerInteraction({
     },
   };
 
+  const dragMagnetStyle: React.CSSProperties | undefined =
+    appMode === 'play' && (dragMagOffset.x !== 0 || dragMagOffset.y !== 0)
+      ? { translate: `${dragMagOffset.x}px ${dragMagOffset.y}px` }
+      : undefined;
+
   return {
     appMode,
     showCanvasLabels,
@@ -1170,6 +1227,7 @@ export function useEntityPointerInteraction({
     canDrag,
     x,
     y,
+    dragMagnetStyle,
     dragControls,
     handleDragStart,
     handleDrag,

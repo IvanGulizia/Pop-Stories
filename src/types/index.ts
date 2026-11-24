@@ -133,6 +133,7 @@ export interface PhysicsBehaviorConfig extends BaseBehaviorConfig {
   worldPinDamping?: number;         // Amortissement 0.02..0.6 (défaut 0.15)
   worldPinBreakable?: boolean;      // Cassable par traction/drag (défaut true)
   worldPinBreakDistance?: number;   // Distance d'étirement avant rupture en px (défaut 60)
+  worldPinPullingStateId?: StateId; // État déclenché pendant la traction / résistance
   worldPinBrokenStateId?: StateId;  // État déclenché automatiquement lors de l'arrachement
 }
 
@@ -749,6 +750,7 @@ export interface SnapBehaviorConfig extends BaseBehaviorConfig {
   unsnapDistance?: number;              // px (hystérésis d'arrachement, défaut ~1.5x rayon)
   reSnapCooldownSec?: number;           // s avant ré-aimantation après détachement (défaut 0.35)
   snappedStateId?: StateId;
+  pullingStateId?: StateId;             // État déclenché pendant la traction / résistance avant arrachement
   unsnappedStateId?: StateId;
 }
 

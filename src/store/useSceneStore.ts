@@ -456,20 +456,28 @@ interface SceneState {
 
   // Interactive live canvas Snap custom pin picker & direct pin drag
   snapPinCanvasPick: {
-    entityId: EntityId;
-    behaviorId: string;
+    entityId?: EntityId;
+    behaviorId?: string;
     stateId?: StateId;
+    requestId?: string;
     pinRole: 'source' | 'target';
     referenceEntityId: EntityId;
   } | null;
+  snapPinCanvasPickResult: {
+    requestId: string;
+    pinRole: 'source' | 'target';
+    anchor: Position;
+  } | null;
   startSnapPinCanvasPick: (req: {
-    entityId: EntityId;
-    behaviorId: string;
+    entityId?: EntityId;
+    behaviorId?: string;
     stateId?: StateId;
+    requestId?: string;
     pinRole: 'source' | 'target';
     referenceEntityId: EntityId;
   }) => void;
   cancelSnapPinCanvasPick: () => void;
+  clearSnapPinCanvasPickResult: () => void;
   completeSnapPinCanvasPick: (worldX: number, worldY: number) => void;
   moveSnapCustomPin: (params: {
     entityId: EntityId;
@@ -1685,6 +1693,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   snapPinCanvasPick: null,
+  snapPinCanvasPickResult: null,
   startSnapPinCanvasPick: (req) =>
     set((state) => {
       const refEnt = state.entities[req.referenceEntityId];
@@ -1696,15 +1705,40 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       };
     }),
   cancelSnapPinCanvasPick: () => set({ snapPinCanvasPick: null }),
+  clearSnapPinCanvasPickResult: () => set({ snapPinCanvasPickResult: null }),
   completeSnapPinCanvasPick: (worldX, worldY) => {
-    const pick = get().snapPinCanvasPick;
+    const state = get();
+    const pick = state.snapPinCanvasPick;
     if (!pick) return;
-    get().moveSnapCustomPin({
-      ...pick,
-      worldX,
-      worldY,
-      skipHistory: false,
-    });
+    if (pick.requestId) {
+      const refEnt = state.entities[pick.referenceEntityId];
+      if (refEnt) {
+        const anchor = computeSnapCustomAnchorFromWorld(refEnt, { x: worldX, y: worldY });
+        set({
+          snapPinCanvasPick: null,
+          snapPinCanvasPickResult: {
+            requestId: pick.requestId,
+            pinRole: pick.pinRole,
+            anchor,
+          },
+        });
+        return;
+      }
+      set({ snapPinCanvasPick: null });
+      return;
+    }
+    if (pick.entityId && pick.behaviorId) {
+      state.moveSnapCustomPin({
+        entityId: pick.entityId,
+        behaviorId: pick.behaviorId,
+        stateId: pick.stateId,
+        pinRole: pick.pinRole,
+        referenceEntityId: pick.referenceEntityId,
+        worldX,
+        worldY,
+        skipHistory: false,
+      });
+    }
     set({ snapPinCanvasPick: null });
   },
   moveSnapCustomPin: ({
@@ -1728,6 +1762,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     const anchorField = pinRole === 'source' ? 'sourceAnchor' : 'targetAnchor';
     const pinField = pinRole === 'source' ? 'customSourceAnchor' : 'customTargetAnchor';
     const patch: Partial<SnapBehaviorConfig> = {
+      snapAlignment: 'anchor_offset',
       [anchorField]: 'custom_canvas' as SnapAnchorPreset,
       [pinField]: norm,
     };
@@ -1838,7 +1873,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   },
 
   settings: {
-    aspectRatio: '1:1',
+    aspectRatio: 'free',
     showCanvasLabels: false,
     showGrid: false,
     gridStyle: 'dots',

@@ -21,6 +21,7 @@ export function Plant({ entity, style }: PlantProps) {
     canDrag,
     x,
     y,
+    dragMagnetStyle,
     dragControls,
     handleDragStart,
     handleDrag,
@@ -82,6 +83,7 @@ export function Plant({ entity, style }: PlantProps) {
         zIndex: isSelected && appMode !== 'play' ? 30 : undefined,
         pointerEvents: 'none',
         opacity: runtimeOpacity,
+        ...dragMagnetStyle,
         ...style,
       }}
       drag={appMode === 'play' && hasSlider ? false : canDrag}

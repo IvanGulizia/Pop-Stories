@@ -1,26 +1,19 @@
 import React from 'react';
-import { Dices, FolderOpen, Paintbrush, Pencil, Plus, Sliders, X } from 'lucide-react';
-import { EMPTY_LIST, EMPTY_RECORD, useSceneStore } from '../../store/useSceneStore';
+import { Dices, Paintbrush, Plus } from 'lucide-react';
 import {
   CustomParticlePreset,
-  CustomParticleUsageMode,
   Entity,
   EntityState,
   HealthBehaviorConfig,
   LookAtBehaviorConfig,
-  ParticleAnchorPreset,
-  ParticleColorMode,
-  ParticleDirectionMode,
-  ParticleEffectPreset,
-  ParticleEmissionShape,
   ParticleEmitterBehaviorConfig,
-  ParticleShape,
   SceneTransitionType,
   StrokeWiggleBehaviorConfig,
 } from '../../types';
 import { SCENE_TRANSITION_OPTIONS } from '../rulebook/ruleBookTypes';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
-import { remapPresetConfigSprites } from '../particles/ParticlePresetLibrary';
+import { ParticleInspectorSummary } from '../particles/ParticleInspectorSummary';
+import { EMPTY_LIST, EMPTY_RECORD, useSceneStore } from '../../store/useSceneStore';
 
 export function LookAtBehaviorControls({
   b,
@@ -385,668 +378,105 @@ export function ParticleEmitterBehaviorControls({
   b,
   update,
   customParticles,
-  onOpenParticleDrawer,
   onOpenParticleEditor,
-  onDeleteCustomParticle,
-  targetEntityOptions = [],
-  entityTypeOptions = [],
-  availableTags = [],
 }: {
   b: ParticleEmitterBehaviorConfig;
   update: (partial: any) => void;
   customParticles: CustomParticlePreset[];
-  onOpenParticleDrawer: (editingPreset?: CustomParticlePreset) => void;
-  onOpenParticleEditor: () => void;
-  onDeleteCustomParticle: (presetId: string) => void;
+  onOpenParticleDrawer?: (editingPreset?: CustomParticlePreset) => void;
+  onOpenParticleEditor: (initialView?: 'studio' | 'draw_custom') => void;
+  onDeleteCustomParticle?: (presetId: string) => void;
   targetEntityOptions?: Entity[];
   entityTypeOptions?: { type: string; label: string }[];
   availableTags?: string[];
 }) {
-  const projectPresets = useSceneStore((s) => s.projectParticlePresets || EMPTY_LIST);
-  const localCollection = useSceneStore((s) => s.localParticleCollection || EMPTY_RECORD);
-  const importEmbeddedParticleSprites = useSceneStore((s) => s.importEmbeddedParticleSprites);
-  const allSavedPresets: { scope: string; preset: ParticleEffectPreset }[] = [
-    ...projectPresets.map((preset) => ({ scope: 'Projet', preset })),
-    ...Object.values(localCollection).map((preset) => ({ scope: 'Globale', preset })),
-  ];
-
   const selectedCustomIds: string[] =
     b.customParticleIds && b.customParticleIds.length > 0
       ? b.customParticleIds
       : b.customParticleId
       ? [b.customParticleId]
       : [];
-  const toggleCustomParticleSelection = (presetId: string) => {
-    const exists = selectedCustomIds.includes(presetId);
-    let nextIds: string[];
-    if (exists) {
-      nextIds = selectedCustomIds.filter((id) => id !== presetId);
-    } else {
-      nextIds = [...selectedCustomIds, presetId];
-    }
-    update({
-      customParticleIds: nextIds,
-      customParticleId: nextIds[0],
-    });
-  };
 
   return (
-    <div className="space-y-1.5">
-      {/* Bouton Studio Particules */}
-      <button
-        type="button"
-        onClick={onOpenParticleEditor}
-        className="w-full py-2 px-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-all active:scale-[0.99]"
-      >
-        <Sliders className="w-3.5 h-3.5" />
-        <span>Studio Particules &amp; Collection</span>
-      </button>
-
-      {/* Sélecteur rapide depuis la Collection Projet / Globale */}
-      {allSavedPresets.length > 0 && (
-        <div className="p-2 bg-amber-50/60 rounded-xl border border-amber-200/80 flex items-center justify-between gap-2">
-          <span className="font-bold text-amber-950 text-[11px] flex items-center gap-1 shrink-0">
-            <FolderOpen className="w-3.5 h-3.5 text-amber-600" />
-            <span>Appliquer preset</span>
-          </span>
-          <select
-            value=""
-            onChange={(e) => {
-              const found = allSavedPresets.find((x) => `${x.scope}:${x.preset.id}` === e.target.value);
-              if (!found) return;
-              const mapped = remapPresetConfigSprites(
-                found.preset.config,
-                found.preset.embeddedCustomSprites,
-                importEmbeddedParticleSprites
-              );
-              update({
-                shape: mapped.shape,
-                customParticleId: mapped.customParticleId,
-                customParticleIds: mapped.customParticleIds,
-                customParticleMode: mapped.customParticleMode,
-                useParticleTint: mapped.useParticleTint,
-                color: mapped.color,
-                color2: mapped.color2,
-                colorMode: mapped.colorMode,
-                rate: mapped.rate ?? b.rate,
-                rateMax: mapped.rateMax,
-                speed: mapped.speed,
-                speedMax: mapped.speedMax,
-                size: mapped.size,
-                sizeMax: mapped.sizeMax,
-                endSizeScale: mapped.endSizeScale,
-                lifetime: mapped.lifetime,
-                lifetimeMax: mapped.lifetimeMax,
-                gravity: mapped.gravity,
-                drag: mapped.drag,
-                opacityStart: mapped.opacityStart,
-                opacityEnd: mapped.opacityEnd,
-                spinSpeed: mapped.spinSpeed,
-                spread: mapped.spread,
-                angle: mapped.angle,
-                directionMode: mapped.directionMode,
-                directionTargetMode: mapped.directionTargetMode,
-                directionTargetEntityId: mapped.directionTargetEntityId,
-                directionTargetEntityType: mapped.directionTargetEntityType,
-                directionTargetTag: mapped.directionTargetTag,
-                offsetX: mapped.offsetX ?? b.offsetX,
-                offsetY: mapped.offsetY ?? b.offsetY,
-                anchor: mapped.anchor ?? b.anchor,
-                followRotation: mapped.followRotation ?? b.followRotation,
-                emissionShape: mapped.emissionShape,
-                emissionRadius: mapped.emissionRadius,
-                emissionWidth: mapped.emissionWidth,
-                emissionHeight: mapped.emissionHeight,
-                emitterDuration: mapped.emitterDuration,
-                emitterLoop: mapped.emitterLoop,
-                initialBurstCount: mapped.initialBurstCount,
-                burstInterval: mapped.burstInterval,
-                burstCount: mapped.burstCount,
-              });
-            }}
-            className="bg-white border border-amber-300 rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-800 max-w-[165px]"
-          >
-            <option value="">-- Choisir ({allSavedPresets.length}) --</option>
-            {allSavedPresets.map(({ scope, preset }) => (
-              <option key={`${scope}:${preset.id}`} value={`${scope}:${preset.id}`}>
-                [{scope}] {preset.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* Ligne 1: Forme des particules */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-        <span className="font-bold text-slate-700 text-xs">Forme des particules</span>
-        <select
-          value={b.shape || 'circle'}
-          onChange={(e) => {
-            const nextShape = e.target.value as ParticleShape;
-            if (nextShape === 'custom' && selectedCustomIds.length === 0 && customParticles.length > 0) {
-              update({
-                shape: nextShape,
-                customParticleId: customParticles[0].id,
-                customParticleIds: [customParticles[0].id],
-              });
-            } else {
-              update({ shape: nextShape });
-            }
-          }}
-          className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-        >
-          <option value="circle">Rond (Bulle / Fumée)</option>
-          <option value="square">Carré (Confetti / Pixel)</option>
-          <option value="spark">Étincelle (Trait)</option>
-          <option value="star">Étoile</option>
-          <option value="custom">Particule dessinée ✨</option>
-        </select>
-      </div>
-
-      {/* Galerie de particules dessinées si shape === 'custom' */}
-      {b.shape === 'custom' && (
-        <div className="p-2.5 bg-amber-50/60 rounded-xl border border-amber-200 space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-bold text-amber-950">
-              Particules ({selectedCustomIds.length} sél.) :
-            </span>
-            <button
-              type="button"
-              onClick={() => onOpenParticleDrawer(undefined)}
-              className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
-            >
-              <Paintbrush className="w-3 h-3" />
-              <span>+ Dessiner</span>
-            </button>
-          </div>
-
-          {customParticles.length === 0 ? (
-            <div className="text-[11px] text-amber-800 bg-white/80 rounded-lg p-2 border border-amber-200/80 text-center">
-              Aucune particule dessinée pour le moment. Cliquez sur <strong>+ Dessiner</strong> ci-dessus.
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 gap-1.5">
-              {customParticles.map((preset) => {
-                const selIdx = selectedCustomIds.indexOf(preset.id);
-                const isSel = selIdx !== -1;
-                return (
-                  <div
-                    key={preset.id}
-                    className={`relative group p-1.5 rounded-xl border flex flex-col items-center gap-1 cursor-pointer transition-all ${
-                      isSel
-                        ? 'bg-white border-amber-500 ring-2 ring-amber-300/60 shadow-xs'
-                        : 'bg-white/80 border-slate-200 hover:border-amber-300'
-                    }`}
-                    onClick={() => toggleCustomParticleSelection(preset.id)}
-                  >
-                    {isSel && (
-                      <span className="absolute -top-1.5 -left-1.5 px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[9px] font-black shadow-2xs">
-                        #{selIdx + 1}
-                      </span>
-                    )}
-                    <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden">
-                      <svg viewBox="0 0 100 100" className="w-7 h-7">
-                        {preset.vectorPaths.map((p) => (
-                          <path
-                            key={p.id}
-                            d={p.d}
-                            stroke={p.stroke}
-                            strokeWidth={p.strokeWidth}
-                            fill={p.fill || 'none'}
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        ))}
-                      </svg>
-                    </div>
-                    <span className="text-[9px] font-bold text-slate-700 truncate w-full text-center">
-                      {preset.name}
-                    </span>
-                    <div className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center gap-0.5">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenParticleDrawer(preset);
-                        }}
-                        className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
-                        title="Modifier ce dessin"
-                      >
-                        <Pencil className="w-2.5 h-2.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteCustomParticle(preset.id);
-                          if (isSel) {
-                            const nextIds = selectedCustomIds.filter((id) => id !== preset.id);
-                            update({ customParticleIds: nextIds, customParticleId: nextIds[0] });
-                          }
-                        }}
-                        className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
-                        title="Supprimer ce preset"
-                      >
-                        <X className="w-2.5 h-2.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {selectedCustomIds.length > 1 && (
-            <div className="p-2 bg-white rounded-xl border border-amber-200 flex items-center justify-between gap-2">
-              <span className="text-[11px] font-bold text-slate-700">Utilisation :</span>
-              <select
-                value={b.customParticleMode || 'random'}
-                onChange={(e) => update({ customParticleMode: e.target.value as CustomParticleUsageMode })}
-                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800"
-              >
-                <option value="random">Aléatoire parmi les sélectionnées</option>
-                <option value="sequence">Séquence (#1 → #2 → ...)</option>
-                <option value="lifetime_anim">Animation sur durée de vie</option>
-              </select>
-            </div>
-          )}
-
-          <div className="flex items-center justify-between pt-1 border-t border-amber-200/70">
-            <span className="text-[11px] font-bold text-slate-700">Teinter avec les couleurs d'émission</span>
-            <input
-              type="checkbox"
-              checked={b.useParticleTint === true}
-              onChange={(e) => update({ useParticleTint: e.target.checked })}
-              className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Ligne 2: Débit d'émission */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200">
-        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-          <span className="font-bold">Débit d'émission</span>
-          <EditableNumericValue
-            value={b.rate ?? 14}
-            unit="part/s"
-            precision={0}
-            onChange={(val) => update({ rate: val })}
-            className="font-mono font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded text-[11px]"
-          />
-        </div>
-        <input
-          type="range"
-          min="1"
-          max="40"
-          step="1"
-          value={Math.max(1, Math.min(40, b.rate ?? 14))}
-          onChange={(e) => update({ rate: parseInt(e.target.value, 10) })}
-          className="w-full accent-amber-500"
-        />
-      </div>
-
-      {/* Ligne 3: Couleur Principale */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-        <span className="font-bold text-slate-700 text-xs">Couleur principale</span>
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-mono text-slate-500">{b.color || '#f59e0b'}</span>
-          <input
-            type="color"
-            value={b.color || '#f59e0b'}
-            onChange={(e) => update({ color: e.target.value })}
-            className="w-8 h-6 rounded border border-slate-300 cursor-pointer"
-          />
-        </div>
-      </div>
-
-      {/* Ligne 4: Couleur Secondaire */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-        <span className="font-bold text-slate-700 text-xs">Couleur secondaire (Mix)</span>
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-mono text-slate-500">{b.color2 || b.color || '#ef4444'}</span>
-          <input
-            type="color"
-            value={b.color2 || b.color || '#ef4444'}
-            onChange={(e) => update({ color2: e.target.value })}
-            className="w-8 h-6 rounded border border-slate-300 cursor-pointer"
-          />
-        </div>
-      </div>
-
-      {/* Ligne 5: Vitesse initiale */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200">
-        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-          <span className="font-bold">Vitesse d'éjection</span>
-          <EditableNumericValue
-            value={b.speed ?? 140}
-            unit="px/s"
-            precision={0}
-            onChange={(val) => update({ speed: val })}
-            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
-          />
-        </div>
-        <input
-          type="range"
-          min="10"
-          max="500"
-          step="10"
-          value={Math.max(10, Math.min(500, b.speed ?? 140))}
-          onChange={(e) => update({ speed: parseFloat(e.target.value) })}
-          className="w-full accent-indigo-600"
-        />
-      </div>
-
-      {/* Ligne 6: Taille */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200">
-        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-          <span className="font-bold">Taille des particules</span>
-          <EditableNumericValue
-            value={b.size ?? 6}
-            unit="px"
-            precision={0}
-            onChange={(val) => update({ size: val })}
-            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
-          />
-        </div>
-        <input
-          type="range"
-          min="2"
-          max="20"
-          step="1"
-          value={Math.max(2, Math.min(20, b.size ?? 6))}
-          onChange={(e) => update({ size: parseFloat(e.target.value) })}
-          className="w-full accent-indigo-600"
-        />
-      </div>
-
-      {/* Ligne 7: Durée de vie */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200">
-        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-          <span className="font-bold">Durée de vie</span>
-          <EditableNumericValue
-            value={b.lifetime ?? 0.8}
-            unit="s"
-            precision={1}
-            onChange={(val) => update({ lifetime: val })}
-            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
-          />
-        </div>
-        <input
-          type="range"
-          min="0.2"
-          max="3.0"
-          step="0.1"
-          value={Math.max(0.2, Math.min(3.0, b.lifetime ?? 0.8))}
-          onChange={(e) => update({ lifetime: parseFloat(e.target.value) })}
-          className="w-full accent-indigo-600"
-        />
-      </div>
-
-      {/* Ligne 8: Gravité des particules */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200">
-        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-          <span className="font-bold">Gravité / Flottaison</span>
-          <EditableNumericValue
-            value={b.gravity ?? 160}
-            unit="px/s²"
-            precision={0}
-            onChange={(val) => update({ gravity: val })}
-            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
-          />
-        </div>
-        <input
-          type="range"
-          min="-300"
-          max="600"
-          step="20"
-          value={Math.max(-300, Math.min(600, b.gravity ?? 160))}
-          onChange={(e) => update({ gravity: parseFloat(e.target.value) })}
-          className="w-full accent-indigo-600"
-        />
-      </div>
-
-      {/* Ligne 9: Direction */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
-        <div className="flex items-center justify-between gap-2 text-xs text-slate-700">
-          <span className="font-bold">Direction d&apos;émission</span>
-          <select
-            value={b.directionMode || 'angle'}
-            onChange={(e) => {
-              const nextMode = e.target.value as ParticleDirectionMode;
-              const patch: Record<string, any> = { directionMode: nextMode };
-              if (
-                (nextMode === 'toward_target' || nextMode === 'away_target') &&
-                !b.directionTargetMode
-              ) {
-                patch.directionTargetMode = 'entity';
-                patch.directionTargetEntityId = b.directionTargetEntityId || targetEntityOptions[0]?.id || '';
-              }
-              update(patch);
-            }}
-            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800 max-w-[155px]"
-          >
-            <option value="angle">Angle fixe (°)</option>
-            <option value="facing">Sens de l&apos;entité</option>
-            <option value="mouse">Vers la souris</option>
-            <option value="toward_target">Vers une cible</option>
-            <option value="away_target">Opposé à une cible</option>
-          </select>
-        </div>
-
-        {(b.directionMode || 'angle') === 'angle' && (
-          <div className="pt-1 border-t border-slate-100">
-            <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-              <span className="text-[11px] font-semibold text-slate-600">Angle (°)</span>
-              <EditableNumericValue
-                value={b.angle ?? -90}
-                unit="°"
-                precision={0}
-                onChange={(val) => update({ angle: val })}
-                className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
-              />
-            </div>
-            <input
-              type="range"
-              min="-180"
-              max="180"
-              step="5"
-              value={Math.max(-180, Math.min(180, b.angle ?? -90))}
-              onChange={(e) => update({ angle: parseFloat(e.target.value) })}
-              className="w-full accent-indigo-600"
-            />
-          </div>
-        )}
-
-        {(b.directionMode === 'toward_target' || b.directionMode === 'away_target') && (
-          <div className="pt-1 border-t border-slate-100 space-y-1.5 text-[11px]">
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-semibold text-slate-600">Cible</span>
-              <select
-                value={b.directionTargetMode || 'entity'}
-                onChange={(e) => update({ directionTargetMode: e.target.value as any })}
-                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800"
-              >
-                <option value="entity">Entité de la scène</option>
-                <option value="type">Par Type</option>
-                <option value="tag">Par #Tag</option>
-                <option value="mouse">Curseur souris</option>
-              </select>
-            </div>
-
-            {(b.directionTargetMode || 'entity') === 'entity' && (
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold text-slate-500">Entité</span>
-                <select
-                  value={b.directionTargetEntityId || targetEntityOptions[0]?.id || ''}
-                  onChange={(e) => update({ directionTargetEntityId: e.target.value })}
-                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800 max-w-[155px]"
-                >
-                  {targetEntityOptions.map((ent) => (
-                    <option key={ent.id} value={ent.id}>
-                      {ent.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {b.directionTargetMode === 'type' && (
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold text-slate-500">Type</span>
-                <select
-                  value={b.directionTargetEntityType || entityTypeOptions[0]?.type || ''}
-                  onChange={(e) => update({ directionTargetEntityType: e.target.value })}
-                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800 max-w-[155px]"
-                >
-                  {entityTypeOptions.map((opt) => (
-                    <option key={opt.type} value={opt.type}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {b.directionTargetMode === 'tag' && (
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold text-slate-500">Tag (#tag)</span>
-                <input
-                  type="text"
-                  list="emitter-dir-tags"
-                  value={b.directionTargetTag || ''}
-                  onChange={(e) => update({ directionTargetTag: e.target.value.replace(/^#/, '') })}
-                  placeholder="ex: joueur"
-                  className="w-32 bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800"
-                />
-                <datalist id="emitter-dir-tags">
-                  {availableTags.map((t) => (
-                    <option key={t} value={t} />
-                  ))}
-                </datalist>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Ligne 10: Cône de dispersion */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200">
-        <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
-          <span className="font-bold">Cône de dispersion</span>
-          <EditableNumericValue
-            value={b.spread ?? 60}
-            unit="°"
-            precision={0}
-            onChange={(val) => update({ spread: val })}
-            className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[11px]"
-          />
-        </div>
-        <input
-          type="range"
-          min="5"
-          max="360"
-          step="5"
-          value={Math.max(5, Math.min(360, b.spread ?? 60))}
-          onChange={(e) => update({ spread: parseFloat(e.target.value) })}
-          className="w-full accent-indigo-600"
-        />
-      </div>
-
-      {/* Ligne 11: Ancrage relatif, Rotation & Décalage ΔX/ΔY */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-bold text-slate-700 text-xs">Ancre relative</span>
-          <select
-            value={b.anchor || 'center'}
-            onChange={(e) => update({ anchor: e.target.value as ParticleAnchorPreset })}
-            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
-          >
-            <option value="center">Centre</option>
-            <option value="top">Bord Haut</option>
-            <option value="bottom">Bord Bas</option>
-            <option value="left">Bord Gauche</option>
-            <option value="right">Bord Droite</option>
-            <option value="pivot">Point de Pivot</option>
-          </select>
-        </div>
-
-        <label className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100 cursor-pointer">
-          <span className="text-[11px] font-semibold text-slate-600">
-            Suivre rotation &amp; miroir (flipX)
-          </span>
-          <input
-            type="checkbox"
-            checked={b.followRotation !== false}
-            onChange={(e) => update({ followRotation: e.target.checked })}
-            className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
-          />
-        </label>
-
-        <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-slate-100">
-          <div className="flex items-center justify-between gap-1 text-xs">
-            <span className="font-semibold text-slate-600">ΔX</span>
-            <EditableNumericValue
-              value={b.offsetX ?? 0}
-              unit="px"
-              precision={0}
-              onChange={(val) => update({ offsetX: val })}
-              className="font-mono font-bold text-slate-800 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded"
-            />
-          </div>
-          <div className="flex items-center justify-between gap-1 text-xs">
-            <span className="font-semibold text-slate-600">ΔY</span>
-            <EditableNumericValue
-              value={b.offsetY ?? 0}
-              unit="px"
-              precision={0}
-              onChange={(val) => update({ offsetY: val })}
-              className="font-mono font-bold text-slate-800 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Ligne 12: Zone d'apparition & Cycle / Durée */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-bold text-slate-700 text-xs">Zone &amp; Durée</span>
-          <select
-            value={b.emissionShape || 'point'}
-            onChange={(e) => update({ emissionShape: e.target.value as ParticleEmissionShape })}
-            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-800"
-          >
-            <option value="point">Point précis</option>
-            <option value="circle">Disque (Rayon)</option>
-            <option value="box">Rectangle</option>
-          </select>
-        </div>
-
-        <div className="flex items-center justify-between gap-2 text-[11px] pt-1 border-t border-slate-100">
-          <span className="font-semibold text-slate-600">Durée émetteur (0 = ∞)</span>
-          <div className="flex items-center gap-2">
-            <EditableNumericValue
-              value={b.emitterDuration ?? 0}
-              unit="s"
-              precision={1}
-              onChange={(val) => update({ emitterDuration: val })}
-              className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded"
-            />
-            {(b.emitterDuration ?? 0) > 0 && (
-              <label className="flex items-center gap-1 cursor-pointer text-[10px] font-bold text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={b.emitterLoop !== false}
-                  onChange={(e) => update({ emitterLoop: e.target.checked })}
-                  className="w-3.5 h-3.5 accent-amber-500 rounded cursor-pointer"
-                />
-                <span>Boucle</span>
-              </label>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+    <ParticleInspectorSummary
+      mode="emitter"
+      customParticles={customParticles}
+      summary={{
+        shape: b.shape || 'circle',
+        customParticleIds: selectedCustomIds,
+        color: b.color || '#f59e0b',
+        color2: b.color2,
+        colorMode: b.colorMode,
+        rate: b.rate ?? 14,
+        rateMax: b.rateMax,
+        speed: b.speed ?? 140,
+        speedMax: b.speedMax,
+        size: b.size ?? 6,
+        sizeMax: b.sizeMax,
+        lifetime: b.lifetime ?? 0.8,
+        lifetimeMax: b.lifetimeMax,
+        gravity: b.gravity ?? 160,
+        spread: b.spread ?? 60,
+        angle: b.angle ?? -90,
+        directionMode: b.directionMode,
+        emissionShape: b.emissionShape,
+        anchor: b.anchor,
+        offsetX: b.offsetX,
+        offsetY: b.offsetY,
+        emitterDuration: b.emitterDuration,
+        emitterLoop: b.emitterLoop,
+        initialBurstCount: b.initialBurstCount,
+        burstInterval: b.burstInterval,
+        burstCount: b.burstCount,
+      }}
+      onOpenStudio={(view) => onOpenParticleEditor(view)}
+      onApplySavedPreset={(mapped) =>
+        update({
+          shape: mapped.shape,
+          customParticleId: mapped.customParticleId,
+          customParticleIds: mapped.customParticleIds,
+          customParticleMode: mapped.customParticleMode,
+          useParticleTint: mapped.useParticleTint,
+          color: mapped.color,
+          color2: mapped.color2,
+          colorMode: mapped.colorMode,
+          rate: mapped.rate ?? b.rate,
+          rateMax: mapped.rateMax,
+          speed: mapped.speed,
+          speedMax: mapped.speedMax,
+          size: mapped.size,
+          sizeMax: mapped.sizeMax,
+          endSizeScale: mapped.endSizeScale,
+          lifetime: mapped.lifetime,
+          lifetimeMax: mapped.lifetimeMax,
+          gravity: mapped.gravity,
+          drag: mapped.drag,
+          opacityStart: mapped.opacityStart,
+          opacityEnd: mapped.opacityEnd,
+          spinSpeed: mapped.spinSpeed,
+          spread: mapped.spread,
+          angle: mapped.angle,
+          directionMode: mapped.directionMode,
+          directionTargetMode: mapped.directionTargetMode,
+          directionTargetEntityId: mapped.directionTargetEntityId,
+          directionTargetEntityType: mapped.directionTargetEntityType,
+          directionTargetTag: mapped.directionTargetTag,
+          offsetX: mapped.offsetX ?? b.offsetX,
+          offsetY: mapped.offsetY ?? b.offsetY,
+          anchor: mapped.anchor ?? b.anchor,
+          followRotation: mapped.followRotation ?? b.followRotation,
+          emissionShape: mapped.emissionShape,
+          emissionRadius: mapped.emissionRadius,
+          emissionWidth: mapped.emissionWidth,
+          emissionHeight: mapped.emissionHeight,
+          emitterDuration: mapped.emitterDuration,
+          emitterLoop: mapped.emitterLoop,
+          initialBurstCount: mapped.initialBurstCount,
+          burstInterval: mapped.burstInterval,
+          burstCount: mapped.burstCount,
+        })
+      }
+    />
   );
 }
 

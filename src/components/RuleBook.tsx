@@ -11,9 +11,7 @@ import {
 } from '../types';
 import { EntityMiniPreview } from './EntityMiniPreview';
 import { SoundRecorderModal } from './SoundRecorderModal';
-import { FullScreenDrawingModal } from './FullScreenDrawingModal';
 import { ParticleEditorModal } from './ParticleEditorModal';
-import { invalidateCustomParticleSprite } from '../utils/particleSystem';
 import {
   Plus,
   Trash2,
@@ -36,7 +34,6 @@ import {
 import { soundSynth } from '../utils/sound';
 import {
   ActiveModal,
-  ParticleDrawingTarget,
   WizardData,
   getSceneTransitionShortLabel,
 } from './rulebook/ruleBookTypes';
@@ -66,9 +63,6 @@ export function RuleBook() {
   const deleteFolder = useSceneStore((state) => state.deleteFolder);
   const settings = useSceneStore((state) => state.settings);
   const customParticles = useSceneStore((state) => state.customParticles || EMPTY_LIST);
-  const addCustomParticle = useSceneStore((state) => state.addCustomParticle);
-  const updateCustomParticle = useSceneStore((state) => state.updateCustomParticle);
-  const deleteCustomParticle = useSceneStore((state) => state.deleteCustomParticle);
   const appMode = useSceneStore((state) => state.appMode);
   const initialGameVariables = useSceneStore((state) => state.initialGameVariables || EMPTY_RECORD);
   const gameVariables = useSceneStore((state) => state.gameVariables || EMPTY_RECORD);
@@ -89,8 +83,10 @@ export function RuleBook() {
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
   const [activeWizard, setActiveWizard] = useState<WizardData | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
-  const [particleDrawingTarget, setParticleDrawingTarget] = useState<ParticleDrawingTarget | null>(null);
-  const [particleEditorContext, setParticleEditorContext] = useState<'wizard' | 'modal' | null>(null);
+  const [particleEditorContext, setParticleEditorContext] = useState<{
+    target: 'wizard' | 'modal';
+    initialView?: 'studio' | 'draw_custom';
+  } | null>(null);
 
   // Folder, Search & Variables drawer state
   const [selectedFolderId, setSelectedFolderId] = useState<string | 'all'>('all');
@@ -2980,9 +2976,7 @@ export function RuleBook() {
           allProjectTags={allProjectTags}
           customSounds={customSounds}
           customParticles={customParticles}
-          deleteCustomParticle={deleteCustomParticle}
           setIsSoundModalOpen={setIsSoundModalOpen}
-          setParticleDrawingTarget={setParticleDrawingTarget}
           setParticleEditorContext={setParticleEditorContext}
           getEntityObj={getEntityObj}
           completeWizardWithAction={completeWizardWithAction}
@@ -3004,9 +2998,7 @@ export function RuleBook() {
           allProjectTags={allProjectTags}
           customSounds={customSounds}
           customParticles={customParticles}
-          deleteCustomParticle={deleteCustomParticle}
           setIsSoundModalOpen={setIsSoundModalOpen}
-          setParticleDrawingTarget={(t) => setParticleDrawingTarget(t)}
           setParticleEditorContext={setParticleEditorContext}
           getEntityObj={getEntityObj}
           openRuleSubjectModal={openRuleSubjectModal}
@@ -3046,92 +3038,32 @@ export function RuleBook() {
         }}
       />
 
-      {/* Atelier de dessin plein écran pour particule personnalisée */}
-      {particleDrawingTarget && (
-        <FullScreenDrawingModal
-          title={
-            particleDrawingTarget.editingPreset
-              ? `Modifier particule : ${particleDrawingTarget.editingPreset.name}`
-              : 'Dessiner une particule'
-          }
-          subtitle="Dessinez votre particule personnalisée"
-          enableFlipbook={false}
-          initialPaths={particleDrawingTarget.editingPreset?.vectorPaths || []}
-          currentEditingStateName={
-            particleDrawingTarget.editingPreset?.name || `Particule ${customParticles.length + 1}`
-          }
-          onSave={(paths, _dataUrl, _colliderType, customName) => {
-            const finalName = (customName || '').trim() || `Particule ${customParticles.length + 1}`;
-            let targetPresetId = particleDrawingTarget.editingPreset?.id;
-            if (targetPresetId) {
-              updateCustomParticle(targetPresetId, {
-                name: finalName,
-                vectorPaths: paths,
-              });
-              invalidateCustomParticleSprite(targetPresetId);
-            } else {
-              targetPresetId = addCustomParticle({
-                name: finalName,
-                vectorPaths: paths,
-                useTint: false,
-              });
-            }
-            if (particleDrawingTarget.context === 'wizard' && activeWizard) {
-              const existingIds =
-                activeWizard.customParticleIds && activeWizard.customParticleIds.length > 0
-                  ? activeWizard.customParticleIds
-                  : activeWizard.customParticleId
-                  ? [activeWizard.customParticleId]
-                  : [];
-              const nextIds = existingIds.includes(targetPresetId)
-                ? existingIds
-                : [...existingIds, targetPresetId];
-              setActiveWizard({
-                ...activeWizard,
-                particleShape: 'custom',
-                customParticleId: nextIds[0],
-                customParticleIds: nextIds,
-              });
-            } else if (
-              particleDrawingTarget.context === 'modal' &&
-              activeModal &&
-              activeModal.type === 'action'
-            ) {
-              const existingIds =
-                activeModal.customParticleIds && activeModal.customParticleIds.length > 0
-                  ? activeModal.customParticleIds
-                  : activeModal.customParticleId
-                  ? [activeModal.customParticleId]
-                  : [];
-              const nextIds = existingIds.includes(targetPresetId)
-                ? existingIds
-                : [...existingIds, targetPresetId];
-              setActiveModal({
-                ...activeModal,
-                particleShape: 'custom',
-                customParticleId: nextIds[0],
-                customParticleIds: nextIds,
-              });
-            }
-            setParticleDrawingTarget(null);
-          }}
-          onClose={() => setParticleDrawingTarget(null)}
-        />
-      )}
-
-      {/* Éditeur & Testeur interactif de particules (Action emit_particles) */}
+      {/* Studio Unifié Particules & Dessin de Particules (Action emit_particles) */}
       {particleEditorContext && (() => {
         const src =
-          particleEditorContext === 'wizard'
+          particleEditorContext.target === 'wizard'
             ? activeWizard
             : activeModal && activeModal.type === 'action'
             ? activeModal
             : null;
         if (!src) return null;
+        const triggerType =
+          particleEditorContext.target === 'wizard'
+            ? activeWizard?.triggerType
+            : activeModal && activeModal.type === 'action'
+            ? rules.find((r) => r.id === activeModal.ruleId)?.trigger.type
+            : undefined;
+        const allowTarget =
+          triggerType === 'collision' ||
+          triggerType === 'proximity' ||
+          triggerType === 'target_arrived' ||
+          triggerType === 'snap';
         return (
           <ParticleEditorModal
             isOpen={true}
             mode="burst"
+            allowTarget={allowTarget}
+            initialView={particleEditorContext.initialView || 'studio'}
             initialConfig={{
               shape: src.particleShape || 'circle',
               customParticleId: src.customParticleId,
@@ -3166,6 +3098,19 @@ export function RuleBook() {
               emissionRadius: src.particleEmissionRadius,
               emissionWidth: src.particleEmissionWidth,
               emissionHeight: src.particleEmissionHeight,
+              particleOriginMode: src.particleOriginMode,
+              particleOriginEntityId: src.particleOriginEntityId,
+              particleOriginEntityType: src.particleOriginEntityType,
+              particleOriginTag: src.particleOriginTag,
+              particleCoords: src.particleCoords,
+              particleAnchor: src.particleAnchor,
+              particleOffsetX: src.particleOffsetX,
+              particleOffsetY: src.particleOffsetY,
+              particleMatchOriginRotation: src.particleMatchOriginRotation,
+              particleEmitDuration: src.particleEmitDuration,
+              particleEmitRate: src.particleEmitRate,
+              particleBurstCount: src.particleBurstCount,
+              particleBurstInterval: src.particleBurstInterval,
             }}
             onApply={(cfg) => {
               const nextCustomIds =
@@ -3210,10 +3155,23 @@ export function RuleBook() {
                 particleEmissionRadius: cfg.emissionRadius,
                 particleEmissionWidth: cfg.emissionWidth,
                 particleEmissionHeight: cfg.emissionHeight,
+                particleOriginMode: cfg.particleOriginMode,
+                particleOriginEntityId: cfg.particleOriginEntityId,
+                particleOriginEntityType: cfg.particleOriginEntityType,
+                particleOriginTag: cfg.particleOriginTag,
+                particleCoords: cfg.particleCoords,
+                particleAnchor: cfg.particleAnchor,
+                particleOffsetX: cfg.particleOffsetX,
+                particleOffsetY: cfg.particleOffsetY,
+                particleMatchOriginRotation: cfg.particleMatchOriginRotation,
+                particleEmitDuration: cfg.particleEmitDuration,
+                particleEmitRate: cfg.particleEmitRate,
+                particleBurstCount: cfg.particleBurstCount,
+                particleBurstInterval: cfg.particleBurstInterval,
               };
-              if (particleEditorContext === 'wizard' && activeWizard) {
+              if (particleEditorContext.target === 'wizard' && activeWizard) {
                 setActiveWizard({ ...activeWizard, ...patch });
-              } else if (particleEditorContext === 'modal' && activeModal && activeModal.type === 'action') {
+              } else if (particleEditorContext.target === 'modal' && activeModal && activeModal.type === 'action') {
                 setActiveModal({ ...activeModal, ...patch });
               }
               setParticleEditorContext(null);

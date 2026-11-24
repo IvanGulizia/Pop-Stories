@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Sparkles,
@@ -12,6 +12,9 @@ import {
   MousePointerClick,
   Flame,
   RefreshCw,
+  ArrowLeft,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import {
   CustomParticlePreset,
@@ -22,6 +25,8 @@ import {
   ParticleEffectConfig,
   ParticleEmissionShape,
   ParticleShape,
+  Position,
+  VectorPath,
 } from '../types';
 import { useSceneStore, EMPTY_LIST, EMPTY_RECORD } from '../store/useSceneStore';
 import {
@@ -30,18 +35,49 @@ import {
   sampleParticleRange,
   syncCustomParticlePresets,
 } from '../utils/particleSystem';
-import { FullScreenDrawingModal } from './FullScreenDrawingModal';
+import {
+  DrawingCanvas,
+  DrawingCanvasActionsHandle,
+  DrawingCanvasHistoryState,
+} from './DrawingCanvas';
 import { EditableNumericValue } from './shared/EditableNumericValue';
 import {
   ParticlePresetLibrary,
   QuickParticlePresetItem,
 } from './particles/ParticlePresetLibrary';
+import { ParticleActionOriginSection } from './particles/ParticleActionOriginSection';
 
-export type ParticleEditorConfig = ParticleEffectConfig;
+export interface ParticleEditorConfig extends ParticleEffectConfig {
+  particleOriginMode?:
+    | 'subject'
+    | 'target'
+    | 'entity'
+    | 'type'
+    | 'tag'
+    | 'last_spawned'
+    | 'event_point'
+    | 'coordinates'
+    | 'mouse';
+  particleOriginEntityId?: string;
+  particleOriginEntityType?: string;
+  particleOriginTag?: string;
+  particleCoords?: Position;
+  particleAnchor?: ParticleAnchorPreset;
+  particleOffsetX?: number;
+  particleOffsetY?: number;
+  particleMatchOriginRotation?: boolean;
+  particleEmitDuration?: number;
+  particleEmitRate?: number;
+  particleBurstCount?: number;
+  particleBurstInterval?: number;
+}
 
 interface ParticleEditorModalProps {
   isOpen: boolean;
   mode: 'emitter' | 'burst';
+  allowTarget?: boolean;
+  initialView?: 'studio' | 'draw_custom';
+  initialEditingPreset?: CustomParticlePreset;
   initialConfig: Partial<ParticleEditorConfig>;
   onApply: (config: ParticleEditorConfig) => void;
   onClose: () => void;
@@ -335,6 +371,9 @@ const RangeOrFixedRow: React.FC<RangeOrFixedRowProps> = ({
 export function ParticleEditorModal({
   isOpen,
   mode,
+  allowTarget = false,
+  initialView = 'studio',
+  initialEditingPreset,
   initialConfig,
   onApply,
   onClose,
@@ -360,6 +399,10 @@ export function ParticleEditorModal({
     entityList.forEach((e) => e.tags?.forEach((t) => s.add(t)));
     return Array.from(s);
   }, [entityList]);
+  const availableEntityOptions = React.useMemo(
+    () => typeOptions.map((o) => ({ type: o.type, label: o.label })),
+    [typeOptions]
+  );
 
   const [config, setConfig] = useState<ParticleEditorConfig>(() => {
     const initialIds =
@@ -418,12 +461,78 @@ export function ParticleEditorModal({
       initialBurstCount: initialConfig.initialBurstCount ?? 0,
       burstInterval: initialConfig.burstInterval ?? 0,
       burstCount: initialConfig.burstCount ?? 12,
+      // Champs spécifiques aux événements (emit_particles)
+      particleOriginMode: initialConfig.particleOriginMode || 'subject',
+      particleOriginEntityId: initialConfig.particleOriginEntityId,
+      particleOriginEntityType: initialConfig.particleOriginEntityType,
+      particleOriginTag: initialConfig.particleOriginTag,
+      particleCoords: initialConfig.particleCoords,
+      particleAnchor: initialConfig.particleAnchor || 'center',
+      particleOffsetX: initialConfig.particleOffsetX ?? 0,
+      particleOffsetY: initialConfig.particleOffsetY ?? 0,
+      particleMatchOriginRotation: initialConfig.particleMatchOriginRotation !== false,
+      particleEmitDuration: initialConfig.particleEmitDuration ?? 0,
+      particleEmitRate: initialConfig.particleEmitRate ?? 20,
+      particleBurstInterval: initialConfig.particleBurstInterval ?? 0,
+      particleBurstCount: initialConfig.particleBurstCount,
     };
   });
 
   const [isAutoEmitting, setIsAutoEmitting] = useState(true);
   const [backdropTheme, setBackdropTheme] = useState<'dark' | 'light' | 'grid'>('dark');
-  const [drawerTarget, setDrawerTarget] = useState<{ editingPreset?: CustomParticlePreset } | null>(null);
+  const [drawerTarget, setDrawerTarget] = useState<{
+    editingPreset?: CustomParticlePreset;
+    sessionKey: string;
+  } | null>(() =>
+    initialView === 'draw_custom'
+      ? {
+          editingPreset: initialEditingPreset,
+          sessionKey: `draw_${initialEditingPreset?.id || 'new'}_${Date.now()}`,
+        }
+      : null
+  );
+  const [drawingPaths, setDrawingPaths] = useState<VectorPath[]>(() =>
+    initialView === 'draw_custom' && initialEditingPreset?.vectorPaths
+      ? JSON.parse(JSON.stringify(initialEditingPreset.vectorPaths))
+      : []
+  );
+  const [drawingName, setDrawingName] = useState<string>(() =>
+    initialView === 'draw_custom'
+      ? initialEditingPreset?.name || `Particule ${customParticles.length + 1}`
+      : ''
+  );
+  const canvasActionsRef = useRef<DrawingCanvasActionsHandle | null>(null);
+  const [drawingHistoryState, setDrawingHistoryState] = useState<DrawingCanvasHistoryState>({
+    canUndo: false,
+    canRedo: false,
+    pathCount: initialEditingPreset?.vectorPaths?.length || 0,
+    onionEnabled: false,
+    hasOnion: false,
+  });
+  const handleDrawingHistoryChange = useCallback((st: DrawingCanvasHistoryState) => {
+    setDrawingHistoryState(st);
+  }, []);
+  const handleDrawingVectorChange = useCallback((paths: VectorPath[]) => {
+    setDrawingPaths(paths);
+  }, []);
+  const openInlineDrawer = (editingPreset?: CustomParticlePreset) => {
+    const clonedPaths: VectorPath[] = editingPreset?.vectorPaths
+      ? JSON.parse(JSON.stringify(editingPreset.vectorPaths))
+      : [];
+    setDrawingPaths(clonedPaths);
+    setDrawingName(editingPreset?.name || `Particule ${customParticles.length + 1}`);
+    setDrawingHistoryState({
+      canUndo: false,
+      canRedo: false,
+      pathCount: clonedPaths.length,
+      onionEnabled: false,
+      hasOnion: false,
+    });
+    setDrawerTarget({
+      editingPreset,
+      sessionKey: `draw_${editingPreset?.id || 'new'}_${Date.now()}`,
+    });
+  };
   const [cycleRestartSignal, setCycleRestartSignal] = useState(0);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -554,6 +663,70 @@ export function ParticleEditorModal({
               });
             }
           }
+        } else if ((cfg.particleEmitDuration ?? 0) > 0) {
+          const dur = cfg.particleEmitDuration ?? 0;
+          const pauseGap = 0.65;
+          if (sim.elapsedSec >= dur + pauseGap) {
+            sim.elapsedSec = 0;
+            sim.initialBurstDone = false;
+            sim.burstTimer = 0;
+            sim.emitAcc = 0;
+          }
+          if (sim.elapsedSec < dur) {
+            let whole = 0;
+            if (!sim.initialBurstDone && (cfg.count ?? 0) > 0) {
+              whole += Math.max(1, Math.round(cfg.count ?? 20));
+              sim.initialBurstDone = true;
+            }
+            if ((cfg.particleBurstInterval ?? 0) > 0 && (cfg.particleBurstCount ?? cfg.count ?? 12) > 0) {
+              sim.burstTimer += dt;
+              if (sim.burstTimer >= cfg.particleBurstInterval!) {
+                sim.burstTimer -= cfg.particleBurstInterval!;
+                whole += Math.max(1, Math.round(cfg.particleBurstCount ?? cfg.count ?? 12));
+              }
+            }
+            const effRate = Math.max(0, cfg.particleEmitRate ?? 20);
+            sim.emitAcc += effRate * dt;
+            const cont = Math.floor(sim.emitAcc);
+            if (cont > 0) {
+              sim.emitAcc -= cont;
+              whole += cont;
+            }
+            if (whole > 0) {
+              pool.emitBurst({
+                x: ORIGIN_X,
+                y: ORIGIN_Y,
+                count: Math.min(80, whole),
+                color: cfg.color,
+                color2: cfg.color2,
+                colorMode: cfg.colorMode,
+                shape: cfg.shape,
+                customParticleId: cfg.customParticleId,
+                customParticleIds: cfg.customParticleIds,
+                customParticleMode: cfg.customParticleMode,
+                useTint: cfg.useParticleTint,
+                speed: cfg.speed,
+                speedMax: cfg.speedMax,
+                size: cfg.size,
+                sizeMax: cfg.sizeMax,
+                endSizeScale: cfg.endSizeScale,
+                lifetime: cfg.lifetime,
+                lifetimeMax: cfg.lifetimeMax,
+                gravity: cfg.gravity,
+                drag: cfg.drag,
+                opacityStart: cfg.opacityStart,
+                opacityEnd: cfg.opacityEnd,
+                spinSpeed: cfg.spinSpeed,
+                spread: cfg.spread,
+                angle: cfg.angle,
+                emissionShape: cfg.emissionShape,
+                emissionRadius: cfg.emissionRadius,
+                emissionWidth: cfg.emissionWidth,
+                emissionHeight: cfg.emissionHeight,
+              });
+            }
+          }
+          sim.elapsedSec += dt;
         } else {
           sim.burstLoopTimer += dt;
           const maxL = cfg.lifetimeMax ?? cfg.lifetime;
@@ -676,6 +849,87 @@ export function ParticleEditorModal({
   const centerRayX = originX + Math.cos(angleRad) * (rayLen + 10);
   const centerRayY = originY + Math.sin(angleRad) * (rayLen + 10);
 
+  const pureEffectConfig: ParticleEffectConfig = {
+    shape: config.shape,
+    customParticleId: config.customParticleId,
+    customParticleIds: config.customParticleIds,
+    customParticleMode: config.customParticleMode,
+    useParticleTint: config.useParticleTint,
+    color: config.color,
+    color2: config.color2,
+    colorMode: config.colorMode,
+    rate: config.rate,
+    rateMax: config.rateMax,
+    count: config.count,
+    countMax: config.countMax,
+    speed: config.speed,
+    speedMax: config.speedMax,
+    size: config.size,
+    sizeMax: config.sizeMax,
+    endSizeScale: config.endSizeScale,
+    lifetime: config.lifetime,
+    lifetimeMax: config.lifetimeMax,
+    gravity: config.gravity,
+    drag: config.drag,
+    opacityStart: config.opacityStart,
+    opacityEnd: config.opacityEnd,
+    spinSpeed: config.spinSpeed,
+    spread: config.spread,
+    angle: config.angle,
+    directionMode: config.directionMode,
+    directionTargetMode: config.directionTargetMode,
+    directionTargetEntityId: config.directionTargetEntityId,
+    directionTargetEntityType: config.directionTargetEntityType,
+    directionTargetTag: config.directionTargetTag,
+    offsetX: config.offsetX,
+    offsetY: config.offsetY,
+    anchor: config.anchor,
+    followRotation: config.followRotation,
+    emissionShape: config.emissionShape,
+    emissionRadius: config.emissionRadius,
+    emissionWidth: config.emissionWidth,
+    emissionHeight: config.emissionHeight,
+    emitterDuration: config.emitterDuration,
+    emitterLoop: config.emitterLoop,
+    initialBurstCount: config.initialBurstCount,
+    burstInterval: config.burstInterval,
+    burstCount: config.burstCount,
+  };
+
+  const handleSaveInlineDrawing = () => {
+    if (!drawerTarget) return;
+    const finalName = drawingName.trim() || `Particule ${customParticles.length + 1}`;
+    let targetPresetId = drawerTarget.editingPreset?.id;
+    if (targetPresetId) {
+      updateCustomParticle(targetPresetId, {
+        name: finalName,
+        vectorPaths: drawingPaths,
+      });
+      invalidateCustomParticleSprite(targetPresetId);
+    } else {
+      targetPresetId = addCustomParticle({
+        name: finalName,
+        vectorPaths: drawingPaths,
+        useTint: false,
+      });
+    }
+    const existingIds =
+      config.customParticleIds && config.customParticleIds.length > 0
+        ? config.customParticleIds
+        : config.customParticleId
+        ? [config.customParticleId]
+        : [];
+    const nextIds = existingIds.includes(targetPresetId)
+      ? existingIds
+      : [...existingIds, targetPresetId];
+    update({
+      shape: 'custom',
+      customParticleId: nextIds[0] || targetPresetId,
+      customParticleIds: nextIds,
+    });
+    setDrawerTarget(null);
+  };
+
   return createPortal(
     <div
       data-modal-open="true"
@@ -692,54 +946,145 @@ export function ParticleEditorModal({
       }}
     >
       <div
-        className="bg-white rounded-3xl max-w-5xl w-full shadow-2xl border border-slate-200 flex flex-col max-h-[92vh] overflow-hidden animate-in zoom-in-95 duration-150"
+        className={`bg-white rounded-3xl max-w-5xl w-full shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in zoom-in-95 duration-150 ${
+          drawerTarget ? 'h-[90vh]' : 'max-h-[92vh]'
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 bg-slate-50 shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-amber-100 border border-amber-200 text-amber-600 flex items-center justify-center">
-              <Sparkles className="w-5 h-5" />
+        {/* Header unifié (Studio ou Vue Dessin Particule) */}
+        {drawerTarget ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-slate-200 bg-slate-50 shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <button
+                type="button"
+                onClick={() => setDrawerTarget(null)}
+                className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-xs font-bold text-slate-700 flex items-center gap-1 cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Studio</span>
+              </button>
+              <div className="w-8 h-8 rounded-xl bg-amber-100 border border-amber-200 text-amber-600 flex items-center justify-center shrink-0">
+                <Paintbrush className="w-4 h-4" />
+              </div>
+              <input
+                type="text"
+                value={drawingName}
+                onChange={(e) => setDrawingName(e.target.value)}
+                placeholder="Nom de la particule..."
+                className="bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-xs sm:text-sm font-extrabold text-slate-800 w-44 sm:w-60 focus:outline-none focus:ring-2 focus:ring-amber-400"
+              />
             </div>
-            <div>
-              <h2 className="text-sm sm:text-base font-black text-slate-800 tracking-tight">
-                Studio Particules &amp; Collection
-              </h2>
-              <p className="text-[11px] text-slate-500">
-                {mode === 'emitter'
-                  ? 'Plages Min–Max, formes d’émission, salves, durée et collection inter-projets'
-                  : 'Testez vos salves avancées (plages aléatoires, dégradés, formes) et enregistrez vos recettes'}
-              </p>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => canvasActionsRef.current?.undo()}
+                disabled={!drawingHistoryState.canUndo}
+                className="px-2 py-1.5 rounded-lg text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 disabled:opacity-35 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
+                title="Annuler le trait (Ctrl+Z)"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Annuler</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => canvasActionsRef.current?.redo()}
+                disabled={!drawingHistoryState.canRedo}
+                className="px-2 py-1.5 rounded-lg text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 disabled:opacity-35 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
+                title="Rétablir"
+              >
+                <Redo2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => canvasActionsRef.current?.clear()}
+                disabled={drawingHistoryState.pathCount === 0}
+                className="px-2 py-1.5 rounded-lg text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 disabled:opacity-35 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
+                title="Tout effacer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setDrawerTarget(null)}
+                className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200/70 rounded-xl cursor-pointer"
+              >
+                Retour
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveInlineDrawing}
+                className="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-black rounded-xl shadow-sm flex items-center gap-1.5 cursor-pointer active:scale-95"
+              >
+                <Check className="w-4 h-4" />
+                <span>Enregistrer la particule</span>
+              </button>
             </div>
           </div>
+        ) : (
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 bg-slate-50 shrink-0">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-2xl bg-amber-100 border border-amber-200 text-amber-600 flex items-center justify-center">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-sm sm:text-base font-black text-slate-800 tracking-tight">
+                  Studio Particules &amp; Collection
+                </h2>
+                <p className="text-[11px] text-slate-500">
+                  {mode === 'emitter'
+                    ? 'Émetteur continu : plages Min–Max, formes, salves, durée, ancre et collection inter-projets'
+                    : 'Événement particules : source, ancrage, salves temporisées, plages aléatoires et collection'}
+                </p>
+              </div>
+            </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200/70 rounded-xl cursor-pointer"
-            >
-              Annuler
-            </button>
-            <button
-              type="button"
-              onClick={() => onApply(config)}
-              className="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-black rounded-xl shadow-sm flex items-center gap-1.5 cursor-pointer active:scale-95"
-            >
-              <Check className="w-4 h-4" />
-              <span>Appliquer</span>
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-200 cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200/70 rounded-xl cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => onApply(config)}
+                className="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-black rounded-xl shadow-sm flex items-center gap-1.5 cursor-pointer active:scale-95"
+              >
+                <Check className="w-4 h-4" />
+                <span>Appliquer</span>
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-200 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Body: Left Stage + Right Controls */}
+        {/* Body: either inline DrawingCanvas or Studio Stage + Controls */}
+        {drawerTarget ? (
+          <div className="flex-1 p-3 sm:p-4 overflow-hidden bg-slate-100/60 flex items-center justify-center relative min-h-0">
+            <DrawingCanvas
+              frameSyncKey={drawerTarget.sessionKey}
+              initialPaths={drawingPaths}
+              initialStrokeColor="#000000"
+              currentEditingStateName={drawingName || 'Particule'}
+              onVectorChange={handleDrawingVectorChange}
+              enablePivotEditing={false}
+              actionsRef={canvasActionsRef}
+              onHistoryStateChange={handleDrawingHistoryChange}
+              hideTopHistoryButtons={true}
+            />
+          </div>
+        ) : (
         <div className="flex-1 overflow-hidden grid grid-cols-1 lg:grid-cols-12 min-h-0">
           {/* LEFT: Live Interactive Stage + Preset Library */}
           <div className="lg:col-span-6 p-4 bg-slate-100/70 border-b lg:border-b-0 lg:border-r border-slate-200 flex flex-col gap-3 overflow-y-auto">
@@ -768,7 +1113,7 @@ export function ParticleEditorModal({
                   <span>Salve test</span>
                 </button>
 
-                {mode === 'emitter' && (
+                {(mode === 'emitter' || (config.particleEmitDuration ?? 0) > 0) && (
                   <button
                     type="button"
                     onClick={() => {
@@ -964,7 +1309,7 @@ export function ParticleEditorModal({
             {/* Présets & Collection Projet / Inter-projets */}
             <ParticlePresetLibrary
               mode={mode}
-              currentConfig={config}
+              currentConfig={pureEffectConfig}
               quickPresets={QUICK_PRESETS}
               onApplyConfig={(patch) => {
                 update(patch);
@@ -1080,7 +1425,7 @@ export function ParticleEditorModal({
                   </div>
                   <button
                     type="button"
-                    onClick={() => setDrawerTarget({})}
+                    onClick={() => openInlineDrawer(undefined)}
                     className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs shrink-0"
                   >
                     <Paintbrush className="w-3 h-3" />
@@ -1149,7 +1494,7 @@ export function ParticleEditorModal({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setDrawerTarget({ editingPreset: preset });
+                                openInlineDrawer(preset);
                               }}
                               className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-xs cursor-pointer"
                               title="Modifier"
@@ -1707,66 +2052,84 @@ export function ParticleEditorModal({
                 </div>
               </div>
             )}
+            {/* Événement (mode burst) : Source, Ancrage & Émission temporisée */}
+            {mode === 'burst' && (
+              <div className="p-2.5 bg-amber-50/50 rounded-2xl border border-amber-200/80 space-y-2">
+                <span className="text-[11px] font-extrabold text-amber-950 block">
+                  Source, Ancrage &amp; Émission temporisée
+                </span>
+
+                <ParticleActionOriginSection
+                  draft={config}
+                  allowTarget={allowTarget}
+                  entities={entities}
+                  availableEntityOptions={availableEntityOptions}
+                  allProjectTags={allTags}
+                  datalistId="particle-studio-origin-tags"
+                  hideSavedCollection={true}
+                  onPatch={(patch) => update(patch as Partial<ParticleEditorConfig>)}
+                />
+
+                <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <span className="font-bold text-slate-700 text-xs block">
+                        Durée d&apos;émission (0 = salve unique)
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        &gt; 0s : jet continu et/ou plusieurs salves temporisées
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <EditableNumericValue
+                        value={config.particleEmitDuration ?? 0}
+                        unit="s"
+                        precision={1}
+                        onChange={(v) => update({ particleEmitDuration: Math.max(0, v) })}
+                        className="font-mono font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  {(config.particleEmitDuration ?? 0) > 0 && (
+                    <div className="grid grid-cols-3 gap-1.5 pt-1.5 border-t border-slate-100 text-xs">
+                      <div className="p-1.5 bg-amber-50/50 rounded-lg border border-amber-200/70 flex flex-col gap-0.5">
+                        <span className="text-[10px] font-bold text-slate-600">Débit (part/s)</span>
+                        <EditableNumericValue
+                          value={config.particleEmitRate ?? 20}
+                          precision={0}
+                          onChange={(v) => update({ particleEmitRate: Math.max(0, v) })}
+                          className="font-mono font-bold text-amber-800 text-[11px]"
+                        />
+                      </div>
+                      <div className="p-1.5 bg-amber-50/50 rounded-lg border border-amber-200/70 flex flex-col gap-0.5">
+                        <span className="text-[10px] font-bold text-slate-600">Salve tous les</span>
+                        <EditableNumericValue
+                          value={config.particleBurstInterval ?? 0}
+                          unit="s"
+                          precision={2}
+                          onChange={(v) => update({ particleBurstInterval: Math.max(0, v) })}
+                          className="font-mono font-bold text-amber-800 text-[11px]"
+                        />
+                      </div>
+                      <div className="p-1.5 bg-amber-50/50 rounded-lg border border-amber-200/70 flex flex-col gap-0.5">
+                        <span className="text-[10px] font-bold text-slate-600">Nb / salve</span>
+                        <EditableNumericValue
+                          value={config.particleBurstCount ?? (config.count ?? 12)}
+                          precision={0}
+                          onChange={(v) => update({ particleBurstCount: Math.max(0, Math.round(v)) })}
+                          className="font-mono font-bold text-amber-800 text-[11px]"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
+        )}
       </div>
-
-      {/* Atelier de dessin plein écran pour particule custom */}
-      {drawerTarget && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
-          onPointerUp={(e) => e.stopPropagation()}
-        >
-          <FullScreenDrawingModal
-            title={
-              drawerTarget.editingPreset
-                ? `Modifier particule : ${drawerTarget.editingPreset.name}`
-                : 'Dessiner une particule'
-            }
-            subtitle="Dessinez votre particule personnalisée"
-            enableFlipbook={false}
-            initialPaths={drawerTarget.editingPreset?.vectorPaths || []}
-            currentEditingStateName={
-              drawerTarget.editingPreset?.name || `Particule ${customParticles.length + 1}`
-            }
-            onSave={(paths, _dataUrl, _colliderType, customName) => {
-              const finalName = (customName || '').trim() || `Particule ${customParticles.length + 1}`;
-              let targetPresetId = drawerTarget.editingPreset?.id;
-              if (targetPresetId) {
-                updateCustomParticle(targetPresetId, {
-                  name: finalName,
-                  vectorPaths: paths,
-                });
-                invalidateCustomParticleSprite(targetPresetId);
-              } else {
-                targetPresetId = addCustomParticle({
-                  name: finalName,
-                  vectorPaths: paths,
-                  useTint: false,
-                });
-              }
-              const existingIds =
-                config.customParticleIds && config.customParticleIds.length > 0
-                  ? config.customParticleIds
-                  : config.customParticleId
-                  ? [config.customParticleId]
-                  : [];
-              const nextIds = existingIds.includes(targetPresetId)
-                ? existingIds
-                : [...existingIds, targetPresetId];
-              update({
-                shape: 'custom',
-                customParticleId: nextIds[0] || targetPresetId,
-                customParticleIds: nextIds,
-              });
-              setDrawerTarget(null);
-            }}
-            onClose={() => setDrawerTarget(null)}
-          />
-        </div>
-      )}
     </div>,
     document.body
   );

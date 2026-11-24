@@ -26,6 +26,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
     canDrag,
     x,
     y,
+    dragMagnetStyle,
     dragControls,
     handleDragStart,
     handleDrag,
@@ -203,6 +204,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
         zIndex: isSelected && appMode !== 'play' ? 30 : undefined,
         pointerEvents: 'none',
         opacity: runtimeOpacity,
+        ...dragMagnetStyle,
         ...style,
       }}
       drag={appMode === 'play' && hasSlider ? false : canDrag}

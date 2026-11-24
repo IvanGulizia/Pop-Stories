@@ -9,6 +9,7 @@ import {
   StateId,
 } from '../../types';
 import { computeRelativeParentOffset } from '../../store/parentingHelpers';
+import { getEffectiveBehaviors } from './behaviorResolution';
 import { getPivotWorldPosition, resolveEffectivePivot } from './pivotHelpers';
 
 export interface SnapRuntimeEntry {
@@ -18,6 +19,8 @@ export interface SnapRuntimeEntry {
   cooldownRemaining: number;
   snappedAtPos?: Position;
   isApproaching?: boolean;
+  isPulling?: boolean;
+  prePullStateId?: StateId;
 }
 
 export interface SnapCandidateMatch {
@@ -83,6 +86,8 @@ export function createInitialSnapRuntimeEntry(): SnapRuntimeEntry {
     attachBehavior: null,
     cooldownRemaining: 0,
     isApproaching: false,
+    isPulling: false,
+    prePullStateId: undefined,
   };
 }
 
@@ -595,40 +600,67 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
 
     const goal = computeSnapGoalForTarget(probeEntity, snappedTarget, config, currentRotationDeg);
 
+    const pullDist =
+      isDragging && dragPos
+        ? Math.hypot(dragPos.x - goal.goalTopLeft.x, dragPos.y - goal.goalTopLeft.y)
+        : 0;
+
     // Pull-to-unsnap si on tire l'entité au-delà de la distance d'arrachement
-    if (isDragging && allowPullUnsnap && dragPos) {
-      const pullDist = Math.hypot(
-        dragPos.x - goal.goalTopLeft.x,
-        dragPos.y - goal.goalTopLeft.y
-      );
-      if (pullDist > unsnapDist) {
-        const wasParented =
-          entity.parentId === snappedTarget.id ||
-          isSnapParentAttachBehavior(nextRuntime.attachBehavior);
-        nextRuntime.isSnapped = false;
-        nextRuntime.snappedTargetId = null;
-        nextRuntime.attachBehavior = null;
-        nextRuntime.cooldownRemaining = cooldownSec;
-        return {
-          nextRuntime,
-          nextPosition: dragPos,
-          zeroVelocity: true,
-          freezeStatic: false,
-          parentMutation: wasParented ? { childId: entity.id, parentId: null } : undefined,
-          snapEvent: {
-            phase: 'exit',
-            targetEntityId: snappedTarget.id,
-            eventPosition: {
-              x: Math.round(dragPos.x + entity.size.width / 2),
-              y: Math.round(dragPos.y + entity.size.height / 2),
-            },
+    if (isDragging && allowPullUnsnap && dragPos && pullDist > unsnapDist) {
+      const wasParented =
+        entity.parentId === snappedTarget.id ||
+        isSnapParentAttachBehavior(nextRuntime.attachBehavior);
+      const prevBeforePull = nextRuntime.prePullStateId;
+      nextRuntime.isSnapped = false;
+      nextRuntime.snappedTargetId = null;
+      nextRuntime.attachBehavior = null;
+      nextRuntime.cooldownRemaining = cooldownSec;
+      nextRuntime.isPulling = false;
+      nextRuntime.prePullStateId = undefined;
+      return {
+        nextRuntime,
+        nextPosition: dragPos,
+        zeroVelocity: true,
+        freezeStatic: false,
+        parentMutation: wasParented ? { childId: entity.id, parentId: null } : undefined,
+        snapEvent: {
+          phase: 'exit',
+          targetEntityId: snappedTarget.id,
+          eventPosition: {
+            x: Math.round(dragPos.x + entity.size.width / 2),
+            y: Math.round(dragPos.y + entity.size.height / 2),
           },
-          stateChange:
-            config.unsnappedStateId && entity.states[config.unsnappedStateId]
-              ? config.unsnappedStateId
-              : undefined,
-        };
+        },
+        stateChange:
+          config.unsnappedStateId && entity.states[config.unsnappedStateId]
+            ? config.unsnappedStateId
+            : prevBeforePull && entity.states[prevBeforePull]
+            ? prevBeforePull
+            : undefined,
+      };
+    }
+
+    // Hystérésis d'état en traction / résistance pendant que l'objet est encore attaché
+    let pullStateChange: StateId | undefined;
+    const wasPulling = Boolean(nextRuntime.isPulling);
+    if (!wasPulling && isDragging && dragPos && pullDist > 6) {
+      nextRuntime.isPulling = true;
+      nextRuntime.prePullStateId = entity.currentStateId;
+      if (config.pullingStateId && entity.states[config.pullingStateId]) {
+        pullStateChange = config.pullingStateId;
       }
+    } else if (wasPulling && (!isDragging || !dragPos || pullDist <= 2)) {
+      nextRuntime.isPulling = false;
+      const restoreTarget =
+        config.snappedStateId && entity.states[config.snappedStateId]
+          ? config.snappedStateId
+          : nextRuntime.prePullStateId && entity.states[nextRuntime.prePullStateId]
+          ? nextRuntime.prePullStateId
+          : undefined;
+      if (restoreTarget && restoreTarget !== entity.currentStateId) {
+        pullStateChange = restoreTarget;
+      }
+      nextRuntime.prePullStateId = undefined;
     }
 
     // Maintien du snap actif
@@ -684,6 +716,7 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
       zeroVelocity: isFreezeMode || isPosOnlyMode,
       freezeStatic: isFreezeMode,
       parentMutation,
+      ...(pullStateChange ? { stateChange: pullStateChange } : {}),
       activeLink: {
         from: goal.sourceAnchorWorld,
         to: goal.targetAnchorWorld,
@@ -861,3 +894,149 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
     },
   };
 }
+
+/**
+ * Calcule le décalage visuel élastique d'attraction magnétique ressenti en temps réel
+ * pendant le drag manuel d'une entité non encore snappée (objet aimanté ou proche d'un réceptacle).
+ */
+export function computeDraggedSnapMagneticOffset(params: {
+  entity: Entity;
+  rawPos: Position;
+  allEntities: Record<EntityId, Entity>;
+  snapRuntimeStates?: Map<string, SnapRuntimeEntry>;
+}): Position {
+  const { entity, rawPos, allEntities, snapRuntimeStates } = params;
+  if (!entity || entity.disabled || entity.visible === false) {
+    return { x: 0, y: 0 };
+  }
+  const rt = snapRuntimeStates?.get(entity.id);
+  if (rt?.isSnapped || (rt && rt.cooldownRemaining > 0)) {
+    return { x: 0, y: 0 };
+  }
+
+  const probeEntity: Entity = { ...entity, position: rawPos };
+  let bestPull: {
+    distance: number;
+    goalTopLeft: Position;
+    magnetRadius: number;
+    magnetForce: number;
+  } | null = null;
+
+  // 1) Vérifier le comportement Snap propre à l'entité draguée
+  const selfState = entity.states?.[entity.currentStateId];
+  const selfBehaviors = getEffectiveBehaviors(entity, selfState);
+  const selfSnap = selfBehaviors.find((b) => b.type === 'snap') as SnapBehaviorConfig | undefined;
+  if (
+    selfSnap &&
+    selfSnap.enabled !== false &&
+    selfSnap.snapRole !== 'receptacle' &&
+    selfSnap.magnetEnabled
+  ) {
+    const baseRadius = Math.max(4, Number.isFinite(selfSnap.snapRadius) ? selfSnap.snapRadius : 48);
+    const magnetRadius = Math.max(
+      baseRadius,
+      Number.isFinite(selfSnap.magnetRadius as number) ? (selfSnap.magnetRadius as number) : 120
+    );
+    const magnetForce = Math.max(
+      0,
+      Number.isFinite(selfSnap.magnetForce as number) ? (selfSnap.magnetForce as number) : 260
+    );
+    if (magnetForce > 0) {
+      const cand = findSnapCandidateWithinRadius(
+        probeEntity,
+        allEntities,
+        selfSnap,
+        magnetRadius,
+        rawPos
+      );
+      if (cand) {
+        bestPull = {
+          distance: cand.distance,
+          goalTopLeft: cand.goalTopLeft,
+          magnetRadius,
+          magnetForce,
+        };
+      }
+    }
+  }
+
+  // 2) Vérifier les réceptacles (socles) présents sur la scène
+  for (const rec of Object.values(allEntities)) {
+    if (!rec || rec.id === entity.id || rec.disabled || rec.visible === false) continue;
+    if (rec.parentId === entity.id) continue;
+    const recState = rec.states?.[rec.currentStateId];
+    const recBehaviors = getEffectiveBehaviors(rec, recState);
+    const recSnap = recBehaviors.find((b) => b.type === 'snap') as SnapBehaviorConfig | undefined;
+    if (
+      !recSnap ||
+      recSnap.enabled === false ||
+      recSnap.snapRole !== 'receptacle' ||
+      !recSnap.magnetEnabled
+    ) {
+      continue;
+    }
+    if (!matchesSnapFilter(rec.id, probeEntity, recSnap)) continue;
+
+    // Respecter la capacité max du réceptacle
+    const maxCap = Math.max(1, Math.round(recSnap.maxCapacity ?? 1));
+    if (snapRuntimeStates) {
+      let occupied = 0;
+      for (const entry of snapRuntimeStates.values()) {
+        if (entry.isSnapped && entry.snappedTargetId === rec.id) {
+          occupied += 1;
+        }
+      }
+      if (occupied >= maxCap) continue;
+    }
+
+    const baseRadius = Math.max(4, Number.isFinite(recSnap.snapRadius) ? recSnap.snapRadius : 48);
+    const magnetRadius = Math.max(
+      baseRadius,
+      Number.isFinite(recSnap.magnetRadius as number) ? (recSnap.magnetRadius as number) : 120
+    );
+    const magnetForce = Math.max(
+      0,
+      Number.isFinite(recSnap.magnetForce as number) ? (recSnap.magnetForce as number) : 260
+    );
+    if (magnetForce <= 0) continue;
+
+    const candConfig: SnapBehaviorConfig = {
+      ...recSnap,
+      snapRole: 'magnet_object',
+      targetType: 'entity',
+      targetEntityId: rec.id,
+      sourceAnchor: recSnap.targetAnchor || 'center',
+      customSourceAnchor: recSnap.customTargetAnchor,
+      targetAnchor: recSnap.sourceAnchor || 'center',
+      customTargetAnchor: recSnap.customSourceAnchor,
+    };
+    const goal = computeSnapGoalForTarget(probeEntity, rec, candConfig);
+    if (goal.metricDistance <= magnetRadius) {
+      if (!bestPull || goal.metricDistance < bestPull.distance) {
+        bestPull = {
+          distance: goal.metricDistance,
+          goalTopLeft: goal.goalTopLeft,
+          magnetRadius,
+          magnetForce,
+        };
+      }
+    }
+  }
+
+  if (!bestPull) {
+    return { x: 0, y: 0 };
+  }
+
+  const t = Math.max(0, Math.min(1, 1 - bestPull.distance / Math.max(1, bestPull.magnetRadius)));
+  const smoothT = t * t * (3 - 2 * t);
+  const forceScale = Math.min(
+    0.82,
+    Math.max(0.18, 0.25 + 0.42 * Math.min(1.5, bestPull.magnetForce / 260))
+  );
+  const pullRatio = smoothT * forceScale;
+  return {
+    x: Math.round((bestPull.goalTopLeft.x - rawPos.x) * pullRatio * 100) / 100,
+    y: Math.round((bestPull.goalTopLeft.y - rawPos.y) * pullRatio * 100) / 100,
+  };
+}
+
