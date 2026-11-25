@@ -978,6 +978,12 @@ export function SnapBehaviorControls({
             </div>
           </div>
         ))}
+        <div className="pt-1 text-[10px] leading-snug text-cyan-800/90">
+          <strong>Priorité :</strong> Santé &gt; Snap &gt; Marionnette &gt; Locomotions (les états RuleBook externes restent intacts).{' '}
+          {isReceptacle
+            ? "Si un objet possède aussi son propre composant Snap « Objet aimanté », il pilote sa physique et ses ancres tandis que le Réceptacle gère sa capacité max et ses propres états."
+            : "Compatible avec un Réceptacle : cet objet pilote ses ancres/physique, et le Réceptacle observe automatiquement la capture et sa capacité max."}
+        </div>
       </div>
     </div>
   );

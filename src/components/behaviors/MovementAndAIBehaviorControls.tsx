@@ -19,6 +19,45 @@ import {
 } from './BehaviorSharedControls';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 
+function LocomotionDragSnapPauseCard({
+  pauseWhileDragged,
+  pauseWhileSnapped,
+  update,
+}: {
+  pauseWhileDragged?: boolean;
+  pauseWhileSnapped?: boolean;
+  update: (partial: any) => void;
+}) {
+  return (
+    <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="font-bold text-slate-700 text-xs">Pause pendant le Drag</div>
+          <div className="text-[10px] text-slate-400">Suspend le déplacement quand on saisit l’objet</div>
+        </div>
+        <input
+          type="checkbox"
+          checked={pauseWhileDragged !== false}
+          onChange={(e) => update({ pauseWhileDragged: e.target.checked })}
+          className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
+        />
+      </div>
+      <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-100">
+        <div>
+          <div className="font-bold text-slate-700 text-xs">Pause pendant un Snap</div>
+          <div className="text-[10px] text-slate-400">Suspend le déplacement tant que l’objet est aimanté</div>
+        </div>
+        <input
+          type="checkbox"
+          checked={pauseWhileSnapped !== false}
+          onChange={(e) => update({ pauseWhileSnapped: e.target.checked })}
+          className="w-4 h-4 accent-cyan-600 rounded cursor-pointer shrink-0"
+        />
+      </div>
+    </div>
+  );
+}
+
 export function PatrolBehaviorControls({
   b,
   update,
@@ -552,6 +591,12 @@ export function PatrolBehaviorControls({
         )}
       </div>
 
+      <LocomotionDragSnapPauseCard
+        pauseWhileDragged={b.pauseWhileDragged}
+        pauseWhileSnapped={b.pauseWhileSnapped}
+        update={update}
+      />
+
       {/* États visuels automatiques */}
       <LocomotionStateBindingsCard
         folderName="Patrouille"
@@ -837,6 +882,12 @@ export function WanderingBehaviorControls({
         </div>
       )}
 
+      <LocomotionDragSnapPauseCard
+        pauseWhileDragged={b.pauseWhileDragged}
+        pauseWhileSnapped={b.pauseWhileSnapped}
+        update={update}
+      />
+
       {/* États visuels automatiques */}
       <LocomotionStateBindingsCard
         folderName="Errance"
@@ -1022,6 +1073,12 @@ export function MoveToBehaviorControls({
           className="w-full accent-indigo-600"
         />
       </div>
+
+      <LocomotionDragSnapPauseCard
+        pauseWhileDragged={b.pauseWhileDragged}
+        pauseWhileSnapped={b.pauseWhileSnapped}
+        update={update}
+      />
 
       <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0} update={update} />
       <FlipControls flipOnMove={b.flipOnMove} flipInvert={b.flipInvert} update={update} />
@@ -1378,6 +1435,12 @@ export function FollowBehaviorControls({
         </>
       )}
 
+      <LocomotionDragSnapPauseCard
+        pauseWhileDragged={b.pauseWhileDragged}
+        pauseWhileSnapped={b.pauseWhileSnapped}
+        update={update}
+      />
+
       {/* États visuels automatiques */}
       <LocomotionStateBindingsCard
         folderName="Suivre"
@@ -1583,18 +1646,32 @@ export function FleeBehaviorControls({
         </select>
       </div>
 
-      {/* Suspendre la peur pendant le drag */}
-      <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
-        <div>
-          <div className="font-bold text-slate-700 text-xs">Suspendre la peur pendant le Drag</div>
-          <div className="text-[10px] text-slate-400">Évite de fuir ou d'écraser les états quand on l'attrape</div>
+      {/* Suspendre la peur pendant le drag / snap */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <div className="font-bold text-slate-700 text-xs">Suspendre la peur pendant le Drag</div>
+            <div className="text-[10px] text-slate-400">Évite de fuir ou d&apos;écraser les états quand on l&apos;attrape</div>
+          </div>
+          <input
+            type="checkbox"
+            checked={b.pauseWhileDragged !== false}
+            onChange={(e) => update({ pauseWhileDragged: e.target.checked })}
+            className="w-4 h-4 accent-rose-500 rounded cursor-pointer shrink-0"
+          />
         </div>
-        <input
-          type="checkbox"
-          checked={b.pauseWhileDragged !== false}
-          onChange={(e) => update({ pauseWhileDragged: e.target.checked })}
-          className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
-        />
+        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-100">
+          <div>
+            <div className="font-bold text-slate-700 text-xs">Suspendre la peur pendant un Snap</div>
+            <div className="text-[10px] text-slate-400">Reste calme tant que l&apos;objet est aimanté sur une cible</div>
+          </div>
+          <input
+            type="checkbox"
+            checked={b.pauseWhileSnapped !== false}
+            onChange={(e) => update({ pauseWhileSnapped: e.target.checked })}
+            className="w-4 h-4 accent-cyan-600 rounded cursor-pointer shrink-0"
+          />
+        </div>
       </div>
 
       {/* États visuels (Conscience / Peur — Garde-fou actif) */}

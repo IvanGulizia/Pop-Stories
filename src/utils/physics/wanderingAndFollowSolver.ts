@@ -467,14 +467,18 @@ export interface StateCandidateInput {
 }
 
 /**
- * Option A — Coordination propre et non-écrasante des états entre Marionnette Interactive,
+ * Option A — Coordination propre et non-écrasante des états entre Snap, Marionnette Interactive,
  * Contrôle Clavier, Fuite, Suivre, Patrouille et Errance.
- * Les états externes (ex: Blessé, Mort, Attaque, Ramasser) restent 100% intacts.
+ * Priorité : Santé > Snap (Traction/Snappé/Approche) > Marionnette active > Locomotions > Marionnette repos.
+ * Les états externes (ex: Blessé, Mort, Attaque, Ramasser, RuleBook) restent 100% intacts.
  */
 export function resolveLocomotionAndPuppetState(params: {
   currentStateId: string;
   validStateIds: Set<string>;
   hasHealthOverride?: boolean;
+  snap?: StateCandidateInput & {
+    isActive: boolean;
+  };
   puppet?: StateCandidateInput & {
     isActiveInteraction: boolean;
     allowInterruptLocomotion: boolean;
@@ -489,6 +493,7 @@ export function resolveLocomotionAndPuppetState(params: {
     currentStateId,
     validStateIds,
     hasHealthOverride = false,
+    snap,
     puppet,
     keyboard,
     flee,
@@ -507,20 +512,32 @@ export function resolveLocomotionAndPuppetState(params: {
     cand.boundIds.forEach((id) => locomotionBoundIds.add(id));
   });
 
+  const snapHasBounds = Boolean(snap && snap.boundIds.size > 0);
+  const currentInSnap = Boolean(snap && snap.boundIds.has(currentStateId));
   const puppetHasBounds = Boolean(puppet && puppet.boundIds.size > 0);
   const currentInPuppet = Boolean(puppet && puppet.boundIds.has(currentStateId));
   const currentInLocomotion = locomotionBoundIds.has(currentStateId);
 
-  // 1. Interaction active de Marionnette (Drag, Swing, Shake, Survol, Approche, Chute/Atterrissage Marionnette)
+  // 1. Snap actif (Traction > Snappé > Approche) — prioritaire sur Marionnette & Locomotion tant que l'état courant est géré
+  if (snap && snap.isActive && snapHasBounds) {
+    const canSnapControl = currentInSnap || currentInPuppet || currentInLocomotion;
+    if (canSnapControl && isValid(snap.desiredStateId)) {
+      return snap.desiredStateId !== currentStateId ? snap.desiredStateId : undefined;
+    }
+  }
+
+  // 2. Interaction active de Marionnette (Drag, Swing, Shake, Survol, Approche, Chute/Atterrissage Marionnette)
   if (puppet && puppet.isActiveInteraction && puppetHasBounds) {
     const canPuppetControl =
-      currentInPuppet || (puppet.allowInterruptLocomotion !== false && currentInLocomotion);
+      currentInPuppet ||
+      (puppet.allowInterruptLocomotion !== false && currentInLocomotion) ||
+      (Boolean(!snap?.isActive) && currentInSnap);
     if (canPuppetControl && isValid(puppet.desiredStateId)) {
       return puppet.desiredStateId !== currentStateId ? puppet.desiredStateId : undefined;
     }
   }
 
-  // 2. Priorité des comportements de locomotion : Keyboard > Flee (effrayé) > Follow > Patrol > Wandering > Flee (calme)
+  // 3. Priorité des comportements de locomotion : Keyboard > Flee (effrayé) > Follow > Patrol > Wandering > Flee (calme)
   const orderedLocomotion: Array<StateCandidateInput | undefined> = [
     keyboard,
     flee?.isScared ? flee : undefined,
@@ -531,9 +548,11 @@ export function resolveLocomotionAndPuppetState(params: {
   ];
 
   // Un comportement de locomotion peut prendre la main si l'état courant est dans locomotionBoundIds
-  // OU si la marionnette vient de relâcher (état courant dans puppet.boundIds et !puppet.isActiveInteraction)
+  // OU si la marionnette / snap vient de relâcher
   const canLocomotionRun =
-    currentInLocomotion || (Boolean(puppet && !puppet.isActiveInteraction) && currentInPuppet);
+    currentInLocomotion ||
+    (Boolean(puppet && !puppet.isActiveInteraction) && currentInPuppet) ||
+    (Boolean(snap && !snap.isActive) && currentInSnap);
 
   if (canLocomotionRun) {
     for (const cand of orderedLocomotion) {
@@ -541,15 +560,21 @@ export function resolveLocomotionAndPuppetState(params: {
       const candOwnsOrHandoff =
         cand.boundIds.has(currentStateId) ||
         currentInLocomotion ||
-        (Boolean(puppet && !puppet.isActiveInteraction) && currentInPuppet);
+        (Boolean(puppet && !puppet.isActiveInteraction) && currentInPuppet) ||
+        (Boolean(snap && !snap.isActive) && currentInSnap);
       if (candOwnsOrHandoff && isValid(cand.desiredStateId)) {
         return cand.desiredStateId !== currentStateId ? cand.desiredStateId : undefined;
       }
     }
   }
 
-  // 3. Marionnette au repos (si aucune locomotion n'a d'état à jouer, ou si Marionnette est seule)
-  if (puppet && puppetHasBounds && currentInPuppet && isValid(puppet.desiredStateId)) {
+  // 4. Marionnette au repos (si aucune locomotion n'a d'état à jouer, ou si Marionnette est seule)
+  if (
+    puppet &&
+    puppetHasBounds &&
+    (currentInPuppet || (Boolean(snap && !snap.isActive) && currentInSnap)) &&
+    isValid(puppet.desiredStateId)
+  ) {
     return puppet.desiredStateId !== currentStateId ? puppet.desiredStateId : undefined;
   }
 

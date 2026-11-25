@@ -407,4 +407,271 @@ describe('Canvas libre par défaut, magnétisme drag, état en traction & repèr
     useSceneStore.getState().clearSnapPinCanvasPickResult();
     expect(useSceneStore.getState().snapPinCanvasPickResult).toBeNull();
   });
+
+  it('assure la cohabitation sans collision entre Objet aimanté (+ Wandering + Marionnette) et Réceptacle quel que soit l’ordre', () => {
+    const runScenario = (hookFirst: boolean) => {
+      resetMatterPhysicsRuntime();
+
+      const dogStates = {
+        'dog-idle': { id: 'dog-idle', name: 'Repos', color: '#64748b', scale: 1, rotation: 0 },
+        'dog-walk': { id: 'dog-walk', name: 'Balade', color: '#3b82f6', scale: 1, rotation: 0 },
+        'dog-drag': { id: 'dog-drag', name: 'Porté', color: '#a855f7', scale: 1, rotation: 0 },
+        'dog-release': { id: 'dog-release', name: 'Relâché', color: '#c084fc', scale: 1, rotation: 0 },
+        'dog-snapped': { id: 'dog-snapped', name: 'Accroché', color: '#22c55e', scale: 1, rotation: 0 },
+        'dog-pull': { id: 'dog-pull', name: 'Traction', color: '#f59e0b', scale: 1, rotation: 0 },
+        'dog-free': { id: 'dog-free', name: 'Détaché', color: '#94a3b8', scale: 1, rotation: 0 },
+      };
+      const hookStates = {
+        'hook-idle': { id: 'hook-idle', name: 'Vide', color: '#64748b', scale: 1, rotation: 0 },
+        'hook-snapped': { id: 'hook-snapped', name: 'Occupé', color: '#22c55e', scale: 1, rotation: 0 },
+        'hook-pull': { id: 'hook-pull', name: 'Tendu', color: '#f59e0b', scale: 1, rotation: 0 },
+        'hook-free': { id: 'hook-free', name: 'Libéré', color: '#94a3b8', scale: 1, rotation: 0 },
+      };
+
+      const dog = makeEntity('dog', {
+        position: { x: 205, y: 200 },
+        currentStateId: 'dog-idle',
+        states: dogStates,
+        behaviors: [
+          {
+            id: 'dog-wander',
+            type: 'wandering',
+            enabled: true,
+            mode: 'free_2d',
+            radius: 150,
+            speed: 140,
+            randomness: 50,
+            changeInterval: 1.5,
+            pauseDuration: 0,
+            stateBindings: {
+              idleStateId: 'dog-idle',
+              moveStateId: 'dog-walk',
+            },
+          },
+          {
+            id: 'dog-puppet',
+            type: 'interactive_puppet',
+            enabled: true,
+            allowInterruptLocomotion: true,
+            dragReleaseDuration: 0.2,
+            stateBindings: {
+              idleStateId: 'dog-idle',
+              dragStateId: 'dog-drag',
+              dragReleaseStateId: 'dog-release',
+            },
+          },
+          {
+            id: 'dog-snap',
+            type: 'snap',
+            enabled: true,
+            snapRole: 'magnet_object',
+            targetType: 'entity',
+            targetEntityId: 'hook',
+            snapTrigger: 'on_release',
+            snapRadius: 50,
+            snapMode: 'instant',
+            snapAlignment: 'center',
+            attachBehavior: 'position_only',
+            allowPullUnsnap: true,
+            unsnapDistance: 85,
+            reSnapCooldownSec: 0.5,
+            snappedStateId: 'dog-snapped',
+            pullingStateId: 'dog-pull',
+            unsnappedStateId: 'dog-free',
+          },
+        ],
+      });
+
+      const hook = makeEntity('hook', {
+        position: { x: 200, y: 200 },
+        currentStateId: 'hook-idle',
+        states: hookStates,
+        behaviors: [
+          {
+            id: 'hook-snap',
+            type: 'snap',
+            enabled: true,
+            snapRole: 'receptacle',
+            targetType: 'any',
+            maxCapacity: 1,
+            snapTrigger: 'always_when_near',
+            snapRadius: 50,
+            snapMode: 'instant',
+            snapAlignment: 'center',
+            attachBehavior: 'position_only',
+            allowPullUnsnap: true,
+            unsnapDistance: 85,
+            snappedStateId: 'hook-snapped',
+            pullingStateId: 'hook-pull',
+            unsnappedStateId: 'hook-free',
+          },
+        ],
+      });
+
+      const buildEntities = (d: Entity, h: Entity): Record<string, Entity> =>
+        hookFirst ? { hook: h, dog: d } : { dog: d, hook: h };
+
+      const applyTick = (d: Entity, h: Entity) => {
+        const res = stepMatterPhysics({
+          entities: buildEntities(d, h),
+          canvasBounds: { width: 800, height: 500 },
+          deltaTime: 1 / 60,
+        });
+        const nextDog: Entity = {
+          ...d,
+          ...(res.updatedTransforms.dog?.position ? { position: res.updatedTransforms.dog.position } : {}),
+          ...(res.stateChanges?.dog ? { currentStateId: res.stateChanges.dog } : {}),
+        };
+        const nextHook: Entity = {
+          ...h,
+          ...(res.updatedTransforms.hook?.position ? { position: res.updatedTransforms.hook.position } : {}),
+          ...(res.stateChanges?.hook ? { currentStateId: res.stateChanges.hook } : {}),
+        };
+        return { res, nextDog, nextHook };
+      };
+
+      // 1. Pendant le drag près du crochet : Marionnette passe en dog-drag, Wandering est en pause,
+      // et le réceptacle (even though always_when_near) n'écrase PAS l'objet aimanté configuré en on_release !
+      setActiveDragPosition('dog', { x: 205, y: 200 });
+      const dragTick = applyTick(dog, hook);
+      expect(dragTick.nextDog.currentStateId).toBe('dog-drag');
+      expect(dragTick.nextHook.currentStateId).toBe('hook-idle');
+
+      // 2. Relâche du drag : dog (on_release) déclenche son snap -> dog-snapped ET hook-snapped !
+      // Même si dragReleaseDuration est actif sur Marionnette, Snap prime.
+      setActiveDragPosition('dog', null);
+      let curDog = dragTick.nextDog;
+      let curHook = dragTick.nextHook;
+      const relTick = applyTick(curDog, curHook);
+      curDog = relTick.nextDog;
+      curHook = relTick.nextHook;
+      expect(curDog.currentStateId).toBe('dog-snapped');
+      // Si hookFirst est true, hook observe au tick suivant dès que dog s'est snappé après lui
+      const stabilizeTick = applyTick(curDog, curHook);
+      curDog = stabilizeTick.nextDog;
+      curHook = stabilizeTick.nextHook;
+      expect(curDog.currentStateId).toBe('dog-snapped');
+      expect(curHook.currentStateId).toBe('hook-snapped');
+
+      // Wandering doit rester en pause tant que dog est snappé (sa position reste verrouillée sur hook)
+      const posBeforeWait = { ...curDog.position };
+      for (let i = 0; i < 6; i++) {
+        const t = applyTick(curDog, curHook);
+        curDog = t.nextDog;
+        curHook = t.nextHook;
+      }
+      expect(curDog.currentStateId).toBe('dog-snapped');
+      expect(curHook.currentStateId).toBe('hook-snapped');
+      expect(curDog.position.x).toBeCloseTo(posBeforeWait.x, 1);
+      expect(curDog.position.y).toBeCloseTo(posBeforeWait.y, 1);
+
+      // 3. Traction légère (< unsnapDistance 85) -> dog-pull ET hook-pull
+      setActiveDragPosition('dog', { x: 230, y: 200 });
+      const pullTick1 = applyTick(curDog, curHook);
+      curDog = pullTick1.nextDog;
+      curHook = pullTick1.nextHook;
+      const pullTick2 = applyTick(curDog, curHook);
+      curDog = pullTick2.nextDog;
+      curHook = pullTick2.nextHook;
+      expect(curDog.currentStateId).toBe('dog-pull');
+      expect(curHook.currentStateId).toBe('hook-pull');
+
+      // 4. Arrachement (> unsnapDistance 85) -> dog-free / hook-free puis Wandering reprend
+      setActiveDragPosition('dog', { x: 320, y: 200 });
+      const breakTick1 = applyTick(curDog, curHook);
+      curDog = breakTick1.nextDog;
+      curHook = breakTick1.nextHook;
+      expect(curDog.currentStateId).toBe('dog-free');
+      const breakTick2 = applyTick(curDog, curHook);
+      curDog = breakTick2.nextDog;
+      curHook = breakTick2.nextHook;
+      expect(curHook.currentStateId).toBe('hook-free');
+
+      // Relâche loin du crochet -> Wandering reprend la marche (dog-walk)
+      setActiveDragPosition('dog', null);
+      let resumedWalk = false;
+      for (let i = 0; i < 10; i++) {
+        const t = applyTick(curDog, curHook);
+        curDog = t.nextDog;
+        curHook = t.nextHook;
+        if (curDog.currentStateId === 'dog-walk') {
+          resumedWalk = true;
+          break;
+        }
+      }
+      expect(resumedWalk).toBe(true);
+    };
+
+    runScenario(true);
+    runScenario(false);
+  });
+
+  it('empêche un Objet aimanté de se snapper sur un Réceptacle déjà à maxCapacity', () => {
+    const hook = makeEntity('hook', {
+      position: { x: 200, y: 200 },
+      behaviors: [
+        {
+          id: 'hook-rec',
+          type: 'snap',
+          enabled: true,
+          snapRole: 'receptacle',
+          targetType: 'any',
+          maxCapacity: 1,
+          snapTrigger: 'always_when_near',
+          snapRadius: 60,
+          snapMode: 'instant',
+          snapAlignment: 'center',
+          attachBehavior: 'position_only',
+        },
+      ],
+    });
+
+    const dog1 = makeEntity('dog1', {
+      position: { x: 202, y: 200 },
+      behaviors: [
+        {
+          id: 'dog1-snap',
+          type: 'snap',
+          enabled: true,
+          snapRole: 'magnet_object',
+          targetType: 'entity',
+          targetEntityId: 'hook',
+          snapTrigger: 'always_when_near',
+          snapRadius: 60,
+          snapMode: 'instant',
+          snapAlignment: 'center',
+          attachBehavior: 'position_only',
+        },
+      ],
+    });
+
+    const dog2 = makeEntity('dog2', {
+      position: { x: 204, y: 200 },
+      behaviors: [
+        {
+          id: 'dog2-snap',
+          type: 'snap',
+          enabled: true,
+          snapRole: 'magnet_object',
+          targetType: 'entity',
+          targetEntityId: 'hook',
+          snapTrigger: 'always_when_near',
+          snapRadius: 60,
+          snapMode: 'instant',
+          snapAlignment: 'center',
+          attachBehavior: 'position_only',
+        },
+      ],
+    });
+
+    const res1 = stepMatterPhysics({
+      entities: { dog1, hook, dog2 },
+      canvasBounds: { width: 800, height: 500 },
+      deltaTime: 1 / 60,
+    });
+
+    // dog1 occupe la seule place disponible sur hook -> dog2 ne doit pas pouvoir s'y snapper
+    const enteredIds = (res1.snapEvents || []).filter((e) => e.phase === 'enter').map((e) => e.subjectId);
+    expect(enteredIds).toEqual(['dog1']);
+  });
 });

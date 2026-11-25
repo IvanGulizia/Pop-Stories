@@ -207,6 +207,8 @@ export interface FollowBehaviorConfig extends BaseBehaviorConfig {
   jumpCooldown?: number;     // secondes entre 2 sauts auto, défaut 0.7
   jumpHeightThreshold?: number; // hauteur min au-dessus de l'entité pour sauter (px), défaut 36
   jumpOnWall?: boolean;      // Sauter aussi en cas d'obstacle mural, défaut true
+  pauseWhileDragged?: boolean; // défaut true : pause pendant le drag manuel
+  pauseWhileSnapped?: boolean; // défaut true : pause tant que l'entité est snappée
   stateBindings?: {
     idleStateId?: StateId;
     moveStateId?: StateId;
@@ -229,6 +231,8 @@ export interface MoveToBehaviorConfig extends BaseBehaviorConfig {
   damping?: number;      // 0..0.99 (inertie à l'arrivée)
   flipOnMove?: boolean;
   flipInvert?: boolean;
+  pauseWhileDragged?: boolean; // défaut true
+  pauseWhileSnapped?: boolean; // défaut true
 }
 
 export type PatrolMode = 'symmetric' | 'one_way_return' | 'waypoints';
@@ -270,6 +274,8 @@ export interface PatrolBehaviorConfig extends BaseBehaviorConfig {
   detectLedges?: boolean;                 // Détection du vide / bord de plateforme
   ledgeCheckDepth?: number;               // Profondeur de sonde vers le bas en px (défaut 28)
   initialDirection?: 1 | -1;              // Sens initial (défaut 1)
+  pauseWhileDragged?: boolean;            // défaut true
+  pauseWhileSnapped?: boolean;            // défaut true
   stateBindings?: {
     idleStateId?: StateId;
     moveStateId?: StateId;
@@ -296,6 +302,8 @@ export interface WanderingBehaviorConfig extends BaseBehaviorConfig {
   ledgeCheckDepth?: number; // Profondeur sonde (défaut 28 px)
   flipOnMove?: boolean;
   flipInvert?: boolean;
+  pauseWhileDragged?: boolean; // défaut true
+  pauseWhileSnapped?: boolean; // défaut true
   stateBindings?: {
     idleStateId?: StateId;
     moveStateId?: StateId;
@@ -477,6 +485,7 @@ export interface FleeBehaviorConfig extends BaseBehaviorConfig {
   flipOnMove?: boolean;
   flipInvert?: boolean;
   pauseWhileDragged?: boolean; // défaut true : ne pas fuir pendant que le joueur tient l'entité
+  pauseWhileSnapped?: boolean; // défaut true : ne pas fuir pendant que l'entité est snappée
   stateBindings?: {
     calmStateId?: StateId;
     scaredStateId?: StateId;

@@ -366,6 +366,47 @@ describe('Option A Locomotion <-> InteractivePuppet State Coordination & Visual 
         patrol: { boundIds: new Set(['idle', 'patrol_walk']), desiredStateId: 'patrol_walk' },
       })
     ).toBe('patrol_walk');
+
+    // Snap actif prime sur Marionnette active et Locomotions, mais jamais sur un état externe
+    const snapValid = new Set(['idle', 'walk', 'hover', 'snapped', 'pulling', 'unsnapped', 'carry']);
+    expect(
+      resolveLocomotionAndPuppetState({
+        currentStateId: 'hover',
+        validStateIds: snapValid,
+        snap: { boundIds: new Set(['snapped', 'pulling', 'unsnapped']), desiredStateId: 'snapped', isActive: true },
+        puppet: {
+          boundIds: new Set(['idle', 'hover']),
+          desiredStateId: 'hover',
+          isActiveInteraction: true,
+          allowInterruptLocomotion: true,
+        },
+        wandering: { boundIds: new Set(['idle', 'walk']), desiredStateId: 'walk' },
+      })
+    ).toBe('snapped');
+
+    expect(
+      resolveLocomotionAndPuppetState({
+        currentStateId: 'carry',
+        validStateIds: snapValid,
+        snap: { boundIds: new Set(['snapped', 'pulling', 'unsnapped']), desiredStateId: 'snapped', isActive: true },
+      })
+    ).toBeUndefined();
+
+    // Au détachement (snap.isActive = false), un état Snap restitue proprement à Marionnette ou Locomotion
+    expect(
+      resolveLocomotionAndPuppetState({
+        currentStateId: 'snapped',
+        validStateIds: snapValid,
+        snap: { boundIds: new Set(['snapped', 'pulling', 'unsnapped']), desiredStateId: undefined, isActive: false },
+        puppet: {
+          boundIds: new Set(['idle', 'hover']),
+          desiredStateId: 'idle',
+          isActiveInteraction: false,
+          allowInterruptLocomotion: true,
+        },
+        wandering: { boundIds: new Set(['idle', 'walk']), desiredStateId: 'walk' },
+      })
+    ).toBe('walk');
   });
 
   it('drives patrol turnStateId, wandering stateBindings, and puppet hover override in stepMatterPhysics', () => {

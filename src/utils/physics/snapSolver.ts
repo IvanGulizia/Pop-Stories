@@ -43,6 +43,7 @@ export interface SnapStepInput {
   justReleased: boolean;
   dragPos?: Position | null;
   currentRotationDeg?: number;
+  snapRuntimeStates?: Map<string, SnapRuntimeEntry>;
 }
 
 export interface SnapStepResult {
@@ -449,10 +450,34 @@ export function computeSnapGoalForTarget(
   };
 }
 
+export function getActiveMagnetSnapBehavior(entity: Entity): SnapBehaviorConfig | undefined {
+  const st = entity.states?.[entity.currentStateId];
+  const behs = getEffectiveBehaviors(entity, st);
+  const snap = behs.find((b) => b.type === 'snap') as SnapBehaviorConfig | undefined;
+  if (!snap || snap.enabled === false || snap.snapRole === 'receptacle') {
+    return undefined;
+  }
+  return snap;
+}
+
+export function getActiveReceptacleSnapBehavior(entity: Entity): SnapBehaviorConfig | undefined {
+  const st = entity.states?.[entity.currentStateId];
+  const behs = getEffectiveBehaviors(entity, st);
+  const snap = behs.find((b) => b.type === 'snap') as SnapBehaviorConfig | undefined;
+  if (!snap || snap.enabled === false || snap.snapRole !== 'receptacle') {
+    return undefined;
+  }
+  return snap;
+}
+
 export function matchesSnapFilter(
   subjectId: string,
   candidate: Entity,
-  config: SnapBehaviorConfig
+  config: SnapBehaviorConfig,
+  options?: {
+    subjectEntity?: Entity;
+    snapRuntimeStates?: Map<string, SnapRuntimeEntry>;
+  }
 ): boolean {
   if (!candidate || candidate.id === subjectId) return false;
   if (candidate.disabled || candidate.visible === false) return false;
@@ -460,21 +485,50 @@ export function matchesSnapFilter(
   if (candidate.parentId === subjectId) return false;
 
   const targetType = config.targetType || 'any';
-  if (targetType === 'any') return true;
-  if (targetType === 'entity') {
-    return Boolean(config.targetEntityId && candidate.id === config.targetEntityId);
-  }
-  if (targetType === 'type') {
-    return Boolean(config.targetEntityType && candidate.type === config.targetEntityType);
-  }
-  if (targetType === 'tag') {
+  let baseMatch = false;
+  if (targetType === 'any') {
+    baseMatch = true;
+  } else if (targetType === 'entity') {
+    baseMatch = Boolean(config.targetEntityId && candidate.id === config.targetEntityId);
+  } else if (targetType === 'type') {
+    baseMatch = Boolean(config.targetEntityType && candidate.type === config.targetEntityType);
+  } else if (targetType === 'tag') {
     const clean = (config.targetTag || '').trim().replace(/^#/, '').toLowerCase();
     if (!clean) return false;
-    return (candidate.tags || []).some(
+    baseMatch = (candidate.tags || []).some(
       (t) => t.trim().replace(/^#/, '').toLowerCase() === clean
     );
   }
-  return false;
+  if (!baseMatch) return false;
+
+  // Si un objet aimanté (magnet_object) vise une cible qui est un Réceptacle actif,
+  // respecter également le filtre d'acceptation et la capacité max du réceptacle.
+  if (config.snapRole !== 'receptacle' && options) {
+    const recSnap = getActiveReceptacleSnapBehavior(candidate);
+    if (recSnap) {
+      if (options.subjectEntity && !matchesSnapFilter(candidate.id, options.subjectEntity, recSnap)) {
+        return false;
+      }
+      if (options.snapRuntimeStates) {
+        const selfRt = options.snapRuntimeStates.get(subjectId);
+        const alreadyOnThisTarget = Boolean(
+          selfRt?.isSnapped && selfRt.snappedTargetId === candidate.id
+        );
+        if (!alreadyOnThisTarget) {
+          const maxCap = Math.max(1, Math.round(recSnap.maxCapacity ?? 1));
+          let occupied = 0;
+          for (const [eid, entry] of options.snapRuntimeStates.entries()) {
+            if (eid !== subjectId && entry.isSnapped && entry.snappedTargetId === candidate.id) {
+              occupied += 1;
+            }
+          }
+          if (occupied >= maxCap) return false;
+        }
+      }
+    }
+  }
+
+  return true;
 }
 
 export function findSnapCandidateWithinRadius(
@@ -483,7 +537,8 @@ export function findSnapCandidateWithinRadius(
   config: SnapBehaviorConfig,
   searchRadius: number,
   positionOverride?: Position | null,
-  currentEntityRotDeg?: number
+  currentEntityRotDeg?: number,
+  snapRuntimeStates?: Map<string, SnapRuntimeEntry>
 ): SnapCandidateMatch | null {
   const radius = Math.max(4, Number.isFinite(searchRadius) ? searchRadius : 48);
   const probeEntity: Entity = positionOverride
@@ -492,7 +547,14 @@ export function findSnapCandidateWithinRadius(
 
   let best: SnapCandidateMatch | null = null;
   for (const candidate of Object.values(allEntities)) {
-    if (!matchesSnapFilter(entity.id, candidate, config)) continue;
+    if (
+      !matchesSnapFilter(entity.id, candidate, config, {
+        subjectEntity: probeEntity,
+        snapRuntimeStates,
+      })
+    ) {
+      continue;
+    }
     const goal = computeSnapGoalForTarget(
       probeEntity,
       candidate,
@@ -521,7 +583,8 @@ export function findBestSnapCandidate(
   allEntities: Record<EntityId, Entity>,
   config: SnapBehaviorConfig,
   positionOverride?: Position | null,
-  currentEntityRotDeg?: number
+  currentEntityRotDeg?: number,
+  snapRuntimeStates?: Map<string, SnapRuntimeEntry>
 ): SnapCandidateMatch | null {
   const radius = Math.max(4, Number.isFinite(config.snapRadius) ? config.snapRadius : 48);
   return findSnapCandidateWithinRadius(
@@ -530,7 +593,8 @@ export function findBestSnapCandidate(
     config,
     radius,
     positionOverride,
-    currentEntityRotDeg
+    currentEntityRotDeg,
+    snapRuntimeStates
   );
 }
 
@@ -545,6 +609,7 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
     justReleased,
     dragPos,
     currentRotationDeg,
+    snapRuntimeStates,
   } = input;
 
   const safeDt = Math.max(0.001, Math.min(0.05, dt));
@@ -736,7 +801,8 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
     allEntities,
     config,
     probePos,
-    currentRotationDeg
+    currentRotationDeg,
+    snapRuntimeStates
   );
 
   const magnetCandidate =
@@ -748,7 +814,8 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
           config,
           magnetRadius,
           probePos,
-          currentRotationDeg
+          currentRotationDeg,
+          snapRuntimeStates
         )
       : candidate;
 
@@ -947,7 +1014,9 @@ export function computeDraggedSnapMagneticOffset(params: {
         allEntities,
         selfSnap,
         magnetRadius,
-        rawPos
+        rawPos,
+        undefined,
+        snapRuntimeStates
       );
       if (cand) {
         bestPull = {
@@ -960,8 +1029,12 @@ export function computeDraggedSnapMagneticOffset(params: {
     }
   }
 
-  // 2) Vérifier les réceptacles (socles) présents sur la scène
-  for (const rec of Object.values(allEntities)) {
+  // 2) Vérifier les réceptacles (socles) présents sur la scène uniquement si l'objet dragué
+  //    n'a pas son propre comportement Snap 'magnet_object' actif (sinon l'objet aimanté fait foi).
+  const hasActiveSelfMagnetSnap = Boolean(
+    selfSnap && selfSnap.enabled !== false && selfSnap.snapRole !== 'receptacle'
+  );
+  for (const rec of hasActiveSelfMagnetSnap ? [] : Object.values(allEntities)) {
     if (!rec || rec.id === entity.id || rec.disabled || rec.visible === false) continue;
     if (rec.parentId === entity.id) continue;
     const recState = rec.states?.[rec.currentStateId];

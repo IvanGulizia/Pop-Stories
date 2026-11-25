@@ -92,6 +92,8 @@ import {
   computeDraggedSnapMagneticOffset,
   computeSnapGoalForTarget,
   createInitialSnapRuntimeEntry,
+  getActiveMagnetSnapBehavior,
+  getActiveReceptacleSnapBehavior,
   getSnapAnchorWorldPoint,
   isSnapParentAttachBehavior,
   matchesSnapFilter,
@@ -485,6 +487,7 @@ const debugRotateDragTracks = new Map<
 >();
 
 const snapRuntimeStates = new Map<string, SnapRuntimeEntry>();
+const receptaclePrevSnappedIds = new Map<string, Set<string>>();
 const prevActiveDragIds = new Set<string>();
 const justReleasedDragIds = new Set<string>();
 const debugSnapLinks = new Map<
@@ -1251,6 +1254,7 @@ export function resetMatterPhysicsRuntime() {
   lastRotateDragOutputValues.clear();
   debugRotateDragTracks.clear();
   snapRuntimeStates.clear();
+  receptaclePrevSnappedIds.clear();
   prevActiveDragIds.clear();
   justReleasedDragIds.clear();
   debugSnapLinks.clear();
@@ -1809,6 +1813,7 @@ function ensurePhysicsWorld(
       impulseDrivenEntityIds.delete(id);
       pendingInitialVelocities.delete(id);
       snapRuntimeStates.delete(id);
+      receptaclePrevSnappedIds.delete(id);
       prevActiveDragIds.delete(id);
       justReleasedDragIds.delete(id);
       debugSnapLinks.delete(id);
@@ -2815,8 +2820,47 @@ export function stepMatterPhysics(params: {
       }
     }
 
+    const isSelfOrAncestorDraggedPhysics = (() => {
+      if (activeDragPositions[entity.id] || mouseGrabConstraints.has(entity.id)) return true;
+      let ancId = entity.parentId;
+      let depth = 0;
+      while (ancId && liveEntities[ancId] && depth < 16) {
+        if (activeDragPositions[ancId] || mouseGrabConstraints.has(ancId)) return true;
+        ancId = liveEntities[ancId].parentId;
+        depth += 1;
+      }
+      return false;
+    })();
+    const isEntitySnappedNow = Boolean(snapRuntimeStates.get(entity.id)?.isSnapped);
+
+    const isPatrolPausedByDragOrSnap = Boolean(
+      patrol &&
+        ((patrol.pauseWhileDragged !== false && isSelfOrAncestorDraggedPhysics) ||
+          (patrol.pauseWhileSnapped !== false && isEntitySnappedNow))
+    );
+    const isWanderingPausedByDragOrSnap = Boolean(
+      wandering &&
+        ((wandering.pauseWhileDragged !== false && isSelfOrAncestorDraggedPhysics) ||
+          (wandering.pauseWhileSnapped !== false && isEntitySnappedNow))
+    );
+    const isMoveToPausedByDragOrSnap = Boolean(
+      moveTo &&
+        ((moveTo.pauseWhileDragged !== false && isSelfOrAncestorDraggedPhysics) ||
+          (moveTo.pauseWhileSnapped !== false && isEntitySnappedNow))
+    );
+    const isFollowPausedByDragOrSnap = Boolean(
+      follow &&
+        ((follow.pauseWhileDragged !== false && isSelfOrAncestorDraggedPhysics) ||
+          (follow.pauseWhileSnapped !== false && isEntitySnappedNow))
+    );
+    const isFleePausedByDragOrSnap = Boolean(
+      flee &&
+        ((flee.pauseWhileDragged !== false && isSelfOrAncestorDraggedPhysics) ||
+          (flee.pauseWhileSnapped !== false && isEntitySnappedNow))
+    );
+
     // 4. Patrouille 2.0 (Symétrique, Aller simple, Multi-points, Murs & Vide, Compatible Physique/Gravité)
-    if (patrol && !controlsLockedByDeath) {
+    if (patrol && !controlsLockedByDeath && !isPatrolPausedByDragOrSnap) {
       let patrolState = patrolStates.get(entity.id);
       if (!patrolState) {
         patrolState = {
@@ -2931,7 +2975,7 @@ export function stepMatterPhysics(params: {
     }
 
     // 4b. Errance / Balade aléatoire (Wandering) — Libre 2D ou Sol horizontal avec Murs & Vide
-    if (wandering && !controlsLockedByDeath) {
+    if (wandering && !controlsLockedByDeath && !isWanderingPausedByDragOrSnap) {
       let wState = wanderingStates.get(entity.id);
       if (!wState) {
         wState = {
@@ -3019,7 +3063,7 @@ export function stepMatterPhysics(params: {
     };
 
     // 5. Move To
-    if (moveTo && !controlsLockedByDeath) {
+    if (moveTo && !controlsLockedByDeath && !isMoveToPausedByDragOrSnap) {
       let targetX = entity.position.x;
       let targetY = entity.position.y;
       let hasValidTarget = false;
@@ -3105,7 +3149,7 @@ export function stepMatterPhysics(params: {
     }
 
     // 6. Follow (Libre 2D ou Au sol / Plateforme avec saut automatique + événement Arrivé sur cible)
-    if (follow && !controlsLockedByDeath) {
+    if (follow && !controlsLockedByDeath && !isFollowPausedByDragOrSnap) {
       let targetX = body.position.x;
       let targetY = body.position.y;
       let hasValidTarget = false;
@@ -3224,6 +3268,8 @@ export function stepMatterPhysics(params: {
           hasValidTarget: false,
         });
       }
+    } else if (isFollowPausedByDragOrSnap) {
+      if (followSpringStates.has(entity.id)) followSpringStates.delete(entity.id);
     } else if (!follow) {
       if (followSpringStates.has(entity.id)) followSpringStates.delete(entity.id);
       if (followJumpStates.has(entity.id)) followJumpStates.delete(entity.id);
@@ -3231,7 +3277,7 @@ export function stepMatterPhysics(params: {
     }
 
     // 6b. Flee (Fuir une menace)
-    if (flee && (flee.speed ?? 160) > 0) {
+    if (flee && !controlsLockedByDeath && !isFleePausedByDragOrSnap && (flee.speed ?? 160) > 0) {
       const fleeThreat = resolveTargetWorldPoint(
         entity.id,
         body.position.x,
@@ -3332,8 +3378,12 @@ export function stepMatterPhysics(params: {
     const isPatrolTurnHold = hasPatrolTurnState && (patrolTurnTimers.get(entity.id) ?? 0) > 0;
     const isOtherFlipPaused =
       (otherFlipSource?.type === 'patrol' &&
-        ((patrolStates.get(entity.id)?.timer ?? 0) > 0 || isPatrolTurnHold)) ||
-      (otherFlipSource?.type === 'wandering' && (wanderingStates.get(entity.id)?.pauseTimer ?? 0) > 0);
+        (isPatrolPausedByDragOrSnap || (patrolStates.get(entity.id)?.timer ?? 0) > 0 || isPatrolTurnHold)) ||
+      (otherFlipSource?.type === 'wandering' &&
+        (isWanderingPausedByDragOrSnap || (wanderingStates.get(entity.id)?.pauseTimer ?? 0) > 0)) ||
+      (otherFlipSource?.type === 'move_to' && isMoveToPausedByDragOrSnap) ||
+      (otherFlipSource?.type === 'follow' && isFollowPausedByDragOrSnap) ||
+      (otherFlipSource?.type === 'flee' && isFleePausedByDragOrSnap);
 
     const nextMoveFlip = computeMovementFlipX({
       keyboard: keyboard?.flipOnMove ? keyboard : undefined,
@@ -3980,6 +4030,7 @@ export function stepMatterPhysics(params: {
           justReleased: false,
           dragPos: snapDragPos,
           currentRotationDeg: newRot,
+          snapRuntimeStates,
         });
         snapHandledThisTick = true;
         if (snapRes.snapEvent?.phase === 'exit') {
@@ -3989,6 +4040,9 @@ export function stepMatterPhysics(params: {
           snapRuntimeStates.set(entity.id, snapRes.nextRuntime);
           if (snapRes.activeLink) {
             debugSnapLinks.set(entity.id, snapRes.activeLink);
+          }
+          if (snapRes.stateChange && !stateChanges[entity.id]) {
+            stateChanges[entity.id] = snapRes.stateChange;
           }
         }
       }
@@ -4725,11 +4779,24 @@ export function stepMatterPhysics(params: {
           }
         };
 
+        const prevSnappedSet = receptaclePrevSnappedIds.get(entity.id) || new Set<string>();
+        const prevSnappedCount = prevSnappedSet.size;
+
         // 1) Maintenir les entités déjà capturées par ce réceptacle
         for (const cand of Object.values(snapLiveEntities)) {
           if (!cand || cand.id === entity.id) continue;
           const candRt = snapRuntimeStates.get(cand.id);
           if (!candRt?.isSnapped || candRt.snappedTargetId !== entity.id) continue;
+
+          // Cohabitation sans collision : si l'objet capturé possède son propre Snap 'magnet_object',
+          // il gère lui-même son maintien, ses ancres et son arrachement. Le réceptacle observe seulement.
+          if (getActiveMagnetSnapBehavior(cand)) {
+            currentlySnappedIds.add(cand.id);
+            if (candRt.isPulling) {
+              anyPulling = true;
+            }
+            continue;
+          }
 
           const candDrag = currentDragIds.has(cand.id);
           const candGrabRt = mouseGrabConstraints.get(cand.id);
@@ -4757,12 +4824,6 @@ export function stepMatterPhysics(params: {
             if (cRes.nextRuntime.isPulling) {
               anyPulling = true;
             }
-          } else if (
-            snapBeh.unsnappedStateId &&
-            entity.states[snapBeh.unsnappedStateId] &&
-            !stateChanges[entity.id]
-          ) {
-            stateChanges[entity.id] = snapBeh.unsnappedStateId;
           }
         }
 
@@ -4792,6 +4853,38 @@ export function stepMatterPhysics(params: {
                 }
               : undefined);
 
+          const candMagnetSnap = getActiveMagnetSnapBehavior(cand);
+          if (candMagnetSnap) {
+            // Cohabitation sans collision : l'objet aimanté gère lui-même son approche, magnétisme et capture.
+            // Le réceptacle observe seulement la proximité pour son propre état approachingStateId.
+            if (
+              candRt.cooldownRemaining <= 0 &&
+              matchesSnapFilter(cand.id, probeEntity, candMagnetSnap)
+            ) {
+              const candRadius = Math.max(
+                4,
+                Number.isFinite(candMagnetSnap.snapRadius) ? candMagnetSnap.snapRadius : 48
+              );
+              const candDetectRadius = candMagnetSnap.magnetEnabled
+                ? Math.max(
+                    candRadius,
+                    Number.isFinite(candMagnetSnap.magnetRadius as number)
+                      ? (candMagnetSnap.magnetRadius as number)
+                      : 120
+                  )
+                : candRadius;
+              const obsGoal = computeSnapGoalForTarget(
+                candDragPos ? { ...cand, position: candDragPos } : cand,
+                probeEntity,
+                candMagnetSnap
+              );
+              if (obsGoal.metricDistance <= candDetectRadius) {
+                anyApproaching = true;
+              }
+            }
+            continue;
+          }
+
           const quickGoal = computeSnapGoalForTarget(
             candDragPos ? { ...cand, position: candDragPos } : cand,
             probeEntity,
@@ -4817,14 +4910,31 @@ export function stepMatterPhysics(params: {
             if (cRes.nextRuntime.isSnapped) {
               activeCount += 1;
               currentlySnappedIds.add(cand.id);
-              if (snapBeh.snappedStateId && entity.states[snapBeh.snappedStateId]) {
-                stateChanges[entity.id] = snapBeh.snappedStateId;
-              }
             }
           } else if (magnetEnabled && quickGoal.metricDistance <= magnetRadius) {
             anyApproaching = true;
           }
         }
+
+        // Transitions de capture / libération observées par le réceptacle (directes ou via magnet_object)
+        if (
+          prevSnappedCount === 0 &&
+          activeCount > 0 &&
+          snapBeh.snappedStateId &&
+          entity.states[snapBeh.snappedStateId] &&
+          !stateChanges[entity.id]
+        ) {
+          stateChanges[entity.id] = snapBeh.snappedStateId;
+        } else if (
+          prevSnappedCount > 0 &&
+          activeCount === 0 &&
+          snapBeh.unsnappedStateId &&
+          entity.states[snapBeh.unsnappedStateId] &&
+          !stateChanges[entity.id]
+        ) {
+          stateChanges[entity.id] = snapBeh.unsnappedStateId;
+        }
+        receptaclePrevSnappedIds.set(entity.id, currentlySnappedIds);
 
         const recRt = snapRuntimeStates.get(entity.id) || createInitialSnapRuntimeEntry();
         const wasRecPulling = Boolean(recRt.isPulling);
@@ -4896,6 +5006,7 @@ export function stepMatterPhysics(params: {
           justReleased: releasedThisTick.has(entity.id),
           dragPos: snapDragPos,
           currentRotationDeg: newRot,
+          snapRuntimeStates,
         });
         applySnapStepResult(snapRes);
 
@@ -6308,11 +6419,13 @@ export function stepMatterPhysics(params: {
           [fsb.calmStateId, fsb.scaredStateId].filter((sid): sid is string => hasState(sid))
         );
         if (fBound.size > 0) {
-          let isSelfOrAncestorDragged = Boolean(activeDragPositions[entity.id]);
+          let isSelfOrAncestorDragged = Boolean(
+            activeDragPositions[entity.id] || mouseGrabConstraints.has(entity.id)
+          );
           let ancId = entity.parentId;
           let depthGuard = 0;
           while (!isSelfOrAncestorDragged && ancId && liveEntities[ancId] && depthGuard < 16) {
-            if (activeDragPositions[ancId]) {
+            if (activeDragPositions[ancId] || mouseGrabConstraints.has(ancId)) {
               isSelfOrAncestorDragged = true;
               break;
             }
@@ -6320,6 +6433,8 @@ export function stepMatterPhysics(params: {
             depthGuard += 1;
           }
           const pausedByDrag = fleeBeh.pauseWhileDragged !== false && isSelfOrAncestorDragged;
+          const pausedBySnapped =
+            fleeBeh.pauseWhileSnapped !== false && Boolean(snapRuntimeStates.get(entity.id)?.isSnapped);
           const selfCx = newX + entity.size.width / 2;
           const selfCy = newY + entity.size.height / 2;
           const threatPt = resolveTargetWorldPoint(
@@ -6335,7 +6450,7 @@ export function stepMatterPhysics(params: {
           );
           const radius = fleeBeh.fleeRadius ?? 220;
           const dist = threatPt ? Math.hypot(selfCx - threatPt.x, selfCy - threatPt.y) : Infinity;
-          const isScared = Boolean(threatPt && !pausedByDrag && (radius <= 0 || dist < radius));
+          const isScared = Boolean(threatPt && !pausedByDrag && !pausedBySnapped && (radius <= 0 || dist < radius));
           const nextFleeState =
             isScared && hasState(fsb.scaredStateId)
               ? fsb.scaredStateId
@@ -6424,10 +6539,63 @@ export function stepMatterPhysics(params: {
         }
       }
 
+      // Candidat 5f : Snap (Prioritaire sur Marionnette & Locomotions tant qu'actif)
+      let snapCand: (StateCandidateInput & { isActive: boolean }) | undefined;
+      if (snapBeh && snapBeh.enabled !== false) {
+        const sBound = new Set(
+          [
+            snapBeh.approachingStateId,
+            snapBeh.snappedStateId,
+            snapBeh.pullingStateId,
+            snapBeh.unsnappedStateId,
+          ].filter((sid): sid is string => hasState(sid))
+        );
+        if (sBound.size > 0) {
+          const sRt = snapRuntimeStates.get(entity.id);
+          if (snapBeh.snapRole === 'receptacle') {
+            const activeHeldCount = receptaclePrevSnappedIds.get(entity.id)?.size ?? 0;
+            const isPullingNow = Boolean(sRt?.isPulling && activeHeldCount > 0);
+            const isHeldNow = activeHeldCount > 0;
+            const isAppNow = Boolean(sRt?.isApproaching && !isHeldNow);
+            let desiredSnapState: string | undefined;
+            if (isPullingNow && hasState(snapBeh.pullingStateId)) {
+              desiredSnapState = snapBeh.pullingStateId;
+            } else if (isHeldNow && hasState(snapBeh.snappedStateId)) {
+              desiredSnapState = snapBeh.snappedStateId;
+            } else if (isAppNow && hasState(snapBeh.approachingStateId)) {
+              desiredSnapState = snapBeh.approachingStateId;
+            }
+            snapCand = {
+              boundIds: sBound,
+              desiredStateId: desiredSnapState,
+              isActive: Boolean(desiredSnapState),
+            };
+          } else {
+            const isPullingNow = Boolean(sRt?.isSnapped && sRt?.isPulling);
+            const isSnappedNow = Boolean(sRt?.isSnapped);
+            const isAppNow = Boolean(!isSnappedNow && sRt?.isApproaching);
+            let desiredSnapState: string | undefined;
+            if (isPullingNow && hasState(snapBeh.pullingStateId)) {
+              desiredSnapState = snapBeh.pullingStateId;
+            } else if (isSnappedNow && hasState(snapBeh.snappedStateId)) {
+              desiredSnapState = snapBeh.snappedStateId;
+            } else if (isAppNow && hasState(snapBeh.approachingStateId)) {
+              desiredSnapState = snapBeh.approachingStateId;
+            }
+            snapCand = {
+              boundIds: sBound,
+              desiredStateId: desiredSnapState,
+              isActive: Boolean(desiredSnapState),
+            };
+          }
+        }
+      }
+
       const nextCoordinatedState = resolveLocomotionAndPuppetState({
         currentStateId: entity.currentStateId,
         validStateIds: new Set(Object.keys(entity.states)),
         hasHealthOverride: Boolean(stateChanges[entity.id]),
+        snap: snapCand,
         puppet: puppetCandidateForEntity,
         keyboard: keyboardCand,
         flee: fleeCand,
