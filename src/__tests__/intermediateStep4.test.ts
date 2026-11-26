@@ -235,4 +235,73 @@ describe('Étape Intermédiaire 4 — Ergonomie, Overrides & World Pin (Piste B)
     expect(hasActiveWorldPin('head')).toBe(true);
     expect(getGizmoRuntimeDebugData().worldPins.head).toBeDefined();
   });
+
+  it('ne ré-épingle pas un objet dont worldPinEnabled est global lorsque worldPinPullingStateId et worldPinBrokenStateId sont définis', () => {
+    const head = makeEntity('head', {
+      position: { x: 200, y: 200 },
+      size: { width: 80, height: 80 },
+      currentStateId: 'normal',
+      states: {
+        normal: { id: 'normal', name: 'Normal', color: '#3b82f6', scale: 1, rotation: 0 },
+        traction: { id: 'traction', name: 'Résistance', color: '#f59e0b', scale: 1, rotation: 0 },
+        arrache: { id: 'arrache', name: 'Arraché', color: '#10b981', scale: 1, rotation: 0 },
+      },
+      behaviors: [
+        {
+          id: 'phys-head',
+          type: 'physics',
+          enabled: true,
+          isStatic: false,
+          isTrigger: false,
+          gravity: 0,
+          bounce: 0.2,
+          friction: 0.4,
+          frictionAir: 0.05,
+          mass: 1,
+          worldPinEnabled: true,
+          worldPinStiffness: 0.35,
+          worldPinDamping: 0.2,
+          worldPinBreakable: true,
+          worldPinBreakDistance: 50,
+          worldPinPullingStateId: 'traction',
+          worldPinBrokenStateId: 'arrache',
+        },
+      ],
+    });
+
+    const entities: Record<string, Entity> = { head };
+    const canvasBounds = { width: 800, height: 600 };
+
+    stepMatterPhysics({ entities, deltaTime: 1 / 60, canvasBounds });
+    expect(hasActiveWorldPin('head')).toBe(true);
+
+    startPhysicsGrab('head', 240, 240);
+    updatePhysicsGrabTarget('head', 265, 240);
+    for (let i = 0; i < 6; i++) {
+      const r = stepMatterPhysics({ entities, deltaTime: 1 / 60, canvasBounds });
+      if (r.updatedTransforms.head?.position) head.position = r.updatedTransforms.head.position;
+      if (r.stateChanges?.head) head.currentStateId = r.stateChanges.head;
+    }
+    expect(head.currentStateId).toBe('traction');
+    expect(hasActiveWorldPin('head')).toBe(true);
+
+    updatePhysicsGrabTarget('head', 420, 240);
+    for (let i = 0; i < 20; i++) {
+      const r = stepMatterPhysics({ entities, deltaTime: 1 / 60, canvasBounds });
+      if (r.updatedTransforms.head?.position) head.position = r.updatedTransforms.head.position;
+      if (r.stateChanges?.head) head.currentStateId = r.stateChanges.head;
+      if (head.currentStateId === 'arrache') break;
+    }
+    expect(head.currentStateId).toBe('arrache');
+    expect(hasActiveWorldPin('head')).toBe(false);
+    endPhysicsGrab('head', false);
+
+    // Plusieurs ticks suivants en état 'arrache' : l'objet ne doit JAMAIS se ré-épingler au canvas
+    for (let i = 0; i < 10; i++) {
+      const r = stepMatterPhysics({ entities, deltaTime: 1 / 60, canvasBounds });
+      if (r.stateChanges?.head) head.currentStateId = r.stateChanges.head;
+      expect(hasActiveWorldPin('head')).toBe(false);
+      expect(getGizmoRuntimeDebugData().worldPins.head).toBeUndefined();
+    }
+  });
 });

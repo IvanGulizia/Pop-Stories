@@ -429,7 +429,10 @@ const worldPinRuntimeMeta = new Map<
     prePullStateId?: string;
   }
 >();
-const brokenWorldPinStateIds = new Map<string, string>();
+const brokenWorldPinStateIds = new Map<
+  string,
+  { originStateId: string; brokenStateId?: string }
+>();
 
 export interface PhysicsGrabOptions {
   rotationMode?: GrabRotationMode;
@@ -2491,9 +2494,15 @@ export function stepMatterPhysics(params: {
         physics.worldPinEnabled === true
     );
 
-    const brokenInState = brokenWorldPinStateIds.get(entity.id);
-    if (!wantsWorldPin || (brokenInState && brokenInState !== entity.currentStateId)) {
-      if (brokenInState && (!wantsWorldPin || brokenInState !== entity.currentStateId)) {
+    const brokenInfo = brokenWorldPinStateIds.get(entity.id);
+    const staysBrokenInCurrentState = Boolean(
+      brokenInfo &&
+        (brokenInfo.brokenStateId
+          ? entity.currentStateId === brokenInfo.brokenStateId
+          : entity.currentStateId === brokenInfo.originStateId)
+    );
+    if (!wantsWorldPin || (brokenInfo && !staysBrokenInCurrentState)) {
+      if (brokenInfo) {
         brokenWorldPinStateIds.delete(entity.id);
       }
       const existingPin = worldPinConstraints.get(entity.id);
@@ -2505,7 +2514,7 @@ export function stepMatterPhysics(params: {
       continue;
     }
 
-    if (brokenInState === entity.currentStateId) {
+    if (staysBrokenInCurrentState) {
       const existingPin = worldPinConstraints.get(entity.id);
       if (existingPin) {
         World.remove(engine.world, existingPin);
@@ -3834,7 +3843,17 @@ export function stepMatterPhysics(params: {
         worldPinConstraints.delete(pinEntId);
         worldPinRuntimeMeta.delete(pinEntId);
         debugWorldPins.delete(pinEntId);
-        brokenWorldPinStateIds.set(pinEntId, meta.stateId);
+
+        const prevBeforePull = meta.prePullStateId;
+        const originStateId = prevBeforePull || meta.stateId;
+        const targetBrokenStateId =
+          meta.brokenStateId && pinEntity.states[meta.brokenStateId]
+            ? meta.brokenStateId
+            : undefined;
+        brokenWorldPinStateIds.set(pinEntId, {
+          originStateId,
+          brokenStateId: targetBrokenStateId,
+        });
 
         brokenJointEvents.push({
           childId: pinEntId,
@@ -3847,12 +3866,11 @@ export function stepMatterPhysics(params: {
           isWorldPin: true,
         });
 
-        const prevBeforePull = meta.prePullStateId;
         meta.isPulling = false;
         meta.prePullStateId = undefined;
 
-        if (meta.brokenStateId && pinEntity.states[meta.brokenStateId]) {
-          stateChanges[pinEntId] = meta.brokenStateId;
+        if (targetBrokenStateId) {
+          stateChanges[pinEntId] = targetBrokenStateId;
         } else if (prevBeforePull && pinEntity.states[prevBeforePull]) {
           stateChanges[pinEntId] = prevBeforePull;
         }

@@ -390,16 +390,18 @@ export function PhysicsBehaviorControls({
                   </div>
 
                   {stateList.length > 0 && (
-                    <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-bold text-slate-700 text-xs">État en traction (résistance)</span>
+                    <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2 overflow-hidden">
+                      <div className="space-y-1">
+                        <span className="font-bold text-slate-700 text-xs block truncate">
+                          État en traction (résistance)
+                        </span>
                         <div className="flex items-center gap-1 min-w-0">
                           <select
                             value={b.worldPinPullingStateId || ''}
                             onChange={(e) =>
                               update({ worldPinPullingStateId: e.target.value || undefined })
                             }
-                            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[140px]"
+                            className="flex-1 min-w-0 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
                           >
                             <option value="">Aucun changement</option>
                             {stateList.map((st) => (
@@ -434,15 +436,17 @@ export function PhysicsBehaviorControls({
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-100">
-                        <span className="font-bold text-slate-700 text-xs">État après arrachement</span>
+                      <div className="space-y-1 pt-1.5 border-t border-slate-100">
+                        <span className="font-bold text-slate-700 text-xs block truncate">
+                          État après arrachement
+                        </span>
                         <div className="flex items-center gap-1 min-w-0">
                           <select
                             value={b.worldPinBrokenStateId || ''}
                             onChange={(e) =>
                               update({ worldPinBrokenStateId: e.target.value || undefined })
                             }
-                            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[140px]"
+                            className="flex-1 min-w-0 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
                           >
                             <option value="">Aucun changement</option>
                             {stateList.map((st) => (
