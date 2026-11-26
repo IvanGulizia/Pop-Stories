@@ -674,4 +674,125 @@ describe('Canvas libre par défaut, magnétisme drag, état en traction & repèr
     const enteredIds = (res1.snapEvents || []).filter((e) => e.phase === 'enter').map((e) => e.subjectId);
     expect(enteredIds).toEqual(['dog1']);
   });
+
+  it('gère bidirectional_joint sans parentage (pré-attaché, entraînement mutuel libre, et arrachement si cible figée)', () => {
+    resetMatterPhysicsRuntime();
+
+    const makeBody = (id: string, x: number, y: number, isStatic: boolean) =>
+      makeEntity(id, {
+        position: { x, y },
+        behaviors: [
+          {
+            id: `${id}-phys`,
+            type: 'physics',
+            enabled: true,
+            isStatic,
+            gravity: 0,
+            mass: 1,
+            bounce: 0,
+            friction: 0.2,
+          },
+        ],
+      });
+
+    const headInit = makeEntity('head', {
+      position: { x: 260, y: 200 },
+      currentStateId: 'st-free',
+      states: {
+        'st-free': { id: 'st-free', name: 'Libre', color: '#64748b', scale: 1, rotation: 0 },
+        'st-attached': { id: 'st-attached', name: 'Attaché', color: '#22c55e', scale: 1, rotation: 0 },
+        'st-pull': { id: 'st-pull', name: 'Traction', color: '#f59e0b', scale: 1, rotation: 0 },
+        'st-broken': { id: 'st-broken', name: 'Détaché', color: '#ef4444', scale: 1, rotation: 0 },
+      },
+      behaviors: [
+        {
+          id: 'head-phys',
+          type: 'physics',
+          enabled: true,
+          isStatic: false,
+          gravity: 0,
+          mass: 1,
+          bounce: 0,
+          friction: 0.2,
+        },
+        {
+          id: 'head-snap',
+          type: 'snap',
+          enabled: true,
+          snapRole: 'magnet_object',
+          targetType: 'entity',
+          targetEntityId: 'body',
+          snapTrigger: 'on_release',
+          snapRadius: 48,
+          snapMode: 'instant',
+          snapAlignment: 'center',
+          attachBehavior: 'bidirectional_joint',
+          startAttachedAtInit: true,
+          springStiffness: 0.85,
+          springDamping: 0.25,
+          allowPullUnsnap: true,
+          unsnapDistance: 75,
+          snappedStateId: 'st-attached',
+          pullingStateId: 'st-pull',
+          unsnappedStateId: 'st-broken',
+        },
+      ],
+    });
+
+    // Cas A : Le corps est dynamique/libre -> tirer la tête entraîne le corps sans parentId !
+    let curHead = headInit;
+    let curBody = makeBody('body', 200, 200, false);
+
+    const stepEntities = () => {
+      const res = stepMatterPhysics({
+        entities: { head: curHead, body: curBody },
+        canvasBounds: { width: 800, height: 600 },
+        deltaTime: 1 / 60,
+      });
+      if (res.updatedTransforms.head?.position) {
+        curHead = { ...curHead, position: res.updatedTransforms.head.position };
+      }
+      if (res.updatedTransforms.body?.position) {
+        curBody = { ...curBody, position: res.updatedTransforms.body.position };
+      }
+      if (res.stateChanges?.head) {
+        curHead = { ...curHead, currentStateId: res.stateChanges.head };
+      }
+      return res;
+    };
+
+    const t1 = stepEntities();
+    // startAttachedAtInit doit aligner et passer à st-attached SANS aucune parentMutation
+    expect(t1.snapParentMutations || []).toEqual([]);
+    expect(curHead.parentId).toBeUndefined();
+    expect(curHead.currentStateId).toBe('st-attached');
+    expect(curHead.position.x).toBeCloseTo(200, 1);
+
+    // On déplace la tête progressivement à droite -> le corps libre doit suivre !
+    for (let i = 1; i <= 12; i++) {
+      setActiveDragPosition('head', { x: 200 + i * 5, y: 200 });
+      stepEntities();
+    }
+    setActiveDragPosition('head', null);
+    expect(curBody.position.x).toBeGreaterThan(225);
+    expect(curHead.currentStateId).not.toBe('st-broken');
+
+    // Inversement : on déplace le corps -> la tête libre doit suivre !
+    const headBeforeBodyDrag = curHead.position.x;
+    for (let i = 1; i <= 12; i++) {
+      setActiveDragPosition('body', { x: curBody.position.x + 5, y: 200 });
+      stepEntities();
+    }
+    setActiveDragPosition('body', null);
+    expect(curHead.position.x).toBeGreaterThan(headBeforeBodyDrag + 15);
+
+    // Cas B : Le corps devient figé (isStatic: true) -> tirer la tête au-delà de unsnapDistance (75px) la détache !
+    curBody = makeBody('body', curBody.position.x, curBody.position.y, true);
+    setActiveDragPosition('head', { x: curBody.position.x + 110, y: 200 });
+    const tBreak = stepEntities();
+    setActiveDragPosition('head', null);
+    expect(tBreak.snapEvents?.some((e) => e.phase === 'exit' && e.subjectId === 'head')).toBe(true);
+    expect(curHead.currentStateId).toBe('st-broken');
+    expect(curHead.parentId).toBeUndefined();
+  });
 });

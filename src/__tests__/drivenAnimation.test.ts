@@ -22,6 +22,7 @@ import {
 import { executeRuleActions } from '../store/ruleExecutionEngine';
 import { clearTriggerGateState, resetPlaySessionClock } from '../store/triggerGate';
 import { useSceneStore } from '../store/useSceneStore';
+import { getEntityWorldColliderBounds } from '../utils/collider';
 
 function makeFrames(count: number): AnimationFrame[] {
   return Array.from({ length: count }, (_, idx) => ({
@@ -640,6 +641,224 @@ describe('Driven Animation (Kitty / Draco)', () => {
         canvasBounds: { width: 800, height: 600 },
       });
       expect(tick.updatedTransforms.sprite?.runtimeAnimFrameIndex).toBe(1);
+    });
+
+    it('supports collision_traverse single-pass slicing and collision_travel scrubbing in irreversible mode', () => {
+      const saw = makeEntity('saw', {
+        position: { x: 300, y: 200 },
+        size: { width: 100, height: 80 },
+        colliderMode: 'trigger_only',
+        colliderType: 'box',
+      });
+
+      const orange = makeEntity('orange', {
+        position: { x: 240, y: 210 },
+        size: { width: 60, height: 60 },
+        colliderType: 'box',
+        states: {
+          'state-default': {
+            id: 'state-default',
+            name: 'Orange',
+            color: '#f97316',
+            scale: 1,
+            rotation: 0,
+            frames: makeFrames(5),
+          },
+        },
+        behaviors: [
+          makeDrivenConfig({
+            sourceType: 'collision_traverse',
+            progressionMode: 'irreversible',
+            targetType: 'entity',
+            targetEntityId: 'saw',
+            traverseAxis: 'left_to_right',
+          }),
+        ],
+      });
+
+      // Just touching left edge (x=240..300 vs saw 300..400 -> 0%)
+      const tEnter = stepMatterPhysics({
+        entities: { orange, saw },
+        deltaTime: 0.016,
+        canvasBounds: { width: 800, height: 600 },
+      });
+      expect(tEnter.updatedTransforms.orange?.runtimeAnimFrameIndex).toBe(0);
+
+      // Halfway across saw (center at x=350 -> x=320..380) -> ~50% -> frame 2
+      const tMid = stepMatterPhysics({
+        entities: { orange: { ...orange, position: { x: 320, y: 210 } }, saw },
+        deltaTime: 0.016,
+        canvasBounds: { width: 800, height: 600 },
+      });
+      expect(tMid.updatedTransforms.orange?.runtimeAnimFrameIndex).toBe(2);
+
+      // Near right exit (bSelf ~ 388..436 overlapping saw bOther 310..390 -> ~98%) -> frame 4; then move back left -> stays irreversible at frame 4!
+      const tExit = stepMatterPhysics({
+        entities: { orange: { ...orange, position: { x: 382, y: 210 } }, saw },
+        deltaTime: 0.016,
+        canvasBounds: { width: 800, height: 600 },
+      });
+      expect(tExit.updatedTransforms.orange?.runtimeAnimFrameIndex).toBe(4);
+
+      const tBack = stepMatterPhysics({
+        entities: { orange: { ...orange, position: { x: 100, y: 210 } }, saw },
+        deltaTime: 0.016,
+        canvasBounds: { width: 800, height: 600 },
+      });
+      expect(tBack.updatedTransforms.orange?.runtimeAnimFrameIndex).toBe(4);
+
+      // Test collision_travel accumulation inside contact
+      resetMatterPhysicsRuntime();
+      const grater = makeEntity('grater', {
+        position: { x: 200, y: 200 },
+        size: { width: 160, height: 120 },
+        colliderMode: 'trigger_only',
+        colliderType: 'box',
+      });
+      const cheese = makeEntity('cheese', {
+        position: { x: 220, y: 220 },
+        size: { width: 40, height: 40 },
+        colliderType: 'box',
+        behaviors: [
+          makeDrivenConfig({
+            sourceType: 'collision_travel',
+            progressionMode: 'irreversible',
+            targetType: 'entity',
+            targetEntityId: 'grater',
+            collisionTravelDistancePx: 100,
+          }),
+        ],
+      });
+      stepMatterPhysics({
+        entities: { cheese, grater },
+        deltaTime: 0.016,
+        canvasBounds: { width: 800, height: 600 },
+      });
+      const tr2 = stepMatterPhysics({
+        entities: { cheese: { ...cheese, position: { x: 270, y: 220 } }, grater },
+        deltaTime: 0.016,
+        canvasBounds: { width: 800, height: 600 },
+      });
+      expect(tr2.updatedTransforms.cheese?.runtimeAnimFrameIndex).toBe(1);
+      const tr3 = stepMatterPhysics({
+        entities: { cheese: { ...cheese, position: { x: 320, y: 220 } }, grater },
+        deltaTime: 0.016,
+        canvasBounds: { width: 800, height: 600 },
+      });
+      expect(tr3.updatedTransforms.cheese?.runtimeAnimFrameIndex).toBe(2);
+    });
+
+    it('filters contacts by colliderSide and shrinks collider dynamically with syncColliderToFrame', () => {
+      // block bSelf bounds: x=208..272, y=168..232; sensor height=40 -> bOther y=[pos.y+4..pos.y+36]
+      const topSensor = makeEntity('topSensor', {
+        position: { x: 200, y: 136 }, // y=140..172 overlaps top edge y=168
+        size: { width: 80, height: 40 },
+        colliderMode: 'trigger_only',
+        colliderType: 'box',
+      });
+      const block = makeEntity('block', {
+        position: { x: 200, y: 160 },
+        size: { width: 80, height: 80 },
+        colliderType: 'box',
+        states: {
+          'state-default': {
+            id: 'state-default',
+            name: 'Normal',
+            color: '#8b5cf6',
+            scale: 1,
+            rotation: 0,
+            frames: [
+              { id: 'f0', vectorPaths: [{ id: 'p0', d: 'M 20 20', stroke: '#000', strokeWidth: 2, rect: { x: 20, y: 20, width: 160, height: 160 } }] },
+              { id: 'f1', vectorPaths: [{ id: 'p1', d: 'M 80 80', stroke: '#000', strokeWidth: 2, rect: { x: 80, y: 80, width: 40, height: 40 } }] },
+            ],
+          },
+        },
+        behaviors: [
+          makeDrivenConfig({
+            sourceType: 'collision_step',
+            progressionMode: 'irreversible',
+            targetType: 'entity',
+            targetEntityId: 'topSensor',
+            colliderSide: 'bottom', // Expects bottom contact, NOT top
+            syncColliderToFrame: true,
+          }),
+        ],
+      });
+
+      // Touching top edge should NOT advance because colliderSide is 'bottom'
+      const tTop = stepMatterPhysics({
+        entities: { block, topSensor },
+        deltaTime: 0.016,
+        canvasBounds: { width: 800, height: 600 },
+      });
+      expect(tTop.updatedTransforms.block?.runtimeAnimFrameIndex).toBe(0);
+
+      // Moving sensor to bottom edge (y=226 -> 230..262 overlaps bottom edge y=232) SHOULD advance to frame 1 & shrink collider to match f1
+      const bottomSensor = { ...topSensor, position: { x: 200, y: 226 } };
+      const tBottom = stepMatterPhysics({
+        entities: { block, topSensor: bottomSensor },
+        deltaTime: 0.016,
+        canvasBounds: { width: 800, height: 600 },
+      });
+      expect(tBottom.updatedTransforms.block?.runtimeAnimFrameIndex).toBe(1);
+
+      const blockAtF1 = { ...block, runtimeAnimFrameIndex: 1 };
+      const shrunkBounds = getEntityWorldColliderBounds(blockAtF1);
+      expect(shrunkBounds.width).toBeLessThan(30);
+    });
+
+    it('supports component-linked sources: pull_tension, puppet_shake, rotation_angle, slider_value', () => {
+      let rt = createInitialDrivenAnimationRuntime('state-default');
+      const baseCfg = {
+        id: 'da-comp',
+        type: 'driven_animation' as const,
+        enabled: true,
+        progressionMode: 'reversible' as const,
+      };
+
+      const pullRes = stepDrivenAnimationEntity({
+        config: { ...baseCfg, sourceType: 'pull_tension' },
+        runtime: rt,
+        currentStateId: 'state-default',
+        frameCount: 5,
+        dt: 0.016,
+        inputs: { pullTensionRatio: 0.75 },
+      });
+      expect(pullRes.effectiveProgress).toBeCloseTo(0.75);
+      expect(pullRes.frameIndex).toBe(3);
+
+      const shakeRes = stepDrivenAnimationEntity({
+        config: { ...baseCfg, sourceType: 'puppet_shake' },
+        runtime: rt,
+        currentStateId: 'state-default',
+        frameCount: 5,
+        dt: 0.016,
+        inputs: { puppetShakeRatio: 0.5 },
+      });
+      expect(shakeRes.effectiveProgress).toBeCloseTo(0.5);
+      expect(shakeRes.frameIndex).toBe(2);
+
+      const rotRes = stepDrivenAnimationEntity({
+        config: { ...baseCfg, sourceType: 'rotation_angle', angleMin: 0, angleMax: 180 },
+        runtime: rt,
+        currentStateId: 'state-default',
+        frameCount: 5,
+        dt: 0.016,
+        inputs: { rotationAngleDeg: 90 },
+      });
+      expect(rotRes.effectiveProgress).toBeCloseTo(0.5);
+      expect(rotRes.frameIndex).toBe(2);
+
+      const sliderRes = stepDrivenAnimationEntity({
+        config: { ...baseCfg, sourceType: 'slider_value' },
+        runtime: rt,
+        currentStateId: 'state-default',
+        frameCount: 5,
+        dt: 0.016,
+        inputs: { sliderNormalizedValue: 1 },
+      });
+      expect(sliderRes.effectiveProgress).toBeCloseTo(1);
+      expect(sliderRes.frameIndex).toBe(4);
     });
   });
 });

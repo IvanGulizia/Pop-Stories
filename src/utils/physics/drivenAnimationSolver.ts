@@ -2,6 +2,7 @@ import {
   DrivenAnimationBehaviorConfig,
   DrivenAnimationCurve,
   DrivenAnimationEndBehavior,
+  DrivenAnimationTraverseAxis,
 } from '../../types';
 
 export interface DrivenAnimationRuntimeState {
@@ -13,6 +14,9 @@ export interface DrivenAnimationRuntimeState {
   cooldownRemaining: number;
   hasCompletedOnce: boolean;
   manualPinnedFrame: number | null;
+  detectedTraverseAxis?: 'left_to_right' | 'right_to_left' | 'top_to_bottom' | 'bottom_to_top';
+  lastContactPos?: { x: number; y: number };
+  accumulatedTravelPx?: number;
 }
 
 export function createInitialDrivenAnimationRuntime(
@@ -90,12 +94,87 @@ export function resolveFrameIndexFromProgress(
   return Math.max(0, Math.min(frameCount - 1, Math.round(p * (frameCount - 1))));
 }
 
+export interface TraverseBoundsBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export function detectAutoTraverseAxis(
+  selfBox: TraverseBoundsBox,
+  targetBox: TraverseBoundsBox
+): 'left_to_right' | 'right_to_left' | 'top_to_bottom' | 'bottom_to_top' {
+  const sCx = selfBox.x + selfBox.width / 2;
+  const sCy = selfBox.y + selfBox.height / 2;
+  const tCx = targetBox.x + targetBox.width / 2;
+  const tCy = targetBox.y + targetBox.height / 2;
+  const normDx = (sCx - tCx) / Math.max(1, (selfBox.width + targetBox.width) / 2);
+  const normDy = (sCy - tCy) / Math.max(1, (selfBox.height + targetBox.height) / 2);
+  if (Math.abs(normDx) >= Math.abs(normDy)) {
+    return normDx <= 0 ? 'left_to_right' : 'right_to_left';
+  }
+  return normDy <= 0 ? 'top_to_bottom' : 'bottom_to_top';
+}
+
+export function computeColliderTraverseProgress(
+  selfBox: TraverseBoundsBox,
+  targetBox: TraverseBoundsBox,
+  axis: DrivenAnimationTraverseAxis | 'left_to_right' | 'right_to_left' | 'top_to_bottom' | 'bottom_to_top' = 'left_to_right'
+): number {
+  const resolvedAxis = axis === 'auto' ? detectAutoTraverseAxis(selfBox, targetBox) : axis;
+  const sW = Math.max(1, selfBox.width);
+  const sH = Math.max(1, selfBox.height);
+  const tW = Math.max(1, targetBox.width);
+  const tH = Math.max(1, targetBox.height);
+  const sCx = selfBox.x + sW / 2;
+  const sCy = selfBox.y + sH / 2;
+  const tCx = targetBox.x + tW / 2;
+  const tCy = targetBox.y + tH / 2;
+
+  switch (resolvedAxis) {
+    case 'left_to_right': {
+      const startCx = targetBox.x - sW / 2;
+      const span = tW + sW;
+      return clamp01((sCx - startCx) / span);
+    }
+    case 'right_to_left': {
+      const startCx = targetBox.x + tW + sW / 2;
+      const span = tW + sW;
+      return clamp01((startCx - sCx) / span);
+    }
+    case 'top_to_bottom': {
+      const startCy = targetBox.y - sH / 2;
+      const span = tH + sH;
+      return clamp01((sCy - startCy) / span);
+    }
+    case 'bottom_to_top': {
+      const startCy = targetBox.y + tH + sH / 2;
+      const span = tH + sH;
+      return clamp01((startCy - sCy) / span);
+    }
+    case 'center_inward': {
+      const halfX = (tW + sW) / 2;
+      const halfY = (tH + sH) / 2;
+      const normDist = Math.hypot((sCx - tCx) / Math.max(1, halfX), (sCy - tCy) / Math.max(1, halfY));
+      return clamp01(1 - normDist);
+    }
+  }
+}
+
 export interface DrivenAnimationInputs {
   proximityDistance?: number | null;
   variableValue?: number;
   isTouchingTarget?: boolean;
   speedPxPerSec?: number;
   healthRatio?: number;
+  traverseProgress?: number | null;
+  entryEdgeHint?: 'left_to_right' | 'right_to_left' | 'top_to_bottom' | 'bottom_to_top' | null;
+  movedDistanceWhileTouchingPx?: number;
+  pullTensionRatio?: number;
+  puppetShakeRatio?: number;
+  rotationAngleDeg?: number;
+  sliderNormalizedValue?: number;
 }
 
 export interface DrivenAnimationStepOutput {
@@ -168,6 +247,9 @@ export function stepDrivenAnimationEntity(params: {
       rt.wasTouching = false;
       rt.cooldownRemaining = 0;
       rt.hasCompletedOnce = false;
+      rt.detectedTraverseAxis = undefined;
+      rt.lastContactPos = undefined;
+      rt.accumulatedTravelPx = 0;
     }
   }
 
@@ -226,9 +308,42 @@ export function stepDrivenAnimationEntity(params: {
     }
     rt.wasTouching = touching;
     rt.progress = rawProgress;
+  } else if (config.sourceType === 'collision_travel') {
+    const touching = Boolean(inputs.isTouchingTarget);
+    const travelMax = Math.max(4, config.collisionTravelDistancePx ?? 120);
+    const deltaPx = touching ? Math.max(0, inputs.movedDistanceWhileTouchingPx ?? 0) : 0;
+    const prevAccum = rt.accumulatedTravelPx ?? rt.progress * travelMax;
+    if (touching) {
+      const nextAccum = prevAccum + deltaPx;
+      rt.accumulatedTravelPx = endBehavior === 'clamp' ? Math.min(travelMax, nextAccum) : nextAccum;
+      rawProgress = rt.accumulatedTravelPx / travelMax;
+      if (isIrreversible) {
+        rt.maxReachedProgress = Math.max(rt.maxReachedProgress, clamp01(rawProgress));
+        rawProgress = rt.maxReachedProgress;
+      }
+    } else if (!isIrreversible) {
+      const decayPx = travelMax * 0.8 * safeDt;
+      rt.accumulatedTravelPx = Math.max(0, prevAccum - decayPx);
+      rawProgress = rt.accumulatedTravelPx / travelMax;
+    }
+    rt.wasTouching = touching;
+    rt.progress = rawProgress;
   } else {
     let target01 = rt.progress;
-    if (config.sourceType === 'proximity') {
+    if (config.sourceType === 'collision_traverse') {
+      const touching = Boolean(inputs.isTouchingTarget);
+      if (touching && !rt.wasTouching && (config.traverseAxis || 'auto') === 'auto' && inputs.entryEdgeHint) {
+        rt.detectedTraverseAxis = inputs.entryEdgeHint;
+      } else if (!touching && !isIrreversible) {
+        rt.detectedTraverseAxis = undefined;
+      }
+      if (touching && inputs.traverseProgress !== null && inputs.traverseProgress !== undefined && Number.isFinite(inputs.traverseProgress)) {
+        target01 = clamp01(inputs.traverseProgress);
+      } else {
+        target01 = isIrreversible ? rt.maxReachedProgress : 0;
+      }
+      rt.wasTouching = touching;
+    } else if (config.sourceType === 'proximity') {
       const dist = inputs.proximityDistance;
       if (dist !== null && dist !== undefined && Number.isFinite(dist)) {
         const dStart = config.proximityDistanceStart ?? 260;
@@ -250,6 +365,18 @@ export function stepDrivenAnimationEntity(params: {
     } else if (config.sourceType === 'health') {
       const ratio = clamp01(inputs.healthRatio ?? 1);
       target01 = config.invertHealth !== false ? 1 - ratio : ratio;
+    } else if (config.sourceType === 'pull_tension') {
+      target01 = clamp01(inputs.pullTensionRatio ?? 0);
+    } else if (config.sourceType === 'puppet_shake') {
+      target01 = clamp01(inputs.puppetShakeRatio ?? 0);
+    } else if (config.sourceType === 'rotation_angle') {
+      target01 = computeMappedRangeProgress(
+        inputs.rotationAngleDeg ?? 0,
+        config.angleMin ?? -180,
+        config.angleMax ?? 180
+      );
+    } else if (config.sourceType === 'slider_value') {
+      target01 = clamp01(inputs.sliderNormalizedValue ?? 0);
     }
 
     if (isIrreversible) {

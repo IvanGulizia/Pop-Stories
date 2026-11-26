@@ -812,51 +812,65 @@ export function SnapBehaviorControls({
             <option value="parent_rigid">Parenter solidement (suit la cible)</option>
             <option value="parent_spring">Parenter avec ressort souple</option>
             <option value="parent_physics_joint">Parenter avec Joint Physique (Break Joint)</option>
+            <option value="bidirectional_joint">Joint bidirectionnel (sans parentage)</option>
           </select>
         </div>
 
-        {attachBehavior === 'parent_spring' && (
-          <div className="grid grid-cols-2 gap-1.5 bg-cyan-50/50 p-2 rounded-lg border border-cyan-200/70">
-            <div>
-              <div className="flex justify-between text-[10px] font-bold text-slate-600">
-                <span>Raideur</span>
-                <EditableNumericValue
-                  value={b.springStiffness ?? 0.25}
-                  precision={2}
-                  onChange={(v) => update({ springStiffness: v })}
-                  className="font-mono font-bold text-cyan-700 cursor-text"
+        {(attachBehavior === 'parent_spring' || attachBehavior === 'bidirectional_joint') && (
+          <div className="space-y-1.5 bg-cyan-50/50 p-2 rounded-lg border border-cyan-200/70">
+            <div className="grid grid-cols-2 gap-1.5">
+              <div>
+                <div className="flex justify-between text-[10px] font-bold text-slate-600">
+                  <span>Raideur</span>
+                  <EditableNumericValue
+                    value={b.springStiffness ?? (attachBehavior === 'bidirectional_joint' ? 0.65 : 0.25)}
+                    precision={2}
+                    onChange={(v) => update({ springStiffness: v })}
+                    className="font-mono font-bold text-cyan-700 cursor-text"
+                  />
+                </div>
+                <input
+                  type="range"
+                  min="0.02"
+                  max="1"
+                  step="0.02"
+                  value={Math.max(
+                    0.02,
+                    Math.min(1, b.springStiffness ?? (attachBehavior === 'bidirectional_joint' ? 0.65 : 0.25))
+                  )}
+                  onChange={(e) => update({ springStiffness: parseFloat(e.target.value) })}
+                  className="w-full accent-cyan-600"
                 />
               </div>
-              <input
-                type="range"
-                min="0.02"
-                max="1"
-                step="0.02"
-                value={Math.max(0.02, Math.min(1, b.springStiffness ?? 0.25))}
-                onChange={(e) => update({ springStiffness: parseFloat(e.target.value) })}
-                className="w-full accent-cyan-600"
-              />
-            </div>
-            <div>
-              <div className="flex justify-between text-[10px] font-bold text-slate-600">
-                <span>Amorti</span>
-                <EditableNumericValue
-                  value={b.springDamping ?? 0.18}
-                  precision={2}
-                  onChange={(v) => update({ springDamping: v })}
-                  className="font-mono font-bold text-cyan-700 cursor-text"
+              <div>
+                <div className="flex justify-between text-[10px] font-bold text-slate-600">
+                  <span>Amorti</span>
+                  <EditableNumericValue
+                    value={b.springDamping ?? (attachBehavior === 'bidirectional_joint' ? 0.25 : 0.18)}
+                    precision={2}
+                    onChange={(v) => update({ springDamping: v })}
+                    className="font-mono font-bold text-cyan-700 cursor-text"
+                  />
+                </div>
+                <input
+                  type="range"
+                  min="0.01"
+                  max="1"
+                  step="0.02"
+                  value={Math.max(
+                    0.01,
+                    Math.min(1, b.springDamping ?? (attachBehavior === 'bidirectional_joint' ? 0.25 : 0.18))
+                  )}
+                  onChange={(e) => update({ springDamping: parseFloat(e.target.value) })}
+                  className="w-full accent-cyan-600"
                 />
               </div>
-              <input
-                type="range"
-                min="0.01"
-                max="1"
-                step="0.02"
-                value={Math.max(0.01, Math.min(1, b.springDamping ?? 0.18))}
-                onChange={(e) => update({ springDamping: parseFloat(e.target.value) })}
-                className="w-full accent-cyan-600"
-              />
             </div>
+            {attachBehavior === 'bidirectional_joint' && (
+              <p className="text-[10px] leading-snug text-cyan-900">
+                Liaison symétrique sans hiérarchie : tirer la tête entraîne un corps libre, ou inversement. Si l&apos;un est figé ou épinglé au sol, tirer l&apos;autre le détache au-delà de la distance d&apos;arrachement.
+              </p>
+            )}
           </div>
         )}
 
@@ -872,6 +886,21 @@ export function SnapBehaviorControls({
               })
             }
           />
+        )}
+
+        {!isReceptacle && (
+          <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+            <div>
+              <div className="text-[11px] font-bold text-slate-700">Pré-attaché au démarrage</div>
+              <div className="text-[10px] text-slate-400">Relie automatiquement dès le lancement du Play</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={Boolean(b.startAttachedAtInit)}
+              onChange={(e) => update({ startAttachedAtInit: e.target.checked })}
+              className="w-4 h-4 accent-cyan-600 rounded cursor-pointer"
+            />
+          </div>
         )}
 
         <div className="flex items-center justify-between pt-1 border-t border-slate-100">

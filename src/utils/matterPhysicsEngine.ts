@@ -97,6 +97,7 @@ import {
   getSnapAnchorWorldPoint,
   isSnapParentAttachBehavior,
   matchesSnapFilter,
+  resolveInitialSnapAttach,
   stepSnapSolver,
 } from './physics/snapSolver';
 import {
@@ -135,7 +136,9 @@ import {
 import { resolveEffectiveParentOffset } from '../store/parentingHelpers';
 import {
   DrivenAnimationRuntimeState,
+  computeColliderTraverseProgress,
   createInitialDrivenAnimationRuntime,
+  detectAutoTraverseAxis,
   stepDrivenAnimationEntity,
   applyManualAnimationControl,
 } from './physics/drivenAnimationSolver';
@@ -490,6 +493,11 @@ const debugRotateDragTracks = new Map<
 >();
 
 const snapRuntimeStates = new Map<string, SnapRuntimeEntry>();
+const snapJointConstraints = new Map<
+  string,
+  { constraint: Matter.Constraint; targetId: string }
+>();
+const snapInitAttachedDone = new Set<string>();
 const receptaclePrevSnappedIds = new Map<string, Set<string>>();
 const prevActiveDragIds = new Set<string>();
 const justReleasedDragIds = new Set<string>();
@@ -1257,6 +1265,8 @@ export function resetMatterPhysicsRuntime() {
   lastRotateDragOutputValues.clear();
   debugRotateDragTracks.clear();
   snapRuntimeStates.clear();
+  snapJointConstraints.clear();
+  snapInitAttachedDone.clear();
   receptaclePrevSnappedIds.clear();
   prevActiveDragIds.clear();
   justReleasedDragIds.clear();
@@ -1545,6 +1555,12 @@ function ensurePhysicsWorld(
       const idA = getBodyLabel(pair.bodyA);
       const idB = getBodyLabel(pair.bodyB);
       if (!idA || !idB) return false;
+      const biA = snapJointConstraints.get(idA);
+      const biB = snapJointConstraints.get(idB);
+      if ((biA && biA.targetId === idB) || (biB && biB.targetId === idA)) {
+        pair.isActive = false;
+        return true;
+      }
       const isAOneWay = oneWayPlatformIds.has(idA);
       const isBOneWay = oneWayPlatformIds.has(idB);
       if (!isAOneWay && !isBOneWay) return false;
@@ -1792,6 +1808,11 @@ function ensurePhysicsWorld(
         World.remove(engine.world, wpc);
         worldPinConstraints.delete(id);
       }
+      const sjc = snapJointConstraints.get(id);
+      if (sjc) {
+        World.remove(engine.world, sjc.constraint);
+        snapJointConstraints.delete(id);
+      }
       worldPinRuntimeMeta.delete(id);
       brokenWorldPinStateIds.delete(id);
       World.remove(engine.world, body);
@@ -1816,6 +1837,7 @@ function ensurePhysicsWorld(
       impulseDrivenEntityIds.delete(id);
       pendingInitialVelocities.delete(id);
       snapRuntimeStates.delete(id);
+      snapInitAttachedDone.delete(id);
       receptaclePrevSnappedIds.delete(id);
       prevActiveDragIds.delete(id);
       justReleasedDragIds.delete(id);
@@ -1840,6 +1862,11 @@ function ensurePhysicsWorld(
       if (existingPin) {
         World.remove(engine.world, existingPin);
         worldPinConstraints.delete(entity.id);
+      }
+      const existingSnapJoint = snapJointConstraints.get(entity.id);
+      if (existingSnapJoint) {
+        World.remove(engine.world, existingSnapJoint.constraint);
+        snapJointConstraints.delete(entity.id);
       }
       worldPinRuntimeMeta.delete(entity.id);
       brokenWorldPinStateIds.delete(entity.id);
@@ -1888,6 +1915,7 @@ function ensurePhysicsWorld(
     const isBrokenDynamic = brokenJointDynamicIds.has(entity.id);
     const snapRtCheck = snapRuntimeStates.get(entity.id);
     const isSnapFrozen = Boolean(snapRtCheck?.isSnapped && snapRtCheck.attachBehavior === 'freeze_physics');
+    const isSnapBidirectional = Boolean(snapRtCheck?.isSnapped && snapRtCheck.attachBehavior === 'bidirectional_joint');
     let isStatic = true;
     if (isSnapFrozen && !isCollisionAttachedChild) {
       isStatic = true;
@@ -1901,7 +1929,12 @@ function ensurePhysicsWorld(
       isStatic = false;
     } else if (physics) {
       isStatic = physics.isStatic === true;
-    } else if (hasMovement || impulseDrivenEntityIds.has(entity.id) || pendingInitialVelocities.has(entity.id)) {
+    } else if (
+      hasMovement ||
+      impulseDrivenEntityIds.has(entity.id) ||
+      pendingInitialVelocities.has(entity.id) ||
+      isSnapBidirectional
+    ) {
       isStatic = false;
     }
 
@@ -1966,12 +1999,21 @@ function ensurePhysicsWorld(
     const worldCenterY = bodyWorldInit.y;
     const colliderType = geom.colliderType;
 
-    const colliderWidth = Math.max(12, Math.round(geom.width * scaleX));
-    const colliderHeight = Math.max(12, Math.round(geom.height * scaleY));
-    const colliderRadius = Math.max(6, Math.round(geom.radius * Math.max(scaleX, scaleY)));
+    const hasSyncFrameCollider = effectiveBehaviors.some(
+      (b) =>
+        b.type === 'driven_animation' &&
+        b.enabled !== false &&
+        (b as DrivenAnimationBehaviorConfig).syncColliderToFrame === true
+    );
+    const quantizeDim = (v: number, minVal: number) =>
+      hasSyncFrameCollider ? Math.max(minVal, Math.round(v / 2) * 2) : Math.max(minVal, Math.round(v));
+
+    const colliderWidth = quantizeDim(geom.width * scaleX, 12);
+    const colliderHeight = quantizeDim(geom.height * scaleY, 12);
+    const colliderRadius = quantizeDim(geom.radius * Math.max(scaleX, scaleY), 6);
 
     const freezeRotation = physics?.freezeRotation === true;
-    const signature = `${colliderMode}_${colliderType}_${colliderWidth}_${colliderHeight}_${colliderRadius}_${isStatic}_${isSensor}_${freezeRotation}_${isSnapFrozen}`;
+    const signature = `${colliderMode}_${colliderType}_${colliderWidth}_${colliderHeight}_${colliderRadius}_${isStatic}_${isSensor}_${freezeRotation}_${isSnapFrozen}_${isSnapBidirectional}`;
     let body = bodyMap.get(entity.id);
 
     // Si le corps n'existe pas ou si la forme du collider a été modifiée dans le mode dessin, le recréer
@@ -2161,8 +2203,7 @@ export function stepMatterPhysics(params: {
   const dt = Math.min(deltaTime, 0.05);
 
   const activeDragEntries = Object.entries(activeDragPositions);
-  const liveEntities: Record<string, Entity> =
-    activeDragEntries.length > 0 ? { ...entities } : entities;
+  const liveEntities: Record<string, Entity> = { ...entities };
   if (activeDragEntries.length > 0) {
     for (const [dragId, dragPos] of activeDragEntries) {
       const orig = liveEntities[dragId];
@@ -2171,9 +2212,6 @@ export function stepMatterPhysics(params: {
       }
     }
   }
-
-  ensurePhysicsWorld(canvasBounds, liveEntities, colliderLayers);
-  if (!engine) return { updatedTransforms: {} };
 
   const updatedTransforms: PhysicsTickResult['updatedTransforms'] = {};
   const flipUpdates = new Map<string, boolean>();
@@ -2184,6 +2222,60 @@ export function stepMatterPhysics(params: {
   const arrivedTargetEvents: NonNullable<PhysicsTickResult['arrivedTargetEvents']> = [];
   const snapEvents: NonNullable<PhysicsTickResult['snapEvents']> = [];
   const snapParentMutations: NonNullable<PhysicsTickResult['snapParentMutations']> = [];
+
+  // Pré-attachement au démarrage (`startAttachedAtInit`) pour les entités Snap configurées
+  for (const ent of Object.values(liveEntities)) {
+    if (!ent || ent.disabled) continue;
+    const st = ent.states?.[ent.currentStateId];
+    const snapCfg = getActiveMagnetSnapBehavior(ent);
+    if (!snapCfg || !snapCfg.startAttachedAtInit) {
+      snapInitAttachedDone.delete(ent.id);
+      continue;
+    }
+    if (snapInitAttachedDone.has(ent.id)) continue;
+    snapInitAttachedDone.add(ent.id);
+    const existingRt = snapRuntimeStates.get(ent.id);
+    if (existingRt?.isSnapped) continue;
+
+    const initRes = resolveInitialSnapAttach({
+      entity: ent,
+      config: snapCfg,
+      allEntities: liveEntities,
+      snapRuntimeStates,
+    });
+    if (initRes) {
+      snapRuntimeStates.set(ent.id, initRes.nextRuntime);
+      if (initRes.nextPosition || initRes.nextRotationDeg !== undefined) {
+        const nextSt =
+          initRes.nextRotationDeg !== undefined && st
+            ? { ...st, rotation: initRes.nextRotationDeg }
+            : st;
+        liveEntities[ent.id] = {
+          ...ent,
+          ...(initRes.nextPosition ? { position: initRes.nextPosition } : {}),
+          ...(nextSt ? { states: { ...ent.states, [ent.currentStateId]: nextSt } } : {}),
+        };
+        updatedTransforms[ent.id] = {
+          ...(updatedTransforms[ent.id] || {}),
+          ...(initRes.nextPosition ? { position: initRes.nextPosition } : {}),
+          ...(initRes.nextRotationDeg !== undefined ? { rotation: initRes.nextRotationDeg } : {}),
+        };
+      }
+      if (initRes.parentMutation) {
+        snapParentMutations.push(initRes.parentMutation);
+      }
+      if (initRes.snapEvent) {
+        snapEvents.push({ subjectId: ent.id, ...initRes.snapEvent });
+      }
+      if (initRes.stateChange && !stateChanges[ent.id]) {
+        stateChanges[ent.id] = initRes.stateChange;
+      }
+    }
+  }
+
+  ensurePhysicsWorld(canvasBounds, liveEntities, colliderLayers);
+  if (!engine) return { updatedTransforms: {} };
+
   const brokenJointIdSet = new Set<string>();
   const tickFollowStatus = new Map<string, { isMoving: boolean; triggeredJump: boolean }>();
   const tickWanderingMoved = new Set<string>();
@@ -2586,6 +2678,128 @@ export function stepMatterPhysics(params: {
       (pinConstraint as unknown as { angleB: number }).angleB = body!.angle;
       pinConstraint.stiffness = stiffness;
       pinConstraint.damping = damping;
+    }
+  }
+
+  // Pré-passe 3 : Contraintes symétriques Snap sans parentage (`bidirectional_joint`)
+  for (const entity of topoPrepassEntities) {
+    if (entity.disabled) continue;
+    const rt = snapRuntimeStates.get(entity.id);
+    const snapCfg = getActiveMagnetSnapBehavior(entity);
+    const targetEnt = rt?.snappedTargetId ? liveEntities[rt.snappedTargetId] : undefined;
+    const bodyA = targetEnt ? bodyMap.get(targetEnt.id) : undefined;
+    const bodyB = bodyMap.get(entity.id);
+    const wantsBidirectional = Boolean(
+      rt?.isSnapped &&
+        rt.attachBehavior === 'bidirectional_joint' &&
+        snapCfg &&
+        targetEnt &&
+        !targetEnt.disabled &&
+        bodyA &&
+        bodyB
+    );
+
+    if (!wantsBidirectional || !snapCfg || !targetEnt || !bodyA || !bodyB) {
+      const existingSnapJoint = snapJointConstraints.get(entity.id);
+      if (existingSnapJoint) {
+        World.remove(engine.world, existingSnapJoint.constraint);
+        snapJointConstraints.delete(entity.id);
+      }
+      continue;
+    }
+
+    const useAnchorOffset = snapCfg.snapAlignment === 'anchor_offset';
+    const targetAnchorUnrot = getSnapAnchorWorldPoint(
+      targetEnt,
+      useAnchorOffset ? snapCfg.targetAnchor || 'center' : 'center',
+      snapCfg.customTargetAnchor,
+      0
+    );
+    const rawOffX = snapCfg.offsetX ?? 0;
+    const rawOffY = snapCfg.offsetY ?? 0;
+    const tEffPivot = resolveEffectivePivot(targetEnt, targetEnt.states[targetEnt.currentStateId]);
+    const tCOffset = colliderOffsets.get(targetEnt.id) || {
+      relCenterX: targetEnt.size.width / 2,
+      relCenterY: targetEnt.size.height / 2,
+    };
+    const tBodyCenterUnrot = getBodyWorldCenterFromPivot(
+      targetEnt.position,
+      targetEnt.size,
+      tCOffset.relCenterX,
+      tCOffset.relCenterY,
+      tEffPivot,
+      0
+    );
+    const localPointA = {
+      x: targetAnchorUnrot.x + rawOffX - tBodyCenterUnrot.x,
+      y: targetAnchorUnrot.y + rawOffY - tBodyCenterUnrot.y,
+    };
+    const rotatedPointA = rotateVector(localPointA.x, localPointA.y, bodyA.angle);
+
+    const srcAnchorUnrot = getSnapAnchorWorldPoint(
+      entity,
+      useAnchorOffset ? snapCfg.sourceAnchor || 'center' : 'center',
+      snapCfg.customSourceAnchor,
+      0
+    );
+    const sEffPivot = resolveEffectivePivot(entity, entity.states[entity.currentStateId]);
+    const sCOffset = colliderOffsets.get(entity.id) || {
+      relCenterX: entity.size.width / 2,
+      relCenterY: entity.size.height / 2,
+    };
+    const sBodyCenterUnrot = getBodyWorldCenterFromPivot(
+      entity.position,
+      entity.size,
+      sCOffset.relCenterX,
+      sCOffset.relCenterY,
+      sEffPivot,
+      0
+    );
+    const localPointB = {
+      x: srcAnchorUnrot.x - sBodyCenterUnrot.x,
+      y: srcAnchorUnrot.y - sBodyCenterUnrot.y,
+    };
+    const rotatedPointB = rotateVector(localPointB.x, localPointB.y, bodyB.angle);
+
+    const jc = snapCfg.jointConfig || {};
+    const stiffness = Math.max(0.05, Math.min(0.95, snapCfg.springStiffness ?? jc.springStiffness ?? 0.65));
+    const damping = Math.max(0.02, Math.min(0.6, snapCfg.springDamping ?? jc.springDamping ?? 0.25));
+
+    const existing = snapJointConstraints.get(entity.id);
+    if (
+      !existing ||
+      existing.targetId !== targetEnt.id ||
+      existing.constraint.bodyA !== bodyA ||
+      existing.constraint.bodyB !== bodyB
+    ) {
+      if (existing) {
+        World.remove(engine.world, existing.constraint);
+      }
+      const cDef: Record<string, unknown> = {
+        bodyA,
+        pointA: rotatedPointA,
+        angleA: bodyA.angle,
+        bodyB,
+        pointB: rotatedPointB,
+        angleB: bodyB.angle,
+        length: 0,
+        stiffness,
+        damping,
+      };
+      const nextConstraint = Constraint.create(cDef as unknown as Matter.IConstraintDefinition);
+      (nextConstraint as unknown as { angleA: number; angleB: number }).angleA = bodyA.angle;
+      (nextConstraint as unknown as { angleA: number; angleB: number }).angleB = bodyB.angle;
+      snapJointConstraints.set(entity.id, { constraint: nextConstraint, targetId: targetEnt.id });
+      World.add(engine.world, nextConstraint);
+    } else {
+      existing.constraint.pointA.x = rotatedPointA.x;
+      existing.constraint.pointA.y = rotatedPointA.y;
+      existing.constraint.pointB.x = rotatedPointB.x;
+      existing.constraint.pointB.y = rotatedPointB.y;
+      (existing.constraint as unknown as { angleA: number; angleB: number }).angleA = bodyA.angle;
+      (existing.constraint as unknown as { angleA: number; angleB: number }).angleB = bodyB.angle;
+      existing.constraint.stiffness = stiffness;
+      existing.constraint.damping = damping;
     }
   }
 
@@ -3956,7 +4170,7 @@ export function stepMatterPhysics(params: {
     let pendingRotUpdate: number | undefined;
     let pendingFlipUpdate: boolean | undefined;
 
-    // Pré-vérification pull-to-unsnap si l'entité snappée est actuellement tirée à la souris
+    // Pré-vérification pull-to-unsnap si l'entité snappée (ou sa cible en joint bidirectionnel) est tirée à la souris
     const snapBeh = effectiveBehaviors.find((b) => b.type === 'snap') as SnapBehaviorConfig | undefined;
     const isSnapDragging = currentDragIds.has(entity.id);
     const snapGrabRt = mouseGrabConstraints.get(entity.id);
@@ -3968,11 +4182,36 @@ export function stepMatterPhysics(params: {
             y: snapGrabRt.targetWorld.y - entity.size.height / 2,
           }
         : undefined);
+    const preSnapRt = snapRuntimeStates.get(entity.id);
+    const biTargetId =
+      preSnapRt?.isSnapped && preSnapRt.attachBehavior === 'bidirectional_joint'
+        ? preSnapRt.snappedTargetId
+        : null;
+    const isBiTargetDragging = Boolean(biTargetId && currentDragIds.has(biTargetId));
+    const biTargetEnt = biTargetId ? liveEntities[biTargetId] : undefined;
+    const biTargetGrabRt = biTargetId ? mouseGrabConstraints.get(biTargetId) : undefined;
+    const biTargetDragPos = biTargetId
+      ? activeDragPositions[biTargetId] ??
+        (biTargetGrabRt && biTargetEnt
+          ? {
+              x: biTargetGrabRt.targetWorld.x - biTargetEnt.size.width / 2,
+              y: biTargetGrabRt.targetWorld.y - biTargetEnt.size.height / 2,
+            }
+          : undefined)
+      : undefined;
+
     let snapHandledThisTick = false;
     let snapExitedThisTick = false;
 
     const applySnapStepResult = (snapRes: ReturnType<typeof stepSnapSolver>) => {
       snapRuntimeStates.set(entity.id, snapRes.nextRuntime);
+      if (!snapRes.nextRuntime.isSnapped || snapRes.nextRuntime.attachBehavior !== 'bidirectional_joint') {
+        const existingSnapJoint = snapJointConstraints.get(entity.id);
+        if (existingSnapJoint) {
+          World.remove(engine!.world, existingSnapJoint.constraint);
+          snapJointConstraints.delete(entity.id);
+        }
+      }
       if (snapRes.activeLink) {
         debugSnapLinks.set(entity.id, snapRes.activeLink);
       }
@@ -4037,16 +4276,18 @@ export function stepMatterPhysics(params: {
 
     if (snapBeh && snapBeh.enabled !== false && snapBeh.snapRole !== 'receptacle') {
       const existingSnapRt = snapRuntimeStates.get(entity.id);
-      if (existingSnapRt?.isSnapped && isSnapDragging) {
+      if (existingSnapRt?.isSnapped && (isSnapDragging || isBiTargetDragging)) {
         const snapRes = stepSnapSolver({
           entity: { ...entity, position: { x: newX, y: newY }, flipX: nextFlipX },
           config: snapBeh,
           runtime: existingSnapRt,
           allEntities: snapLiveEntities,
           dt,
-          isDragging: true,
+          isDragging: isSnapDragging,
           justReleased: false,
           dragPos: snapDragPos,
+          isTargetDragging: isBiTargetDragging,
+          targetDragPos: biTargetDragPos,
           currentRotationDeg: newRot,
           snapRuntimeStates,
         });
@@ -5023,6 +5264,8 @@ export function stepMatterPhysics(params: {
           isDragging: isSnapDragging,
           justReleased: releasedThisTick.has(entity.id),
           dragPos: snapDragPos,
+          isTargetDragging: isBiTargetDragging,
+          targetDragPos: biTargetDragPos,
           currentRotationDeg: newRot,
           snapRuntimeStates,
         });
@@ -6004,7 +6247,7 @@ export function stepMatterPhysics(params: {
       }
     }
 
-    // Cas 4b : Animation Pilotée façon Kitty / Draco (Variable, Proximité, Collision, Vitesse, Santé)
+    // Cas 4b : Animation Pilotée façon Kitty / Draco (Variable, Proximité, Collisions, Traversée, Vitesse, Santé, Composants)
     const drivenBeh = effectiveBehaviors.find((b) => b.type === 'driven_animation') as
       | DrivenAnimationBehaviorConfig
       | undefined;
@@ -6017,6 +6260,18 @@ export function stepMatterPhysics(params: {
       const liveSelf = snapLiveEntities[entity.id] || entity;
       const selfCenterX = liveSelf.position.x + liveSelf.size.width / 2;
       const selfCenterY = liveSelf.position.y + liveSelf.size.height / 2;
+      const bSelf = getEntityWorldColliderBounds(liveSelf);
+      const sideFilter = drivenBeh.colliderSide || 'all';
+      const selfProxAnchor: Position =
+        sideFilter === 'top'
+          ? { x: bSelf.centerX, y: bSelf.y }
+          : sideFilter === 'bottom'
+          ? { x: bSelf.centerX, y: bSelf.y + bSelf.height }
+          : sideFilter === 'left'
+          ? { x: bSelf.x, y: bSelf.centerY }
+          : sideFilter === 'right'
+          ? { x: bSelf.x + bSelf.width, y: bSelf.centerY }
+          : { x: selfCenterX, y: selfCenterY };
 
       let proximityDistance: number | null = null;
       let linkTargetPt: Position | null = null;
@@ -6029,7 +6284,7 @@ export function stepMatterPhysics(params: {
             if (!other || other.disabled || other.id === entity.id) continue;
             const ocx = other.position.x + other.size.width / 2;
             const ocy = other.position.y + other.size.height / 2;
-            const d = Math.hypot(ocx - selfCenterX, ocy - selfCenterY);
+            const d = Math.hypot(ocx - selfProxAnchor.x, ocy - selfProxAnchor.y);
             if (d < bestDist) {
               bestDist = d;
               linkTargetPt = { x: ocx, y: ocy };
@@ -6045,8 +6300,8 @@ export function stepMatterPhysics(params: {
               : (tgtType as 'mouse' | 'entity' | 'nearest_type' | 'nearest_tag');
           const pt = resolveTargetWorldPoint(
             entity.id,
-            selfCenterX,
-            selfCenterY,
+            selfProxAnchor.x,
+            selfProxAnchor.y,
             normalizedProxTgt,
             drivenBeh.targetEntityId,
             drivenBeh.targetEntityType,
@@ -6056,13 +6311,24 @@ export function stepMatterPhysics(params: {
           );
           if (pt) {
             linkTargetPt = pt;
-            proximityDistance = Math.hypot(pt.x - selfCenterX, pt.y - selfCenterY);
+            proximityDistance = Math.hypot(pt.x - selfProxAnchor.x, pt.y - selfProxAnchor.y);
           }
         }
       }
 
       let isTouchingTarget = false;
-      if (drivenBeh.sourceType === 'collision_step' || drivenBeh.sourceType === 'collision_hold') {
+      let traverseProgress: number | null = null;
+      let entryEdgeHint: 'left_to_right' | 'right_to_left' | 'top_to_bottom' | 'bottom_to_top' | null = null;
+      let movedDistanceWhileTouchingPx = 0;
+      let nextLastContactPos: Position | undefined;
+
+      const isCollisionSource =
+        drivenBeh.sourceType === 'collision_step' ||
+        drivenBeh.sourceType === 'collision_hold' ||
+        drivenBeh.sourceType === 'collision_traverse' ||
+        drivenBeh.sourceType === 'collision_travel';
+
+      if (isCollisionSource) {
         const ignoreSensors = drivenBeh.collisionIgnoreSensors === true;
         const rawTgtType = drivenBeh.targetType || 'any';
         const tgtType =
@@ -6072,7 +6338,6 @@ export function stepMatterPhysics(params: {
             ? 'tag'
             : rawTgtType;
         const cleanTag = (drivenBeh.targetTag || '').trim().replace(/^#/, '').toLowerCase();
-        const bSelf = getEntityWorldColliderBounds(liveSelf);
 
         for (const other of Object.values(snapLiveEntities)) {
           if (!other || other.disabled || other.id === entity.id) continue;
@@ -6091,11 +6356,11 @@ export function stepMatterPhysics(params: {
             if (!hasTag) continue;
           }
 
+          const bOther = getEntityWorldColliderBounds(other);
           let touching =
             activePhysicsCollisionPairs.has(`${entity.id}:::${other.id}`) ||
             activePhysicsCollisionPairs.has(`${other.id}:::${entity.id}`);
           if (!touching) {
-            const bOther = getEntityWorldColliderBounds(other);
             const tol = 2;
             if (bSelf.colliderType === 'circle' && bOther.colliderType === 'circle') {
               const rSum = bSelf.radius + bOther.radius + tol;
@@ -6117,12 +6382,41 @@ export function stepMatterPhysics(params: {
                 bSelf.y + bSelf.height + tol >= bOther.y;
             }
           }
+
+          if (touching && sideFilter !== 'all') {
+            const contactNormal = activePhysicsCollisionNormals.get(`${entity.id}:::${other.id}`) || null;
+            const sideOnSelf = computeDirectionalCollisionSide(bSelf, bOther, contactNormal);
+            if (sideOnSelf !== sideFilter) {
+              touching = false;
+            }
+          }
+
           if (touching) {
             isTouchingTarget = true;
             linkTargetPt = {
               x: other.position.x + other.size.width / 2,
               y: other.position.y + other.size.height / 2,
             };
+            entryEdgeHint = detectAutoTraverseAxis(bSelf, bOther);
+            const resolvedAxis =
+              (drivenBeh.traverseAxis || 'auto') === 'auto'
+                ? rtState.wasTouching && rtState.detectedTraverseAxis
+                  ? rtState.detectedTraverseAxis
+                  : entryEdgeHint
+                : drivenBeh.traverseAxis!;
+            traverseProgress = computeColliderTraverseProgress(bSelf, bOther, resolvedAxis);
+
+            const relContact = {
+              x: selfCenterX - (other.position.x + other.size.width / 2),
+              y: selfCenterY - (other.position.y + other.size.height / 2),
+            };
+            nextLastContactPos = relContact;
+            if (rtState.wasTouching && rtState.lastContactPos) {
+              movedDistanceWhileTouchingPx = Math.hypot(
+                relContact.x - rtState.lastContactPos.x,
+                relContact.y - rtState.lastContactPos.y
+              );
+            }
             break;
           }
         }
@@ -6147,6 +6441,110 @@ export function stepMatterPhysics(params: {
       const cleanInputVar = (drivenBeh.variableName || '').trim();
       const variableValue = cleanInputVar ? (gameVariables[cleanInputVar] ?? 0) : 0;
 
+      // Lectures directes de composants liés (pull_tension, puppet_shake, rotation_angle, slider_value)
+      const compSrcId =
+        drivenBeh.componentSourceTargetId && snapLiveEntities[drivenBeh.componentSourceTargetId]
+          ? drivenBeh.componentSourceTargetId
+          : entity.id;
+      const compSrcEnt = snapLiveEntities[compSrcId] || liveSelf;
+      const compSrcBody = bodyMap.get(compSrcId);
+      const compSrcState = compSrcEnt.states?.[compSrcEnt.currentStateId];
+      const compSrcBehs = getEffectiveBehaviors(compSrcEnt, compSrcState);
+
+      let pullTensionRatio = 0;
+      if (drivenBeh.sourceType === 'pull_tension') {
+        const pSrcMode = drivenBeh.pullTensionSource || 'auto';
+        const maxPullPx = Math.max(8, drivenBeh.pullTensionMaxPx ?? 80);
+        const wpRatio = debugWorldPins.get(compSrcId)?.stressRatio ?? 0;
+        const jRatio = debugJointStressRatios.get(compSrcId) ?? 0;
+        let snapRatio = 0;
+        const compSnapRt = snapRuntimeStates.get(compSrcId);
+        if (compSnapRt?.isSnapped && compSnapRt.snappedTargetId && snapLiveEntities[compSnapRt.snappedTargetId]) {
+          const compSnapCfg = compSrcBehs.find((x) => x.type === 'snap') as SnapBehaviorConfig | undefined;
+          if (compSnapCfg) {
+            const gSnap = computeSnapGoalForTarget(
+              compSrcEnt,
+              snapLiveEntities[compSnapRt.snappedTargetId],
+              compSnapCfg
+            );
+            const rad = Math.max(4, compSnapCfg.snapRadius ?? 48);
+            const unsnapD = Math.max(rad + 8, compSnapCfg.unsnapDistance ?? Math.round(rad * 1.5));
+            snapRatio = Math.max(0, Math.min(1, gSnap.metricDistance / Math.max(1, unsnapD)));
+          }
+        }
+        let grabStretchRatio = 0;
+        const grabRt = mouseGrabConstraints.get(compSrcId);
+        if (grabRt && compSrcBody) {
+          const rotatedGrabPt = rotateVector(
+            grabRt.localPointFromBodyCenter.x,
+            grabRt.localPointFromBodyCenter.y,
+            compSrcBody.angle
+          );
+          const grabWorldPt = {
+            x: compSrcBody.position.x + rotatedGrabPt.x,
+            y: compSrcBody.position.y + rotatedGrabPt.y,
+          };
+          grabStretchRatio = Math.max(
+            0,
+            Math.min(1, Math.hypot(grabRt.targetWorld.x - grabWorldPt.x, grabRt.targetWorld.y - grabWorldPt.y) / maxPullPx)
+          );
+        }
+        if (pSrcMode === 'world_pin') pullTensionRatio = wpRatio;
+        else if (pSrcMode === 'joint') pullTensionRatio = jRatio;
+        else if (pSrcMode === 'snap') pullTensionRatio = snapRatio;
+        else if (pSrcMode === 'drag') pullTensionRatio = grabStretchRatio;
+        else pullTensionRatio = Math.max(wpRatio, jRatio, snapRatio, grabStretchRatio);
+      }
+
+      let puppetShakeRatio = 0;
+      if (drivenBeh.sourceType === 'puppet_shake') {
+        const compPuppet = compSrcBehs.find((x) => x.type === 'interactive_puppet') as
+          | InteractivePuppetBehaviorConfig
+          | undefined;
+        const maxShakeSpd = Math.max(
+          40,
+          drivenBeh.shakeSpeedMax ?? (compPuppet?.swingSpeedThreshold ? compPuppet.swingSpeedThreshold * 2.5 : 900)
+        );
+        const compPuppetRt = puppetRuntimeStates.get(compSrcId);
+        if (compPuppetRt) {
+          const dragSpd = Math.hypot(compPuppetRt.smoothDragVx, compPuppetRt.smoothDragVy);
+          puppetShakeRatio = Math.max(0, Math.min(1, dragSpd / maxShakeSpd));
+        } else {
+          puppetShakeRatio = Math.max(0, Math.min(1, speedPxPerSec / maxShakeSpd));
+        }
+      }
+
+      let rotationAngleDeg = 0;
+      if (drivenBeh.sourceType === 'rotation_angle') {
+        const resolvedComp = resolvedTransforms.get(compSrcId);
+        rotationAngleDeg =
+          resolvedComp?.rotation ??
+          (compSrcBody && !compSrcBody.isStatic ? (compSrcBody.angle * 180) / Math.PI : compSrcState?.rotation ?? 0);
+      }
+
+      let sliderNormalizedValue = 0;
+      if (drivenBeh.sourceType === 'slider_value') {
+        const slTrack = debugSliderTracks.get(compSrcId);
+        if (slTrack) {
+          const axis = drivenBeh.sliderAxis || 'x';
+          if (axis === 'y') sliderNormalizedValue = slTrack.valueY;
+          else if (axis === 'magnitude') {
+            sliderNormalizedValue = Math.min(1, Math.hypot(slTrack.valueX, slTrack.valueY));
+          } else {
+            sliderNormalizedValue = slTrack.valueX;
+          }
+        } else {
+          const rdTrack = debugRotateDragTracks.get(compSrcId);
+          if (rdTrack) {
+            const minA = rdTrack.config.minAngle ?? -135;
+            const maxA = rdTrack.config.maxAngle ?? 135;
+            const span = maxA - minA;
+            sliderNormalizedValue =
+              Math.abs(span) > 1e-4 ? Math.max(0, Math.min(1, (rdTrack.angleDeg - minA) / span)) : 0;
+          }
+        }
+      }
+
       const stepOut = stepDrivenAnimationEntity({
         config: drivenBeh,
         runtime: rtState,
@@ -6159,8 +6557,16 @@ export function stepMatterPhysics(params: {
           isTouchingTarget,
           speedPxPerSec,
           healthRatio,
+          traverseProgress,
+          entryEdgeHint,
+          movedDistanceWhileTouchingPx,
+          pullTensionRatio,
+          puppetShakeRatio,
+          rotationAngleDeg,
+          sliderNormalizedValue,
         },
       });
+      stepOut.nextRuntime.lastContactPos = nextLastContactPos;
       drivenAnimationStates.set(entity.id, stepOut.nextRuntime);
 
       debugDrivenAnimLinks.set(entity.id, {

@@ -1,4 +1,14 @@
-import { ColliderBounds, ColliderType, Entity, EntityPivot, EntityState, Position, VectorPath } from '../types';
+import {
+  ColliderBounds,
+  ColliderType,
+  DrivenAnimationBehaviorConfig,
+  Entity,
+  EntityPivot,
+  EntityState,
+  Position,
+  VectorPath,
+} from '../types';
+import { getEffectiveBehaviors } from './physics/behaviorResolution';
 import { getPivotWorldPosition, resolveEffectivePivot, rotateVector } from './physics/pivotHelpers';
 
 export interface EntityColliderGeometry {
@@ -135,6 +145,33 @@ export function computeAutoColliderBoundsFromPaths(
   };
 }
 
+export function resolveActiveFrameVectorPaths(
+  entity: Entity,
+  effectiveState?: EntityState
+): VectorPath[] | undefined {
+  const frames = effectiveState?.frames;
+  const idx = entity.runtimeAnimFrameIndex;
+  if (
+    frames &&
+    frames.length > 0 &&
+    typeof idx === 'number' &&
+    idx >= 0 &&
+    idx < frames.length
+  ) {
+    const behs = getEffectiveBehaviors(entity, effectiveState);
+    const hasSync = behs.some(
+      (b) =>
+        b.type === 'driven_animation' &&
+        b.enabled !== false &&
+        (b as DrivenAnimationBehaviorConfig).syncColliderToFrame === true
+    );
+    if (hasSync && frames[idx]?.vectorPaths) {
+      return frames[idx].vectorPaths;
+    }
+  }
+  return effectiveState?.vectorPaths || entity.vectorPaths;
+}
+
 /**
  * Calculates the exact collider geometry in 200x200 canvas space.
  */
@@ -201,7 +238,7 @@ export function getEntityColliderBounds(
     };
   }
 
-  const paths = effectiveState?.vectorPaths || entity.vectorPaths;
+  const paths = resolveActiveFrameVectorPaths(entity, effectiveState);
 
   let rawX = 0;
   let rawY = 0;

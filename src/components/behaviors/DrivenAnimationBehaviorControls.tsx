@@ -3,23 +3,39 @@ import { Clapperboard, Paintbrush, Plus } from 'lucide-react';
 import { EMPTY_RECORD, useSceneStore } from '../../store/useSceneStore';
 import {
   DrivenAnimationBehaviorConfig,
+  DrivenAnimationColliderSide,
   DrivenAnimationCurve,
   DrivenAnimationEndBehavior,
   DrivenAnimationProgressionMode,
   DrivenAnimationSourceType,
+  DrivenAnimationTraverseAxis,
   Entity,
   EntityState,
 } from '../../types';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 
-const SOURCE_OPTIONS: { id: DrivenAnimationSourceType; label: string; desc: string }[] = [
-  { id: 'proximity', label: 'Proximité', desc: 'Distance entre cet objet et une cible ou la souris' },
-  { id: 'variable', label: 'Variable', desc: 'Piloté par une Variable de jeu (Slider, Cadran, Score...)' },
-  { id: 'collision_step', label: 'Passage (Cran)', desc: 'Avance d’une étape à chaque contact / entrée dans un collider' },
-  { id: 'collision_hold', label: 'Contact continu', desc: 'Progresse tant que le collider touche la cible (ex: usure)' },
-  { id: 'speed', label: 'Vitesse', desc: 'Proportionnel à la vitesse de déplacement actuelle (px/s)' },
-  { id: 'health', label: 'Santé (PV)', desc: 'Évolue en fonction des points de vie restants' },
+const SOURCE_OPTIONS: {
+  id: DrivenAnimationSourceType;
+  label: string;
+  group: 'space' | 'physics' | 'values';
+  quick?: boolean;
+  desc: string;
+}[] = [
+  { id: 'proximity', label: 'Proximité', group: 'space', quick: true, desc: 'Distance entre cet objet (ou un de ses côtés) et une cible ou la souris' },
+  { id: 'collision_step', label: 'Passage (Cran)', group: 'space', quick: true, desc: 'Avance d’une étape à chaque contact / entrée dans un collider' },
+  { id: 'collision_traverse', label: 'Traversée', group: 'space', quick: true, desc: 'Progression spatiale 0→100% en traversant le collider cible (ex: coupe en 1 passage)' },
+  { id: 'collision_travel', label: 'Glissement (Distance)', group: 'space', desc: 'Avance selon la distance parcourue en px pendant le contact (frottement / râpe)' },
+  { id: 'collision_hold', label: 'Contact continu', group: 'space', desc: 'Progresse dans le temps tant que le collider touche la cible (ex: usure)' },
+  { id: 'pull_tension', label: 'Traction', group: 'physics', quick: true, desc: 'Tension d’étirement avant rupture (Épingle au monde, Joint, Snap ou Drag)' },
+  { id: 'puppet_shake', label: 'Secousse', group: 'physics', desc: 'Intensité de secousse / agitation de la Marionnette' },
+  { id: 'speed', label: 'Vitesse', group: 'physics', quick: true, desc: 'Proportionnel à la vitesse de déplacement actuelle (px/s)' },
+  { id: 'rotation_angle', label: 'Angle (Rotation)', group: 'values', desc: 'Angle courant de l’objet ou d’un cadran (en degrés)' },
+  { id: 'slider_value', label: 'Glissière / Cadran', group: 'values', desc: 'Valeur directe (0..100%) d’un composant Slider ou Cadran sans passer par une variable' },
+  { id: 'variable', label: 'Variable', group: 'values', quick: true, desc: 'Piloté par une Variable de jeu (Score, Compteur, Événement...)' },
+  { id: 'health', label: 'Santé (PV)', group: 'values', desc: 'Évolue en fonction des points de vie restants' },
 ];
+
+const QUICK_SOURCE_OPTIONS = SOURCE_OPTIONS.filter((o) => o.quick);
 
 export function DrivenAnimationBehaviorControls({
   b,
@@ -47,8 +63,26 @@ export function DrivenAnimationBehaviorControls({
   const progressionMode: DrivenAnimationProgressionMode = b.progressionMode || 'reversible';
   const endBehavior: DrivenAnimationEndBehavior = b.endBehavior || 'clamp';
   const curve: DrivenAnimationCurve = b.curve || 'linear';
-  const needsTarget =
-    sourceType === 'proximity' || sourceType === 'collision_step' || sourceType === 'collision_hold';
+  const isCollisionSource =
+    sourceType === 'collision_step' ||
+    sourceType === 'collision_hold' ||
+    sourceType === 'collision_traverse' ||
+    sourceType === 'collision_travel';
+  const needsTarget = sourceType === 'proximity' || isCollisionSource;
+  const supportsColliderSide = sourceType === 'proximity' || isCollisionSource;
+  const needsComponentSource =
+    sourceType === 'pull_tension' ||
+    sourceType === 'puppet_shake' ||
+    sourceType === 'rotation_angle' ||
+    sourceType === 'slider_value';
+
+  const selectSource = (nextSource: DrivenAnimationSourceType) => {
+    const patch: Partial<DrivenAnimationBehaviorConfig> = { sourceType: nextSource };
+    if ((nextSource === 'collision_step' || nextSource === 'collision_traverse') && !b.progressionMode) {
+      patch.progressionMode = 'irreversible';
+    }
+    update(patch);
+  };
 
   return (
     <div className="space-y-2">
@@ -60,23 +94,17 @@ export function DrivenAnimationBehaviorControls({
         </div>
       </div>
 
-      {/* 1. Source de pilotage */}
+      {/* 1. Source de pilotage (Raccourcis visibles + menu complet) */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
         <span className="font-bold text-slate-700 text-xs block">1. Source qui pilote l’animation</span>
-        <div className="grid grid-cols-2 gap-1">
-          {SOURCE_OPTIONS.map((opt) => (
+        <div className="grid grid-cols-3 gap-1">
+          {QUICK_SOURCE_OPTIONS.map((opt) => (
             <button
               key={opt.id}
               type="button"
-              onClick={() => {
-                const patch: Partial<DrivenAnimationBehaviorConfig> = { sourceType: opt.id };
-                if (opt.id === 'collision_step' && !b.progressionMode) {
-                  patch.progressionMode = 'irreversible';
-                }
-                update(patch);
-              }}
+              onClick={() => selectSource(opt.id)}
               title={opt.desc}
-              className={`px-2 py-1.5 rounded-lg text-[10px] font-bold border text-left transition-colors cursor-pointer ${
+              className={`px-1.5 py-1.5 rounded-lg text-[10px] font-bold border text-center truncate transition-colors cursor-pointer ${
                 sourceType === opt.id
                   ? 'bg-violet-600 text-white border-violet-600 shadow-2xs'
                   : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -85,6 +113,36 @@ export function DrivenAnimationBehaviorControls({
               {opt.label}
             </button>
           ))}
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-semibold text-slate-500 shrink-0">Toutes les sources</span>
+          <select
+            value={sourceType}
+            onChange={(e) => selectSource(e.target.value as DrivenAnimationSourceType)}
+            className="flex-1 min-w-0 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-800"
+          >
+            <optgroup label="Espace & Collisions">
+              {SOURCE_OPTIONS.filter((o) => o.group === 'space').map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Physique & Interactions">
+              {SOURCE_OPTIONS.filter((o) => o.group === 'physics').map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Valeurs & Composants">
+              {SOURCE_OPTIONS.filter((o) => o.group === 'values').map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </optgroup>
+          </select>
         </div>
         <p className="text-[10px] text-slate-500">
           {SOURCE_OPTIONS.find((o) => o.id === sourceType)?.desc}
@@ -101,9 +159,7 @@ export function DrivenAnimationBehaviorControls({
                 className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 max-w-[180px]"
               >
                 {sourceType === 'proximity' && <option value="mouse">Curseur / Souris</option>}
-                {(sourceType === 'collision_step' || sourceType === 'collision_hold' || sourceType === 'proximity') && (
-                  <option value="any">N’importe quel objet</option>
-                )}
+                <option value="any">N’importe quel objet</option>
                 <option value="entity">Entité précise</option>
                 <option value={sourceType === 'proximity' ? 'nearest_type' : 'type'}>Type d’objet</option>
                 <option value={sourceType === 'proximity' ? 'nearest_tag' : 'tag'}>Tag (#tag)</option>
@@ -162,6 +218,23 @@ export function DrivenAnimationBehaviorControls({
                     <option key={t} value={t} />
                   ))}
                 </datalist>
+              </div>
+            )}
+
+            {supportsColliderSide && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold text-slate-600">Côté du collider</span>
+                <select
+                  value={b.colliderSide || 'all'}
+                  onChange={(e) => update({ colliderSide: e.target.value as DrivenAnimationColliderSide })}
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[175px]"
+                >
+                  <option value="all">Tous les côtés (Centre / Complet)</option>
+                  <option value="top">Haut uniquement</option>
+                  <option value="bottom">Bas uniquement</option>
+                  <option value="left">Gauche uniquement</option>
+                  <option value="right">Droite uniquement</option>
+                </select>
               </div>
             )}
           </div>
@@ -361,6 +434,161 @@ export function DrivenAnimationBehaviorControls({
           </div>
         )}
 
+        {sourceType === 'collision_traverse' && (
+          <div className="pt-1.5 border-t border-slate-100 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-slate-600">Sens de traversée</span>
+              <select
+                value={b.traverseAxis || 'auto'}
+                onChange={(e) => update({ traverseAxis: e.target.value as DrivenAnimationTraverseAxis })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[175px]"
+              >
+                <option value="auto">Automatique (bord d&apos;entrée)</option>
+                <option value="left_to_right">Gauche → Droite</option>
+                <option value="right_to_left">Droite → Gauche</option>
+                <option value="top_to_bottom">Haut → Bas</option>
+                <option value="bottom_to_top">Bas → Haut</option>
+                <option value="center_inward">Bords → Centre (écrasement)</option>
+              </select>
+            </div>
+            <label className="flex items-center justify-between text-[11px] text-slate-700 cursor-pointer">
+              <span>Ignorer zones capteurs (Trigger)</span>
+              <input
+                type="checkbox"
+                checked={b.collisionIgnoreSensors === true}
+                onChange={(e) => update({ collisionIgnoreSensors: e.target.checked })}
+                className="accent-violet-600"
+              />
+            </label>
+          </div>
+        )}
+
+        {sourceType === 'collision_travel' && (
+          <div className="pt-1.5 border-t border-slate-100 space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] text-slate-700">
+              <span className="font-semibold">Distance pour 100%</span>
+              <EditableNumericValue
+                value={b.collisionTravelDistancePx ?? 120}
+                unit="px"
+                precision={0}
+                onChange={(v) => update({ collisionTravelDistancePx: Math.max(4, v) })}
+                className="font-mono font-bold text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded text-xs"
+              />
+            </div>
+            <label className="flex items-center justify-between text-[11px] text-slate-700 cursor-pointer">
+              <span>Ignorer zones capteurs (Trigger)</span>
+              <input
+                type="checkbox"
+                checked={b.collisionIgnoreSensors === true}
+                onChange={(e) => update({ collisionIgnoreSensors: e.target.checked })}
+                className="accent-violet-600"
+              />
+            </label>
+          </div>
+        )}
+
+        {needsComponentSource && (
+          <div className="pt-1.5 border-t border-slate-100 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-slate-600">Objet source</span>
+              <select
+                value={b.componentSourceTargetId || ''}
+                onChange={(e) => update({ componentSourceTargetId: e.target.value || undefined })}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[175px]"
+              >
+                <option value="">Cet objet (lui-même)</option>
+                {targetEntityOptions.map((ent) => (
+                  <option key={ent.id} value={ent.id}>
+                    {ent.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {sourceType === 'pull_tension' && (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-slate-600">Origine traction</span>
+                  <select
+                    value={b.pullTensionSource || 'auto'}
+                    onChange={(e) => update({ pullTensionSource: e.target.value as any })}
+                    className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[175px]"
+                  >
+                    <option value="auto">Automatique (tout détecter)</option>
+                    <option value="world_pin">Épingle au monde (Physics)</option>
+                    <option value="joint">Joint cassable (Parent)</option>
+                    <option value="snap">Résistance Snap</option>
+                    <option value="drag">Élastique saisie souris</option>
+                  </select>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-slate-700">
+                  <span className="font-semibold">Distance 100% (si drag)</span>
+                  <EditableNumericValue
+                    value={b.pullTensionMaxPx ?? 80}
+                    unit="px"
+                    precision={0}
+                    onChange={(v) => update({ pullTensionMaxPx: Math.max(8, v) })}
+                    className="font-mono font-bold text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded text-xs"
+                  />
+                </div>
+              </>
+            )}
+
+            {sourceType === 'puppet_shake' && (
+              <div className="flex items-center justify-between text-[11px] text-slate-700">
+                <span className="font-semibold">Vitesse secousse 100%</span>
+                <EditableNumericValue
+                  value={b.shakeSpeedMax ?? 900}
+                  unit="px/s"
+                  precision={0}
+                  onChange={(v) => update({ shakeSpeedMax: Math.max(40, v) })}
+                  className="font-mono font-bold text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded text-xs"
+                />
+              </div>
+            )}
+
+            {sourceType === 'rotation_angle' && (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center justify-between bg-slate-50 px-2 py-1 rounded-lg border border-slate-200">
+                  <span className="text-[10px] font-semibold text-slate-500">Angle 0%</span>
+                  <EditableNumericValue
+                    value={b.angleMin ?? -180}
+                    unit="°"
+                    precision={0}
+                    onChange={(v) => update({ angleMin: v })}
+                    className="font-mono font-bold text-xs text-violet-700"
+                  />
+                </div>
+                <div className="flex items-center justify-between bg-slate-50 px-2 py-1 rounded-lg border border-slate-200">
+                  <span className="text-[10px] font-semibold text-slate-500">Angle 100%</span>
+                  <EditableNumericValue
+                    value={b.angleMax ?? 180}
+                    unit="°"
+                    precision={0}
+                    onChange={(v) => update({ angleMax: v })}
+                    className="font-mono font-bold text-xs text-violet-700"
+                  />
+                </div>
+              </div>
+            )}
+
+            {sourceType === 'slider_value' && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold text-slate-600">Axe de la glissière</span>
+                <select
+                  value={b.sliderAxis || 'x'}
+                  onChange={(e) => update({ sliderAxis: e.target.value as any })}
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800 max-w-[175px]"
+                >
+                  <option value="x">Axe X / Rail 1D / Cadran</option>
+                  <option value="y">Axe Y (Zone 2D)</option>
+                  <option value="magnitude">Distance au point 0 (2D)</option>
+                </select>
+              </div>
+            )}
+          </div>
+        )}
+
         {sourceType === 'health' && (
           <div className="pt-1.5 border-t border-slate-100">
             <label className="flex items-center justify-between text-[11px] text-slate-700 cursor-pointer">
@@ -411,7 +639,8 @@ export function DrivenAnimationBehaviorControls({
 
         {progressionMode === 'reversible' &&
           sourceType !== 'collision_step' &&
-          sourceType !== 'collision_hold' && (
+          sourceType !== 'collision_hold' &&
+          sourceType !== 'collision_travel' && (
             <div>
               <div className="flex justify-between text-[11px] text-slate-700 mb-0.5">
                 <span className="font-semibold">Lissage (Inertie)</span>
@@ -496,6 +725,18 @@ export function DrivenAnimationBehaviorControls({
             className="accent-violet-600"
           />
         </label>
+
+        {b.driveFlipbook !== false && (
+          <label className="flex items-center justify-between text-[11px] text-slate-600 cursor-pointer pl-2 border-l-2 border-violet-200">
+            <span>Adapter le collider au dessin de chaque frame</span>
+            <input
+              type="checkbox"
+              checked={Boolean(b.syncColliderToFrame)}
+              onChange={(e) => update({ syncColliderToFrame: e.target.checked })}
+              className="accent-violet-600"
+            />
+          </label>
+        )}
 
         <label className="flex items-center justify-between text-[11px] text-slate-700 cursor-pointer pt-1 border-t border-slate-100">
           <span className="font-semibold">Moduler Scale / Rotation / Opacité</span>

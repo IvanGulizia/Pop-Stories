@@ -724,6 +724,7 @@ export type SnapAttachBehavior =
   | 'parent_rigid'
   | 'parent_spring'
   | 'parent_physics_joint'
+  | 'bidirectional_joint'
   | 'freeze_physics';
 
 export interface SnapBehaviorConfig extends BaseBehaviorConfig {
@@ -747,8 +748,9 @@ export interface SnapBehaviorConfig extends BaseBehaviorConfig {
   offsetY?: number;
   matchTargetRotation?: boolean;
   rotationOffset?: number;
-  attachBehavior: SnapAttachBehavior;   // 'position_only' | 'parent_rigid' | 'parent_spring' | 'parent_physics_joint' | 'freeze_physics'
-  springStiffness?: number;             // utilisé si attachBehavior === 'parent_spring'
+  attachBehavior: SnapAttachBehavior;   // 'position_only' | 'parent_rigid' | 'parent_spring' | 'parent_physics_joint' | 'bidirectional_joint' | 'freeze_physics'
+  startAttachedAtInit?: boolean;        // Pré-attaché dès le lancement du mode Play (ex: tête <-> corps)
+  springStiffness?: number;             // utilisé si attachBehavior === 'parent_spring' | 'bidirectional_joint'
   springDamping?: number;
   jointConfig?: Partial<ParentOffset>;  // configuration avancée du joint physique + Break Joint
   magnetEnabled?: boolean;              // champ d'attraction magnétique avant snap
@@ -768,12 +770,26 @@ export type DrivenAnimationSourceType =
   | 'variable'
   | 'collision_step'
   | 'collision_hold'
+  | 'collision_traverse'
+  | 'collision_travel'
   | 'speed'
-  | 'health';
+  | 'health'
+  | 'pull_tension'
+  | 'puppet_shake'
+  | 'rotation_angle'
+  | 'slider_value';
 
 export type DrivenAnimationProgressionMode = 'reversible' | 'irreversible';
 export type DrivenAnimationCurve = 'linear' | 'ease_in' | 'ease_out' | 'ease_in_out';
 export type DrivenAnimationEndBehavior = 'clamp' | 'loop' | 'ping_pong';
+export type DrivenAnimationColliderSide = 'all' | 'top' | 'bottom' | 'left' | 'right';
+export type DrivenAnimationTraverseAxis =
+  | 'auto'
+  | 'left_to_right'
+  | 'right_to_left'
+  | 'top_to_bottom'
+  | 'bottom_to_top'
+  | 'center_inward';
 
 export interface DrivenAnimationBehaviorConfig extends BaseBehaviorConfig {
   type: 'driven_animation';
@@ -782,6 +798,7 @@ export interface DrivenAnimationBehaviorConfig extends BaseBehaviorConfig {
   targetEntityId?: EntityId;
   targetEntityType?: EntityType;
   targetTag?: string;
+  colliderSide?: DrivenAnimationColliderSide;
   proximityDistanceStart?: number;
   proximityDistanceEnd?: number;
   collisionRequireExit?: boolean;
@@ -790,12 +807,22 @@ export interface DrivenAnimationBehaviorConfig extends BaseBehaviorConfig {
   collisionStepPercent?: number;
   collisionHoldRatePerSec?: number;
   collisionIgnoreSensors?: boolean;
+  traverseAxis?: DrivenAnimationTraverseAxis;
+  collisionTravelDistancePx?: number;
+  syncColliderToFrame?: boolean;
   variableName?: string;
   variableMin?: number;
   variableMax?: number;
   speedMin?: number;
   speedMax?: number;
   invertHealth?: boolean;
+  pullTensionSource?: 'auto' | 'world_pin' | 'joint' | 'snap' | 'drag';
+  pullTensionMaxPx?: number;
+  shakeSpeedMax?: number;
+  angleMin?: number;
+  angleMax?: number;
+  componentSourceTargetId?: EntityId;
+  sliderAxis?: 'x' | 'y' | 'magnitude';
   progressionMode: DrivenAnimationProgressionMode;
   smoothing?: number;
   curve?: DrivenAnimationCurve;

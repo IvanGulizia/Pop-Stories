@@ -42,6 +42,8 @@ export interface SnapStepInput {
   isDragging: boolean;
   justReleased: boolean;
   dragPos?: Position | null;
+  isTargetDragging?: boolean;
+  targetDragPos?: Position | null;
   currentRotationDeg?: number;
   snapRuntimeStates?: Map<string, SnapRuntimeEntry>;
 }
@@ -608,6 +610,8 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
     isDragging,
     justReleased,
     dragPos,
+    isTargetDragging,
+    targetDragPos,
     currentRotationDeg,
     snapRuntimeStates,
   } = input;
@@ -663,15 +667,26 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
       };
     }
 
-    const goal = computeSnapGoalForTarget(probeEntity, snappedTarget, config, currentRotationDeg);
+    const activeAttachBehavior: SnapAttachBehavior = nextRuntime.attachBehavior || attachBehavior;
+    const isBidirectionalMode = activeAttachBehavior === 'bidirectional_joint';
+    const probeTarget: Entity =
+      isBidirectionalMode && targetDragPos
+        ? { ...snappedTarget, position: targetDragPos }
+        : snappedTarget;
 
-    const pullDist =
-      isDragging && dragPos
-        ? Math.hypot(dragPos.x - goal.goalTopLeft.x, dragPos.y - goal.goalTopLeft.y)
-        : 0;
+    const goal = computeSnapGoalForTarget(probeEntity, probeTarget, config, currentRotationDeg);
 
-    // Pull-to-unsnap si on tire l'entité au-delà de la distance d'arrachement
-    if (isDragging && allowPullUnsnap && dragPos && pullDist > unsnapDist) {
+    const anySideDragging = isDragging || (isBidirectionalMode && Boolean(isTargetDragging));
+    const pullDist = isBidirectionalMode
+      ? anySideDragging
+        ? goal.metricDistance
+        : 0
+      : isDragging && dragPos
+      ? Math.hypot(dragPos.x - goal.goalTopLeft.x, dragPos.y - goal.goalTopLeft.y)
+      : 0;
+
+    // Pull-to-unsnap si on tire l'entité (ou l'autre extrémité du joint bidirectionnel) au-delà de la distance d'arrachement
+    if (anySideDragging && allowPullUnsnap && (dragPos || isBidirectionalMode) && pullDist > unsnapDist) {
       const wasParented =
         entity.parentId === snappedTarget.id ||
         isSnapParentAttachBehavior(nextRuntime.attachBehavior);
@@ -684,16 +699,20 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
       nextRuntime.prePullStateId = undefined;
       return {
         nextRuntime,
-        nextPosition: dragPos,
-        zeroVelocity: true,
+        nextPosition: isDragging && dragPos ? dragPos : undefined,
+        zeroVelocity: isDragging,
         freezeStatic: false,
         parentMutation: wasParented ? { childId: entity.id, parentId: null } : undefined,
         snapEvent: {
           phase: 'exit',
           targetEntityId: snappedTarget.id,
           eventPosition: {
-            x: Math.round(dragPos.x + entity.size.width / 2),
-            y: Math.round(dragPos.y + entity.size.height / 2),
+            x: Math.round(
+              (isDragging && dragPos ? dragPos.x : entity.position.x) + entity.size.width / 2
+            ),
+            y: Math.round(
+              (isDragging && dragPos ? dragPos.y : entity.position.y) + entity.size.height / 2
+            ),
           },
         },
         stateChange:
@@ -708,13 +727,13 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
     // Hystérésis d'état en traction / résistance pendant que l'objet est encore attaché
     let pullStateChange: StateId | undefined;
     const wasPulling = Boolean(nextRuntime.isPulling);
-    if (!wasPulling && isDragging && dragPos && pullDist > 6) {
+    if (!wasPulling && anySideDragging && pullDist > 6) {
       nextRuntime.isPulling = true;
       nextRuntime.prePullStateId = entity.currentStateId;
       if (config.pullingStateId && entity.states[config.pullingStateId]) {
         pullStateChange = config.pullingStateId;
       }
-    } else if (wasPulling && (!isDragging || !dragPos || pullDist <= 2)) {
+    } else if (wasPulling && (!anySideDragging || pullDist <= 2)) {
       nextRuntime.isPulling = false;
       const restoreTarget =
         config.snappedStateId && entity.states[config.snappedStateId]
@@ -754,7 +773,7 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
           customOffset: computed,
         };
       }
-    } else if (!isDragging) {
+    } else if (!isBidirectionalMode && !isDragging) {
       const distToGoal = Math.hypot(
         entity.position.x - goal.goalTopLeft.x,
         entity.position.y - goal.goalTopLeft.y
@@ -909,7 +928,11 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
   const isFreezeMode = attachBehavior === 'freeze_physics';
 
   let nextPosition: Position = candidate.goalTopLeft;
-  if (config.snapMode === 'magnetic_smooth' && !isParentMode) {
+  if (
+    config.snapMode === 'magnetic_smooth' &&
+    !isParentMode &&
+    attachBehavior !== 'bidirectional_joint'
+  ) {
     const smooth = Math.max(0.05, Math.min(1, config.smoothSpeed ?? 0.3));
     const alpha = 1 - Math.exp(-(8 + smooth * 42) * safeDt);
     nextPosition = {
@@ -937,6 +960,87 @@ export function stepSnapSolver(input: SnapStepInput): SnapStepResult {
   return {
     nextRuntime,
     nextPosition,
+    nextRotationDeg: candidate.goalRotationDeg,
+    zeroVelocity: true,
+    freezeStatic: isFreezeMode,
+    parentMutation,
+    snapEvent: {
+      phase: 'enter',
+      targetEntityId: candidate.target.id,
+      eventPosition: {
+        x: Math.round(candidate.targetAnchorWorld.x),
+        y: Math.round(candidate.targetAnchorWorld.y),
+      },
+    },
+    stateChange:
+      config.snappedStateId && entity.states[config.snappedStateId]
+        ? config.snappedStateId
+        : undefined,
+    activeLink: {
+      from: candidate.targetAnchorWorld,
+      to: candidate.targetAnchorWorld,
+      snapped: true,
+      targetId: candidate.target.id,
+    },
+  };
+}
+
+/**
+ * Attache immédiatement une entité Snap au démarrage du mode Play (`startAttachedAtInit`).
+ */
+export function resolveInitialSnapAttach(params: {
+  entity: Entity;
+  config: SnapBehaviorConfig;
+  allEntities: Record<EntityId, Entity>;
+  snapRuntimeStates?: Map<string, SnapRuntimeEntry>;
+}): SnapStepResult | null {
+  const { entity, config, allEntities, snapRuntimeStates } = params;
+  if (!config || config.enabled === false || config.snapRole === 'receptacle') {
+    return null;
+  }
+  const candidate = findSnapCandidateWithinRadius(
+    entity,
+    allEntities,
+    config,
+    1e6,
+    entity.position,
+    undefined,
+    snapRuntimeStates
+  );
+  if (!candidate) return null;
+
+  const attachBehavior: SnapAttachBehavior = config.attachBehavior || 'position_only';
+  const isParentMode = isSnapParentAttachBehavior(attachBehavior);
+  const isFreezeMode = attachBehavior === 'freeze_physics';
+  const nextRuntime: SnapRuntimeEntry = {
+    isSnapped: true,
+    snappedTargetId: candidate.target.id,
+    attachBehavior,
+    cooldownRemaining: 0,
+    snappedAtPos: candidate.goalTopLeft,
+    isApproaching: false,
+    isPulling: false,
+  };
+
+  let parentMutation: SnapStepResult['parentMutation'];
+  if (isParentMode && entity.parentId !== candidate.target.id) {
+    const alignedChild = { ...entity, position: candidate.goalTopLeft };
+    const computed = buildSnapParentOffset({
+      alignedChild,
+      target: candidate.target,
+      config,
+      attachBehavior,
+    });
+    parentMutation = {
+      childId: entity.id,
+      parentId: candidate.target.id,
+      customOffset: computed,
+    };
+  }
+
+  return {
+    nextRuntime,
+    nextPosition: candidate.goalTopLeft,
     nextRotationDeg: candidate.goalRotationDeg,
     zeroVelocity: true,
     freezeStatic: isFreezeMode,

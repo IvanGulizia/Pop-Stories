@@ -832,6 +832,7 @@ export const SnapActionConfigEditor: React.FC<SnapActionConfigEditorProps> = ({
               <option value="parent_rigid">Parenter solidement</option>
               <option value="parent_spring">Parenter avec ressort</option>
               <option value="parent_physics_joint">Parenter avec Joint Physique (Break Joint)</option>
+              <option value="bidirectional_joint">Joint bidirectionnel (sans parentage)</option>
               <option value="position_only">Placer uniquement</option>
               <option value="freeze_physics">Poser et figer la physique</option>
             </select>
