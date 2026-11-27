@@ -60,6 +60,7 @@ export function createDefaultBehaviorConfig(type: BehaviorType, entity: Entity):
         throwable: true,
         maxThrowSpeed: 1500,
         precisePhysicsGrab: false,
+        disableCollisionsWhileDragging: false,
       } as DraggableBehaviorConfig;
     case 'interactive_puppet':
       return {
@@ -69,6 +70,7 @@ export function createDefaultBehaviorConfig(type: BehaviorType, entity: Entity):
         throwable: true,
         maxThrowSpeed: 1500,
         precisePhysicsGrab: false,
+        disableCollisionsWhileDragging: false,
         swingMode: 'both',
         swingAroundGrabPoint: false,
         pendulumIntensity: 1.0,
@@ -351,6 +353,7 @@ export function createDefaultBehaviorConfig(type: BehaviorType, entity: Entity):
         matchTargetRotation: false,
         rotationOffset: 0,
         attachBehavior: 'position_only',
+        ignoreCollisionWhileDraggingNearSnap: true,
         springStiffness: 0.25,
         springDamping: 0.18,
         magnetEnabled: false,

@@ -154,6 +154,7 @@ export interface DraggableBehaviorConfig extends BaseBehaviorConfig {
   grabBrakeAngle?: number;       // Zone de freinage doux aux extrémités en ° (défaut 15)
   grabAngularStiffness?: number; // Raideur du rappel vers la verticale (défaut 140)
   grabAngularDamping?: number;   // Amortissement du balancement (défaut 8)
+  disableCollisionsWhileDragging?: boolean; // Désactive les collisions solides tant que l'objet est tenu (drag)
 }
 
 export interface ConstantVelocityBehaviorConfig extends BaseBehaviorConfig {
@@ -536,6 +537,7 @@ export interface InteractivePuppetBehaviorConfig extends BaseBehaviorConfig {
   grabBrakeAngle?: number;        // Zone de freinage doux aux extrémités en ° (défaut 15)
   grabAngularStiffness?: number;  // Raideur du rappel vers la verticale (défaut 140)
   grabAngularDamping?: number;    // Amortissement du balancement (défaut 8)
+  disableCollisionsWhileDragging?: boolean; // Désactive les collisions solides tant que l'objet est tenu (drag)
   // Balancement & Pendule (les deux pistes : auto-tilt physique et/ou états visuels)
   swingMode?: 'pendulum' | 'states' | 'both';
   swingAroundGrabPoint?: boolean; // Pivoter/balancer autour du point exact saisi sur l'objet
@@ -755,6 +757,7 @@ export interface SnapBehaviorConfig extends BaseBehaviorConfig {
   springStiffness?: number;             // utilisé si attachBehavior === 'parent_spring' | 'bidirectional_joint'
   springDamping?: number;
   ignoreTargetCollision?: boolean;      // Si true (défaut), empêche la collision entre les deux corps du joint bidirectionnel (+ grâce à l'arrachement)
+  ignoreCollisionWhileDraggingNearSnap?: boolean; // Si true (défaut), ignore les collisions pendant le drag à l'approche d'une cible compatible
   allowTargetDrag?: boolean;            // Si true (défaut), permet de saisir aussi la cible du joint bidirectionnel à la souris
   bidirectionalFollowSwing?: boolean;   // Si true (défaut), transmet l'inclinaison / le balancement entre les deux extrémités du joint
   bidirectionalAngularStiffness?: number; // Raideur du rappel angulaire entre tête et corps 0..1 (défaut 0.45)

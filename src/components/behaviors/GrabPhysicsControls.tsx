@@ -11,6 +11,7 @@ export interface GrabPhysicsConfigFields {
   grabBrakeAngle?: number;
   grabAngularStiffness?: number;
   grabAngularDamping?: number;
+  disableCollisionsWhileDragging?: boolean;
 }
 
 interface GrabPhysicsControlsProps {
@@ -219,6 +220,22 @@ export function GrabPhysicsControls({
             )}
           </div>
         )}
+      </div>
+
+      {/* 3. Désactiver les collisions solides pendant le drag */}
+      <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between gap-2">
+        <div>
+          <div className="font-bold text-slate-700 text-xs">Ignorer les collisions pendant le drag</div>
+          <div className="text-[10px] text-slate-400">
+            Passe en mode fantôme tant que l&apos;objet est tenu (évite de repousser les autres corps)
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          checked={Boolean(config.disableCollisionsWhileDragging)}
+          onChange={(e) => update({ disableCollisionsWhileDragging: e.target.checked })}
+          className={`w-4 h-4 ${checkboxAccent} rounded cursor-pointer shrink-0`}
+        />
       </div>
     </div>
   );

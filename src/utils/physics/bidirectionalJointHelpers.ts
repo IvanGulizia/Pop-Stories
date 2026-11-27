@@ -2,7 +2,13 @@ import Matter from 'matter-js';
 import { Entity, ParentOffset, SnapBehaviorConfig } from '../../types';
 import { getEntityWorldColliderBounds } from '../collider';
 import { rotateVector } from './pivotHelpers';
-import { SnapRuntimeEntry } from './snapSolver';
+import {
+  SnapRuntimeEntry,
+  computeSnapGoalForTarget,
+  getActiveMagnetSnapBehavior,
+  getActiveReceptacleSnapBehavior,
+  matchesSnapFilter,
+} from './snapSolver';
 import { clampJointBodyAngle, stepJointAngularForces } from './jointAngularSolver';
 
 const { Body } = Matter;
@@ -28,9 +34,10 @@ export function computeBidirectionalCollisionGroups(params: {
   entities: Record<string, Entity>;
   snapRuntimeStates: Map<string, SnapRuntimeEntry>;
   unsnapGracePairs: Set<string>;
+  dragApproachPairs?: Set<string>;
   getSnapConfig: (entity: Entity) => SnapBehaviorConfig | undefined;
 }): Map<string, number> {
-  const { entities, snapRuntimeStates, unsnapGracePairs, getSnapConfig } = params;
+  const { entities, snapRuntimeStates, unsnapGracePairs, dragApproachPairs, getSnapConfig } = params;
   const parent = new Map<string, string>();
   const degree = new Map<string, number>();
 
@@ -92,6 +99,18 @@ export function computeBidirectionalCollisionGroups(params: {
     }
   }
 
+  // 4. Drag-near-snap approach pairs (ignore collisions while dragging near a compatible snap target)
+  if (dragApproachPairs) {
+    for (const key of dragApproachPairs) {
+      const parsed = parseBidirectionalPairKey(key);
+      if (!parsed) continue;
+      const [a, b] = parsed;
+      if (entities[a] && entities[b]) {
+        union(a, b);
+      }
+    }
+  }
+
   const rootToGroup = new Map<string, number>();
   const result = new Map<string, number>();
   let nextIdx = 0;
@@ -144,6 +163,95 @@ export function checkWorldColliderBoundsOverlap(
     a.y <= b.y + b.height + marginPx &&
     a.y + a.height + marginPx >= b.y
   );
+}
+
+/**
+ * Computes entity pairs that should temporarily ignore solid collisions because one of them
+ * is actively being dragged near (or overlapping) a compatible Snap target and has
+ * `ignoreCollisionWhileDraggingNearSnap !== false`.
+ */
+export function computeDragNearSnapCollisionPairs(params: {
+  entities: Record<string, Entity>;
+  draggedIds: Set<string>;
+  snapRuntimeStates: Map<string, SnapRuntimeEntry>;
+}): Set<string> {
+  const { entities, draggedIds, snapRuntimeStates } = params;
+  const pairs = new Set<string>();
+  if (draggedIds.size === 0) return pairs;
+
+  const entityList = Object.values(entities);
+
+  const isWithinSnapApproach = (
+    subject: Entity,
+    target: Entity,
+    cfg: SnapBehaviorConfig
+  ): boolean => {
+    if (checkWorldColliderBoundsOverlap(subject, target, 24)) {
+      return true;
+    }
+    const baseRadius = Number.isFinite(cfg.snapRadius) ? Math.max(4, cfg.snapRadius) : 48;
+    const magRadius =
+      cfg.magnetEnabled && Number.isFinite(cfg.magnetRadius) ? Math.max(0, cfg.magnetRadius!) : 0;
+    const approachRadius = Math.max(baseRadius * 2.2, magRadius, 100);
+    const goal = computeSnapGoalForTarget(subject, target, cfg);
+    return goal.metricDistance <= approachRadius;
+  };
+
+  // 1. Magnet objects (snapRole !== 'receptacle')
+  for (const ent of entityList) {
+    if (!ent || ent.disabled || ent.visible === false) continue;
+    const cfg = getActiveMagnetSnapBehavior(ent);
+    if (!cfg || cfg.ignoreCollisionWhileDraggingNearSnap === false) continue;
+    const rt = snapRuntimeStates.get(ent.id);
+    if (rt?.isSnapped) continue;
+
+    for (const cand of entityList) {
+      if (!draggedIds.has(ent.id) && !draggedIds.has(cand.id)) continue;
+      if (
+        !matchesSnapFilter(ent.id, cand, cfg, {
+          subjectEntity: ent,
+          snapRuntimeStates,
+        })
+      ) {
+        continue;
+      }
+      if (isWithinSnapApproach(ent, cand, cfg)) {
+        pairs.add(makeBidirectionalPairKey(ent.id, cand.id));
+      }
+    }
+  }
+
+  // 2. Receptacles (snapRole === 'receptacle')
+  for (const rec of entityList) {
+    if (!rec || rec.disabled || rec.visible === false) continue;
+    const recCfg = getActiveReceptacleSnapBehavior(rec);
+    if (!recCfg || recCfg.ignoreCollisionWhileDraggingNearSnap === false) continue;
+
+    const maxCap = Math.max(1, Math.round(recCfg.maxCapacity ?? 1));
+    let occupied = 0;
+    for (const entry of snapRuntimeStates.values()) {
+      if (entry.isSnapped && entry.snappedTargetId === rec.id) {
+        occupied += 1;
+      }
+    }
+    if (occupied >= maxCap) continue;
+
+    for (const cand of entityList) {
+      if (!draggedIds.has(rec.id) && !draggedIds.has(cand.id)) continue;
+      const candRt = snapRuntimeStates.get(cand.id);
+      if (candRt?.isSnapped) continue;
+      const candMagnetCfg = getActiveMagnetSnapBehavior(cand);
+      if (candMagnetCfg && candMagnetCfg.ignoreCollisionWhileDraggingNearSnap === false) {
+        continue;
+      }
+      if (!matchesSnapFilter(rec.id, cand, recCfg)) continue;
+      if (isWithinSnapApproach(cand, rec, recCfg)) {
+        pairs.add(makeBidirectionalPairKey(rec.id, cand.id));
+      }
+    }
+  }
+
+  return pairs;
 }
 
 export interface BidirectionalJointRuntimeEntry {

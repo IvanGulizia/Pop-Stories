@@ -923,4 +923,213 @@ describe('Canvas libre par défaut, magnétisme drag, état en traction & repèr
     expect(bodyNoPhys.position.x).toBeGreaterThan(290);
     expect(Math.abs(bodyNoPhys.states.default.rotation || 0)).toBeGreaterThan(3);
   });
+
+  it('ignore la collision à l’approche d’une cible Snap compatible pendant le drag sans désactiver les autres obstacles', () => {
+    const runApproachTest = (ignoreNearSnap: boolean) => {
+      resetMatterPhysicsRuntime();
+
+      let head = makeEntity('head', {
+        position: { x: 100, y: 200 },
+        size: { width: 60, height: 60 },
+        behaviors: [
+          {
+            id: 'head-phys',
+            type: 'physics',
+            enabled: true,
+            isStatic: false,
+            gravity: 0,
+            mass: 1,
+            bounce: 0,
+            friction: 0.2,
+          },
+          {
+            id: 'head-drag',
+            type: 'draggable',
+            enabled: true,
+            throwable: false,
+          },
+          {
+            id: 'head-snap',
+            type: 'snap',
+            enabled: true,
+            snapRole: 'magnet_object',
+            targetType: 'entity',
+            targetEntityId: 'body',
+            snapTrigger: 'on_release',
+            snapRadius: 48,
+            snapMode: 'instant',
+            snapAlignment: 'center',
+            attachBehavior: 'bidirectional_joint',
+            ignoreCollisionWhileDraggingNearSnap: ignoreNearSnap,
+          },
+        ],
+      });
+
+      let body = makeEntity('body', {
+        position: { x: 260, y: 200 },
+        size: { width: 60, height: 60 },
+        behaviors: [
+          {
+            id: 'body-phys',
+            type: 'physics',
+            enabled: true,
+            isStatic: false,
+            gravity: 0,
+            mass: 1,
+            bounce: 0,
+            friction: 0.2,
+          },
+        ],
+      });
+
+      let crate = makeEntity('crate', {
+        position: { x: 100, y: 400 },
+        size: { width: 60, height: 60 },
+        behaviors: [
+          {
+            id: 'crate-phys',
+            type: 'physics',
+            enabled: true,
+            isStatic: false,
+            gravity: 0,
+            mass: 1,
+            bounce: 0,
+            friction: 0.2,
+          },
+        ],
+      });
+
+      const stepAll = () => {
+        const res = stepMatterPhysics({
+          entities: { head, body, crate },
+          canvasBounds: { width: 800, height: 600 },
+          deltaTime: 1 / 60,
+        });
+        if (res.updatedTransforms.head?.position) head = { ...head, position: res.updatedTransforms.head.position };
+        if (res.updatedTransforms.body?.position) body = { ...body, position: res.updatedTransforms.body.position };
+        if (res.updatedTransforms.crate?.position) crate = { ...crate, position: res.updatedTransforms.crate.position };
+        return res;
+      };
+
+      stepAll();
+
+      // 1. On approche la tête directement dans le collider du corps (cible Snap)
+      for (let i = 0; i < 6; i++) {
+        setActiveDragPosition('head', { x: 245, y: 200 });
+        stepAll();
+      }
+      const bodyMovedX = Math.abs(body.position.x - 260);
+
+      if (ignoreNearSnap) {
+        // Avec l'option active, le corps n'est PAS bousculé et le relâcher recolle la tête proprement
+        expect(bodyMovedX).toBeLessThan(1);
+        setActiveDragPosition('head', null);
+        const snapTick = stepAll();
+        expect(snapTick.snapEvents?.some((e) => e.phase === 'enter' && e.subjectId === 'head')).toBe(true);
+        expect(Math.abs(body.position.x - 260)).toBeLessThan(2);
+      } else {
+        // Option désactivée : la tête bouscule le corps avant même d'atteindre le centre
+        expect(bodyMovedX).toBeGreaterThan(5);
+        setActiveDragPosition('head', null);
+      }
+
+      // 2. Hors cible Snap, l'obstacle neutre (crate) reste solide pendant le drag
+      if (ignoreNearSnap) {
+        resetMatterPhysicsRuntime();
+        head = { ...head, position: { x: 40, y: 400 } };
+        crate = { ...crate, position: { x: 100, y: 400 } };
+        body = { ...body, position: { x: 700, y: 100 } };
+        stepAll();
+        for (let i = 0; i < 6; i++) {
+          setActiveDragPosition('head', { x: 75 + i * 5, y: 400 });
+          stepAll();
+        }
+        setActiveDragPosition('head', null);
+        expect(crate.position.x).toBeGreaterThan(105);
+      }
+    };
+
+    runApproachTest(true);
+    runApproachTest(false);
+  });
+
+  it('désactive les collisions solides pendant le drag lorsque disableCollisionsWhileDragging est activé', () => {
+    const runGhostDrag = (ghostEnabled: boolean) => {
+      resetMatterPhysicsRuntime();
+
+      let puppet = makeEntity('puppet', {
+        position: { x: 100, y: 200 },
+        size: { width: 50, height: 50 },
+        behaviors: [
+          {
+            id: 'puppet-phys',
+            type: 'physics',
+            enabled: true,
+            isStatic: false,
+            gravity: 0,
+            mass: 1,
+            bounce: 0,
+            friction: 0.2,
+          },
+          {
+            id: 'puppet-beh',
+            type: 'interactive_puppet',
+            enabled: true,
+            throwable: false,
+            disableCollisionsWhileDragging: ghostEnabled,
+          },
+        ],
+      });
+
+      let obstacle = makeEntity('obstacle', {
+        position: { x: 180, y: 200 },
+        size: { width: 50, height: 50 },
+        behaviors: [
+          {
+            id: 'obs-phys',
+            type: 'physics',
+            enabled: true,
+            isStatic: false,
+            gravity: 0,
+            mass: 1,
+            bounce: 0,
+            friction: 0.2,
+          },
+        ],
+      });
+
+      const step = () => {
+        const res = stepMatterPhysics({
+          entities: { puppet, obstacle },
+          canvasBounds: { width: 800, height: 600 },
+          deltaTime: 1 / 60,
+        });
+        if (res.updatedTransforms.puppet?.position) puppet = { ...puppet, position: res.updatedTransforms.puppet.position };
+        if (res.updatedTransforms.obstacle?.position) obstacle = { ...obstacle, position: res.updatedTransforms.obstacle.position };
+      };
+
+      step();
+
+      // Glisser directement à travers l'obstacle
+      for (let i = 1; i <= 8; i++) {
+        setActiveDragPosition('puppet', { x: 100 + i * 10, y: 200 });
+        step();
+      }
+
+      if (ghostEnabled) {
+        expect(Math.abs(obstacle.position.x - 180)).toBeLessThan(0.5);
+        // Lâcher pendant le chevauchement ne doit pas catapulter l'obstacle
+        setActiveDragPosition('puppet', null);
+        step();
+        step();
+        expect(Math.abs(obstacle.position.x - 180)).toBeLessThan(2);
+      } else {
+        setActiveDragPosition('puppet', null);
+        expect(obstacle.position.x).toBeGreaterThan(190);
+      }
+    };
+
+    runGhostDrag(true);
+    runGhostDrag(false);
+  });
 });

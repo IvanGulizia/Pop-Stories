@@ -51,6 +51,7 @@ import {
   BidirectionalJointRuntimeEntry,
   checkWorldColliderBoundsOverlap,
   computeBidirectionalCollisionGroups,
+  computeDragNearSnapCollisionPairs,
   makeBidirectionalPairKey,
   parseBidirectionalPairKey,
   stepBidirectionalPostSubStep,
@@ -508,6 +509,8 @@ const snapJointConstraints = new Map<
   { constraint: Matter.Constraint; targetId: string }
 >();
 const snapUnsnapGracePairs = new Set<string>();
+const snapDragApproachPairs = new Set<string>();
+const prevGhostDragIds = new Set<string>();
 const snapInitAttachedDone = new Set<string>();
 const receptaclePrevSnappedIds = new Map<string, Set<string>>();
 const prevActiveDragIds = new Set<string>();
@@ -1278,6 +1281,8 @@ export function resetMatterPhysicsRuntime() {
   snapRuntimeStates.clear();
   snapJointConstraints.clear();
   snapUnsnapGracePairs.clear();
+  snapDragApproachPairs.clear();
+  prevGhostDragIds.clear();
   snapInitAttachedDone.clear();
   receptaclePrevSnappedIds.clear();
   prevActiveDragIds.clear();
@@ -1592,7 +1597,8 @@ function computeLookAtRotationAndFlip(params: {
 function ensurePhysicsWorld(
   canvasBounds: { width: number; height: number },
   entities: Record<string, Entity>,
-  colliderLayers: SceneLayer[] = []
+  colliderLayers: SceneLayer[] = [],
+  draggedIds?: Set<string>
 ) {
   if (!engine) {
     engine = Engine.create({
@@ -1608,10 +1614,12 @@ function ensurePhysicsWorld(
       if (!idA || !idB) return false;
       const biA = snapJointConstraints.get(idA);
       const biB = snapJointConstraints.get(idB);
+      const pairKeyBi = makeBidirectionalPairKey(idA, idB);
       if (
         (biA && biA.targetId === idB) ||
         (biB && biB.targetId === idA) ||
-        snapUnsnapGracePairs.has(makeBidirectionalPairKey(idA, idB))
+        snapUnsnapGracePairs.has(pairKeyBi) ||
+        snapDragApproachPairs.has(pairKeyBi)
       ) {
         pair.isActive = false;
         return true;
@@ -1864,6 +1872,7 @@ function ensurePhysicsWorld(
     entities,
     snapRuntimeStates,
     unsnapGracePairs: snapUnsnapGracePairs,
+    dragApproachPairs: snapDragApproachPairs,
     getSnapConfig: (ent) => getActiveMagnetSnapBehavior(ent),
   });
 
@@ -1913,6 +1922,7 @@ function ensurePhysicsWorld(
       receptaclePrevSnappedIds.delete(id);
       prevActiveDragIds.delete(id);
       justReleasedDragIds.delete(id);
+      prevGhostDragIds.delete(id);
       debugSnapLinks.delete(id);
       debugSnapMagnets.delete(id);
       drivenAnimationStates.delete(id);
@@ -2012,7 +2022,23 @@ function ensurePhysicsWorld(
       isStatic = false;
     }
 
-    const isSensor =
+    const puppetDragBeh = effectiveBehaviors.find((b) => b.type === 'interactive_puppet') as
+      | InteractivePuppetBehaviorConfig
+      | undefined;
+    const manualDragBeh = effectiveBehaviors.find((b) => b.type === 'draggable') as
+      | DraggableBehaviorConfig
+      | undefined;
+    const hasGhostDrag = Boolean(
+      puppetDragBeh?.disableCollisionsWhileDragging || manualDragBeh?.disableCollisionsWhileDragging
+    );
+    const isGhostDragging = Boolean(draggedIds?.has(entity.id) && hasGhostDrag);
+    if (isGhostDragging) {
+      prevGhostDragIds.add(entity.id);
+    } else {
+      prevGhostDragIds.delete(entity.id);
+    }
+
+    const baseIsSensor =
       colliderMode === 'trigger_only' ||
       (isAttachedChild && effectiveOffset?.disableCollisionsWhileAttached === true)
         ? true
@@ -2021,6 +2047,7 @@ function ensurePhysicsWorld(
         : isCollisionAttachedChild || isBrokenDynamic
         ? false
         : true;
+    const isSensor = baseIsSensor || isGhostDragging;
     const collisionGroup =
       bidirectionalCollisionGroups.get(entity.id) ?? getHierarchyCollisionGroup(entity, entities);
 
@@ -2088,7 +2115,7 @@ function ensurePhysicsWorld(
     const colliderRadius = quantizeDim(geom.radius * Math.max(scaleX, scaleY), 6);
 
     const freezeRotation = physics?.freezeRotation === true;
-    const signature = `${colliderMode}_${colliderType}_${colliderWidth}_${colliderHeight}_${colliderRadius}_${isStatic}_${isSensor}_${freezeRotation}_${isSnapFrozen}_${isSnapBidirectional}`;
+    const signature = `${colliderMode}_${colliderType}_${colliderWidth}_${colliderHeight}_${colliderRadius}_${isStatic}_${baseIsSensor}_${freezeRotation}_${isSnapFrozen}_${isSnapBidirectional}`;
     let body = bodyMap.get(entity.id);
 
     // Si le corps n'existe pas ou si la forme du collider a été modifiée dans le mode dessin, le recréer
@@ -2351,33 +2378,6 @@ export function stepMatterPhysics(params: {
     }
   }
 
-  ensurePhysicsWorld(canvasBounds, liveEntities, colliderLayers);
-  if (!engine) return { updatedTransforms: {} };
-
-  // Nettoyer les paires de grâce post-arrachement une fois que leurs colliders ne se touchent plus
-  for (const key of Array.from(snapUnsnapGracePairs)) {
-    const parsed = parseBidirectionalPairKey(key);
-    if (!parsed) {
-      snapUnsnapGracePairs.delete(key);
-      continue;
-    }
-    const [idA, idB] = parsed;
-    const entA = liveEntities[idA];
-    const entB = liveEntities[idB];
-    if (!entA || entA.disabled || !entB || entB.disabled || !checkWorldColliderBoundsOverlap(entA, entB, 6)) {
-      snapUnsnapGracePairs.delete(key);
-    }
-  }
-
-  const brokenJointIdSet = new Set<string>();
-  const tickFollowStatus = new Map<string, { isMoving: boolean; triggeredJump: boolean }>();
-  const tickWanderingMoved = new Set<string>();
-  const tickPatrolStatus = new Map<string, { isMoving: boolean; turned: boolean }>();
-  const patrolIntendedDirX = new Map<string, HorizontalIntent>();
-  let healthDeathSceneAction: PhysicsTickResult['healthDeathSceneAction'];
-  const entityList = Object.values(liveEntities);
-  const snapLiveEntities: Record<string, Entity> = { ...liveEntities };
-
   const currentDragIds = new Set<string>(Object.keys(activeDragPositions));
   for (const grabId of mouseGrabConstraints.keys()) {
     currentDragIds.add(grabId);
@@ -2391,6 +2391,103 @@ export function stepMatterPhysics(params: {
   justReleasedDragIds.clear();
   prevActiveDragIds.clear();
   currentDragIds.forEach((id) => prevActiveDragIds.add(id));
+
+  // Mettre à jour les paires d'approche Snap (ignorer collision pendant le drag près d'une cible compatible)
+  const prevDragApproachPairs = new Set(snapDragApproachPairs);
+  snapDragApproachPairs.clear();
+  const nextDragApproachPairs = computeDragNearSnapCollisionPairs({
+    entities: liveEntities,
+    draggedIds: currentDragIds,
+    snapRuntimeStates,
+  });
+  nextDragApproachPairs.forEach((k) => snapDragApproachPairs.add(k));
+
+  const doesLiveOrBodyOverlap = (idA: string, idB: string, margin: number): boolean => {
+    const entA = liveEntities[idA];
+    const entB = liveEntities[idB];
+    if (!entA || entA.disabled || !entB || entB.disabled) return false;
+    if (checkWorldColliderBoundsOverlap(entA, entB, margin)) return true;
+    const bA = bodyMap.get(idA);
+    const bB = bodyMap.get(idB);
+    if (bA && bB) {
+      return (
+        bA.bounds.min.x <= bB.bounds.max.x + margin &&
+        bA.bounds.max.x + margin >= bB.bounds.min.x &&
+        bA.bounds.min.y <= bB.bounds.max.y + margin &&
+        bA.bounds.max.y + margin >= bB.bounds.min.y
+      );
+    }
+    return false;
+  };
+
+  // Grâce anti-catapulte au lâcher si l'objet tenu en approche Snap ou en mode fantôme chevauche encore
+  for (const key of prevDragApproachPairs) {
+    if (snapDragApproachPairs.has(key)) continue;
+    const parsed = parseBidirectionalPairKey(key);
+    if (!parsed) continue;
+    const [idA, idB] = parsed;
+    if (!releasedThisTick.has(idA) && !releasedThisTick.has(idB)) continue;
+    if (doesLiveOrBodyOverlap(idA, idB, 2)) {
+      snapUnsnapGracePairs.add(key);
+    }
+  }
+
+  for (const ghostId of Array.from(prevGhostDragIds)) {
+    const ent = liveEntities[ghostId];
+    if (!ent || ent.disabled) {
+      prevGhostDragIds.delete(ghostId);
+      continue;
+    }
+    const st = ent.states?.[ent.currentStateId];
+    const eff = getEffectiveBehaviors(ent, st);
+    const stillGhostDragging =
+      currentDragIds.has(ghostId) &&
+      eff.some(
+        (b) =>
+          (b.type === 'draggable' || b.type === 'interactive_puppet') &&
+          b.enabled !== false &&
+          Boolean((b as DraggableBehaviorConfig | InteractivePuppetBehaviorConfig).disableCollisionsWhileDragging)
+      );
+    if (stillGhostDragging) continue;
+
+    // L'entité vient de quitter le mode fantôme : protéger les corps dynamiques chevauchés jusqu'à séparation
+    if ((ent.colliderMode || 'default') === 'default') {
+      for (const other of Object.values(liveEntities)) {
+        if (!other || other.disabled || other.id === ghostId) continue;
+        if ((other.colliderMode || 'default') !== 'default') continue;
+        const otherBody = bodyMap.get(other.id);
+        if (!otherBody || otherBody.isStatic || otherBody.isSensor) continue;
+        if (doesLiveOrBodyOverlap(ghostId, other.id, 2)) {
+          snapUnsnapGracePairs.add(makeBidirectionalPairKey(ghostId, other.id));
+        }
+      }
+    }
+  }
+
+  // Nettoyer les paires de grâce une fois que leurs colliders ne se touchent plus
+  for (const key of Array.from(snapUnsnapGracePairs)) {
+    const parsed = parseBidirectionalPairKey(key);
+    if (!parsed) {
+      snapUnsnapGracePairs.delete(key);
+      continue;
+    }
+    const [idA, idB] = parsed;
+    if (!doesLiveOrBodyOverlap(idA, idB, 6)) {
+      snapUnsnapGracePairs.delete(key);
+    }
+  }
+
+  ensurePhysicsWorld(canvasBounds, liveEntities, colliderLayers, currentDragIds);
+  if (!engine) return { updatedTransforms: {} };
+
+  const brokenJointIdSet = new Set<string>();
+  const tickFollowStatus = new Map<string, { isMoving: boolean; triggeredJump: boolean }>();
+  const tickWanderingMoved = new Set<string>();
+  const tickPatrolStatus = new Map<string, { isMoving: boolean; turned: boolean }>();
+  const patrolIntendedDirX = new Map<string, HorizontalIntent>();
+  let healthDeathSceneAction: PhysicsTickResult['healthDeathSceneAction'];
+  const entityList = Object.values(liveEntities);
+  const snapLiveEntities: Record<string, Entity> = { ...liveEntities };
 
   keyboardMoveInput.clear();
   keyboardHorizIntent.clear();

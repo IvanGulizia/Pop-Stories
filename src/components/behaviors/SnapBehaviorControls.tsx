@@ -1000,6 +1000,23 @@ export function SnapBehaviorControls({
           />
         )}
 
+        <div className="flex items-center justify-between pt-1 border-t border-slate-100 gap-2">
+          <div>
+            <div className="text-[11px] font-bold text-slate-700">
+              Ignorer la collision à l&apos;approche d&apos;une cible (pendant le drag)
+            </div>
+            <div className="text-[10px] text-slate-400">
+              Évite de bousculer la cible compatible lors du drag pour la recoller proprement
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={b.ignoreCollisionWhileDraggingNearSnap !== false}
+            onChange={(e) => update({ ignoreCollisionWhileDraggingNearSnap: e.target.checked })}
+            className="w-4 h-4 accent-cyan-600 rounded cursor-pointer shrink-0"
+          />
+        </div>
+
         {!isReceptacle && (
           <div className="flex items-center justify-between pt-1 border-t border-slate-100">
             <div>
