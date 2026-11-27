@@ -635,7 +635,9 @@ export interface StrokeWiggleBehaviorConfig extends BaseBehaviorConfig {
   fps: number;                    // Vitesse de cycle des traits 1..24 Hz (défaut 6)
   frameCount: number;             // Nombre de variantes pré-calculées en boucle 2..6 (défaut 4)
   detail?: 'low' | 'medium' | 'high'; // Densité de subdivision des traits (défaut 'medium')
-  segmentStep?: number;           // Pas exact de subdivision en unités SVG (6..48)
+  segmentStep?: number;           // Longueur d'onde / espacement entre décalages en unités SVG (4..80)
+  smoothness?: number;            // Lissage de l'onde le long du trait 0..1 (0 = anguleux, 1 = ondulé souple)
+  displacementMode?: 'xy' | 'normal' | 'mixed'; // Direction de vibration : libre X/Y, perpendiculaire au trait ou mixte
   verticalScale?: number;         // Multiplicateur d'amplitude verticale 0..2 (défaut 1)
   endpointStability?: number;     // Stabilisation des extrémités sur traits ouverts 0..1 (défaut 0)
   seed?: number;                  // Graine aléatoire déterministe 0..999 (défaut 0)
@@ -752,6 +754,12 @@ export interface SnapBehaviorConfig extends BaseBehaviorConfig {
   startAttachedAtInit?: boolean;        // Pré-attaché dès le lancement du mode Play (ex: tête <-> corps)
   springStiffness?: number;             // utilisé si attachBehavior === 'parent_spring' | 'bidirectional_joint'
   springDamping?: number;
+  ignoreTargetCollision?: boolean;      // Si true (défaut), empêche la collision entre les deux corps du joint bidirectionnel (+ grâce à l'arrachement)
+  allowTargetDrag?: boolean;            // Si true (défaut), permet de saisir aussi la cible du joint bidirectionnel à la souris
+  bidirectionalFollowSwing?: boolean;   // Si true (défaut), transmet l'inclinaison / le balancement entre les deux extrémités du joint
+  bidirectionalAngularStiffness?: number; // Raideur du rappel angulaire entre tête et corps 0..1 (défaut 0.45)
+  bidirectionalAngularDamping?: number;   // Amortissement du suivi angulaire 0..1 (défaut 0.35)
+  bidirectionalMaxAngle?: number;         // Débattement angulaire max ±degrés autour de l'axe (0 = libre, défaut 50)
   jointConfig?: Partial<ParentOffset>;  // configuration avancée du joint physique + Break Joint
   magnetEnabled?: boolean;              // champ d'attraction magnétique avant snap
   magnetRadius?: number;                // rayon du champ d'attraction en px (défaut 120)

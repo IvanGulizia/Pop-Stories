@@ -112,6 +112,86 @@ describe('strokeWiggle (Boiling Lines)', () => {
     expect(variants).toHaveLength(1);
     expect(variants[0]).toEqual(samplePaths);
   });
+
+  it('produces smoother, longer-wavelength waves on dense freehand strokes when segmentStep & smoothness increase', () => {
+    // 60 points spaced by 1px each along X (typical Apple Pencil freehand stroke)
+    const densePoints = Array.from({ length: 60 }, (_, i) => ({ x: 40 + i, y: 100 }));
+    const densePath: VectorPath = {
+      id: 'dense-freehand',
+      d: `M 40 100 ${densePoints.slice(1).map((p) => `L ${p.x} ${p.y}`).join(' ')}`,
+      stroke: '#000000',
+      strokeWidth: 4,
+      fill: 'none',
+      type: 'freehand',
+      points: densePoints,
+    };
+
+    const choppy = buildWiggledPathVariants([densePath], {
+      amplitude: 4,
+      frameCount: 2,
+      segmentStep: 4,
+      smoothness: 0,
+      displacementMode: 'xy',
+    });
+    const smooth = buildWiggledPathVariants([densePath], {
+      amplitude: 4,
+      frameCount: 2,
+      segmentStep: 48,
+      smoothness: 0.95,
+      displacementMode: 'xy',
+    });
+
+    const extractYs = (d: string) => {
+      const nums = (d.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+      const ys: number[] = [];
+      for (let i = 1; i < nums.length; i += 2) ys.push(nums[i]);
+      return ys;
+    };
+    const meanAbsDiff = (arr: number[]) => {
+      let sum = 0;
+      for (let i = 1; i < arr.length; i++) sum += Math.abs(arr[i] - arr[i - 1]);
+      return sum / Math.max(1, arr.length - 1);
+    };
+
+    const choppyRoughness = meanAbsDiff(extractYs(choppy[0][0].d));
+    const smoothRoughness = meanAbsDiff(extractYs(smooth[0][0].d));
+    expect(smoothRoughness).toBeLessThan(choppyRoughness * 0.6);
+  });
+
+  it('supports normal and mixed displacement modes along horizontal strokes', () => {
+    const horizPts = Array.from({ length: 20 }, (_, i) => ({ x: 20 + i * 5, y: 100 }));
+    const horizPath: VectorPath = {
+      id: 'horiz-normal',
+      d: `M 20 100 ${horizPts.slice(1).map((p) => `L ${p.x} ${p.y}`).join(' ')}`,
+      stroke: '#000000',
+      strokeWidth: 4,
+      fill: 'none',
+      type: 'freehand',
+      points: horizPts,
+    };
+
+    const normalRes = buildWiggledPathVariants([horizPath], {
+      amplitude: 5,
+      frameCount: 2,
+      segmentStep: 20,
+      smoothness: 0.75,
+      displacementMode: 'normal',
+    });
+    const mixedRes = buildWiggledPathVariants([horizPath], {
+      amplitude: 5,
+      frameCount: 2,
+      segmentStep: 20,
+      smoothness: 0.75,
+      displacementMode: 'mixed',
+    });
+
+    // Normal mode on horizontal segment displaces strictly along Y (X stays close to evenly spaced original)
+    const nums = (normalRes[0][0].d.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+    const ys: number[] = [];
+    for (let i = 1; i < nums.length; i += 2) ys.push(nums[i]);
+    expect(ys.some((y) => Math.abs(y - 100) > 0.2)).toBe(true);
+    expect(normalRes[0][0].d).not.toEqual(mixedRes[0][0].d);
+  });
 });
 
 describe('shouldIgnorePointerForStylusOnly (iPad Apple Pencil palm rejection)', () => {

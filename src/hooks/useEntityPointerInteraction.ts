@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useDragControls, useMotionValue } from 'motion/react';
 import { Entity, EntityState, HealthBehaviorConfig, PhysicsBehaviorConfig, RotateDragBehaviorConfig } from '../types';
-import { useSceneStore } from '../store/useSceneStore';
+import { EMPTY_RECORD, useSceneStore } from '../store/useSceneStore';
 import {
   EntityHitTestContext,
   getEntityColliderBounds,
@@ -22,10 +22,12 @@ import {
   getEffectiveBehaviors,
   getEntityRuntimeHealth,
   hasActiveWorldPin,
+  isActiveBidirectionalDragTarget,
   isEntityDraggable,
   notifyEntityDragLifecycle,
   notifyEntityHoverState,
   releasePuppetGrabHold,
+  resolvePlayEntityDraggable,
   setActiveDragPosition,
   setEntityRuntimeVelocity,
   setPuppetGrabPivot,
@@ -119,13 +121,19 @@ export function useEntityPointerInteraction({
   );
   const currentState: EntityState = entity.states[entity.currentStateId] || fallbackState;
 
+  const playEntities = useSceneStore((state) => (state.appMode === 'play' ? state.entities : EMPTY_RECORD));
+  const isBidirectionalDragTarget =
+    appMode === 'play' && isActiveBidirectionalDragTarget(entity.id, playEntities);
   const {
     canDrag: canDragFromBehavior,
     hasSlider,
     hasRotateDrag,
     throwable,
     maxThrowSpeed,
-  } = isEntityDraggable(entity, currentState);
+  } =
+    appMode === 'play'
+      ? resolvePlayEntityDraggable(entity, currentState, isBidirectionalDragTarget)
+      : isEntityDraggable(entity, currentState);
   const isPlayDisabled = appMode === 'play' && Boolean(entity.disabled);
   const canDrag = !isPlayDisabled && !isResizing && !isRotating && (appMode !== 'play' || canDragFromBehavior);
 
@@ -142,7 +150,15 @@ export function useEntityPointerInteraction({
 
   const getTargetInteractionFlags = (target: Entity) => {
     const tState = target.states[target.currentStateId];
-    const tDrag = isEntityDraggable(target, tState);
+    const tLiveEntities = useSceneStore.getState().entities;
+    const tDrag =
+      appMode === 'play'
+        ? resolvePlayEntityDraggable(
+            target,
+            tState,
+            isActiveBidirectionalDragTarget(target.id, tLiveEntities)
+          )
+        : isEntityDraggable(target, tState);
     const tHasClick = hasEntityClickRules(target, rules);
     return { canDragTarget: tDrag.canDrag, hasClickRulesTarget: tHasClick };
   };
@@ -671,9 +687,13 @@ export function useEntityPointerInteraction({
         return;
       }
       const liveTargetState = liveTarget.states[liveTarget.currentStateId];
-      const liveDragInfo = isEntityDraggable(liveTarget, liveTargetState);
+      const liveDragInfo = resolvePlayEntityDraggable(
+        liveTarget,
+        liveTargetState,
+        isActiveBidirectionalDragTarget(liveTarget.id, liveEntitiesMap)
+      );
       const canDragTarget =
-        target.id === entity.id ? canDrag : !isResizing && !isRotating && liveDragInfo.canDrag;
+        !isResizing && !isRotating && (target.id === entity.id ? liveDragInfo.canDrag && !isPlayDisabled : liveDragInfo.canDrag);
 
       const pt = getSceneEventPosition(e.clientX, e.clientY);
       upHandledForPointerRef.current = false;
@@ -977,7 +997,11 @@ export function useEntityPointerInteraction({
             const latestTarget =
               useSceneStore.getState().entities[liveTarget.id] || liveTarget;
             const latestState = latestTarget.states[latestTarget.currentStateId];
-            const latestDrag = isEntityDraggable(latestTarget, latestState);
+            const latestDrag = resolvePlayEntityDraggable(
+              latestTarget,
+              latestState,
+              isActiveBidirectionalDragTarget(latestTarget.id, useSceneStore.getState().entities)
+            );
 
             endPhysicsGrab(
               liveTarget.id,

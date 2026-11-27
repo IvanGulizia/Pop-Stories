@@ -867,9 +867,121 @@ export function SnapBehaviorControls({
               </div>
             </div>
             {attachBehavior === 'bidirectional_joint' && (
-              <p className="text-[10px] leading-snug text-cyan-900">
-                Liaison symétrique sans hiérarchie : tirer la tête entraîne un corps libre, ou inversement. Si l&apos;un est figé ou épinglé au sol, tirer l&apos;autre le détache au-delà de la distance d&apos;arrachement.
-              </p>
+              <div className="space-y-2 pt-1.5 border-t border-cyan-200/70">
+                <p className="text-[10px] leading-snug text-cyan-900">
+                  Liaison symétrique sans hiérarchie : tirer la tête entraîne un corps libre, ou inversement. Si l&apos;un est figé ou épinglé au sol, tirer l&apos;autre le détache au-delà de la distance d&apos;arrachement.
+                </p>
+
+                <div className="grid grid-cols-1 gap-1.5">
+                  <label className="flex items-center justify-between gap-2 cursor-pointer">
+                    <span className="text-[11px] font-bold text-slate-700">
+                      Ignorer collisions entre objets liés
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={b.ignoreTargetCollision !== false}
+                      onChange={(e) => update({ ignoreTargetCollision: e.target.checked })}
+                      className="w-4 h-4 accent-cyan-600 rounded cursor-pointer shrink-0"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between gap-2 cursor-pointer">
+                    <span className="text-[11px] font-bold text-slate-700">
+                      Autoriser le drag depuis la cible
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={b.allowTargetDrag !== false}
+                      onChange={(e) => update({ allowTargetDrag: e.target.checked })}
+                      className="w-4 h-4 accent-cyan-600 rounded cursor-pointer shrink-0"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between gap-2 cursor-pointer">
+                    <span className="text-[11px] font-bold text-slate-700">
+                      Suivre le balancement (Marionnette)
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={b.bidirectionalFollowSwing !== false}
+                      onChange={(e) => update({ bidirectionalFollowSwing: e.target.checked })}
+                      className="w-4 h-4 accent-cyan-600 rounded cursor-pointer shrink-0"
+                    />
+                  </label>
+                </div>
+
+                {b.bidirectionalFollowSwing !== false && (
+                  <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-cyan-200/50">
+                    <div>
+                      <div className="flex justify-between text-[10px] font-bold text-slate-600">
+                        <span>Couplage</span>
+                        <EditableNumericValue
+                          value={b.bidirectionalAngularStiffness ?? 45}
+                          precision={0}
+                          onChange={(v) => update({ bidirectionalAngularStiffness: v })}
+                          className="font-mono font-bold text-cyan-700 cursor-text"
+                        />
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="180"
+                        step="5"
+                        value={Math.max(0, Math.min(180, b.bidirectionalAngularStiffness ?? 45))}
+                        onChange={(e) =>
+                          update({ bidirectionalAngularStiffness: parseFloat(e.target.value) })
+                        }
+                        className="w-full accent-cyan-600"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[10px] font-bold text-slate-600">
+                        <span>Amorti rot.</span>
+                        <EditableNumericValue
+                          value={b.bidirectionalAngularDamping ?? 8}
+                          precision={1}
+                          onChange={(v) => update({ bidirectionalAngularDamping: v })}
+                          className="font-mono font-bold text-cyan-700 cursor-text"
+                        />
+                      </div>
+                      <input
+                        type="range"
+                        min="1"
+                        max="30"
+                        step="0.5"
+                        value={Math.max(1, Math.min(30, b.bidirectionalAngularDamping ?? 8))}
+                        onChange={(e) =>
+                          update({ bidirectionalAngularDamping: parseFloat(e.target.value) })
+                        }
+                        className="w-full accent-cyan-600"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[10px] font-bold text-slate-600">
+                        <span>Angle max</span>
+                        <EditableNumericValue
+                          value={b.bidirectionalMaxAngle ?? 55}
+                          unit="°"
+                          precision={0}
+                          onChange={(v) => update({ bidirectionalMaxAngle: v })}
+                          className="font-mono font-bold text-cyan-700 cursor-text"
+                        />
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="160"
+                        step="5"
+                        value={Math.max(0, Math.min(160, b.bidirectionalMaxAngle ?? 55))}
+                        onChange={(e) =>
+                          update({ bidirectionalMaxAngle: parseFloat(e.target.value) })
+                        }
+                        className="w-full accent-cyan-600"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}

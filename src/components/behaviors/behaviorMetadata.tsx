@@ -273,6 +273,8 @@ export function createDefaultBehaviorConfig(type: BehaviorType, entity: Entity):
         fps: 6,
         frameCount: 4,
         detail: 'medium',
+        smoothness: 0.75,
+        displacementMode: 'xy',
         affectFill: true,
         previewInEdit: false,
       } as StrokeWiggleBehaviorConfig;

@@ -1022,10 +1022,10 @@ export function StrokeWiggleBehaviorControls({
         />
       </div>
 
-      {/* Finesse de subdivision (preset ou pas exact en px) */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+      {/* Finesse / Longueur d'onde (preset ou pas exact en px) */}
+      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
         <div className="flex items-center justify-between">
-          <span className="font-bold text-slate-700 text-xs">Finesse de vibration</span>
+          <span className="font-bold text-slate-700 text-xs">Espacement des vibrations</span>
           {hasCustomStep && (
             <button
               type="button"
@@ -1038,8 +1038,8 @@ export function StrokeWiggleBehaviorControls({
         </div>
         <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-lg">
           {([
-            { id: 'low', label: 'Douce', step: 28 },
-            { id: 'medium', label: 'Normale', step: 16 },
+            { id: 'low', label: 'Douce', step: 38 },
+            { id: 'medium', label: 'Normale', step: 20 },
             { id: 'high', label: 'Nerveuse', step: 10 },
           ] as const).map((opt) => (
             <button
@@ -1056,17 +1056,17 @@ export function StrokeWiggleBehaviorControls({
             </button>
           ))}
         </div>
-        <div className="pt-1">
+        <div>
           <div className="flex justify-between items-center text-[11px] text-slate-600 mb-0.5">
-            <span>Pas exact (px)</span>
+            <span>Longueur d&apos;onde (px)</span>
             <EditableNumericValue
-              value={b.segmentStep ?? ((b.detail || 'medium') === 'low' ? 28 : (b.detail || 'medium') === 'high' ? 10 : 16)}
+              value={b.segmentStep ?? ((b.detail || 'medium') === 'low' ? 38 : (b.detail || 'medium') === 'high' ? 10 : 20)}
               unit="px"
               precision={0}
               displayText={
                 hasCustomStep
                   ? `${b.segmentStep}px`
-                  : `Auto (${(b.detail || 'medium') === 'low' ? 28 : (b.detail || 'medium') === 'high' ? 10 : 16}px)`
+                  : `Auto (${(b.detail || 'medium') === 'low' ? 38 : (b.detail || 'medium') === 'high' ? 10 : 20}px)`
               }
               onChange={(val) => update({ segmentStep: val })}
               className="font-mono font-bold text-cyan-700"
@@ -1074,16 +1074,70 @@ export function StrokeWiggleBehaviorControls({
           </div>
           <input
             type="range"
-            min="6"
-            max="48"
+            min="4"
+            max="80"
             step="2"
             value={Math.max(
-              6,
-              Math.min(48, b.segmentStep ?? ((b.detail || 'medium') === 'low' ? 28 : (b.detail || 'medium') === 'high' ? 10 : 16))
+              4,
+              Math.min(80, b.segmentStep ?? ((b.detail || 'medium') === 'low' ? 38 : (b.detail || 'medium') === 'high' ? 10 : 20))
             )}
             onChange={(e) => update({ segmentStep: parseInt(e.target.value, 10) })}
             className="w-full accent-cyan-600 cursor-pointer"
           />
+          <span className="text-[10px] text-slate-400 block">
+            Plus la valeur est grande, plus les crêtes d&apos;ondulation sont espacées
+          </span>
+        </div>
+
+        {/* Lissage de l'onde */}
+        <div className="pt-1 border-t border-slate-100">
+          <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
+            <div>
+              <span className="font-bold">Lissage de l&apos;onde</span>
+              <span className="text-[10px] text-slate-400 block">Anguleux (0%) ↔ Ondulation souple (100%)</span>
+            </div>
+            <EditableNumericValue
+              value={Math.round((b.smoothness ?? 0.75) * 100)}
+              unit="%"
+              precision={0}
+              onChange={(pct) => update({ smoothness: pct / 100 })}
+              className="font-mono font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded text-[11px] shrink-0"
+            />
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={Math.max(0, Math.min(1, b.smoothness ?? 0.75))}
+            onChange={(e) => update({ smoothness: parseFloat(e.target.value) })}
+            className="w-full accent-cyan-600 cursor-pointer"
+          />
+        </div>
+
+        {/* Direction de vibration */}
+        <div className="pt-1 border-t border-slate-100">
+          <span className="font-bold text-slate-700 text-xs block mb-1">Direction de déformation</span>
+          <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-lg">
+            {([
+              { id: 'xy', label: 'Libre X/Y' },
+              { id: 'normal', label: 'Normale' },
+              { id: 'mixed', label: 'Mixte' },
+            ] as const).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => update({ displacementMode: opt.id })}
+                className={`py-1 px-1.5 rounded-md text-[10px] font-bold cursor-pointer transition-all ${
+                  (b.displacementMode || 'xy') === opt.id
+                    ? 'bg-cyan-600 text-white shadow-2xs'
+                    : 'text-slate-600 hover:bg-white/70'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

@@ -178,3 +178,24 @@ export function isEntityDraggable(entity: Entity, currentState?: EntityState): {
     grabAngularDamping: 8,
   };
 }
+
+/**
+ * Variante utilisée en mode Play pour rendre également déplaçable à la souris
+ * la cible actuellement attachée par un `bidirectional_joint` (`allowTargetDrag !== false`).
+ */
+export function resolvePlayEntityDraggable(
+  entity: Entity,
+  currentState?: EntityState,
+  isBidirectionalDragTarget?: boolean
+) {
+  const base = isEntityDraggable(entity, currentState);
+  if (!base.canDrag && isBidirectionalDragTarget) {
+    return {
+      ...base,
+      canDrag: true,
+      precisePhysicsGrab: base.hasDynamicPhysics,
+      throwable: base.hasDynamicPhysics,
+    };
+  }
+  return base;
+}

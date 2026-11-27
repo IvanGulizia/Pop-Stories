@@ -9,7 +9,9 @@ import {
   stepSnapSolver,
 } from '../utils/physics/snapSolver';
 import {
+  isActiveBidirectionalDragTarget,
   resetMatterPhysicsRuntime,
+  resolvePlayEntityDraggable,
   setActiveDragPosition,
   stepMatterPhysics,
 } from '../utils/matterPhysicsEngine';
@@ -794,5 +796,131 @@ describe('Canvas libre par défaut, magnétisme drag, état en traction & repèr
     expect(tBreak.snapEvents?.some((e) => e.phase === 'exit' && e.subjectId === 'head')).toBe(true);
     expect(curHead.currentStateId).toBe('st-broken');
     expect(curHead.parentId).toBeUndefined();
+  });
+
+  it('empêche l’explosion de colliders qui se chevauchent, autorise le drag cible sans physique, et propage le balancement marionnette', () => {
+    resetMatterPhysicsRuntime();
+
+    const makePart = (id: string, x: number, y: number, opts?: { withPhysics?: boolean; isHead?: boolean }) =>
+      makeEntity(id, {
+        position: { x, y },
+        size: { width: 120, height: 120 },
+        states: {
+          default: { id: 'default', name: 'Normal', color: '#64748b', scale: 1, rotation: 0 },
+        },
+        behaviors: [
+          ...(opts?.withPhysics
+            ? [
+                {
+                  id: `${id}-phys`,
+                  type: 'physics' as const,
+                  enabled: true,
+                  isStatic: false,
+                  gravity: 0,
+                  mass: 1,
+                  bounce: 0.4,
+                  friction: 0.4,
+                },
+              ]
+            : []),
+          ...(opts?.isHead
+            ? [
+                {
+                  id: 'head-puppet',
+                  type: 'interactive_puppet' as const,
+                  enabled: true,
+                  precisePhysicsGrab: false,
+                  swingMode: 'both' as const,
+                  pendulumMaxAngle: 35,
+                },
+                {
+                  id: 'head-snap',
+                  type: 'snap' as const,
+                  enabled: true,
+                  snapRole: 'magnet_object' as const,
+                  targetType: 'entity' as const,
+                  targetEntityId: 'body',
+                  snapTrigger: 'on_release' as const,
+                  snapRadius: 48,
+                  snapMode: 'instant' as const,
+                  snapAlignment: 'anchor_offset' as const,
+                  sourceAnchor: 'bottom' as const,
+                  targetAnchor: 'top' as const,
+                  offsetX: 0,
+                  offsetY: 30, // chevauchement volontaire de 30px entre tête et corps
+                  attachBehavior: 'bidirectional_joint' as const,
+                  startAttachedAtInit: true,
+                  springStiffness: 0.75,
+                  springDamping: 0.25,
+                  allowPullUnsnap: true,
+                  unsnapDistance: 80,
+                },
+              ]
+            : []),
+        ],
+      });
+
+    // Test 1 : Deux corps avec physique active et colliders qui se chevauchent de 30px ne doivent PAS exploser
+    let headDyn = makePart('head', 200, 120, { withPhysics: true, isHead: true });
+    let bodyDyn = makePart('body', 200, 210, { withPhysics: true });
+
+    for (let i = 0; i < 20; i++) {
+      const res = stepMatterPhysics({
+        entities: { head: headDyn, body: bodyDyn },
+        canvasBounds: { width: 800, height: 600 },
+        deltaTime: 1 / 60,
+      });
+      if (res.updatedTransforms.head?.position) headDyn = { ...headDyn, position: res.updatedTransforms.head.position };
+      if (res.updatedTransforms.body?.position) bodyDyn = { ...bodyDyn, position: res.updatedTransforms.body.position };
+    }
+    expect(Math.abs(headDyn.position.x - bodyDyn.position.x)).toBeLessThan(3);
+    expect(Math.abs((headDyn.position.y + 120) - (bodyDyn.position.y + 30))).toBeLessThan(6);
+
+    // Le corps sans composant Draggable/Puppet devient draggable en Play quand lié par bidirectional_joint
+    const entitiesMap = { head: headDyn, body: bodyDyn };
+    const isBiTarget = isActiveBidirectionalDragTarget('body', entitiesMap);
+    expect(isBiTarget).toBe(true);
+    expect(resolvePlayEntityDraggable(bodyDyn, bodyDyn.states.default, isBiTarget).canDrag).toBe(true);
+
+    // Test 2 : Corps SANS physique (physics disabled) suit le déplacement ET le balancement (runtimeTilt) de la tête
+    resetMatterPhysicsRuntime();
+    let headNoPhys = makePart('head', 200, 120, { withPhysics: false, isHead: true });
+    let bodyNoPhys = makePart('body', 200, 210, { withPhysics: false });
+
+    const stepNoPhys = () => {
+      const res = stepMatterPhysics({
+        entities: { head: headNoPhys, body: bodyNoPhys },
+        canvasBounds: { width: 800, height: 600 },
+        deltaTime: 1 / 60,
+      });
+      if (res.updatedTransforms.head) {
+        const p = res.updatedTransforms.head;
+        headNoPhys = {
+          ...headNoPhys,
+          ...(p.position ? { position: p.position } : {}),
+          ...(p.runtimeTilt !== undefined ? { runtimeTilt: p.runtimeTilt } : {}),
+        };
+      }
+      if (res.updatedTransforms.body) {
+        const p = res.updatedTransforms.body;
+        bodyNoPhys = {
+          ...bodyNoPhys,
+          ...(p.position ? { position: p.position } : {}),
+          ...(p.rotation !== undefined
+            ? { states: { ...bodyNoPhys.states, default: { ...bodyNoPhys.states.default, rotation: p.rotation } } }
+            : {}),
+        };
+      }
+    };
+
+    stepNoPhys();
+    // Tirer rapidement la tête vers la droite génère du balancement (runtimeTilt) -> le corps sans physique doit suivre X et tourner
+    for (let i = 1; i <= 15; i++) {
+      setActiveDragPosition('head', { x: 200 + i * 10, y: 120 });
+      stepNoPhys();
+    }
+    setActiveDragPosition('head', null);
+    expect(bodyNoPhys.position.x).toBeGreaterThan(290);
+    expect(Math.abs(bodyNoPhys.states.default.rotation || 0)).toBeGreaterThan(3);
   });
 });
