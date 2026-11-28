@@ -13,6 +13,7 @@ import {
 import { EMPTY_LIST, EMPTY_RECORD, useSceneStore } from '../../store/useSceneStore';
 import { remapPresetConfigSprites } from './ParticlePresetLibrary';
 import { ParticleOriginDraft } from './ParticleActionOriginSection';
+import { formatRoleLabel } from '../rulebook/ruleBookTypes';
 
 interface QuickBurstPreset {
   label: string;
@@ -157,6 +158,8 @@ interface ParticleInspectorSummaryProps {
   summary: ParticleSummarySnapshot;
   originDraft?: ParticleOriginDraft;
   allowTarget?: boolean;
+  subjectHint?: string;
+  targetHint?: string;
   customParticles: CustomParticlePreset[];
   onOpenStudio: (initialView?: 'studio' | 'draw_custom') => void;
   onApplySavedPreset: (mapped: ParticleEffectConfig) => void;
@@ -176,6 +179,8 @@ export const ParticleInspectorSummary: React.FC<ParticleInspectorSummaryProps> =
   summary,
   originDraft,
   allowTarget = false,
+  subjectHint,
+  targetHint,
   customParticles,
   onOpenStudio,
   onApplySavedPreset,
@@ -280,8 +285,8 @@ export const ParticleInspectorSummary: React.FC<ParticleInspectorSummaryProps> =
             }
             className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-800 max-w-[190px]"
           >
-            <option value="subject">Sujet</option>
-            {allowTarget && <option value="target">Cible touchée</option>}
+            <option value="subject">{formatRoleLabel('Sujet', subjectHint)}</option>
+            {allowTarget && <option value="target">{formatRoleLabel('Cible touchée', targetHint)}</option>}
             <option value="event_point">Point exact (Collision / Clic)</option>
             <option value="mouse">Position du curseur</option>
             <option value="coordinates">Coordonnées (X, Y)</option>
@@ -391,7 +396,12 @@ export const ParticleInspectorSummary: React.FC<ParticleInspectorSummaryProps> =
             </span>
           ) : (
             <span className="px-1.5 py-0.5 rounded-md bg-slate-100">
-              Origine: {ORIGIN_LABELS[originMode] || originMode}
+              Origine:{' '}
+              {originMode === 'subject'
+                ? formatRoleLabel('Sujet', subjectHint)
+                : originMode === 'target'
+                ? formatRoleLabel('Cible touchée', targetHint)
+                : ORIGIN_LABELS[originMode] || originMode}
             </span>
           )}
           {timedDuration > 0 && (

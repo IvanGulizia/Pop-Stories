@@ -2,7 +2,13 @@ import React from 'react';
 import { ChevronRight } from 'lucide-react';
 import { Entity } from '../../types';
 import { EntityMiniPreview } from '../EntityMiniPreview';
-import { EntityOption, WizardData } from './ruleBookTypes';
+import {
+  EntityOption,
+  WizardData,
+  formatRoleLabel,
+  resolveWizardSubjectHint,
+  resolveWizardTargetHint,
+} from './ruleBookTypes';
 
 interface WizardStep2ObjectsProps {
   activeWizard: WizardData;
@@ -29,6 +35,17 @@ export function WizardStep2Objects({
   allProjectTags,
   getEntityObj,
 }: WizardStep2ObjectsProps) {
+  const subjectHint = resolveWizardSubjectHint(activeWizard, {
+    entities,
+    availableEntityOptions,
+    getEntityObj,
+  });
+  const targetHint = resolveWizardTargetHint(activeWizard, {
+    entities,
+    availableEntityOptions,
+    getEntityObj,
+  });
+
   if (isWizardGlobal) {
     return (
       <div className="p-8 bg-indigo-50/60 border-2 border-indigo-200 rounded-3xl text-center space-y-4 max-w-lg mx-auto">
@@ -140,7 +157,7 @@ export function WizardStep2Objects({
         activeWizard.subjectSubStep === 'choose_state' ? (
           <div className="space-y-4">
             <div className="text-xs font-bold text-slate-600">
-              Choisissez si la règle requiert un état précis pour le Sujet {getEntityObj(activeWizard.subjectType)?.name || activeWizard.subjectType} :
+              Choisissez si la règle requiert un état précis pour le {formatRoleLabel('Sujet', subjectHint)} :
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               <button
@@ -449,7 +466,7 @@ export function WizardStep2Objects({
         activeWizard.targetSubStep === 'choose_state' ? (
           <div className="space-y-4">
             <div className="text-xs font-bold text-slate-600">
-              Choisissez si la règle requiert un état précis pour la Cible {getEntityObj(activeWizard.targetType)?.name || activeWizard.targetType} :
+              Choisissez si la règle requiert un état précis pour la {formatRoleLabel('Cible', targetHint)} :
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               <button
@@ -472,7 +489,7 @@ export function WizardStep2Objects({
                   <div className="text-xs font-black text-slate-800 group-hover:text-indigo-700">
                     Tous les états
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">Toute apparence de la cible</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Toute apparence de la {formatRoleLabel('cible', targetHint)}</div>
                 </div>
               </button>
 
@@ -593,7 +610,7 @@ export function WizardStep2Objects({
             ) : activeWizard.targetMode === 'tag' ? (
               <div className="p-4 bg-purple-50/50 border-2 border-purple-200 rounded-3xl space-y-3">
                 <div className="text-xs font-bold text-purple-950">
-                  Déclencher lorsque le Sujet touche n'importe quel objet portant ce #Tag (ex: projectiles, ennemis créés en jeu) :
+                  Déclencher lorsque le {formatRoleLabel('Sujet', subjectHint)} touche n'importe quel objet portant ce #Tag (ex: projectiles, ennemis créés en jeu) :
                 </div>
                 {allProjectTags.length > 0 && (
                   <div className="flex flex-wrap gap-2">

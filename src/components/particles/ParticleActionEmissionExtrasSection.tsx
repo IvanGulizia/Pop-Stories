@@ -1,6 +1,6 @@
 import React from 'react';
 import { Entity, ParticleDirectionMode } from '../../types';
-import { EntityOption } from '../rulebook/ruleBookTypes';
+import { EntityOption, formatRoleLabel } from '../rulebook/ruleBookTypes';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 
 export interface ParticleEmissionExtrasDraft {
@@ -21,6 +21,8 @@ export interface ParticleEmissionExtrasDraft {
 interface ParticleActionEmissionExtrasSectionProps {
   draft: ParticleEmissionExtrasDraft;
   allowTarget: boolean;
+  subjectHint?: string;
+  targetHint?: string;
   entities: Record<string, Entity>;
   availableEntityOptions: EntityOption[];
   allProjectTags: string[];
@@ -31,6 +33,8 @@ interface ParticleActionEmissionExtrasSectionProps {
 export const ParticleActionEmissionExtrasSection: React.FC<ParticleActionEmissionExtrasSectionProps> = ({
   draft,
   allowTarget,
+  subjectHint,
+  targetHint,
   entities,
   availableEntityOptions,
   allProjectTags,
@@ -67,8 +71,14 @@ export const ParticleActionEmissionExtrasSection: React.FC<ParticleActionEmissio
             <option value="angle">Angle fixe (°)</option>
             <option value="facing">Sens de l&apos;entité (rotation / flip)</option>
             <option value="mouse">Vers la souris</option>
-            <option value="toward_target">Vers une cible</option>
-            <option value="away_target">À l&apos;opposé d&apos;une cible</option>
+            <option value="toward_target">
+              {allowTarget ? `Vers ${formatRoleLabel('Cible', targetHint)}` : 'Vers une cible'}
+            </option>
+            <option value="away_target">
+              {allowTarget
+                ? `À l'opposé de ${formatRoleLabel('Cible', targetHint)}`
+                : "À l'opposé d'une cible"}
+            </option>
           </select>
         </div>
 
@@ -105,8 +115,8 @@ export const ParticleActionEmissionExtrasSection: React.FC<ParticleActionEmissio
                 onChange={(e) => onPatch({ particleDirectionTargetMode: e.target.value as any })}
                 className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-800"
               >
-                <option value="subject">Sujet de la règle</option>
-                {allowTarget && <option value="target">Cible touchée</option>}
+                <option value="subject">{formatRoleLabel('Sujet de la règle', subjectHint)}</option>
+                {allowTarget && <option value="target">{formatRoleLabel('Cible touchée', targetHint)}</option>}
                 <option value="entity">Entité de la scène</option>
                 <option value="type">Par Type</option>
                 <option value="tag">Par #Tag</option>

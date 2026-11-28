@@ -37,7 +37,12 @@ import { soundSynth } from '../utils/sound';
 import {
   ActiveModal,
   WizardData,
+  formatRoleLabel,
   getSceneTransitionShortLabel,
+  resolveTriggerSubjectHint,
+  resolveTriggerTargetHint,
+  resolveWizardSubjectHint,
+  resolveWizardTargetHint,
 } from './rulebook/ruleBookTypes';
 import {
   formatEntityStateName,
@@ -1334,6 +1339,7 @@ export function RuleBook() {
             const subjectStateName = rule.trigger.subjectStateId
               ? subjectEntity?.states[rule.trigger.subjectStateId]?.name || rule.trigger.subjectStateId
               : 'Tous les états';
+            const subjectRoleLabel = formatRoleLabel('Sujet', subjectDisplayLabel);
 
             // Find target display info (Type / #Tag / Instance / Tous)
             const targetMode =
@@ -1356,6 +1362,7 @@ export function RuleBook() {
             const targetStateName = rule.trigger.targetStateId
               ? targetEntity?.states[rule.trigger.targetStateId]?.name || rule.trigger.targetStateId
               : 'Tous les états';
+            const targetRoleLabel = formatRoleLabel('Cible', targetDisplayLabel);
 
             // Event badge info
             let eventName = 'Contact';
@@ -1404,7 +1411,7 @@ export function RuleBook() {
             } else if (rule.trigger.type === 'proximity') {
               eventName = `Proximité (<${rule.trigger.proximityDistance || 80}px)`;
               eventIcon = '📏';
-              eventSub = 'Approche de Cible';
+              eventSub = `Approche de ${targetRoleLabel}`;
             } else if (rule.trigger.type === 'boundary') {
               const isVp = rule.trigger.boundarySpace === 'viewport';
               eventName = isVp ? 'Bord du Cadre' : 'Bord du Monde';
@@ -1458,9 +1465,9 @@ export function RuleBook() {
                   : '';
               const stompTag = rule.trigger.collisionRequireDownward ? ' • Stomp' : '';
               if (rule.trigger.phase === 'collision_release') {
-                eventName = 'Relâcher sur cible';
+                eventName = `Relâcher sur ${targetRoleLabel}`;
                 eventIcon = '🎯';
-                eventSub = `Relâché sur cible${sideTag}${stompTag}`;
+                eventSub = `Relâché sur ${targetRoleLabel}${sideTag}${stompTag}`;
               } else if (rule.trigger.phase === 'exit' || rule.trigger.phase === 'release') {
                 eventName = 'Collision Sortie';
                 eventIcon = '💨';
@@ -2180,8 +2187,8 @@ export function RuleBook() {
                           }`}
                           title={isGlobalTrigger ? 'Événement Global / Système' : "Cliquer pour changer l'objet ou son état requis"}
                         >
-                          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600">
-                            {isGlobalTrigger ? '2. Portée' : '2. Sujet'}
+                          <div className="w-full text-[10px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600 truncate">
+                            {isGlobalTrigger ? '2. Portée' : `2. ${subjectRoleLabel}`}
                           </div>
 
                           {isGlobalTrigger ? (
@@ -2283,8 +2290,8 @@ export function RuleBook() {
                             }`}
                             title="Cliquer pour changer la cible, son tag ou son état requis"
                           >
-                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600">
-                              Cible
+                            <div className="w-full text-[10px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600 truncate">
+                              {targetRoleLabel}
                             </div>
 
                             {targetMode === 'any' ? (
@@ -2372,9 +2379,9 @@ export function RuleBook() {
                             actionBadge = "Changer d'état";
                             const targetLabel =
                               act.targetMode === 'subject'
-                                ? `Sujet (${subjectOpt?.label || subjectType})`
+                                ? subjectRoleLabel
                                 : act.targetMode === 'target'
-                                ? `Cible (${targetOpt?.label || targetType})`
+                                ? targetRoleLabel
                                 : act.targetMode === 'last_spawned'
                                 ? 'Dernier créé'
                                 : act.targetMode === 'tag' && act.targetTag
@@ -2395,9 +2402,9 @@ export function RuleBook() {
                             actionBadge = 'Détruire';
                             const targetLabel =
                               act.targetMode === 'subject'
-                                ? `Sujet (${subjectOpt?.label || subjectType})`
+                                ? subjectRoleLabel
                                 : act.targetMode === 'target'
-                                ? `Cible (${targetOpt?.label || targetType})`
+                                ? targetRoleLabel
                                 : act.targetMode === 'last_spawned'
                                 ? 'Dernier créé'
                                 : act.targetMode === 'tag' && act.targetTag
@@ -2418,9 +2425,9 @@ export function RuleBook() {
                                 : act.spawnReferenceMode === 'entity' && act.spawnReferenceEntityId
                                 ? `Sur ${entities[act.spawnReferenceEntityId]?.name || 'Entité'}`
                                 : act.spawnLocationMode === 'at_target'
-                                ? 'Sur Cible'
+                                ? `Sur ${targetRoleLabel}`
                                 : act.spawnLocationMode === 'at_subject'
-                                ? 'Sur Sujet'
+                                ? `Sur ${subjectRoleLabel}`
                                 : act.spawnLocationMode === 'random'
                                 ? act.spawnRandomScope === 'zone'
                                   ? 'Aléatoire (Zone)'
@@ -2480,9 +2487,9 @@ export function RuleBook() {
                                 : '';
                             actionDetail = `Lier à ${
                               act.parentTargetMode === 'subject'
-                                ? 'Sujet'
+                                ? subjectRoleLabel
                                 : act.parentTargetMode === 'target'
-                                ? 'Cible'
+                                ? targetRoleLabel
                                 : act.parentTargetMode === 'last_spawned'
                                 ? 'Dernier créé'
                                 : act.parentTargetMode === 'tag' && act.parentEntityTag
@@ -2501,9 +2508,9 @@ export function RuleBook() {
                             actionBadge = 'Aimanter (Snap)';
                             const snapDst =
                               act.snapTargetMode === 'subject'
-                                ? 'Sujet'
+                                ? subjectRoleLabel
                                 : act.snapTargetMode === 'target'
-                                ? 'Cible'
+                                ? targetRoleLabel
                                 : act.snapTargetMode === 'last_spawned'
                                 ? 'Dernier créé'
                                 : act.snapTargetMode === 'tag' && act.snapTargetTag
@@ -2512,7 +2519,7 @@ export function RuleBook() {
                                 ? entities[act.snapTargetEntityId]?.name || 'Entité'
                                 : getEntityObj(act.snapTargetEntityType)?.name ||
                                   act.snapTargetEntityType ||
-                                  'Cible';
+                                  targetRoleLabel;
                             actionDetail = `Coller à ${snapDst}`;
                           } else if (act.type === 'unsnap') {
                             actionBadge = 'Désaimanter';
@@ -2542,9 +2549,9 @@ export function RuleBook() {
                                 : act.moveDirectionMode === 'facing'
                                 ? 'Direction regard'
                                 : act.moveDirectionMode === 'toward_target'
-                                ? 'Vers référence'
+                                ? formatRoleLabel('Vers cible', targetDisplayLabel)
                                 : act.moveDirectionMode === 'away_target'
-                                ? 'À l’opposé'
+                                ? formatRoleLabel('À l’opposé', targetDisplayLabel)
                                 : act.moveCardinal === 'left'
                                 ? 'Gauche ←'
                                 : act.moveCardinal === 'up'
@@ -2562,9 +2569,9 @@ export function RuleBook() {
                                 : act.impulseDirectionMode === 'facing'
                                 ? 'Regard'
                                 : act.impulseDirectionMode === 'toward_target'
-                                ? 'Vers cible'
+                                ? formatRoleLabel('Vers cible', targetDisplayLabel)
                                 : act.impulseDirectionMode === 'away_target'
-                                ? 'Repousser'
+                                ? formatRoleLabel('Repousser', targetDisplayLabel)
                                 : act.impulseCardinal === 'left'
                                 ? '← Gauche'
                                 : act.impulseCardinal === 'right'
@@ -2582,9 +2589,9 @@ export function RuleBook() {
                                 : 'Désactiver Entité';
                             const targetTxt =
                               act.targetMode === 'subject'
-                                ? 'Sujet'
+                                ? subjectRoleLabel
                                 : act.targetMode === 'target'
-                                ? 'Cible'
+                                ? targetRoleLabel
                                 : act.targetMode === 'last_spawned'
                                 ? 'Dernier créé'
                                 : act.targetMode === 'instance' && act.targetId
@@ -2647,9 +2654,9 @@ export function RuleBook() {
                                 act.cameraFollowMode === 'none'
                                   ? 'Arrêter suivi'
                                   : act.cameraTargetMode === 'subject'
-                                  ? 'Suivre le Sujet'
+                                  ? `Suivre ${subjectRoleLabel}`
                                   : act.cameraTargetMode === 'target'
-                                  ? 'Suivre la Cible'
+                                  ? `Suivre ${targetRoleLabel}`
                                   : act.cameraTargetMode === 'last_spawned'
                                   ? 'Suivre dernier apparu'
                                   : effFollowMode === 'entity'
@@ -2658,11 +2665,11 @@ export function RuleBook() {
                                   ? `Suivre ${followTypeName || 'Objet'}`
                                   : effFollowMode === 'tag'
                                   ? `Suivre #${act.cameraTargetTag || 'tag'}`
-                                  : 'Suivre cible';
+                                  : `Suivre ${targetRoleLabel}`;
                             } else if (cmd === 'move_to') {
                               actionDetail = act.cameraPosition
                                 ? `Aller à (${Math.round(act.cameraPosition.x)}, ${Math.round(act.cameraPosition.y)})`
-                                : 'Centrer sur cible';
+                                : `Centrer sur ${act.cameraTargetMode === 'subject' ? subjectRoleLabel : targetRoleLabel}`;
                             } else {
                               actionDetail = `Reset (${(act.cameraDuration ?? 0.4).toFixed(2)}s)`;
                             }
@@ -2993,9 +3000,9 @@ export function RuleBook() {
                                         ? 'Reset Caméra'
                                         : 'Screen Shake'
                                       : act.targetMode === 'subject'
-                                      ? `Sujet (${subjectOpt?.label || 'Objet'})`
+                                      ? subjectRoleLabel
                                       : act.targetMode === 'target'
-                                      ? `Cible (${targetOpt?.label || 'Objet'})`
+                                      ? targetRoleLabel
                                       : act.targetMode === 'last_spawned'
                                       ? '✨ Dernier objet créé'
                                       : act.targetMode === 'instance' && act.targetId
@@ -3175,22 +3182,58 @@ export function RuleBook() {
             ? activeModal
             : null;
         if (!src) return null;
+        const editingRule =
+          particleEditorContext.target !== 'wizard' && activeModal && activeModal.type === 'action'
+            ? rules.find((r) => r.id === activeModal.ruleId)
+            : undefined;
         const triggerType =
           particleEditorContext.target === 'wizard'
             ? activeWizard?.triggerType
-            : activeModal && activeModal.type === 'action'
-            ? rules.find((r) => r.id === activeModal.ruleId)?.trigger.type
-            : undefined;
+            : editingRule?.trigger.type;
         const allowTarget =
           triggerType === 'collision' ||
           triggerType === 'proximity' ||
           triggerType === 'target_arrived' ||
           triggerType === 'snap';
+        const particleSubjectHint =
+          particleEditorContext.target === 'wizard' && activeWizard
+            ? resolveWizardSubjectHint(activeWizard, {
+                entities,
+                customArchetypes,
+                availableEntityOptions,
+                getEntityObj,
+              })
+            : editingRule
+            ? resolveTriggerSubjectHint(editingRule.trigger, {
+                entities,
+                customArchetypes,
+                availableEntityOptions,
+                getEntityObj,
+              })
+            : undefined;
+        const particleTargetHint =
+          particleEditorContext.target === 'wizard' && activeWizard
+            ? resolveWizardTargetHint(activeWizard, {
+                entities,
+                customArchetypes,
+                availableEntityOptions,
+                getEntityObj,
+              })
+            : editingRule
+            ? resolveTriggerTargetHint(editingRule.trigger, {
+                entities,
+                customArchetypes,
+                availableEntityOptions,
+                getEntityObj,
+              })
+            : undefined;
         return (
           <ParticleEditorModal
             isOpen={true}
             mode="burst"
             allowTarget={allowTarget}
+            subjectHint={particleSubjectHint}
+            targetHint={particleTargetHint}
             initialView={particleEditorContext.initialView || 'studio'}
             initialConfig={{
               shape: src.particleShape || 'circle',

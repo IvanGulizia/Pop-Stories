@@ -1,7 +1,13 @@
 import React from 'react';
 import { DynamicRule, RuleTrigger } from '../../types';
 import { ChevronLeft, ChevronRight, X, Check } from 'lucide-react';
-import { ActiveModal, EntityOption } from './ruleBookTypes';
+import {
+  ActiveModal,
+  EntityOption,
+  formatRoleLabel,
+  resolveTriggerSubjectHint,
+  resolveTriggerTargetHint,
+} from './ruleBookTypes';
 import { useSceneStore, EMPTY_RECORD } from '../../store/useSceneStore';
 import { TriggerLimitsSection } from './TriggerLimitsSection';
 import { KeyboardKeySelector } from './KeyboardKeySelector';
@@ -22,7 +28,19 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
   availableEntityOptions,
 }) => {
   const initialGameVariables = useSceneStore((s) => s.initialGameVariables || EMPTY_RECORD);
+  const entities = useSceneStore((s) => s.entities || EMPTY_RECORD);
+  const customArchetypes = useSceneStore((s) => s.customArchetypes || EMPTY_RECORD);
   const variableNames = Array.from(new Set(['score', ...Object.keys(initialGameVariables)])).sort();
+  const subjectHint = resolveTriggerSubjectHint(rule.trigger, {
+    entities,
+    customArchetypes,
+    availableEntityOptions,
+  });
+  const targetHint = resolveTriggerTargetHint(rule.trigger, {
+    entities,
+    customArchetypes,
+    availableEntityOptions,
+  });
   const modalTriggerType = activeModal.triggerType || rule.trigger.type;
   const modalSubStep = activeModal.subStep || 'main';
   const modalTriggerPhase = activeModal.triggerPhase ?? rule.trigger.phase;
@@ -468,8 +486,8 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                       }
                       className="w-full text-xs font-bold bg-white text-slate-900 border border-indigo-200 rounded-xl px-2.5 py-2 outline-none cursor-pointer"
                     >
-                      <option value="subject">Le Sujet (ex. pied du joueur)</option>
-                      <option value="target">La Cible (ex. tête du Goomba)</option>
+                      <option value="subject">{formatRoleLabel('Le Sujet', subjectHint)} (ex. pied du joueur)</option>
+                      <option value="target">{formatRoleLabel('La Cible', targetHint)} (ex. tête du Goomba)</option>
                     </select>
                   </div>
                 </div>
@@ -582,7 +600,7 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                   💥 Collisions &amp; Contacts entre Objets
                 </div>
                 <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full">
-                  Avec Cible
+                  {formatRoleLabel('Avec Cible', targetHint)}
                 </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
@@ -644,7 +662,7 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                   </div>
                   <div>
                     <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
-                      Lâché sur Cible
+                      {formatRoleLabel('Lâché sur Cible', targetHint)}
                     </div>
                     <div className="text-[10px] text-slate-500">Relâché au-dessus</div>
                   </div>
@@ -725,8 +743,8 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                     }
                     className="px-2 py-1 text-[11px] font-bold bg-white border border-indigo-200 rounded-lg text-slate-800 outline-none cursor-pointer"
                   >
-                    <option value="subject">Mesuré sur : Sujet</option>
-                    <option value="target">Mesuré sur : Cible</option>
+                    <option value="subject">Mesuré sur : {formatRoleLabel('Sujet', subjectHint)}</option>
+                    <option value="target">Mesuré sur : {formatRoleLabel('Cible', targetHint)}</option>
                   </select>
                   <label className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-900 cursor-pointer ml-auto">
                     <input
@@ -977,7 +995,7 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
                 >
                   <span className="text-lg">📏</span>
                   <div>
-                    <div className="text-xs font-black text-slate-900">Approche Cible</div>
+                    <div className="text-xs font-black text-slate-900">{formatRoleLabel('Approche Cible', targetHint)}</div>
                     <div className="text-[9px] text-slate-500">Rayon en px →</div>
                   </div>
                 </button>
@@ -1062,7 +1080,7 @@ export const RuleEventModal: React.FC<RuleEventModalProps> = ({
               </div>
 
               <div className="bg-lime-50/60 p-3 rounded-2xl border border-lime-300/80 space-y-1.5 sm:col-span-4">
-                <div className="text-[11px] font-black uppercase text-lime-900">🏁 Arrivée sur Cible (Suivre / Aller vers)</div>
+                <div className="text-[11px] font-black uppercase text-lime-900">🏁 {formatRoleLabel('Arrivée sur Cible', targetHint)} (Suivre / Aller vers)</div>
                 <button
                   type="button"
                   onClick={() =>

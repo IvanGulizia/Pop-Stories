@@ -2,7 +2,7 @@ import React from 'react';
 import { Check } from 'lucide-react';
 import { ActionTargetMode, Entity, EntityType, ParentOffset, RuleAction } from '../../types';
 import { ParentOffsetFieldsEditor } from '../shared/ParentOffsetFieldsEditor';
-import { EntityOption } from './ruleBookTypes';
+import { EntityOption, formatRoleLabel } from './ruleBookTypes';
 
 export interface AttachParentConfigDraft {
   parentChildMode?: ActionTargetMode;
@@ -27,6 +27,8 @@ interface AttachParentConfigEditorProps {
   entities: Record<string, Entity>;
   availableEntityOptions: EntityOption[];
   allProjectTags: string[];
+  subjectHint?: string;
+  targetHint?: string;
 }
 
 export const AttachParentConfigEditor: React.FC<AttachParentConfigEditorProps> = ({
@@ -38,6 +40,8 @@ export const AttachParentConfigEditor: React.FC<AttachParentConfigEditorProps> =
   entities,
   availableEntityOptions,
   allProjectTags,
+  subjectHint,
+  targetHint,
 }) => {
   const entityList = Object.values(entities);
   const firstEntityId = entityList[0]?.id || '';
@@ -101,8 +105,8 @@ export const AttachParentConfigEditor: React.FC<AttachParentConfigEditorProps> =
             onChange={(e) => onPatch({ parentChildMode: e.target.value as ActionTargetMode })}
             className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
           >
-            {!isGlobal && <option value="subject">Sujet</option>}
-            {isRelational && <option value="target">Cible touchée</option>}
+            {!isGlobal && <option value="subject">{formatRoleLabel('Sujet', subjectHint)}</option>}
+            {isRelational && <option value="target">{formatRoleLabel('Cible touchée', targetHint)}</option>}
             <option value="last_spawned">Dernier objet créé</option>
             <option value="instance">Entité de la scène</option>
             <option value="type">Par Type</option>
@@ -173,8 +177,8 @@ export const AttachParentConfigEditor: React.FC<AttachParentConfigEditorProps> =
             onChange={(e) => onPatch({ parentTargetMode: e.target.value as any })}
             className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
           >
-            {!isGlobal && <option value="subject">Sujet</option>}
-            {isRelational && <option value="target">Cible touchée</option>}
+            {!isGlobal && <option value="subject">{formatRoleLabel('Sujet', subjectHint)}</option>}
+            {isRelational && <option value="target">{formatRoleLabel('Cible touchée', targetHint)}</option>}
             <option value="entity">Entité de la scène</option>
             <option value="type">Par Type</option>
             <option value="tag">Par Tag (#tag)</option>

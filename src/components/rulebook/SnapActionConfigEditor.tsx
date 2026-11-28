@@ -13,7 +13,7 @@ import {
   SnapAttachBehavior,
 } from '../../types';
 import { useSceneStore } from '../../store/useSceneStore';
-import { EntityOption } from './ruleBookTypes';
+import { EntityOption, formatRoleLabel } from './ruleBookTypes';
 import { SnapJointConfigFields } from '../shared/SnapJointConfigFields';
 
 const ANCHOR_OPTIONS: { value: SnapAnchorPreset; label: string }[] = [
@@ -67,6 +67,8 @@ interface SnapActionConfigEditorProps {
   entities: Record<string, Entity>;
   availableEntityOptions: EntityOption[];
   allProjectTags: string[];
+  subjectHint?: string;
+  targetHint?: string;
 }
 
 export const SnapActionConfigEditor: React.FC<SnapActionConfigEditorProps> = ({
@@ -81,6 +83,8 @@ export const SnapActionConfigEditor: React.FC<SnapActionConfigEditorProps> = ({
   entities,
   availableEntityOptions,
   allProjectTags,
+  subjectHint,
+  targetHint,
 }) => {
   const pickerRequestId = useId();
   const startSnapPinCanvasPick = useSceneStore((s) => s.startSnapPinCanvasPick);
@@ -218,8 +222,8 @@ export const SnapActionConfigEditor: React.FC<SnapActionConfigEditorProps> = ({
               onChange={(e) => onPatch({ targetMode: e.target.value as ActionTargetMode })}
               className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
             >
-              {!isGlobal && <option value="subject">Sujet</option>}
-              {isRelational && <option value="target">Cible touchée</option>}
+              {!isGlobal && <option value="subject">{formatRoleLabel('Sujet', subjectHint)}</option>}
+              {isRelational && <option value="target">{formatRoleLabel('Cible touchée', targetHint)}</option>}
               <option value="last_spawned">Dernier objet créé</option>
               <option value="instance">Entité précise</option>
               <option value="type">Par Type</option>
@@ -403,8 +407,8 @@ export const SnapActionConfigEditor: React.FC<SnapActionConfigEditorProps> = ({
             onChange={(e) => onPatch({ targetMode: e.target.value as ActionTargetMode })}
             className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
           >
-            {!isGlobal && <option value="subject">Sujet</option>}
-            {isRelational && <option value="target">Cible touchée</option>}
+            {!isGlobal && <option value="subject">{formatRoleLabel('Sujet', subjectHint)}</option>}
+            {isRelational && <option value="target">{formatRoleLabel('Cible touchée', targetHint)}</option>}
             <option value="last_spawned">Dernier objet créé</option>
             <option value="instance">Entité précise</option>
             <option value="type">Par Type</option>
@@ -473,8 +477,8 @@ export const SnapActionConfigEditor: React.FC<SnapActionConfigEditorProps> = ({
             onChange={(e) => onPatch({ snapTargetMode: e.target.value as any })}
             className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
           >
-            {!isGlobal && <option value="subject">Sujet</option>}
-            {isRelational && <option value="target">Cible touchée</option>}
+            {!isGlobal && <option value="subject">{formatRoleLabel('Sujet', subjectHint)}</option>}
+            {isRelational && <option value="target">{formatRoleLabel('Cible touchée', targetHint)}</option>}
             <option value="entity">Entité de la scène</option>
             <option value="type">Par Type</option>
             <option value="tag">Par Tag (#tag)</option>

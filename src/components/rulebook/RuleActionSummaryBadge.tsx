@@ -8,8 +8,14 @@ import {
   CustomParticlePreset,
 } from '../../types';
 import { EntityMiniPreview } from '../EntityMiniPreview';
-import { ActionModalSubStep, getSceneTransitionShortLabel } from './ruleBookTypes';
-import { useSceneStore, EMPTY_LIST } from '../../store/useSceneStore';
+import {
+  ActionModalSubStep,
+  formatRoleLabel,
+  getSceneTransitionShortLabel,
+  resolveTriggerSubjectHint,
+  resolveTriggerTargetHint,
+} from './ruleBookTypes';
+import { useSceneStore, EMPTY_LIST, EMPTY_RECORD } from '../../store/useSceneStore';
 
 export function getEntityObjFromList(
   type: string | undefined,
@@ -85,6 +91,19 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
   openRuleActionModal,
 }) => {
   const scenes = useSceneStore((s) => s.scenes || EMPTY_LIST);
+  const customArchetypes = useSceneStore((s) => s.customArchetypes || EMPTY_RECORD);
+  const subjectHint = resolveTriggerSubjectHint(trigger, {
+    entities,
+    customArchetypes,
+    getEntityObj,
+  });
+  const targetHint = resolveTriggerTargetHint(trigger, {
+    entities,
+    customArchetypes,
+    getEntityObj,
+  });
+  const subjectRoleLabel = formatRoleLabel('Sujet', subjectHint);
+  const targetRoleLabel = formatRoleLabel('Cible', targetHint);
   const canJump = Boolean(rule && actIdx !== undefined);
   const jumpMain = (e: React.MouseEvent) => {
     if (!rule || actIdx === undefined) return;
@@ -106,7 +125,11 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
     const targetEntObj = getEntityObj(targetType);
     const humanStateName = formatStateName(act.targetStateId, targetEntObj);
     const targetLabel =
-      act.targetMode === 'last_spawned'
+      act.targetMode === 'subject'
+        ? subjectRoleLabel
+        : act.targetMode === 'target'
+        ? targetRoleLabel
+        : act.targetMode === 'last_spawned'
         ? 'Dernier créé'
         : act.targetMode === 'tag' && act.targetTag
         ? `#${act.targetTag}`
@@ -144,7 +167,11 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         : act.targetType || trigger.targetType || trigger.subjectType;
     const targetEntObj = getEntityObj(targetType);
     const targetLabel =
-      act.targetMode === 'last_spawned'
+      act.targetMode === 'subject'
+        ? subjectRoleLabel
+        : act.targetMode === 'target'
+        ? targetRoleLabel
+        : act.targetMode === 'last_spawned'
         ? 'Dernier créé'
         : act.targetMode === 'tag' && act.targetTag
         ? `#${act.targetTag}`
@@ -193,7 +220,11 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         : act.targetType || trigger.targetType || trigger.subjectType;
     const targetEntObj = getEntityObj(targetType);
     const targetLabel =
-      act.targetMode === 'last_spawned'
+      act.targetMode === 'subject'
+        ? subjectRoleLabel
+        : act.targetMode === 'target'
+        ? targetRoleLabel
+        : act.targetMode === 'last_spawned'
         ? 'Dernier créé'
         : act.targetMode === 'tag' && act.targetTag
         ? `#${act.targetTag}`
@@ -312,9 +343,9 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         : act.particleDirectionMode === 'mouse'
         ? ' • ➔Souris'
         : act.particleDirectionMode === 'toward_target'
-        ? ' • ➔Cible'
+        ? ` • ➔${formatRoleLabel('Cible', targetHint)}`
         : act.particleDirectionMode === 'away_target'
-        ? ' • Opposé'
+        ? ` • ${formatRoleLabel('Opposé', targetHint)}`
         : '';
     return (
       <div
@@ -338,9 +369,9 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
   if (act.type === 'attach_to_parent') {
     const childLabel =
       act.targetMode === 'subject'
-        ? 'Sujet'
+        ? subjectRoleLabel
         : act.targetMode === 'target'
-        ? 'Cible'
+        ? targetRoleLabel
         : act.targetMode === 'last_spawned'
         ? 'Dernier créé'
         : act.targetMode === 'instance' && act.targetId
@@ -350,9 +381,9 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         : getEntityObj(act.targetType)?.name || 'Enfant';
     const parentLabel =
       act.parentTargetMode === 'subject'
-        ? 'Sujet'
+        ? subjectRoleLabel
         : act.parentTargetMode === 'target'
-        ? 'Cible'
+        ? targetRoleLabel
         : act.parentTargetMode === 'last_spawned'
         ? 'Dernier créé'
         : act.parentTargetMode === 'tag' && act.parentEntityTag
@@ -389,9 +420,9 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
   if (act.type === 'detach_parent') {
     const targetLabel =
       act.targetMode === 'subject'
-        ? 'Sujet'
+        ? subjectRoleLabel
         : act.targetMode === 'target'
-        ? 'Cible'
+        ? targetRoleLabel
         : act.targetMode === 'last_spawned'
         ? 'Dernier créé'
         : act.targetMode === 'tag' && act.targetTag
@@ -423,9 +454,9 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
   if (act.type === 'snap_to') {
     const srcLabel =
       act.targetMode === 'subject'
-        ? 'Sujet'
+        ? subjectRoleLabel
         : act.targetMode === 'target'
-        ? 'Cible'
+        ? targetRoleLabel
         : act.targetMode === 'last_spawned'
         ? 'Dernier créé'
         : act.targetMode === 'instance' && act.targetId
@@ -435,16 +466,16 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         : getEntityObj(act.targetType)?.name || 'Objet';
     const dstLabel =
       act.snapTargetMode === 'subject'
-        ? 'Sujet'
+        ? subjectRoleLabel
         : act.snapTargetMode === 'target'
-        ? 'Cible'
+        ? targetRoleLabel
         : act.snapTargetMode === 'last_spawned'
         ? 'Dernier créé'
         : act.snapTargetMode === 'entity' && act.snapTargetEntityId
         ? entities[act.snapTargetEntityId]?.name || 'Cible'
         : act.snapTargetMode === 'tag' && act.snapTargetTag
         ? `#${act.snapTargetTag}`
-        : getEntityObj(act.snapTargetEntityType)?.name || 'Cible';
+        : getEntityObj(act.snapTargetEntityType)?.name || targetRoleLabel;
     return (
       <div
         role={canJump ? 'button' : undefined}
@@ -467,9 +498,9 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
   if (act.type === 'unsnap') {
     const targetLabel =
       act.targetMode === 'subject'
-        ? 'Sujet'
+        ? subjectRoleLabel
         : act.targetMode === 'target'
-        ? 'Cible'
+        ? targetRoleLabel
         : act.targetMode === 'last_spawned'
         ? 'Dernier créé'
         : act.targetMode === 'instance' && act.targetId
@@ -503,9 +534,9 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
   if (act.type === 'control_animation') {
     const targetLabel =
       act.targetMode === 'subject'
-        ? 'Sujet'
+        ? subjectRoleLabel
         : act.targetMode === 'target'
-        ? 'Cible'
+        ? targetRoleLabel
         : act.targetMode === 'last_spawned'
         ? 'Dernier créé'
         : act.targetMode === 'instance' && act.targetId
@@ -546,9 +577,9 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
   if (act.type === 'move_entity') {
     const targetLabel =
       act.targetMode === 'subject'
-        ? 'Sujet'
+        ? subjectRoleLabel
         : act.targetMode === 'target'
-        ? 'Cible'
+        ? targetRoleLabel
         : act.targetMode === 'last_spawned'
         ? 'Dernier créé'
         : act.targetMode === 'tag' && act.targetTag
@@ -561,9 +592,9 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         : act.moveDirectionMode === 'facing'
         ? 'Regard'
         : act.moveDirectionMode === 'toward_target'
-        ? 'Vers cible'
+        ? formatRoleLabel('Vers cible', targetHint)
         : act.moveDirectionMode === 'away_target'
-        ? 'Fuir cible'
+        ? formatRoleLabel('Fuir cible', targetHint)
         : act.moveCardinal === 'left'
         ? '←'
         : act.moveCardinal === 'up'
@@ -593,9 +624,9 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
   if (act.type === 'apply_impulse') {
     const targetLabel =
       act.targetMode === 'subject'
-        ? 'Sujet'
+        ? subjectRoleLabel
         : act.targetMode === 'target'
-        ? 'Cible'
+        ? targetRoleLabel
         : act.targetMode === 'last_spawned'
         ? 'Dernier créé'
         : act.targetMode === 'instance' && act.targetId
@@ -610,9 +641,9 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         : act.impulseDirectionMode === 'facing'
         ? 'Regard'
         : act.impulseDirectionMode === 'toward_target'
-        ? 'Vers cible'
+        ? formatRoleLabel('Vers cible', targetHint)
         : act.impulseDirectionMode === 'away_target'
-        ? 'Repousser'
+        ? formatRoleLabel('Repousser', targetHint)
         : act.impulseCardinal === 'left'
         ? '←'
         : act.impulseCardinal === 'right'
@@ -642,9 +673,9 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
   if (act.type === 'set_entity_enabled') {
     const targetLabel =
       act.targetMode === 'subject'
-        ? 'Sujet'
+        ? subjectRoleLabel
         : act.targetMode === 'target'
-        ? 'Cible'
+        ? targetRoleLabel
         : act.targetMode === 'last_spawned'
         ? 'Dernier créé'
         : act.targetMode === 'instance' && act.targetId
@@ -813,15 +844,23 @@ export const RuleActionSummaryBadge: React.FC<RuleActionSummaryBadgeProps> = ({
         : cmd === 'follow'
         ? act.cameraFollowMode === 'none'
           ? 'Suivi OFF'
-          : act.cameraFollowMode === 'tag' && act.cameraTargetTag
+          : act.cameraTargetMode === 'subject'
+          ? `Suivre ${subjectRoleLabel}`
+          : act.cameraTargetMode === 'target'
+          ? `Suivre ${targetRoleLabel}`
+          : act.cameraTargetMode === 'last_spawned'
+          ? 'Suivre dernier'
+          : (act.cameraFollowMode === 'tag' || act.cameraTargetMode === 'tag') && act.cameraTargetTag
           ? `Suivre #${act.cameraTargetTag}`
-          : act.cameraFollowMode === 'type' && act.cameraTargetType
+          : act.cameraFollowMode === 'entity' && act.cameraTargetId
+          ? `Suivre ${entities[act.cameraTargetId]?.name || 'Entité'}`
+          : (act.cameraFollowMode === 'type' || act.cameraTargetMode === 'type') && act.cameraTargetType
           ? `Suivre ${getEntityObj(act.cameraTargetType)?.name || act.cameraTargetType}`
-          : 'Suivre cible'
+          : `Suivre ${targetRoleLabel}`
         : cmd === 'move_to'
         ? act.cameraPosition
           ? `Aller (${Math.round(act.cameraPosition.x)}, ${Math.round(act.cameraPosition.y)})`
-          : 'Aller sur cible'
+          : `Aller sur ${act.cameraTargetMode === 'subject' ? subjectRoleLabel : targetRoleLabel}`
         : 'Reset';
     return (
       <div

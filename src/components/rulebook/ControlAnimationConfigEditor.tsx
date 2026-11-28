@@ -1,7 +1,7 @@
 import React from 'react';
 import { Check, Clapperboard } from 'lucide-react';
 import { ActionTargetMode, Entity, EntityId, EntityType, RuleAction } from '../../types';
-import { EntityOption } from './ruleBookTypes';
+import { EntityOption, formatRoleLabel } from './ruleBookTypes';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 
 export interface ControlAnimationConfigDraft {
@@ -27,6 +27,8 @@ interface ControlAnimationConfigEditorProps {
   entities: Record<string, Entity>;
   availableEntityOptions: EntityOption[];
   allProjectTags: string[];
+  subjectHint?: string;
+  targetHint?: string;
 }
 
 export const ControlAnimationConfigEditor: React.FC<ControlAnimationConfigEditorProps> = ({
@@ -40,6 +42,8 @@ export const ControlAnimationConfigEditor: React.FC<ControlAnimationConfigEditor
   entities,
   availableEntityOptions,
   allProjectTags,
+  subjectHint,
+  targetHint,
 }) => {
   const entityList = Object.values(entities);
   const firstEntityId = entityList[0]?.id || '';
@@ -87,8 +91,8 @@ export const ControlAnimationConfigEditor: React.FC<ControlAnimationConfigEditor
             onChange={(e) => onPatch({ targetMode: e.target.value as ActionTargetMode })}
             className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
           >
-            {!isGlobal && <option value="subject">Sujet</option>}
-            {isRelational && <option value="target">Cible touchée</option>}
+            {!isGlobal && <option value="subject">{formatRoleLabel('Sujet', subjectHint)}</option>}
+            {isRelational && <option value="target">{formatRoleLabel('Cible touchée', targetHint)}</option>}
             <option value="last_spawned">Dernier objet créé</option>
             <option value="instance">Entité précise</option>
             <option value="type">Par Type</option>

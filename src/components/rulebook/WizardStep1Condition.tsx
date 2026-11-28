@@ -1,6 +1,11 @@
 import React from 'react';
 import { ArrowRight, ChevronRight } from 'lucide-react';
-import { WizardData } from './ruleBookTypes';
+import {
+  WizardData,
+  formatRoleLabel,
+  resolveWizardSubjectHint,
+  resolveWizardTargetHint,
+} from './ruleBookTypes';
 import { useSceneStore, EMPTY_RECORD } from '../../store/useSceneStore';
 import { TriggerLimitsSection } from './TriggerLimitsSection';
 import { KeyboardKeySelector } from './KeyboardKeySelector';
@@ -19,7 +24,19 @@ export function WizardStep1Condition({
   isWizardRelational,
 }: WizardStep1ConditionProps) {
   const initialGameVariables = useSceneStore((s) => s.initialGameVariables || EMPTY_RECORD);
+  const entities = useSceneStore((s) => s.entities || EMPTY_RECORD);
+  const customArchetypes = useSceneStore((s) => s.customArchetypes || EMPTY_RECORD);
   const variableNames = Array.from(new Set(['score', ...Object.keys(initialGameVariables)])).sort();
+  const subjectHint = resolveWizardSubjectHint(activeWizard, {
+    entities,
+    customArchetypes,
+    fallbackLabel: 'à choisir',
+  });
+  const targetHint = resolveWizardTargetHint(activeWizard, {
+    entities,
+    customArchetypes,
+    fallbackLabel: 'à choisir',
+  });
 
   if (activeWizard.actionSubStep === 'key_picker') {
     return (
@@ -375,8 +392,8 @@ export function WizardStep1Condition({
                   }
                   className="w-full text-xs font-bold bg-white text-slate-900 border border-indigo-200 rounded-xl px-2.5 py-2 outline-none cursor-pointer"
                 >
-                  <option value="subject">Le Sujet</option>
-                  <option value="target">La Cible</option>
+                  <option value="subject">{formatRoleLabel('Le Sujet', subjectHint)}</option>
+                  <option value="target">{formatRoleLabel('La Cible', targetHint)}</option>
                 </select>
               </div>
             </div>
@@ -501,8 +518,8 @@ export function WizardStep1Condition({
               {isWizardGlobal
                 ? "Continuer vers l'Action (Étape 3)"
                 : isWizardRelational
-                ? 'Continuer vers les Objets Sujet & Cible (Étape 2)'
-                : "Continuer vers l'Objet Sujet (Étape 2)"}
+                ? `Continuer vers les Objets ${formatRoleLabel('Sujet', subjectHint)} & ${formatRoleLabel('Cible', targetHint)} (Étape 2)`
+                : `Continuer vers l'Objet ${formatRoleLabel('Sujet', subjectHint)} (Étape 2)`}
             </span>
             <ArrowRight className="w-4 h-4" />
           </button>
@@ -518,7 +535,7 @@ export function WizardStep1Condition({
         <div className="flex items-center gap-2 text-xs font-black uppercase text-indigo-800 tracking-wider flex-wrap">
           <span>💥 Collisions &amp; Contacts entre Objets</span>
           <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full">
-            Sujet ↔ Cible
+            {formatRoleLabel('Sujet', subjectHint)} ↔ {formatRoleLabel('Cible', targetHint)}
           </span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -630,10 +647,10 @@ export function WizardStep1Condition({
             </div>
             <div>
               <div className="text-xs font-black text-slate-900 group-hover:text-indigo-800">
-                Lâché sur Cible
+                {formatRoleLabel('Lâché sur Cible', targetHint)}
               </div>
               <div className="text-[10px] text-slate-500 mt-0.5">
-                Relâchement du sujet pendant la collision
+                Relâchement du {formatRoleLabel('sujet', subjectHint)} pendant la collision
               </div>
             </div>
           </button>
@@ -698,8 +715,8 @@ export function WizardStep1Condition({
               }
               className="px-2.5 py-1 text-[11px] font-bold bg-white border border-indigo-200 rounded-lg text-slate-800 outline-none cursor-pointer"
             >
-              <option value="subject">Mesuré sur : Sujet</option>
-              <option value="target">Mesuré sur : Cible</option>
+              <option value="subject">Mesuré sur : {formatRoleLabel('Sujet', subjectHint)}</option>
+              <option value="target">Mesuré sur : {formatRoleLabel('Cible', targetHint)}</option>
             </select>
             <label className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-900 cursor-pointer ml-auto">
               <input
@@ -721,7 +738,7 @@ export function WizardStep1Condition({
         <div className="flex items-center gap-2 text-xs font-black uppercase text-purple-800 tracking-wider">
           <span>👆 Clics &amp; Pointeur Souris / Tactile</span>
           <span className="text-[10px] font-bold text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full">
-            1 Objet (Sujet)
+            1 Objet ({formatRoleLabel('Sujet', subjectHint)})
           </span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1074,7 +1091,7 @@ export function WizardStep1Condition({
           >
             <span className="text-xl">📏</span>
             <div>
-              <div className="text-xs font-black text-slate-900">Approche Cible</div>
+              <div className="text-xs font-black text-slate-900">{formatRoleLabel('Approche Cible', targetHint)}</div>
               <div className="text-[9px] text-slate-500">Définir le rayon en px →</div>
             </div>
           </button>
@@ -1176,7 +1193,7 @@ export function WizardStep1Condition({
             <div>
               <div className="text-xs font-black text-slate-900">La caméra commence à suivre une entité</div>
               <div className="text-[10px] text-slate-500">
-                Choisissez l&apos;entité (Sujet) à l&apos;étape 2
+                Choisissez l&apos;entité ({formatRoleLabel('Sujet', subjectHint)}) à l&apos;étape 2
               </div>
             </div>
           </button>
@@ -1184,9 +1201,9 @@ export function WizardStep1Condition({
 
         <div className="bg-lime-50/60 p-3.5 rounded-2xl border border-lime-300/80 space-y-2 sm:col-span-4">
           <div className="flex items-center justify-between gap-2">
-            <div className="text-xs font-black uppercase text-lime-900">🏁 Arrivée sur Cible (Suivre / Aller vers)</div>
+            <div className="text-xs font-black uppercase text-lime-900">🏁 {formatRoleLabel('Arrivée sur Cible', targetHint)} (Suivre / Aller vers)</div>
             <span className="text-[10px] font-bold text-lime-800 bg-lime-100 px-2 py-0.5 rounded-full">
-              Sujet → Cible (Optionnelle)
+              {formatRoleLabel('Sujet', subjectHint)} → {formatRoleLabel('Cible', targetHint)} (Optionnelle)
             </span>
           </div>
           <button
@@ -1224,7 +1241,7 @@ export function WizardStep1Condition({
           <div className="flex items-center justify-between gap-2">
             <div className="text-xs font-black uppercase text-cyan-900">🧲 Aimant / Snap</div>
             <span className="text-[10px] font-bold text-cyan-800 bg-cyan-100 px-2 py-0.5 rounded-full">
-              Sujet → Cible (Optionnelle)
+              {formatRoleLabel('Sujet', subjectHint)} → {formatRoleLabel('Cible', targetHint)} (Optionnelle)
             </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">

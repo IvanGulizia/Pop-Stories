@@ -19,6 +19,9 @@ import {
   ActiveModal,
   EntityOption,
   SCENE_TRANSITION_OPTIONS,
+  formatRoleLabel,
+  resolveTriggerSubjectHint,
+  resolveTriggerTargetHint,
 } from './ruleBookTypes';
 import { CameraActionEditor } from './CameraActionEditor';
 import { AttachParentConfigEditor } from './AttachParentConfigEditor';
@@ -62,6 +65,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
   getEntityObj,
 }) => {
   const initialGameVariables = useSceneStore((s) => s.initialGameVariables || EMPTY_RECORD);
+  const customArchetypes = useSceneStore((s) => s.customArchetypes || EMPTY_RECORD);
   const scenes = useSceneStore((s) => s.scenes || EMPTY_LIST);
   const activeSceneId = useSceneStore((s) => s.activeSceneId);
   const variableNames = Array.from(new Set(['score', ...Object.keys(initialGameVariables)])).sort();
@@ -73,6 +77,18 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
     rule.trigger.type === 'snap';
   const subjectType = rule.trigger.subjectType || availableEntityOptions[0]?.type || 'apple';
   const targetType = rule.trigger.targetType || availableEntityOptions[1]?.type || 'plant';
+  const ruleSubjectHint = resolveTriggerSubjectHint(rule.trigger, {
+    entities,
+    customArchetypes,
+    availableEntityOptions,
+    getEntityObj,
+  });
+  const ruleTargetHint = resolveTriggerTargetHint(rule.trigger, {
+    entities,
+    customArchetypes,
+    availableEntityOptions,
+    getEntityObj,
+  });
 
   const applyAction = (actionData: Partial<RuleAction>) => {
     if (activeModal.actionIndex !== undefined) {
@@ -143,22 +159,18 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
             const modalSubjectEntity =
               modalSubjectIsAny || modalSubjectIsTag ? undefined : getEntityObj(subjectType);
             const modalSubjectOpt = availableEntityOptions.find((o) => o.type === subjectType);
-            const modalSubjectName = modalSubjectIsAny
-              ? 'Tous les objets'
-              : modalSubjectIsTag
-              ? `#${rule.trigger.subjectTag || 'tag'}`
-              : modalSubjectEntity?.name || modalSubjectOpt?.label || subjectType;
+            const modalSubjectName = ruleSubjectHint || modalSubjectOpt?.label || subjectType;
 
             const modalTargetIsAny = rule.trigger.targetMode === 'any';
             const modalTargetIsTag = rule.trigger.targetMode === 'tag';
             const modalTargetEntity =
-              modalTargetIsAny || modalTargetIsTag ? undefined : getEntityObj(targetType);
+              modalTargetIsAny || modalTargetIsTag
+                ? undefined
+                : (rule.trigger.targetMode === 'instance' && rule.trigger.targetId
+                    ? entities[rule.trigger.targetId]
+                    : undefined) || getEntityObj(targetType);
             const modalTargetOpt = availableEntityOptions.find((o) => o.type === targetType);
-            const modalTargetName = modalTargetIsAny
-              ? 'Tous les objets'
-              : modalTargetIsTag
-              ? `#${rule.trigger.targetTag || 'tag'}`
-              : modalTargetEntity?.name || modalTargetOpt?.label || targetType;
+            const modalTargetName = ruleTargetHint || modalTargetOpt?.label || targetType;
 
             return (
               <div
@@ -228,7 +240,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-black text-slate-900 group-hover:text-indigo-700 truncate">
-                          Changer l'état du Sujet
+                          Changer l&apos;état du {formatRoleLabel('Sujet', modalSubjectName)}
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Transformer « {modalSubjectName} »
@@ -335,7 +347,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-black text-slate-900 group-hover:text-slate-900 truncate">
-                          Activer / Désactiver le Sujet
+                          Activer / Désactiver le {formatRoleLabel('Sujet', modalSubjectName)}
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Masquer &amp; suspendre temporairement sans détruire
@@ -389,7 +401,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-black text-slate-900 group-hover:text-rose-700 truncate">
-                          Détruire le Sujet
+                          Détruire le {formatRoleLabel('Sujet', modalSubjectName)}
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Faire disparaître « {modalSubjectName} »
@@ -462,7 +474,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-black text-slate-900 group-hover:text-emerald-700 truncate">
-                            Changer l'état de la Cible
+                            Changer l&apos;état de la {formatRoleLabel('Cible', modalTargetName)}
                           </div>
                           <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                             Transformer « {modalTargetName} »
@@ -492,7 +504,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-black text-slate-900 group-hover:text-sky-700 truncate">
-                            Déplacer la Cible de X px
+                            Déplacer la {formatRoleLabel('Cible', modalTargetName)} de X px
                           </div>
                           <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                             Pousser ou décaler « {modalTargetName} »
@@ -524,7 +536,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-black text-slate-900 group-hover:text-orange-700 truncate">
-                            Force / Impulsion sur Cible
+                            Force / Impulsion sur {formatRoleLabel('Cible', modalTargetName)}
                           </div>
                           <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                             Repousser ou projeter « {modalTargetName} »
@@ -551,7 +563,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-black text-slate-900 group-hover:text-slate-900 truncate">
-                            Activer / Désactiver la Cible
+                            Activer / Désactiver la {formatRoleLabel('Cible', modalTargetName)}
                           </div>
                           <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                             Désactiver temporairement « {modalTargetName} »
@@ -580,7 +592,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-black text-slate-900 group-hover:text-violet-700 truncate">
-                            Contrôler l&apos;animation de la Cible
+                            Contrôler l&apos;animation de la {formatRoleLabel('Cible', modalTargetName)}
                           </div>
                           <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                             Avancer, choisir une frame ou reset « {modalTargetName} »
@@ -605,7 +617,7 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-black text-slate-900 group-hover:text-rose-700 truncate">
-                            Détruire la Cible
+                            Détruire la {formatRoleLabel('Cible', modalTargetName)}
                           </div>
                           <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                             Faire disparaître « {modalTargetName} »
@@ -1991,6 +2003,8 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                 mode="burst"
                 customParticles={customParticles}
                 allowTarget={isCollision || rule.trigger.type === 'proximity'}
+                subjectHint={ruleSubjectHint}
+                targetHint={ruleTargetHint}
                 originDraft={activeModal}
                 summary={{
                   shape: activeModal.particleShape || 'circle',
@@ -2186,6 +2200,8 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
             onConfirm={(actionData) => applyAction(actionData)}
             isRelational={isCollision}
             isGlobal={isGlobal}
+            subjectHint={ruleSubjectHint}
+            targetHint={ruleTargetHint}
             entities={entities}
             availableEntityOptions={availableEntityOptions}
             allProjectTags={allProjectTags}
@@ -2202,6 +2218,8 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
             isGlobal={isGlobal}
             subjectType={subjectType}
             targetType={targetType}
+            subjectHint={ruleSubjectHint}
+            targetHint={ruleTargetHint}
             entities={entities}
             availableEntityOptions={availableEntityOptions}
             allProjectTags={allProjectTags}
@@ -2218,6 +2236,8 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
             isGlobal={isGlobal}
             subjectType={subjectType}
             targetType={targetType}
+            subjectHint={ruleSubjectHint}
+            targetHint={ruleTargetHint}
             entities={entities}
             availableEntityOptions={availableEntityOptions}
             allProjectTags={allProjectTags}
@@ -2235,6 +2255,8 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
             isGlobal={isGlobal}
             subjectType={subjectType}
             targetType={targetType}
+            subjectHint={ruleSubjectHint}
+            targetHint={ruleTargetHint}
             entities={entities}
             availableEntityOptions={availableEntityOptions}
             allProjectTags={allProjectTags}
@@ -2251,6 +2273,8 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
             isGlobal={isGlobal}
             subjectType={subjectType}
             targetType={targetType}
+            subjectHint={ruleSubjectHint}
+            targetHint={ruleTargetHint}
             entities={entities}
             availableEntityOptions={availableEntityOptions}
             allProjectTags={allProjectTags}
@@ -2270,8 +2294,8 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                   }
                   className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
                 >
-                  <option value="subject">Sujet</option>
-                  {isCollision && <option value="target">Cible touchée</option>}
+                  <option value="subject">{formatRoleLabel('Sujet', ruleSubjectHint)}</option>
+                  {isCollision && <option value="target">{formatRoleLabel('Cible touchée', ruleTargetHint)}</option>}
                   <option value="last_spawned">Dernier objet créé</option>
                   <option value="tag">Par Tag (#tag)</option>
                   <option value="type">Par Type</option>
@@ -2425,8 +2449,8 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                   }
                   className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
                 >
-                  <option value="subject">Sujet</option>
-                  {isCollision && <option value="target">Cible touchée</option>}
+                  <option value="subject">{formatRoleLabel('Sujet', ruleSubjectHint)}</option>
+                  {isCollision && <option value="target">{formatRoleLabel('Cible touchée', ruleTargetHint)}</option>}
                   <option value="last_spawned">Dernier objet créé</option>
                   <option value="tag">Par Tag (#tag)</option>
                   <option value="type">Par Type</option>
@@ -2520,8 +2544,8 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                   <option value="cardinal">Direction cardinale (H / B / G / D)</option>
                   <option value="angle">Angle libre (degrés °)</option>
                   <option value="facing">Direction du regard / rotation</option>
-                  <option value="toward_target">Vers une entité / cible</option>
-                  <option value="away_target">S'éloigner d'une entité / cible</option>
+                  <option value="toward_target">Vers une entité / {formatRoleLabel('cible', ruleTargetHint)}</option>
+                  <option value="away_target">S&apos;éloigner d&apos;une entité / {formatRoleLabel('cible', ruleTargetHint)}</option>
                 </select>
               </div>
 
@@ -2599,8 +2623,8 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
                       }
                       className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
                     >
-                      <option value="subject">Sujet</option>
-                      {isCollision && <option value="target">Cible touchée</option>}
+                      <option value="subject">{formatRoleLabel('Sujet', ruleSubjectHint)}</option>
+                      {isCollision && <option value="target">{formatRoleLabel('Cible touchée', ruleTargetHint)}</option>}
                       <option value="last_spawned">Dernier objet créé</option>
                       <option value="mouse">Souris (curseur)</option>
                       <option value="entity">Instance précise</option>
@@ -2917,6 +2941,8 @@ export const RuleActionModal: React.FC<RuleActionModalProps> = ({
             onConfirm={(actionData) => applyAction(actionData)}
             isRelational={isCollision}
             isGlobal={['timer', 'keyboard', 'variable'].includes(rule.trigger.type)}
+            subjectHint={ruleSubjectHint}
+            targetHint={ruleTargetHint}
             entities={entities}
             availableEntityOptions={availableEntityOptions}
             allProjectTags={allProjectTags}

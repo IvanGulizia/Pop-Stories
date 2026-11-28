@@ -9,6 +9,7 @@ import {
 import { clampSpawnRandomZone, getDefaultSpawnRandomZone } from '../utils/spawnHelpers';
 import { EntityMiniPreview } from './EntityMiniPreview';
 import { EditableNumericValue } from './shared/EditableNumericValue';
+import { formatRoleLabel } from './rulebook/ruleBookTypes';
 import {
   MapPin,
   Target,
@@ -1840,7 +1841,9 @@ export function SpawnLocationPicker({
                     : 'bg-slate-50 hover:bg-slate-100 border-slate-200'
                 }`}
               >
-                <div className="text-xs font-bold text-slate-900">🎯 Relative Cible</div>
+                <div className="text-xs font-bold text-slate-900">
+                  🎯 {formatRoleLabel('Relative Cible', targetEntity.name)}
+                </div>
                 <div className="text-[10px] text-slate-500 tabular-nums">
                   Basée sur {targetEntity.name} ({targetEntity.size.width}×{targetEntity.size.height}px)
                 </div>
@@ -1857,7 +1860,9 @@ export function SpawnLocationPicker({
                     : 'bg-slate-50 hover:bg-slate-100 border-slate-200'
                 }`}
               >
-                <div className="text-xs font-bold text-slate-900">👤 Relative Sujet</div>
+                <div className="text-xs font-bold text-slate-900">
+                  👤 {formatRoleLabel('Relative Sujet', subjectEntity.name)}
+                </div>
                 <div className="text-[10px] text-slate-500 tabular-nums">
                   Basée sur {subjectEntity.name} ({subjectEntity.size.width}×{subjectEntity.size.height}px)
                 </div>

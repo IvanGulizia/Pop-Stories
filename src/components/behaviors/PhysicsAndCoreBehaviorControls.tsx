@@ -50,7 +50,7 @@ export function PhysicsBehaviorControls({
         summaryBadge={b.isTrigger ? 'Trigger' : b.isStatic ? 'Fixe' : 'Dynamique'}
         persistKey={entityId ? `${entityId}:${b.id}:physics_body` : undefined}
         defaultOpen={true}
-        headerActions={
+        ruleShortcuts={
           <BehaviorRuleShortcutButton
             entityId={entityId}
             triggerType="collision"
@@ -309,7 +309,7 @@ export function PhysicsBehaviorControls({
           persistKey={entityId ? `${entityId}:${b.id}:physics_pin` : undefined}
           defaultOpen={Boolean(b.worldPinEnabled)}
           tone="amber"
-          headerActions={
+          ruleShortcuts={
             b.worldPinEnabled && b.worldPinBreakable !== false ? (
               <BehaviorRuleShortcutButton
                 entityId={entityId}
@@ -1213,7 +1213,7 @@ export function BoundaryBehaviorControls({
         }
         persistKey={entityId ? `${entityId}:${b.id}:boundary` : undefined}
         defaultOpen={true}
-        headerActions={
+        ruleShortcuts={
           <BehaviorRuleShortcutButton
             entityId={entityId}
             triggerType="boundary"

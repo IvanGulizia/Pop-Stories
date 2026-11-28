@@ -538,7 +538,7 @@ export function HealthBehaviorControls({
         summaryBadge={`${b.maxHp ?? 3} PV${b.damageTag ? ` • #${b.damageTag}` : ''}`}
         persistKey={entityId ? `${entityId}:${b.id}:health_hp` : undefined}
         defaultOpen={true}
-        headerActions={
+        ruleShortcuts={
           <BehaviorRuleShortcutButton
             entityId={entityId}
             triggerType="collision"

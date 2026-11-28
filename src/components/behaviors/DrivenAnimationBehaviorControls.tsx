@@ -107,7 +107,7 @@ export function DrivenAnimationBehaviorControls({
         summaryBadge={activeSourceLabel}
         persistKey={entityId ? `${entityId}:${b.id}:driven_source` : undefined}
         defaultOpen={true}
-        headerActions={
+        ruleShortcuts={
           isCollisionSource ? (
             <BehaviorRuleShortcutButton
               entityId={entityId}

@@ -18,6 +18,9 @@ import {
   EntityOption,
   SCENE_TRANSITION_OPTIONS,
   WizardData,
+  formatRoleLabel,
+  resolveWizardSubjectHint,
+  resolveWizardTargetHint,
 } from './ruleBookTypes';
 import { CameraActionEditor } from './CameraActionEditor';
 import { AttachParentConfigEditor } from './AttachParentConfigEditor';
@@ -63,20 +66,47 @@ export function WizardStep3Actions({
   completeWizardWithAction,
 }: WizardStep3ActionsProps) {
   const initialGameVariables = useSceneStore((s) => s.initialGameVariables || EMPTY_RECORD);
+  const customArchetypes = useSceneStore((s) => s.customArchetypes || EMPTY_RECORD);
   const scenes = useSceneStore((s) => s.scenes || EMPTY_LIST);
   const activeSceneId = useSceneStore((s) => s.activeSceneId);
   const variableNames = Array.from(new Set(['score', ...Object.keys(initialGameVariables)])).sort();
+  const wizardSubjectHint = resolveWizardSubjectHint(activeWizard, {
+    entities,
+    customArchetypes,
+    availableEntityOptions,
+    getEntityObj,
+  });
+  const wizardTargetHint = resolveWizardTargetHint(activeWizard, {
+    entities,
+    customArchetypes,
+    availableEntityOptions,
+    getEntityObj,
+  });
   return (
     <div>
       {/* Mode Principal Étape 3 */}
       {activeWizard.actionSubStep === 'main' && (() => {
-        const wizardSubjectEntity = getEntityObj(activeWizard.subjectType);
+        const wizardSubjectIsAny = activeWizard.subjectMode === 'any';
+        const wizardSubjectIsTag = activeWizard.subjectMode === 'tag';
+        const wizardSubjectEntity =
+          wizardSubjectIsAny || wizardSubjectIsTag
+            ? undefined
+            : (activeWizard.subjectMode === 'instance' && activeWizard.subjectId
+                ? entities[activeWizard.subjectId]
+                : undefined) || getEntityObj(activeWizard.subjectType);
         const wizardSubjectOpt = availableEntityOptions.find((o) => o.type === activeWizard.subjectType);
-        const wizardSubjectName = wizardSubjectEntity?.name || wizardSubjectOpt?.label || activeWizard.subjectType;
+        const wizardSubjectName = wizardSubjectHint || wizardSubjectOpt?.label || activeWizard.subjectType;
 
-        const wizardTargetEntity = getEntityObj(activeWizard.targetType);
+        const wizardTargetIsAny = activeWizard.targetMode === 'any';
+        const wizardTargetIsTag = activeWizard.targetMode === 'tag';
+        const wizardTargetEntity =
+          wizardTargetIsAny || wizardTargetIsTag
+            ? undefined
+            : (activeWizard.targetMode === 'instance' && activeWizard.targetId
+                ? entities[activeWizard.targetId]
+                : undefined) || getEntityObj(activeWizard.targetType);
         const wizardTargetOpt = availableEntityOptions.find((o) => o.type === activeWizard.targetType);
-        const wizardTargetName = wizardTargetEntity?.name || wizardTargetOpt?.label || activeWizard.targetType;
+        const wizardTargetName = wizardTargetHint || wizardTargetOpt?.label || activeWizard.targetType;
         const isCollision = isWizardRelational;
 
         return (
@@ -163,7 +193,7 @@ export function WizardStep3Actions({
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-black text-slate-900 group-hover:text-indigo-700 truncate">
-                            Changer l'état du Sujet
+                            Changer l&apos;état du {formatRoleLabel('Sujet', wizardSubjectName)}
                           </div>
                           <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                             Transformer « {wizardSubjectName} »
@@ -275,7 +305,7 @@ export function WizardStep3Actions({
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-black text-slate-900 group-hover:text-slate-900 truncate">
-                            Activer / Désactiver le Sujet
+                            Activer / Désactiver le {formatRoleLabel('Sujet', wizardSubjectName)}
                           </div>
                           <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                             Masquer &amp; suspendre temporairement sans détruire
@@ -329,7 +359,7 @@ export function WizardStep3Actions({
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-black text-slate-900 group-hover:text-rose-700 truncate">
-                            Détruire le Sujet
+                            Détruire le {formatRoleLabel('Sujet', wizardSubjectName)}
                           </div>
                           <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                             Faire disparaître « {wizardSubjectName} »
@@ -585,7 +615,7 @@ export function WizardStep3Actions({
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-black text-slate-900 group-hover:text-emerald-700 truncate">
-                          Changer l'état de la Cible
+                          Changer l&apos;état de la {formatRoleLabel('Cible', wizardTargetName)}
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Transformer « {wizardTargetName} »
@@ -615,7 +645,7 @@ export function WizardStep3Actions({
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-black text-slate-900 group-hover:text-sky-700 truncate">
-                          Déplacer la Cible de X px
+                          Déplacer la {formatRoleLabel('Cible', wizardTargetName)} de X px
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Pousser ou décaler « {wizardTargetName} »
@@ -647,7 +677,7 @@ export function WizardStep3Actions({
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-black text-slate-900 group-hover:text-orange-700 truncate">
-                          Force / Impulsion sur Cible
+                          Force / Impulsion sur {formatRoleLabel('Cible', wizardTargetName)}
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Repousser ou projeter « {wizardTargetName} »
@@ -674,7 +704,7 @@ export function WizardStep3Actions({
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-black text-slate-900 group-hover:text-slate-900 truncate">
-                          Activer / Désactiver la Cible
+                          Activer / Désactiver la {formatRoleLabel('Cible', wizardTargetName)}
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Désactiver temporairement « {wizardTargetName} »
@@ -703,7 +733,7 @@ export function WizardStep3Actions({
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-black text-slate-900 group-hover:text-violet-700 truncate">
-                          Contrôler l&apos;animation de la Cible
+                          Contrôler l&apos;animation de la {formatRoleLabel('Cible', wizardTargetName)}
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Avancer, choisir une frame ou reset « {wizardTargetName} »
@@ -728,7 +758,7 @@ export function WizardStep3Actions({
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-black text-slate-900 group-hover:text-rose-700 truncate">
-                          Détruire la Cible
+                          Détruire la {formatRoleLabel('Cible', wizardTargetName)}
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                           Faire disparaître « {wizardTargetName} »
@@ -2049,6 +2079,8 @@ export function WizardStep3Actions({
               mode="burst"
               customParticles={customParticles}
               allowTarget={activeWizard.triggerType === 'collision' || activeWizard.triggerType === 'proximity'}
+              subjectHint={wizardSubjectHint}
+              targetHint={wizardTargetHint}
               originDraft={activeWizard}
               summary={{
                 shape: activeWizard.particleShape || 'circle',
@@ -2240,6 +2272,8 @@ export function WizardStep3Actions({
           onConfirm={(actionData) => completeWizardWithAction(actionData)}
           isRelational={isWizardRelational}
           isGlobal={isWizardGlobal}
+          subjectHint={wizardSubjectHint}
+          targetHint={wizardTargetHint}
           entities={entities}
           availableEntityOptions={availableEntityOptions}
           allProjectTags={allProjectTags}
@@ -2272,6 +2306,8 @@ export function WizardStep3Actions({
           isGlobal={isWizardGlobal}
           subjectType={activeWizard.subjectType}
           targetType={activeWizard.targetType}
+          subjectHint={wizardSubjectHint}
+          targetHint={wizardTargetHint}
           entities={entities}
           availableEntityOptions={availableEntityOptions}
           allProjectTags={allProjectTags}
@@ -2304,6 +2340,8 @@ export function WizardStep3Actions({
           isGlobal={isWizardGlobal}
           subjectType={activeWizard.subjectType}
           targetType={activeWizard.targetType}
+          subjectHint={wizardSubjectHint}
+          targetHint={wizardTargetHint}
           entities={entities}
           availableEntityOptions={availableEntityOptions}
           allProjectTags={allProjectTags}
@@ -2338,6 +2376,8 @@ export function WizardStep3Actions({
           isGlobal={isWizardGlobal}
           subjectType={activeWizard.subjectType}
           targetType={activeWizard.targetType}
+          subjectHint={wizardSubjectHint}
+          targetHint={wizardTargetHint}
           entities={entities}
           availableEntityOptions={availableEntityOptions}
           allProjectTags={allProjectTags}
@@ -2370,6 +2410,8 @@ export function WizardStep3Actions({
           isGlobal={isWizardGlobal}
           subjectType={activeWizard.subjectType}
           targetType={activeWizard.targetType}
+          subjectHint={wizardSubjectHint}
+          targetHint={wizardTargetHint}
           entities={entities}
           availableEntityOptions={availableEntityOptions}
           allProjectTags={allProjectTags}
@@ -2387,8 +2429,8 @@ export function WizardStep3Actions({
                 onChange={(e) => setActiveWizard({ ...activeWizard, actionTargetMode: e.target.value as any })}
                 className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
               >
-                <option value="subject">Sujet</option>
-                {isWizardRelational && <option value="target">Cible touchée</option>}
+                <option value="subject">{formatRoleLabel('Sujet', wizardSubjectHint)}</option>
+                {isWizardRelational && <option value="target">{formatRoleLabel('Cible touchée', wizardTargetHint)}</option>}
                 <option value="last_spawned">Dernier objet créé</option>
                 <option value="tag">Par Tag (#tag)</option>
                 <option value="type">Par Type</option>
@@ -2524,8 +2566,8 @@ export function WizardStep3Actions({
                 onChange={(e) => setActiveWizard({ ...activeWizard, actionTargetMode: e.target.value as any })}
                 className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
               >
-                {!isWizardGlobal && <option value="subject">Sujet</option>}
-                {isWizardRelational && <option value="target">Cible touchée</option>}
+                {!isWizardGlobal && <option value="subject">{formatRoleLabel('Sujet', wizardSubjectHint)}</option>}
+                {isWizardRelational && <option value="target">{formatRoleLabel('Cible touchée', wizardTargetHint)}</option>}
                 <option value="last_spawned">Dernier objet créé</option>
                 <option value="tag">Par Tag (#tag)</option>
                 <option value="type">Par Type</option>
@@ -2602,8 +2644,8 @@ export function WizardStep3Actions({
                 <option value="cardinal">Direction cardinale (H / B / G / D)</option>
                 <option value="angle">Angle libre (degrés °)</option>
                 <option value="facing">Direction du regard / rotation</option>
-                <option value="toward_target">Vers une entité / cible</option>
-                <option value="away_target">S'éloigner d'une entité / cible</option>
+                <option value="toward_target">Vers une entité / {formatRoleLabel('cible', wizardTargetHint)}</option>
+                <option value="away_target">S&apos;éloigner d&apos;une entité / {formatRoleLabel('cible', wizardTargetHint)}</option>
               </select>
             </div>
 
@@ -2674,8 +2716,8 @@ export function WizardStep3Actions({
                     onChange={(e) => setActiveWizard({ ...activeWizard, moveTargetMode: e.target.value as any })}
                     className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
                   >
-                    {!isWizardGlobal && <option value="subject">Sujet</option>}
-                    {isWizardRelational && <option value="target">Cible touchée</option>}
+                    {!isWizardGlobal && <option value="subject">{formatRoleLabel('Sujet', wizardSubjectHint)}</option>}
+                    {isWizardRelational && <option value="target">{formatRoleLabel('Cible touchée', wizardTargetHint)}</option>}
                     <option value="last_spawned">Dernier objet créé</option>
                     <option value="mouse">Souris (curseur)</option>
                     <option value="entity">Instance précise</option>
@@ -2973,6 +3015,8 @@ export function WizardStep3Actions({
           onConfirm={(actionData) => completeWizardWithAction(actionData)}
           isRelational={isWizardRelational}
           isGlobal={isWizardGlobal}
+          subjectHint={wizardSubjectHint}
+          targetHint={wizardTargetHint}
           entities={entities}
           availableEntityOptions={availableEntityOptions}
           allProjectTags={allProjectTags}

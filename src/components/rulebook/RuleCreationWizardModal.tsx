@@ -6,11 +6,17 @@ import {
   Entity,
   RuleAction,
 } from '../../types';
-import { EntityOption, WizardData } from './ruleBookTypes';
+import {
+  EntityOption,
+  WizardData,
+  formatRoleLabel,
+  resolveWizardSubjectHint,
+  resolveWizardTargetHint,
+} from './ruleBookTypes';
 import { WizardStep1Condition } from './WizardStep1Condition';
 import { WizardStep2Objects } from './WizardStep2Objects';
 import { WizardStep3Actions } from './WizardStep3Actions';
-import { useSceneStore } from '../../store/useSceneStore';
+import { useSceneStore, EMPTY_RECORD } from '../../store/useSceneStore';
 
 interface RuleCreationWizardModalProps {
   activeWizard: WizardData;
@@ -52,7 +58,22 @@ export function RuleCreationWizardModal({
   const wizardObjectPhase = activeWizard.objectPhase || 'subject';
   const hasWizardParams = true;
 
+  const customArchetypes = useSceneStore((s) => s.customArchetypes || EMPTY_RECORD);
   const isPickingSpawnOnCanvas = useSceneStore((s) => Boolean(s.spawnCanvasPick || s.snapPinCanvasPick));
+  const wizardSubjectHint = resolveWizardSubjectHint(activeWizard, {
+    entities,
+    customArchetypes,
+    availableEntityOptions,
+    getEntityObj,
+    fallbackLabel: 'à choisir',
+  });
+  const wizardTargetHint = resolveWizardTargetHint(activeWizard, {
+    entities,
+    customArchetypes,
+    availableEntityOptions,
+    getEntityObj,
+    fallbackLabel: 'à choisir',
+  });
 
   return (
     <div
@@ -183,8 +204,8 @@ export function RuleCreationWizardModal({
                 label: isWizardGlobal
                   ? '2. Objets (Global ⚡)'
                   : isWizardRelational
-                  ? '2. Objets (Sujet ↔ Cible)'
-                  : '2. Objet (Sujet)',
+                  ? `2. Objets (${formatRoleLabel('Sujet', wizardSubjectHint)} ↔ ${formatRoleLabel('Cible', wizardTargetHint)})`
+                  : `2. ${formatRoleLabel('Sujet', wizardSubjectHint)}`,
                 disabled: isWizardGlobal,
               },
               { num: 3 as const, label: '3. Action' },
@@ -281,7 +302,7 @@ export function RuleCreationWizardModal({
                       : 'text-slate-600 hover:bg-white hover:text-indigo-700'
                   }`}
                 >
-                  📦 Sujet
+                  📦 {formatRoleLabel('Sujet', wizardSubjectHint)}
                 </button>
                 {(activeWizard.subjectMode === 'type' || activeWizard.subjectMode === 'instance') &&
                   Object.keys(getEntityObj(activeWizard.subjectType)?.states || {}).length > 1 && (
@@ -302,7 +323,7 @@ export function RuleCreationWizardModal({
                           : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100'
                       }`}
                     >
-                      🎭 État Sujet
+                      🎭 {formatRoleLabel('État Sujet', wizardSubjectHint)}
                     </button>
                   )}
               </>
@@ -327,7 +348,7 @@ export function RuleCreationWizardModal({
                       : 'text-slate-600 hover:bg-white hover:text-emerald-700'
                   }`}
                 >
-                  🎯 Cible
+                  🎯 {formatRoleLabel('Cible', wizardTargetHint)}
                 </button>
                 {(activeWizard.targetMode === 'type' || activeWizard.targetMode === 'instance') &&
                   Object.keys(getEntityObj(activeWizard.targetType)?.states || {}).length > 1 && (
@@ -348,7 +369,7 @@ export function RuleCreationWizardModal({
                           : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
                       }`}
                     >
-                      🎭 État Cible
+                      🎭 {formatRoleLabel('État Cible', wizardTargetHint)}
                     </button>
                   )}
               </>

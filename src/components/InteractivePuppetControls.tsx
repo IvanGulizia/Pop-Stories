@@ -173,8 +173,8 @@ export function InteractivePuppetControls({
         summaryBadge={b.throwable ? 'Lancer actif' : undefined}
         persistKey={entityId ? `${entityId}:${b.id}:puppet_grab` : undefined}
         defaultOpen={true}
-        headerActions={
-          <div className="flex items-center gap-1">
+        ruleShortcuts={
+          <>
             <BehaviorRuleShortcutButton
               entityId={entityId}
               triggerType="drag"
@@ -187,7 +187,7 @@ export function InteractivePuppetControls({
               triggerPhase="drag_release"
               label="Relâcher Drag"
             />
-          </div>
+          </>
         }
       >
         <GrabPhysicsControls
@@ -379,7 +379,7 @@ export function InteractivePuppetControls({
         summaryBadge={`${b.approachNearDistance ?? 120}/${b.approachFarDistance ?? 280} px`}
         persistKey={entityId ? `${entityId}:${b.id}:puppet_thresholds` : undefined}
         defaultOpen={false}
-        headerActions={
+        ruleShortcuts={
           <BehaviorRuleShortcutButton
             entityId={entityId}
             triggerType="hover"

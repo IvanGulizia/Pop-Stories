@@ -10,11 +10,14 @@ import {
   ActiveModal,
   ActionModalSubStep,
   EntityOption,
+  formatRoleLabel,
+  resolveTriggerSubjectHint,
+  resolveTriggerTargetHint,
 } from './ruleBookTypes';
 import { RuleSubjectTargetModal } from './RuleSubjectTargetModal';
 import { RuleEventModal } from './RuleEventModal';
 import { RuleActionModal } from './RuleActionModal';
-import { useSceneStore } from '../../store/useSceneStore';
+import { useSceneStore, EMPTY_RECORD } from '../../store/useSceneStore';
 
 interface RuleSlotEditModalProps {
   activeModal: NonNullable<ActiveModal>;
@@ -94,7 +97,24 @@ export const RuleSlotEditModal: React.FC<RuleSlotEditModalProps> = ({
       Object.keys(getEntityObj(modalTargetType)?.states || {}).length > 1
     : false;
 
+  const customArchetypes = useSceneStore((s) => s.customArchetypes || EMPTY_RECORD);
   const isPickingSpawnOnCanvas = useSceneStore((s) => Boolean(s.spawnCanvasPick || s.snapPinCanvasPick));
+  const modalSubjectHint = modalRule
+    ? resolveTriggerSubjectHint(modalRule.trigger, {
+        entities,
+        customArchetypes,
+        availableEntityOptions,
+        getEntityObj,
+      })
+    : undefined;
+  const modalTargetHint = modalRule
+    ? resolveTriggerTargetHint(modalRule.trigger, {
+        entities,
+        customArchetypes,
+        availableEntityOptions,
+        getEntityObj,
+      })
+    : undefined;
 
   return (
     <div
@@ -157,7 +177,7 @@ export const RuleSlotEditModal: React.FC<RuleSlotEditModalProps> = ({
                       : 'text-slate-700 hover:bg-white hover:text-indigo-700'
                   }`}
                 >
-                  2. Sujet
+                  2. {formatRoleLabel('Sujet', modalSubjectHint)}
                 </button>
                 {modalSubjectHasStates && (
                   <button
@@ -169,7 +189,7 @@ export const RuleSlotEditModal: React.FC<RuleSlotEditModalProps> = ({
                         : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100'
                     }`}
                   >
-                    🎭 État Sujet
+                    🎭 {formatRoleLabel('État Sujet', modalSubjectHint)}
                   </button>
                 )}
               </>
@@ -187,7 +207,7 @@ export const RuleSlotEditModal: React.FC<RuleSlotEditModalProps> = ({
                       : 'text-slate-700 hover:bg-white hover:text-emerald-700'
                   }`}
                 >
-                  🎯 Cible
+                  🎯 {formatRoleLabel('Cible', modalTargetHint)}
                 </button>
                 {modalTargetHasStates && (
                   <button
@@ -199,7 +219,7 @@ export const RuleSlotEditModal: React.FC<RuleSlotEditModalProps> = ({
                         : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
                     }`}
                   >
-                    🎭 État Cible
+                    🎭 {formatRoleLabel('État Cible', modalTargetHint)}
                   </button>
                 )}
               </>

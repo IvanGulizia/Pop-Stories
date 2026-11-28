@@ -461,7 +461,7 @@ export function PatrolBehaviorControls({
         }
         persistKey={entityId ? `${entityId}:${b.id}:patrol_detect` : undefined}
         defaultOpen={Boolean(b.turnOnWall || b.turnOnCollision || b.detectLedges)}
-        headerActions={
+        ruleShortcuts={
           <BehaviorRuleShortcutButton
             entityId={entityId}
             triggerType="collision"
@@ -1046,7 +1046,7 @@ export function MoveToBehaviorControls({
         summaryBadge={`${b.speed ?? 120} px/s`}
         persistKey={entityId ? `${entityId}:${b.id}:moveto_target` : undefined}
         defaultOpen={true}
-        headerActions={
+        ruleShortcuts={
           <BehaviorRuleShortcutButton
             entityId={entityId}
             triggerType="target_arrived"
@@ -1255,7 +1255,7 @@ export function FollowBehaviorControls({
         summaryBadge={(b.followMode || 'constant_speed') === 'spring' ? 'Ressort' : `${b.speed} px/s`}
         persistKey={entityId ? `${entityId}:${b.id}:follow_target` : undefined}
         defaultOpen={true}
-        headerActions={
+        ruleShortcuts={
           <BehaviorRuleShortcutButton
             entityId={entityId}
             triggerType="target_arrived"

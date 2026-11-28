@@ -7,7 +7,7 @@ import {
   Position,
 } from '../../types';
 import { EMPTY_LIST, EMPTY_RECORD, useSceneStore } from '../../store/useSceneStore';
-import { EntityOption } from '../rulebook/ruleBookTypes';
+import { EntityOption, formatRoleLabel } from '../rulebook/ruleBookTypes';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 import { remapPresetConfigSprites } from './ParticlePresetLibrary';
 
@@ -35,6 +35,8 @@ export interface ParticleOriginDraft {
 interface ParticleActionOriginSectionProps {
   draft: ParticleOriginDraft;
   allowTarget: boolean;
+  subjectHint?: string;
+  targetHint?: string;
   entities: Record<string, Entity>;
   availableEntityOptions: EntityOption[];
   allProjectTags: string[];
@@ -46,6 +48,8 @@ interface ParticleActionOriginSectionProps {
 export const ParticleActionOriginSection: React.FC<ParticleActionOriginSectionProps> = ({
   draft,
   allowTarget,
+  subjectHint,
+  targetHint,
   entities,
   availableEntityOptions,
   allProjectTags,
@@ -144,8 +148,8 @@ export const ParticleActionOriginSection: React.FC<ParticleActionOriginSectionPr
           onChange={(e) => onPatch({ particleOriginMode: e.target.value as any })}
           className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
         >
-          <option value="subject">Sujet</option>
-          {allowTarget && <option value="target">Cible touchée</option>}
+          <option value="subject">{formatRoleLabel('Sujet', subjectHint)}</option>
+          {allowTarget && <option value="target">{formatRoleLabel('Cible touchée', targetHint)}</option>}
           <option value="event_point">💥 Point exact (Collision / Clic)</option>
           <option value="mouse">🖱️ Position du curseur / souris</option>
           <option value="coordinates">📍 Coordonnées exactes (X, Y)</option>

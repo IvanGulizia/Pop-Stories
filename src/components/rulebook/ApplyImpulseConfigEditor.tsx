@@ -2,7 +2,7 @@ import React from 'react';
 import { Check } from 'lucide-react';
 import { ActionTargetMode, Entity, EntityType, RuleAction } from '../../types';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
-import { EntityOption } from './ruleBookTypes';
+import { EntityOption, formatRoleLabel } from './ruleBookTypes';
 
 export interface ApplyImpulseConfigDraft {
   targetMode?: ActionTargetMode;
@@ -32,6 +32,8 @@ interface ApplyImpulseConfigEditorProps {
   entities: Record<string, Entity>;
   availableEntityOptions: EntityOption[];
   allProjectTags: string[];
+  subjectHint?: string;
+  targetHint?: string;
 }
 
 export const ApplyImpulseConfigEditor: React.FC<ApplyImpulseConfigEditorProps> = ({
@@ -45,6 +47,8 @@ export const ApplyImpulseConfigEditor: React.FC<ApplyImpulseConfigEditorProps> =
   entities,
   availableEntityOptions,
   allProjectTags,
+  subjectHint,
+  targetHint,
 }) => {
   const entityList = Object.values(entities);
   const firstEntityId = entityList[0]?.id || '';
@@ -82,8 +86,8 @@ export const ApplyImpulseConfigEditor: React.FC<ApplyImpulseConfigEditorProps> =
             onChange={(e) => onPatch({ targetMode: e.target.value as ActionTargetMode })}
             className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
           >
-            {!isGlobal && <option value="subject">Sujet</option>}
-            {isRelational && <option value="target">Cible touchée</option>}
+            {!isGlobal && <option value="subject">{formatRoleLabel('Sujet', subjectHint)}</option>}
+            {isRelational && <option value="target">{formatRoleLabel('Cible touchée', targetHint)}</option>}
             <option value="last_spawned">Dernier objet créé</option>
             <option value="instance">Entité précise</option>
             <option value="type">Par Type</option>
@@ -209,8 +213,16 @@ export const ApplyImpulseConfigEditor: React.FC<ApplyImpulseConfigEditorProps> =
             <option value="cardinal">Cardinale (↑ Haut / ↓ Bas / ← / →)</option>
             <option value="angle">Angle libre (degrés °)</option>
             <option value="facing">Direction du regard / rotation</option>
-            <option value="toward_target">Vers une cible / souris</option>
-            <option value="away_target">À l'opposé (repousser)</option>
+            <option value="toward_target">
+              {isRelational
+                ? `Vers ${formatRoleLabel('Cible', targetHint)} / autre`
+                : 'Vers une cible / souris'}
+            </option>
+            <option value="away_target">
+              {isRelational
+                ? `À l'opposé de ${formatRoleLabel('Cible', targetHint)}`
+                : "À l'opposé (repousser)"}
+            </option>
           </select>
         </div>
 
@@ -273,8 +285,8 @@ export const ApplyImpulseConfigEditor: React.FC<ApplyImpulseConfigEditorProps> =
                 onChange={(e) => onPatch({ impulseTargetMode: e.target.value as any })}
                 className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800"
               >
-                {!isGlobal && <option value="subject">Sujet</option>}
-                {isRelational && <option value="target">Cible touchée</option>}
+                {!isGlobal && <option value="subject">{formatRoleLabel('Sujet', subjectHint)}</option>}
+                {isRelational && <option value="target">{formatRoleLabel('Cible touchée', targetHint)}</option>}
                 <option value="last_spawned">Dernier objet créé</option>
                 <option value="mouse">Souris (curseur)</option>
                 <option value="entity">Instance précise</option>

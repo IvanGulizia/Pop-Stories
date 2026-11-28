@@ -11,6 +11,7 @@ interface BehaviorSubSectionProps {
   defaultOpen?: boolean;
   tone?: 'slate' | 'violet' | 'cyan' | 'amber' | 'rose' | 'emerald' | 'blue';
   headerActions?: React.ReactNode;
+  ruleShortcuts?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -61,6 +62,7 @@ export function BehaviorSubSection({
   defaultOpen = true,
   tone = 'slate',
   headerActions,
+  ruleShortcuts,
   children,
 }: BehaviorSubSectionProps) {
   const expandedSections = useSceneStore((s) => s.expandedBehaviorSections || EMPTY_RECORD);
@@ -133,9 +135,22 @@ export function BehaviorSubSection({
       </div>
 
       {isOpen && (
-        <div className="px-2.5 pb-2.5 pt-1 border-t border-slate-200/60 space-y-2">
-          {children}
-        </div>
+        <>
+          {ruleShortcuts && (
+            <div
+              className="hidden has-[button]:flex flex-wrap items-center gap-1.5 px-2.5 py-1.5 border-t border-slate-200/60 bg-slate-50/75"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="text-[9.5px] font-extrabold uppercase tracking-wider text-slate-400 mr-0.5">
+                Règles :
+              </span>
+              {ruleShortcuts}
+            </div>
+          )}
+          <div className="px-2.5 pb-2.5 pt-1.5 border-t border-slate-200/60 space-y-2">
+            {children}
+          </div>
+        </>
       )}
     </div>
   );

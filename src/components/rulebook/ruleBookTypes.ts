@@ -23,6 +23,8 @@ import {
   SnapAlignmentMode,
   SnapAnchorPreset,
   SnapAttachBehavior,
+  Entity,
+  RuleTrigger,
 } from '../../types';
 
 export const SCENE_TRANSITION_OPTIONS: {
@@ -51,6 +53,142 @@ export const SCENE_TRANSITION_OPTIONS: {
 export function getSceneTransitionShortLabel(transition?: SceneTransitionType): string {
   const id = transition || 'fade';
   return SCENE_TRANSITION_OPTIONS.find((opt) => opt.id === id)?.shortLabel || 'Fondu noir';
+}
+
+export interface RuleEntityHintContext {
+  entities?: Record<string, Entity>;
+  customArchetypes?: Record<string, Entity>;
+  availableEntityOptions?: EntityOption[];
+  getEntityObj?: (type?: EntityType) => Entity | undefined;
+  fallbackLabel?: string;
+}
+
+export function resolveRuleEntityHint(
+  params: {
+    mode?: SelectionMode | string;
+    entityId?: string;
+    entityType?: EntityType;
+    tag?: string;
+  } & RuleEntityHintContext
+): string | undefined {
+  const {
+    mode,
+    entityId,
+    entityType,
+    tag,
+    entities,
+    customArchetypes,
+    availableEntityOptions,
+    getEntityObj,
+    fallbackLabel,
+  } = params;
+
+  if (mode === 'any') return 'Tout objet';
+  if (mode === 'tag') {
+    const cleanTag = tag?.replace(/^#/, '').trim();
+    return cleanTag ? `#${cleanTag}` : '#tag';
+  }
+  if (mode === 'instance' && entityId && entities?.[entityId]?.name) {
+    return entities[entityId].name;
+  }
+  if (entityType) {
+    const byInstance = Object.values(entities || {}).find((e) => e.type === entityType)?.name;
+    if (byInstance) return byInstance;
+    const byGetter = getEntityObj?.(entityType)?.name;
+    if (byGetter) return byGetter;
+    const byArchetype = customArchetypes?.[entityType]?.name;
+    if (byArchetype) return byArchetype;
+    const byOption = availableEntityOptions?.find((o) => o.type === entityType)?.label;
+    if (byOption && !byOption.startsWith('custom_')) return byOption;
+    if (!entityType.startsWith('custom_')) return entityType;
+  }
+  if (entityId && entities?.[entityId]?.name) {
+    return entities[entityId].name;
+  }
+  return fallbackLabel;
+}
+
+export function resolveTriggerSubjectHint(
+  trigger: Pick<RuleTrigger, 'subjectMode' | 'subjectId' | 'subjectType' | 'subjectTag'>,
+  ctx: RuleEntityHintContext = {}
+): string | undefined {
+  const mode =
+    trigger.subjectMode ||
+    (trigger.subjectId ? 'instance' : trigger.subjectTag ? 'tag' : 'type');
+  return resolveRuleEntityHint({
+    mode,
+    entityId: trigger.subjectId,
+    entityType: trigger.subjectType,
+    tag: trigger.subjectTag,
+    ...ctx,
+  });
+}
+
+export function resolveTriggerTargetHint(
+  trigger: Pick<RuleTrigger, 'type' | 'targetMode' | 'targetId' | 'targetType' | 'targetTag'>,
+  ctx: RuleEntityHintContext = {}
+): string | undefined {
+  const mode =
+    trigger.targetMode ||
+    (trigger.targetId
+      ? 'instance'
+      : trigger.targetTag
+      ? 'tag'
+      : trigger.type === 'target_arrived' || trigger.type === 'snap'
+      ? 'any'
+      : 'type');
+  return resolveRuleEntityHint({
+    mode,
+    entityId: trigger.targetId,
+    entityType: trigger.targetType,
+    tag: trigger.targetTag,
+    ...ctx,
+  });
+}
+
+export function resolveWizardSubjectHint(
+  wizard: Pick<WizardData, 'subjectMode' | 'subjectId' | 'subjectType' | 'subjectTag'>,
+  ctx: RuleEntityHintContext = {}
+): string | undefined {
+  const mode =
+    wizard.subjectMode ||
+    (wizard.subjectId ? 'instance' : wizard.subjectTag ? 'tag' : 'type');
+  return resolveRuleEntityHint({
+    mode,
+    entityId: wizard.subjectId,
+    entityType: wizard.subjectType,
+    tag: wizard.subjectTag,
+    ...ctx,
+  });
+}
+
+export function resolveWizardTargetHint(
+  wizard: Pick<WizardData, 'triggerType' | 'targetMode' | 'targetId' | 'targetType' | 'targetTag'>,
+  ctx: RuleEntityHintContext = {}
+): string | undefined {
+  const mode =
+    wizard.targetMode ||
+    (wizard.targetId
+      ? 'instance'
+      : wizard.targetTag
+      ? 'tag'
+      : wizard.triggerType === 'target_arrived' || wizard.triggerType === 'snap'
+      ? 'any'
+      : 'type');
+  return resolveRuleEntityHint({
+    mode,
+    entityId: wizard.targetId,
+    entityType: wizard.targetType,
+    tag: wizard.targetTag,
+    ...ctx,
+  });
+}
+
+export function formatRoleLabel(roleLabel: string, hint?: string): string {
+  const cleanHint = hint?.trim();
+  if (!cleanHint) return roleLabel;
+  if (cleanHint.toLowerCase() === roleLabel.trim().toLowerCase()) return roleLabel;
+  return `${roleLabel} (${cleanHint})`;
 }
 
 export type ActiveModal =

@@ -12,6 +12,14 @@ import {
   findMatchingRulesForBehaviorEvent,
 } from '../utils/ruleLinkHelpers';
 import { useSceneStore } from '../store/useSceneStore';
+import {
+  formatRoleLabel,
+  resolveRuleEntityHint,
+  resolveTriggerSubjectHint,
+  resolveTriggerTargetHint,
+  resolveWizardSubjectHint,
+  resolveWizardTargetHint,
+} from '../components/rulebook/ruleBookTypes';
 
 function makeEntity(overrides: Partial<Entity> & { id: string }): Entity {
   const { id, ...rest } = overrides;
@@ -392,5 +400,53 @@ describe('workflowUxFeatures — clipboard, rule links, multi-selection & z-orde
     expect(afterShortcut.pendingRuleBookIntent?.mode).toBe('create');
     store.clearPendingRuleBookIntent();
     expect(useSceneStore.getState().pendingRuleBookIntent).toBeNull();
+  });
+
+  it('formatRoleLabel formats contextual role labels without duplicating identical hints', () => {
+    expect(formatRoleLabel('Sujet', 'Tête')).toBe('Sujet (Tête)');
+    expect(formatRoleLabel('Cible', '#mur')).toBe('Cible (#mur)');
+    expect(formatRoleLabel('Sujet', undefined)).toBe('Sujet');
+    expect(formatRoleLabel('Sujet', '   ')).toBe('Sujet');
+    expect(formatRoleLabel('Sujet', 'sujet')).toBe('Sujet');
+  });
+
+  it('resolveRuleEntityHint, trigger hints, and wizard hints resolve instance, type, tag, and any modes', () => {
+    const head = makeEntity({ id: 'head_1', name: 'Tête', type: 'custom_head' });
+    const body = makeEntity({ id: 'body_1', name: 'Corps', type: 'custom_body' });
+    const ctx = {
+      entities: { head_1: head, body_1: body },
+      customArchetypes: {
+        custom_coin: makeEntity({ id: 'arch_coin', name: 'Pièce Or', type: 'custom_coin' }),
+      },
+      availableEntityOptions: [{ type: 'custom_wall', label: 'Mur brique' }],
+    };
+
+    expect(resolveRuleEntityHint({ mode: 'any', ...ctx })).toBe('Tout objet');
+    expect(resolveRuleEntityHint({ mode: 'tag', tag: '#ennemi', ...ctx })).toBe('#ennemi');
+    expect(resolveRuleEntityHint({ mode: 'tag', tag: '', ...ctx })).toBe('#tag');
+    expect(resolveRuleEntityHint({ mode: 'instance', entityId: 'body_1', ...ctx })).toBe('Corps');
+    expect(resolveRuleEntityHint({ mode: 'type', entityType: 'custom_coin', ...ctx })).toBe('Pièce Or');
+    expect(resolveRuleEntityHint({ mode: 'type', entityType: 'custom_wall', ...ctx })).toBe('Mur brique');
+
+    expect(
+      resolveTriggerSubjectHint({ subjectMode: 'type', subjectType: 'custom_head' }, ctx)
+    ).toBe('Tête');
+    expect(
+      resolveTriggerTargetHint({ type: 'collision', targetMode: 'tag', targetTag: 'mur' }, ctx)
+    ).toBe('#mur');
+    expect(resolveTriggerTargetHint({ type: 'snap' }, ctx)).toBe('Tout objet');
+
+    expect(
+      resolveWizardSubjectHint({ subjectMode: 'instance', subjectId: 'head_1', subjectType: 'custom_head' }, ctx)
+    ).toBe('Tête');
+    expect(
+      resolveWizardTargetHint({ triggerType: 'target_arrived', targetType: '' }, ctx)
+    ).toBe('Tout objet');
+    expect(
+      resolveWizardTargetHint(
+        { triggerType: 'collision', targetMode: 'type', targetType: 'custom_body' },
+        ctx
+      )
+    ).toBe('Corps');
   });
 });

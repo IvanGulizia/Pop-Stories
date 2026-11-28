@@ -46,6 +46,7 @@ import {
   QuickParticlePresetItem,
 } from './particles/ParticlePresetLibrary';
 import { ParticleActionOriginSection } from './particles/ParticleActionOriginSection';
+import { formatRoleLabel } from './rulebook/ruleBookTypes';
 
 export interface ParticleEditorConfig extends ParticleEffectConfig {
   particleOriginMode?:
@@ -76,6 +77,8 @@ interface ParticleEditorModalProps {
   isOpen: boolean;
   mode: 'emitter' | 'burst';
   allowTarget?: boolean;
+  subjectHint?: string;
+  targetHint?: string;
   initialView?: 'studio' | 'draw_custom';
   initialEditingPreset?: CustomParticlePreset;
   initialConfig: Partial<ParticleEditorConfig>;
@@ -372,6 +375,8 @@ export function ParticleEditorModal({
   isOpen,
   mode,
   allowTarget = false,
+  subjectHint,
+  targetHint,
   initialView = 'studio',
   initialEditingPreset,
   initialConfig,
@@ -1822,8 +1827,14 @@ export function ParticleEditorModal({
                     <option value="angle">Angle fixe (°)</option>
                     <option value="facing">Sens de l&apos;entité</option>
                     <option value="mouse">Vers la souris</option>
-                    <option value="toward_target">Vers une cible</option>
-                    <option value="away_target">Opposé à cible</option>
+                    <option value="toward_target">
+                      {allowTarget ? `Vers ${formatRoleLabel('Cible', targetHint)}` : 'Vers une cible'}
+                    </option>
+                    <option value="away_target">
+                      {allowTarget
+                        ? `Opposé à ${formatRoleLabel('Cible', targetHint)}`
+                        : 'Opposé à cible'}
+                    </option>
                   </select>
                 </div>
 
@@ -1855,8 +1866,12 @@ export function ParticleEditorModal({
                       onChange={(e) => update({ directionTargetMode: e.target.value as any })}
                       className="w-full bg-white border border-slate-300 rounded-lg px-1.5 py-0.5 font-medium text-slate-800"
                     >
-                      {mode === 'burst' && <option value="subject">Sujet de la règle</option>}
-                      {mode === 'burst' && <option value="target">Cible touchée</option>}
+                      {mode === 'burst' && (
+                        <option value="subject">{formatRoleLabel('Sujet de la règle', subjectHint)}</option>
+                      )}
+                      {mode === 'burst' && allowTarget && (
+                        <option value="target">{formatRoleLabel('Cible touchée', targetHint)}</option>
+                      )}
                       <option value="entity">Entité de la scène</option>
                       <option value="type">Par Type</option>
                       <option value="tag">Par #Tag</option>
@@ -2062,6 +2077,8 @@ export function ParticleEditorModal({
                 <ParticleActionOriginSection
                   draft={config}
                   allowTarget={allowTarget}
+                  subjectHint={subjectHint}
+                  targetHint={targetHint}
                   entities={entities}
                   availableEntityOptions={availableEntityOptions}
                   allProjectTags={allTags}

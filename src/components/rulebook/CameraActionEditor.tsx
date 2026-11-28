@@ -1,7 +1,7 @@
 import React from 'react';
 import { Check } from 'lucide-react';
 import { CameraFollowMode, Entity, EntityType, RuleAction } from '../../types';
-import { EntityOption } from './ruleBookTypes';
+import { EntityOption, formatRoleLabel } from './ruleBookTypes';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 
 export interface CameraActionDraft {
@@ -28,6 +28,8 @@ interface CameraActionEditorProps {
   entities: Record<string, Entity>;
   availableEntityOptions: EntityOption[];
   allProjectTags: string[];
+  subjectHint?: string;
+  targetHint?: string;
 }
 
 export const CameraActionEditor: React.FC<CameraActionEditorProps> = ({
@@ -39,6 +41,8 @@ export const CameraActionEditor: React.FC<CameraActionEditorProps> = ({
   entities,
   availableEntityOptions,
   allProjectTags,
+  subjectHint,
+  targetHint,
 }) => {
   const cmd = draft.cameraCommand || 'shake';
   const shakeIntensity = draft.cameraShakeIntensity ?? 12;
@@ -333,8 +337,8 @@ export const CameraActionEditor: React.FC<CameraActionEditorProps> = ({
                   onChange={(e) => onPatch({ cameraTargetMode: e.target.value as any })}
                   className="w-full px-3 py-2 text-xs font-bold bg-white text-slate-900 border border-slate-300 rounded-xl"
                 >
-                  {!isGlobal && <option value="subject">Sujet déclencheur</option>}
-                  {isRelational && <option value="target">Cible touchée</option>}
+                  {!isGlobal && <option value="subject">{formatRoleLabel('Sujet déclencheur', subjectHint)}</option>}
+                  {isRelational && <option value="target">{formatRoleLabel('Cible touchée', targetHint)}</option>}
                   <option value="last_spawned">Dernier objet créé</option>
                   <option value="entity">Entité précise de la scène</option>
                 </select>
@@ -477,8 +481,8 @@ export const CameraActionEditor: React.FC<CameraActionEditorProps> = ({
                   onChange={(e) => onPatch({ cameraTargetMode: e.target.value as any })}
                   className="w-full px-3 py-2 text-xs font-bold bg-white text-slate-900 border border-slate-300 rounded-xl"
                 >
-                  {!isGlobal && <option value="subject">Sujet déclencheur</option>}
-                  {isRelational && <option value="target">Cible touchée</option>}
+                  {!isGlobal && <option value="subject">{formatRoleLabel('Sujet déclencheur', subjectHint)}</option>}
+                  {isRelational && <option value="target">{formatRoleLabel('Cible touchée', targetHint)}</option>}
                   <option value="last_spawned">Dernier objet créé</option>
                   <option value="entity">Entité précise</option>
                 </select>

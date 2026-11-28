@@ -261,7 +261,7 @@ export function SnapBehaviorControls({
         summaryBadge={`${radius} px`}
         persistKey={entityId ? `${entityId}:${b.id}:snap_magnet` : undefined}
         defaultOpen={true}
-        headerActions={
+        ruleShortcuts={
           <BehaviorRuleShortcutButton
             entityId={entityId}
             triggerType="snap"
@@ -860,8 +860,8 @@ export function SnapBehaviorControls({
         }
         persistKey={entityId ? `${entityId}:${b.id}:snap_link` : undefined}
         defaultOpen={true}
-        headerActions={
-          <div className="flex items-center gap-1">
+        ruleShortcuts={
+          <>
             <BehaviorRuleShortcutButton
               entityId={entityId}
               triggerType="snap"
@@ -876,7 +876,7 @@ export function SnapBehaviorControls({
                 label="Rupture Joint"
               />
             )}
-          </div>
+          </>
         }
       >
         <div>

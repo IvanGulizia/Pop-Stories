@@ -2,7 +2,7 @@ import React from 'react';
 import { DynamicRule, Entity, SelectionMode } from '../../types';
 import { EntityMiniPreview } from '../EntityMiniPreview';
 import { ChevronLeft, X, Check } from 'lucide-react';
-import { ActiveModal, EntityOption } from './ruleBookTypes';
+import { ActiveModal, EntityOption, formatRoleLabel, resolveRuleEntityHint } from './ruleBookTypes';
 
 interface RuleSubjectTargetModalProps {
   activeModal: Extract<NonNullable<ActiveModal>, { type: 'subject' | 'target' }>;
@@ -35,6 +35,17 @@ export const RuleSubjectTargetModal: React.FC<RuleSubjectTargetModalProps> = ({
     activeModal.selectedEntityType || currentType || availableEntityOptions[0]?.type || 'apple';
   const ent = getEntityObj(relevantType);
   const states = ent ? Object.values(ent.states) : [];
+  const entityById = Object.fromEntries(entityList.map((e) => [e.id, e]));
+  const currentHint = resolveRuleEntityHint({
+    mode: activeSelMode,
+    entityId:
+      activeModal.selectedEntityId || (isSubject ? rule.trigger.subjectId : rule.trigger.targetId),
+    entityType: relevantType,
+    tag: activeModal.tagInput ?? (isSubject ? rule.trigger.subjectTag : rule.trigger.targetTag),
+    entities: entityById,
+    availableEntityOptions,
+    getEntityObj,
+  });
 
   return (
     <div className="space-y-4 flex flex-col h-full overflow-hidden">
@@ -51,10 +62,10 @@ export const RuleSubjectTargetModal: React.FC<RuleSubjectTargetModalProps> = ({
           )}
           <h3 className="text-base font-black text-slate-900">
             {activeModal.subStep === 'choose_state'
-              ? `Choisir l'état de ${ent?.name || relevantType}`
+              ? `Choisir l'état de ${ent?.name || currentHint || relevantType}`
               : isSubject
-              ? "Changer l'Objet Sujet"
-              : "Changer l'Objet Cible"}
+              ? formatRoleLabel("Changer l'Objet Sujet", currentHint)
+              : formatRoleLabel("Changer l'Objet Cible", currentHint)}
           </h3>
         </div>
         <button
