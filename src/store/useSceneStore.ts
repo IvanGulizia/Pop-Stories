@@ -47,7 +47,16 @@ import {
   SetEntityEnabledScope,
   SnapAnchorPreset,
   SnapBehaviorConfig,
+  BehaviorType,
 } from '../types';
+import {
+  CopiedBehaviorPayload,
+  buildBehaviorResetConfig,
+  mergeBehaviorPartialPatch,
+  remapPastedBehaviorForEntity,
+  remapPastedBehaviorOverrideForEntity,
+} from '../utils/behaviorClipboardHelpers';
+import { RuleBookShortcutIntent } from '../utils/ruleLinkHelpers';
 import { getEntityWorldColliderBounds } from '../utils/collider';
 import { DEFAULT_SCENE_CAMERA_CONFIG, resolveWorldBounds } from '../utils/cameraSolver';
 import {
@@ -243,6 +252,7 @@ export interface SceneHistorySnapshot {
   rules: DynamicRule[];
   backgroundColor?: string;
   selectedEntityId: EntityId | null;
+  selectedEntityIds?: EntityId[];
   selectedLayerId: string | null;
 }
 
@@ -253,6 +263,7 @@ function captureSceneSnapshot(state: {
   rules: DynamicRule[];
   backgroundColor?: string;
   selectedEntityId: EntityId | null;
+  selectedEntityIds?: EntityId[];
   selectedLayerId: string | null;
 }): SceneHistorySnapshot {
   return {
@@ -262,6 +273,7 @@ function captureSceneSnapshot(state: {
     rules: JSON.parse(JSON.stringify(state.rules || [])),
     backgroundColor: state.backgroundColor || '#ffffff',
     selectedEntityId: state.selectedEntityId,
+    selectedEntityIds: [...(state.selectedEntityIds || (state.selectedEntityId ? [state.selectedEntityId] : []))],
     selectedLayerId: state.selectedLayerId,
   };
 }
@@ -320,6 +332,7 @@ interface SceneState {
   resetProjectPalette: () => void;
   activeCollisions: Record<string, boolean>; // Trace l'état de collision pour chaque pair (ruleId_subId_tarId)
   selectedEntityId: EntityId | null;
+  selectedEntityIds: EntityId[];
   selectedLayerId: string | null;
   appMode: AppMode;
   sceneBounds: Size;
@@ -363,6 +376,17 @@ interface SceneState {
   toggleRuleCollapse: (ruleId: string) => void;
   expandedBehaviorCards: Record<string, boolean>;
   setBehaviorCardExpanded: (cardKey: string, expanded: boolean) => void;
+  expandedBehaviorSections: Record<string, boolean>;
+  setBehaviorSectionExpanded: (sectionKey: string, expanded: boolean) => void;
+  copiedBehavior: CopiedBehaviorPayload | null;
+  copyEntityBehavior: (entityId: EntityId, behaviorId: string, stateId?: StateId) => boolean;
+  pasteBehaviorToEntity: (targetEntityId: EntityId, targetBehaviorId?: string, targetStateId?: StateId) => boolean;
+  resetEntityBehavior: (entityId: EntityId, behaviorId: string) => void;
+  activeMainView: 'canvas' | 'rules';
+  setActiveMainView: (view: 'canvas' | 'rules') => void;
+  pendingRuleBookIntent: RuleBookShortcutIntent | null;
+  openRuleBookFromBehavior: (intent: RuleBookShortcutIntent) => void;
+  clearPendingRuleBookIntent: () => void;
   ruleBookPage: number;
   setRuleBookPage: (page: number) => void;
   gameScore: number;
@@ -514,7 +538,23 @@ interface SceneState {
   // State actions
   setAppMode: (mode: AppMode) => void;
   resetScene: () => void;
-  selectEntity: (id: EntityId | null) => void;
+  selectEntity: (id: EntityId | null, options?: { toggle?: boolean; additive?: boolean }) => void;
+  selectEntities: (ids: EntityId[]) => void;
+  reorderEntityZStep: (id: EntityId, direction: 'up' | 'down' | 'front' | 'back') => void;
+  batchTranslateEntities: (ids: EntityId[], delta: { dx: number; dy: number }) => void;
+  batchDeleteEntities: (ids: EntityId[]) => void;
+  batchDuplicateEntities: (ids: EntityId[]) => EntityId[];
+  batchUpdateEntityDetails: (ids: EntityId[], partial: Partial<Entity>) => void;
+  batchUpdateEntityBehaviorPartial: (
+    ids: EntityId[],
+    behaviorType: BehaviorType,
+    partial: Record<string, any>
+  ) => void;
+  applyBehaviorToEntities: (
+    sourceEntityId: EntityId,
+    behaviorType: BehaviorType,
+    targetIds: EntityId[]
+  ) => void;
   updateEntityPosition: (id: EntityId, position: Position) => void;
   updateEntitySize: (id: EntityId, size: Size) => void;
   updateEntityState: (id: EntityId, stateId: StateId) => void;
@@ -766,6 +806,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         targetSnap.selectedEntityId && targetSnap.entities[targetSnap.selectedEntityId]
           ? targetSnap.selectedEntityId
           : null,
+      selectedEntityIds: (targetSnap.selectedEntityIds ||
+        (targetSnap.selectedEntityId ? [targetSnap.selectedEntityId] : [])
+      ).filter((id) => Boolean(targetSnap.entities[id])),
       selectedLayerId: state.selectedLayerId ?? targetSnap.selectedLayerId,
       sceneUndoStack: state.sceneUndoStack.slice(0, -1),
       sceneRedoStack: [...state.sceneRedoStack, currentSnap].slice(-35),
@@ -801,6 +844,9 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         targetSnap.selectedEntityId && targetSnap.entities[targetSnap.selectedEntityId]
           ? targetSnap.selectedEntityId
           : null,
+      selectedEntityIds: (targetSnap.selectedEntityIds ||
+        (targetSnap.selectedEntityId ? [targetSnap.selectedEntityId] : [])
+      ).filter((id) => Boolean(targetSnap.entities[id])),
       selectedLayerId: state.selectedLayerId ?? targetSnap.selectedLayerId,
       sceneUndoStack: [...state.sceneUndoStack, currentSnap].slice(-35),
       sceneRedoStack: state.sceneRedoStack.slice(0, -1),
@@ -1007,6 +1053,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         },
         entityOrder: [...order.filter((i) => i !== id), id],
         selectedEntityId: id,
+        selectedEntityIds: [id],
       };
     });
 
@@ -1063,6 +1110,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
   localParticleCollection: {},
   activeCollisions: {},
   selectedEntityId: null,
+  selectedEntityIds: [],
   appMode: 'edit',
   sceneBounds: { width: 800, height: 500 },
   setSceneBounds: (bounds) => {
@@ -1170,6 +1218,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       camera: { ...DEFAULT_SCENE_CAMERA_CONFIG, ...(newScene.camera || {}) },
       editorCamera: { x: 0, y: 0, zoom: 1 },
       selectedEntityId: null,
+      selectedEntityIds: [],
       selectedLayerId: null,
       activeCollisions: {},
       sceneUndoStack: [],
@@ -1201,6 +1250,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       camera: { ...DEFAULT_SCENE_CAMERA_CONFIG, ...(target.camera || {}) },
       editorCamera: { x: 0, y: 0, zoom: 1 },
       selectedEntityId: targetOrder[0] || null,
+      selectedEntityIds: targetOrder[0] ? [targetOrder[0]] : [],
       selectedLayerId: null,
       activeCollisions: {},
       sceneUndoStack: [],
@@ -1244,6 +1294,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       camera: { ...DEFAULT_SCENE_CAMERA_CONFIG, ...(cloned.camera || {}) },
       editorCamera: { x: 0, y: 0, zoom: 1 },
       selectedEntityId: targetOrder[0] || null,
+      selectedEntityIds: targetOrder[0] ? [targetOrder[0]] : [],
       selectedLayerId: null,
       activeCollisions: {},
       sceneUndoStack: [],
@@ -1278,6 +1329,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         camera: { ...DEFAULT_SCENE_CAMERA_CONFIG, ...(nextScene.camera || {}) },
         editorCamera: { x: 0, y: 0, zoom: 1 },
         selectedEntityId: nextOrder[0] || null,
+        selectedEntityIds: nextOrder[0] ? [nextOrder[0]] : [],
         selectedLayerId: null,
         activeCollisions: {},
         sceneUndoStack: [],
@@ -1352,6 +1404,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         snapshotScenes: updatedSnapshotScenes,
         activeCollisions: {},
         selectedEntityId: null,
+        selectedEntityIds: [],
         selectedLayerId: null,
       });
       get().evaluateRules();
@@ -1435,6 +1488,89 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         [cardKey]: expanded,
       },
     })),
+  expandedBehaviorSections: {},
+  setBehaviorSectionExpanded: (sectionKey, expanded) =>
+    set((state) => ({
+      expandedBehaviorSections: {
+        ...state.expandedBehaviorSections,
+        [sectionKey]: expanded,
+      },
+    })),
+  copiedBehavior: null,
+  copyEntityBehavior: (entityId, behaviorId, stateId) => {
+    const state = get();
+    const target = findTargetEntityOrArchetype(state, entityId);
+    if (!target) return false;
+    const behavior = (target.behaviors || []).find((b) => b.id === behaviorId);
+    if (!behavior) return false;
+    const targetState = stateId ? target.states[stateId] : undefined;
+    const override = targetState?.behaviorOverrides?.[behavior.id];
+    set({
+      copiedBehavior: {
+        behavior: JSON.parse(JSON.stringify(behavior)),
+        override: override ? JSON.parse(JSON.stringify(override)) : undefined,
+        sourceEntityId: target.id,
+        sourceEntityName: target.name,
+        sourceStateId: targetState?.id,
+        sourceStateName: targetState?.name,
+        sourceStates: JSON.parse(JSON.stringify(target.states || {})),
+      },
+    });
+    return true;
+  },
+  pasteBehaviorToEntity: (targetEntityId, targetBehaviorId, targetStateId) => {
+    const state = get();
+    const payload = state.copiedBehavior;
+    if (!payload) return false;
+    const target = findTargetEntityOrArchetype(state, targetEntityId);
+    if (!target) return false;
+    if (state.appMode === 'edit') {
+      state.pushSceneHistory();
+    }
+    if (targetBehaviorId && targetStateId && target.states[targetStateId]) {
+      const existingBeh = (target.behaviors || []).find((b) => b.id === targetBehaviorId);
+      if (!existingBeh || existingBeh.type !== payload.behavior.type) return false;
+      const remappedOv = remapPastedBehaviorOverrideForEntity(payload, target, targetBehaviorId);
+      state.updateStateBehaviorOverride(targetEntityId, targetStateId, targetBehaviorId, remappedOv);
+      return true;
+    }
+    const existing = targetBehaviorId
+      ? (target.behaviors || []).find((b) => b.id === targetBehaviorId)
+      : undefined;
+    if (existing && existing.type !== payload.behavior.type) return false;
+    const remapped = remapPastedBehaviorForEntity(payload, target, existing?.id);
+    const baseBehaviors = target.behaviors || [];
+    const nextBehaviors = existing
+      ? baseBehaviors.map((b) => (b.id === existing.id ? remapped : b))
+      : [...baseBehaviors, remapped];
+    state.updateEntityBehaviors(targetEntityId, nextBehaviors);
+    state.setBehaviorCardExpanded(`${targetEntityId}:${remapped.id}`, true);
+    return true;
+  },
+  resetEntityBehavior: (entityId, behaviorId) => {
+    const state = get();
+    const target = findTargetEntityOrArchetype(state, entityId);
+    if (!target) return;
+    const currentBeh = (target.behaviors || []).find((b) => b.id === behaviorId);
+    if (!currentBeh) return;
+    if (state.appMode === 'edit') {
+      state.pushSceneHistory();
+    }
+    const resetBeh = buildBehaviorResetConfig(currentBeh, target);
+    const nextBehaviors = (target.behaviors || []).map((b) =>
+      b.id === behaviorId ? resetBeh : b
+    );
+    state.updateEntityBehaviors(entityId, nextBehaviors);
+  },
+  activeMainView: 'canvas',
+  setActiveMainView: (view) => set({ activeMainView: view }),
+  pendingRuleBookIntent: null,
+  openRuleBookFromBehavior: (intent) =>
+    set({
+      pendingRuleBookIntent: intent,
+      activeMainView: 'rules',
+    }),
+  clearPendingRuleBookIntent: () => set({ pendingRuleBookIntent: null }),
   ruleBookPage: 1,
   setRuleBookPage: (page) => set({ ruleBookPage: Math.max(1, page) }),
   gameScore: 0,
@@ -1993,6 +2129,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         ),
         selectedLayerId: layerId,
         selectedEntityId: null, // Dé-sélectionner l'entité lors de la sélection d'un calque
+        selectedEntityIds: [],
       };
     });
     return layerId;
@@ -2042,6 +2179,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     set({
       selectedLayerId: layerId,
       selectedEntityId: layerId ? null : get().selectedEntityId,
+      selectedEntityIds: layerId ? [] : get().selectedEntityIds,
       ...(layerId ? {} : { layerDrawingActions: null }),
     });
   },
@@ -2121,6 +2259,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         },
         entityOrder: [...order.filter((i) => i !== newId), newId],
         selectedEntityId: newId,
+        selectedEntityIds: [newId],
         selectedLayerId: null,
       };
     });
@@ -2332,11 +2471,331 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
     get().evaluateRules();
   },
 
-  selectEntity: (id) =>
-    set((state) => ({
-      selectedEntityId: id,
-      selectedLayerId: id ? null : state.selectedLayerId,
-    })),
+  selectEntity: (id, options) =>
+    set((state) => {
+      if (!id) {
+        return {
+          selectedEntityId: null,
+          selectedEntityIds: [],
+          selectedLayerId: state.selectedLayerId,
+        };
+      }
+      if (options?.toggle) {
+        const current = state.selectedEntityIds || (state.selectedEntityId ? [state.selectedEntityId] : []);
+        const exists = current.includes(id);
+        const nextIds = exists ? current.filter((item) => item !== id) : [...current, id];
+        return {
+          selectedEntityIds: nextIds,
+          selectedEntityId: nextIds[nextIds.length - 1] ?? null,
+          selectedLayerId: nextIds.length > 0 ? null : state.selectedLayerId,
+        };
+      }
+      if (options?.additive) {
+        const current = state.selectedEntityIds || (state.selectedEntityId ? [state.selectedEntityId] : []);
+        const nextIds = [...current.filter((item) => item !== id), id];
+        return {
+          selectedEntityIds: nextIds,
+          selectedEntityId: id,
+          selectedLayerId: null,
+        };
+      }
+      return {
+        selectedEntityId: id,
+        selectedEntityIds: [id],
+        selectedLayerId: null,
+      };
+    }),
+
+  selectEntities: (ids) =>
+    set((state) => {
+      const unique = Array.from(new Set(ids.filter((id) => Boolean(id))));
+      return {
+        selectedEntityIds: unique,
+        selectedEntityId: unique[unique.length - 1] ?? null,
+        selectedLayerId: unique.length > 0 ? null : state.selectedLayerId,
+      };
+    }),
+
+  reorderEntityZStep: (id, direction) => {
+    set((state) => {
+      const order =
+        state.entityOrder && state.entityOrder.length > 0
+          ? [...state.entityOrder]
+          : Object.keys(state.entities);
+      const idx = order.indexOf(id);
+      if (idx === -1) return state;
+      if (direction === 'up') {
+        if (idx >= order.length - 1) return state;
+        [order[idx], order[idx + 1]] = [order[idx + 1], order[idx]];
+      } else if (direction === 'down') {
+        if (idx <= 0) return state;
+        [order[idx], order[idx - 1]] = [order[idx - 1], order[idx]];
+      } else if (direction === 'front') {
+        order.splice(idx, 1);
+        order.push(id);
+      } else if (direction === 'back') {
+        order.splice(idx, 1);
+        order.unshift(id);
+      }
+      return { entityOrder: order };
+    });
+  },
+
+  batchTranslateEntities: (ids, delta) => {
+    const { dx, dy } = delta;
+    if (dx === 0 && dy === 0) return;
+    set((state) => {
+      const selectedSet = new Set(ids.filter((id) => Boolean(state.entities[id])));
+      if (selectedSet.size === 0) return state;
+
+      const hasAncestorInSelection = (entityId: EntityId): boolean => {
+        const visited = new Set<EntityId>();
+        let cur = state.entities[entityId]?.parentId;
+        while (cur && !visited.has(cur)) {
+          if (selectedSet.has(cur)) return true;
+          visited.add(cur);
+          cur = state.entities[cur]?.parentId;
+        }
+        return false;
+      };
+
+      const roots = Array.from(selectedSet).filter((id) => !hasAncestorInSelection(id));
+      const nextEntities: Record<EntityId, Entity> = { ...state.entities };
+      const movedIds = new Set<EntityId>();
+
+      roots.forEach((rootId) => {
+        const root = nextEntities[rootId];
+        if (!root) return;
+        const newPos = { x: root.position.x + dx, y: root.position.y + dy };
+        let updatedRoot: Entity = { ...root, position: newPos };
+        if (state.appMode === 'edit' && root.parentId && nextEntities[root.parentId]) {
+          updatedRoot = {
+            ...updatedRoot,
+            parentOffset: computeRelativeParentOffset(
+              updatedRoot,
+              nextEntities[root.parentId],
+              root.parentOffset
+            ),
+          };
+        }
+        nextEntities[rootId] = updatedRoot;
+        movedIds.add(rootId);
+
+        if (state.appMode === 'edit') {
+          const descendants = collectDescendantIds(nextEntities, rootId);
+          descendants.forEach((descId) => {
+            if (movedIds.has(descId)) return;
+            const child = nextEntities[descId];
+            if (!child) return;
+            nextEntities[descId] = {
+              ...child,
+              position: { x: child.position.x + dx, y: child.position.y + dy },
+            };
+            movedIds.add(descId);
+          });
+        }
+      });
+
+      return { entities: nextEntities };
+    });
+    get().evaluateRules();
+  },
+
+  batchDeleteEntities: (ids) => {
+    const unique = Array.from(new Set(ids));
+    if (unique.length === 0) return;
+    if (get().appMode === 'edit') {
+      get().pushSceneHistory();
+    }
+    const idSet = new Set(unique);
+    unique.forEach((id) => setActiveDragPosition(id, null));
+    set((state) => {
+      const remainingEntities: Record<EntityId, Entity> = {};
+      Object.entries(state.entities).forEach(([eid, ent]) => {
+        if (!idSet.has(eid)) {
+          if (ent.parentId && idSet.has(ent.parentId)) {
+            const { parentId: _p, parentOffset: _o, ...rest } = ent;
+            remainingEntities[eid] = rest as Entity;
+          } else {
+            remainingEntities[eid] = ent;
+          }
+        }
+      });
+      const updatedOrder = (state.entityOrder || []).filter((item) => !idSet.has(item));
+      const remainingSelected = (state.selectedEntityIds || []).filter((item) => !idSet.has(item));
+      const fallbackSelected =
+        remainingSelected.length > 0
+          ? remainingSelected
+          : updatedOrder.length > 0
+          ? [updatedOrder[updatedOrder.length - 1]]
+          : [];
+      const cleanedRules = state.rules.filter(
+        (rule) =>
+          !(rule.trigger.subjectId && idSet.has(rule.trigger.subjectId)) &&
+          !(rule.trigger.targetId && idSet.has(rule.trigger.targetId))
+      );
+      return {
+        entities: remainingEntities,
+        entityOrder: updatedOrder,
+        selectedEntityIds: fallbackSelected,
+        selectedEntityId: fallbackSelected[fallbackSelected.length - 1] ?? null,
+        rules: cleanedRules,
+      };
+    });
+  },
+
+  batchDuplicateEntities: (ids) => {
+    const unique = Array.from(new Set(ids)).filter((id) => Boolean(get().entities[id]));
+    if (unique.length === 0) return [];
+    get().pushSceneHistory();
+    const createdIds: EntityId[] = [];
+    const oldToNew: Record<EntityId, EntityId> = {};
+    const stamp = Date.now().toString(36);
+    const sourceEntities = get().entities;
+
+    unique.forEach((id, idx) => {
+      const cur = sourceEntities[id];
+      if (!cur) return;
+      oldToNew[id] = `${cur.type}-${stamp}-${idx}`;
+    });
+
+    set((state) => {
+      const nextEntities: Record<EntityId, Entity> = { ...state.entities };
+      const order =
+        state.entityOrder && state.entityOrder.length > 0
+          ? [...state.entityOrder]
+          : Object.keys(state.entities);
+
+      unique.forEach((id) => {
+        const cur = state.entities[id];
+        if (!cur) return;
+        const newId = oldToNew[id];
+        const cloned: Entity = {
+          ...JSON.parse(JSON.stringify(cur)),
+          id: newId,
+          name: `${cur.name.replace(/\(Copie.*?\)/g, '').trim()} (Copie)`,
+          position: {
+            x: cur.position.x + 32,
+            y: cur.position.y + 32,
+          },
+        };
+        if (cloned.parentId && oldToNew[cloned.parentId]) {
+          cloned.parentId = oldToNew[cloned.parentId];
+        }
+        nextEntities[newId] = cloned;
+        order.push(newId);
+        createdIds.push(newId);
+      });
+
+      return {
+        entities: nextEntities,
+        entityOrder: order,
+        selectedEntityIds: createdIds,
+        selectedEntityId: createdIds[createdIds.length - 1] ?? null,
+        selectedLayerId: null,
+      };
+    });
+
+    if (get().appMode === 'play' && !getIsEvaluatingRules()) {
+      get().evaluateRules();
+    }
+    return createdIds;
+  },
+
+  batchUpdateEntityDetails: (ids, partial) => {
+    const idSet = new Set(ids);
+    if (idSet.size === 0) return;
+    set((state) => {
+      const updatedEntities = { ...state.entities };
+      const updatedArchetypes = { ...state.customArchetypes };
+      idSet.forEach((id) => {
+        const cur = updatedEntities[id];
+        if (!cur) return;
+        updatedEntities[id] = { ...cur, ...partial };
+        if (updatedArchetypes[cur.type]) {
+          if (partial.disabled !== undefined) {
+            // La visibilité / activation multi-objets reste appliquée proprement aux instances
+          }
+        }
+      });
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
+    });
+  },
+
+  batchUpdateEntityBehaviorPartial: (ids, behaviorType, partial) => {
+    const idSet = new Set(ids);
+    if (idSet.size === 0 || !partial || Object.keys(partial).length === 0) return;
+    set((state) => {
+      const selectedTypes = new Set<string>();
+      const updatedEntities = { ...state.entities };
+      const updatedArchetypes = { ...state.customArchetypes };
+
+      idSet.forEach((id) => {
+        const ent = updatedEntities[id];
+        if (ent) selectedTypes.add(ent.type);
+      });
+
+      Object.values(updatedEntities).forEach((ent) => {
+        if (!idSet.has(ent.id) && !selectedTypes.has(ent.type)) return;
+        const behs = ent.behaviors || [];
+        let changed = false;
+        const nextBehs = behs.map((beh) => {
+          if (beh.type !== behaviorType) return beh;
+          changed = true;
+          return mergeBehaviorPartialPatch(beh, partial);
+        });
+        if (changed) {
+          updatedEntities[ent.id] = { ...ent, behaviors: nextBehs };
+        }
+      });
+
+      selectedTypes.forEach((t) => {
+        const arch = updatedArchetypes[t];
+        if (!arch) return;
+        const behs = arch.behaviors || [];
+        let changed = false;
+        const nextBehs = behs.map((beh) => {
+          if (beh.type !== behaviorType) return beh;
+          changed = true;
+          return mergeBehaviorPartialPatch(beh, partial);
+        });
+        if (changed) {
+          updatedArchetypes[t] = { ...arch, behaviors: nextBehs };
+        }
+      });
+
+      return { entities: updatedEntities, customArchetypes: updatedArchetypes };
+    });
+  },
+
+  applyBehaviorToEntities: (sourceEntityId, behaviorType, targetIds) => {
+    const state = get();
+    const source = findTargetEntityOrArchetype(state, sourceEntityId);
+    if (!source) return;
+    const sourceBeh = (source.behaviors || []).find((b) => b.type === behaviorType);
+    if (!sourceBeh) return;
+    if (state.appMode === 'edit') {
+      state.pushSceneHistory();
+    }
+    const payload: CopiedBehaviorPayload = {
+      behavior: JSON.parse(JSON.stringify(sourceBeh)),
+      sourceEntityId: source.id,
+      sourceEntityName: source.name,
+      sourceStates: JSON.parse(JSON.stringify(source.states || {})),
+    };
+    targetIds.forEach((tid) => {
+      if (tid === sourceEntityId) return;
+      const target = findTargetEntityOrArchetype(get(), tid);
+      if (!target) return;
+      const existing = (target.behaviors || []).find((b) => b.type === behaviorType);
+      const remapped = remapPastedBehaviorForEntity(payload, target, existing?.id);
+      const base = target.behaviors || [];
+      const next = existing
+        ? base.map((b) => (b.id === existing.id ? remapped : b))
+        : [...base, remapped];
+      get().updateEntityBehaviors(tid, next);
+    });
+  },
 
   updateEntityPosition: (id, position) => {
     set((state) => {
@@ -3562,6 +4021,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         },
         entityOrder: [...order.filter((i) => i !== id), id],
         selectedEntityId: id,
+        selectedEntityIds: [id],
       };
     });
   },
@@ -3648,6 +4108,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         },
         entityOrder: [...order.filter((i) => i !== id), id],
         selectedEntityId: id,
+        selectedEntityIds: [id],
       };
     });
     if (get().appMode === 'play' && !getIsEvaluatingRules()) {
@@ -3800,6 +4261,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         return { ...g, entityTypes: nextTypes };
       }),
       selectedEntityId: newType,
+      selectedEntityIds: [newType],
       selectedLayerId: null,
       pendingCatalogSpawnType: null,
     }));
@@ -3846,6 +4308,13 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         return true;
       });
 
+      const nextSelectedIds = (state.selectedEntityIds || []).filter(
+        (item) => item !== type && !deletedIds.has(item)
+      );
+      if (nextSelectedIds.length === 0 && nextSelected) {
+        nextSelectedIds.push(nextSelected);
+      }
+
       return {
         customArchetypes: remainingArchetypes,
         entities: remainingEntities,
@@ -3855,6 +4324,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
           entityTypes: g.entityTypes.filter((t) => t !== type),
         })),
         selectedEntityId: nextSelected,
+        selectedEntityIds: nextSelectedIds,
         rules: cleanedRules,
       };
     });
@@ -3951,6 +4421,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         },
         entityOrder: [...order.filter((i) => i !== id), id],
         selectedEntityId: state.appMode === 'play' ? state.selectedEntityId : id,
+        selectedEntityIds: state.appMode === 'play' ? state.selectedEntityIds : [id],
       };
     });
     // Ne pas ré-évaluer de manière réentrante pendant une boucle d'actions en Play (la frame RAF suivante s'en chargera proprement)
@@ -3980,10 +4451,16 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
         return true;
       });
 
+      const nextSelectedIds = (state.selectedEntityIds || []).filter((item) => item !== id);
+      if (nextSelectedIds.length === 0 && nextSelected) {
+        nextSelectedIds.push(nextSelected);
+      }
+
       return {
         entities: remainingEntities,
         entityOrder: updatedOrder,
         selectedEntityId: nextSelected,
+        selectedEntityIds: nextSelectedIds,
         rules: cleanedRules,
       };
     });
@@ -3995,6 +4472,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       entities: {},
       entityOrder: [],
       selectedEntityId: null,
+      selectedEntityIds: [],
     });
   },
 
@@ -4023,6 +4501,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       activeSceneTransition: null,
       projectPalette: JSON.parse(JSON.stringify(DEFAULT_PROJECT_PALETTE)),
       selectedEntityId: null,
+      selectedEntityIds: [],
       selectedLayerId: null,
       activeCollisions: {},
       snapshotEntities: null,
@@ -4072,6 +4551,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       snapshotEntityOrder: null,
       snapshotRules: null,
       selectedEntityId: 'plant-1',
+      selectedEntityIds: ['plant-1'],
       selectedLayerId: null,
       activeCollisions: {},
       appMode: 'edit',
@@ -4123,6 +4603,7 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
       snapshotEntityOrder: null,
       snapshotRules: null,
       selectedEntityId: built.selectedEntityId,
+      selectedEntityIds: built.selectedEntityId ? [built.selectedEntityId] : [],
       selectedLayerId: null,
       activeCollisions: {},
       appMode: 'edit',
@@ -4303,6 +4784,11 @@ export const useSceneStore = create<SceneState>()((set, get) => ({
             }
           : { ...state.settings, projectPalette: importedPalette },
         selectedEntityId: importedOrder[0] || Object.keys(importedEntities)[0] || null,
+        selectedEntityIds: importedOrder[0]
+          ? [importedOrder[0]]
+          : Object.keys(importedEntities)[0]
+          ? [Object.keys(importedEntities)[0]]
+          : [],
         selectedLayerId: null,
         activeCollisions: {},
         appMode: 'edit',

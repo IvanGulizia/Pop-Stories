@@ -19,6 +19,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
     showCanvasLabels,
     enableHoverScaleAnimation,
     isSelected,
+    showTransformHandles,
     isSameTypeSibling,
     currentState,
     canDragFromBehavior,
@@ -247,6 +248,7 @@ export function CustomShape({ entity, style }: CustomShapeProps) {
           height={entity.size.height}
           rotation={currentState.rotation ?? 0}
           isRotating={isRotating}
+          showHandles={showTransformHandles}
           onResizePointerDown={handleResizePointerDown}
           onRotatePointerDown={handleRotatePointerDown}
         />

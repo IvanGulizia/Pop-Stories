@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useDragControls, useMotionValue } from 'motion/react';
 import { Entity, EntityState, HealthBehaviorConfig, PhysicsBehaviorConfig, RotateDragBehaviorConfig } from '../types';
-import { EMPTY_RECORD, useSceneStore } from '../store/useSceneStore';
+import { EMPTY_LIST, EMPTY_RECORD, useSceneStore } from '../store/useSceneStore';
+import { useContextMenuTrigger } from './useContextMenuTrigger';
 import {
   EntityHitTestContext,
   getEntityColliderBounds,
@@ -74,10 +75,12 @@ export function useEntityPointerInteraction({
   useFallbackClipPath = false,
 }: UseEntityPointerInteractionOptions) {
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
+  const selectedEntityIds = useSceneStore((state) => state.selectedEntityIds || EMPTY_LIST);
   const selectEntity = useSceneStore((state) => state.selectEntity);
   const triggerPointerEvent = useSceneStore((state) => state.triggerPointerEvent);
   const triggerDragRelease = useSceneStore((state) => state.triggerDragRelease);
   const updateEntityPosition = useSceneStore((state) => state.updateEntityPosition);
+  const batchTranslateEntities = useSceneStore((state) => state.batchTranslateEntities);
   const updateEntitySize = useSceneStore((state) => state.updateEntitySize);
   const evaluateRulesWithTemp = useSceneStore((state) => state.evaluateRulesWithTemp);
   const showCanvasLabels = useSceneStore((state) => state.settings.showCanvasLabels);
@@ -92,6 +95,8 @@ export function useEntityPointerInteraction({
   const isPhysicsGrabbingRef = useRef(false);
   const physicsGrabCleanupRef = useRef<(() => void) | null>(null);
   const pushedDragHistoryRef = useRef(false);
+  const lastEditDragPosRef = useRef<{ x: number; y: number } | null>(null);
+  const handledSelectionToggleOnDownRef = useRef(false);
   const lastDragEndTimeRef = useRef<number>(0);
   const lastDragEvalTimeRef = useRef<number>(0);
   const hasMovedBeyondDragThresholdRef = useRef(false);
@@ -109,10 +114,36 @@ export function useEntityPointerInteraction({
   const dragControls = useDragControls();
   const { setCursorState, setIsDragging, isDragCursorLocked, setDragCursorLocked } = useAppCursor();
 
-  const isSelected = selectedEntityId === entity.id;
+  const {
+    bind: editContextMenuBind,
+    cancelLongPress,
+    consumeLongPressClick,
+  } = useContextMenuTrigger(
+    (coords) => {
+      if (useSceneStore.getState().appMode === 'play') return;
+      const snap = useSceneStore.getState();
+      const alreadyInSelection =
+        snap.selectedEntityId === entity.id ||
+        snap.selectedEntityIds.includes(entity.id);
+      if (!alreadyInSelection) {
+        selectEntity(entity.id);
+      }
+      window.dispatchEvent(
+        new CustomEvent('atelier:open-entity-context-menu', {
+          detail: { entityId: entity.id, x: coords.x, y: coords.y },
+        })
+      );
+    },
+    { ignoreInteractiveChildren: false }
+  );
+
+  const isPrimarySelected = selectedEntityId === entity.id;
+  const isMultiSelected = selectedEntityIds.length > 1;
+  const isSelected = isPrimarySelected || selectedEntityIds.includes(entity.id);
   const isSameTypeSibling = useSceneStore(
     (state) =>
       state.appMode !== 'play' &&
+      !state.selectedEntityIds.includes(entity.id) &&
       Boolean(
         state.selectedEntityId &&
           state.selectedEntityId !== entity.id &&
@@ -263,12 +294,14 @@ export function useEntityPointerInteraction({
   }, [entity.id]);
 
   const handleDragStart = () => {
+    cancelLongPress();
     isDraggingRef.current = true;
     pushedDragHistoryRef.current = false;
     lastDragEvalTimeRef.current = 0;
     const rx = Number(x.get());
     const ry = Number(y.get());
     const liveEnt = useSceneStore.getState().entities[entity.id] || entity;
+    lastEditDragPosRef.current = { x: liveEnt.position.x, y: liveEnt.position.y };
     const startPos =
       Number.isFinite(rx) && Number.isFinite(ry)
         ? { x: rx, y: ry }
@@ -359,7 +392,23 @@ export function useEntityPointerInteraction({
             pushedDragHistoryRef.current = true;
             useSceneStore.getState().pushSceneHistory();
           }
-          updateEntityPosition(entity.id, { x: effectiveX, y: effectiveY });
+          const snap = useSceneStore.getState();
+          if (
+            snap.selectedEntityIds.length > 1 &&
+            snap.selectedEntityIds.includes(entity.id)
+          ) {
+            const prevPos =
+              lastEditDragPosRef.current || snap.entities[entity.id]?.position || entity.position;
+            const stepDx = effectiveX - prevPos.x;
+            const stepDy = effectiveY - prevPos.y;
+            if (stepDx !== 0 || stepDy !== 0) {
+              lastEditDragPosRef.current = { x: effectiveX, y: effectiveY };
+              batchTranslateEntities(snap.selectedEntityIds, { dx: stepDx, dy: stepDy });
+            }
+          } else {
+            updateEntityPosition(entity.id, { x: effectiveX, y: effectiveY });
+            lastEditDragPosRef.current = { x: effectiveX, y: effectiveY };
+          }
         }
         evaluateRulesWithTemp({
           [entity.id]: { x: effectiveX, y: effectiveY },
@@ -401,10 +450,32 @@ export function useEntityPointerInteraction({
     if (!isNaN(finalX) && !isNaN(finalY)) {
       x.set(finalX);
       y.set(finalY);
-      updateEntityPosition(entity.id, {
-        x: finalX,
-        y: finalY,
-      });
+      if (appMode !== 'play') {
+        const snap = useSceneStore.getState();
+        if (
+          snap.selectedEntityIds.length > 1 &&
+          snap.selectedEntityIds.includes(entity.id)
+        ) {
+          const prevPos =
+            lastEditDragPosRef.current || snap.entities[entity.id]?.position || entity.position;
+          const remDx = finalX - prevPos.x;
+          const remDy = finalY - prevPos.y;
+          if (Math.abs(remDx) > 0.001 || Math.abs(remDy) > 0.001) {
+            batchTranslateEntities(snap.selectedEntityIds, { dx: remDx, dy: remDy });
+          }
+        } else {
+          updateEntityPosition(entity.id, {
+            x: finalX,
+            y: finalY,
+          });
+        }
+        lastEditDragPosRef.current = null;
+      } else {
+        updateEntityPosition(entity.id, {
+          x: finalX,
+          y: finalY,
+        });
+      }
       evaluateRulesWithTemp();
       if (hasMovedBeyondDragThresholdRef.current) {
         triggerDragRelease(entity.id, {
@@ -631,9 +702,26 @@ export function useEntityPointerInteraction({
     style: {
       clipPath: colliderClipPath,
     },
+    onContextMenu: (e) => {
+      if (appMode === 'play') return;
+      editContextMenuBind.onContextMenu(e);
+    },
     onPointerEnter: handlePointerHoverCheck,
-    onPointerMove: handlePointerHoverCheck,
+    onPointerMove: (e) => {
+      if (appMode !== 'play') {
+        editContextMenuBind.onPointerMove(e);
+      }
+      handlePointerHoverCheck(e);
+    },
+    onPointerCancel: () => {
+      if (appMode !== 'play') {
+        editContextMenuBind.onPointerCancel();
+      }
+    },
     onPointerLeave: (e) => {
+      if (appMode !== 'play') {
+        cancelLongPress();
+      }
       if (appMode === 'play') {
         if (!isDraggingRef.current && !isPhysicsGrabbingRef.current && !isDragCursorLocked()) {
           setCursorState('idle');
@@ -662,8 +750,38 @@ export function useEntityPointerInteraction({
       }
 
       e.stopPropagation();
+
       if (appMode !== 'play') {
-        selectEntity(entity.id);
+        editContextMenuBind.onPointerDown(e);
+
+        if (e.button === 2) {
+          const snap = useSceneStore.getState();
+          const alreadySelected =
+            snap.selectedEntityId === entity.id ||
+            snap.selectedEntityIds.includes(entity.id);
+          if (!alreadySelected) {
+            selectEntity(entity.id);
+          }
+          return;
+        }
+
+        if (e.shiftKey || e.metaKey || e.ctrlKey) {
+          handledSelectionToggleOnDownRef.current = true;
+          selectEntity(entity.id, { toggle: true });
+          const stillSelected = useSceneStore.getState().selectedEntityIds.includes(entity.id);
+          if (!stillSelected) {
+            return;
+          }
+        } else {
+          handledSelectionToggleOnDownRef.current = false;
+          const snap = useSceneStore.getState();
+          const alreadyInMulti =
+            snap.selectedEntityIds.length > 1 &&
+            snap.selectedEntityIds.includes(entity.id);
+          if (!alreadyInMulti) {
+            selectEntity(entity.id);
+          }
+        }
       }
 
       pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
@@ -1158,9 +1276,19 @@ export function useEntityPointerInteraction({
       );
 
       if (appMode !== 'play') {
+        editContextMenuBind.onPointerUp();
         if (!hasMovedBeyondDragThresholdRef.current && isInside) {
-          selectEntity(entity.id);
+          if (
+            !consumeLongPressClick(e as any) &&
+            !handledSelectionToggleOnDownRef.current &&
+            !e.shiftKey &&
+            !e.metaKey &&
+            !e.ctrlKey
+          ) {
+            selectEntity(entity.id);
+          }
         }
+        handledSelectionToggleOnDownRef.current = false;
         isDraggingRef.current = false;
         setIsDragging(false);
         return;
@@ -1211,7 +1339,17 @@ export function useEntityPointerInteraction({
 
       e.stopPropagation();
       if (appMode !== 'play') {
-        selectEntity(entity.id);
+        if (consumeLongPressClick(e)) return;
+        if (
+          !e.shiftKey &&
+          !e.metaKey &&
+          !e.ctrlKey &&
+          !handledSelectionToggleOnDownRef.current &&
+          !hasMovedBeyondDragThresholdRef.current
+        ) {
+          selectEntity(entity.id);
+        }
+        handledSelectionToggleOnDownRef.current = false;
         return;
       }
 
@@ -1244,6 +1382,8 @@ export function useEntityPointerInteraction({
     showCanvasLabels,
     enableHoverScaleAnimation,
     isSelected,
+    isPrimarySelected,
+    showTransformHandles: isPrimarySelected || !isMultiSelected,
     isSameTypeSibling,
     currentState,
     canDragFromBehavior,

@@ -1,10 +1,16 @@
 import React, { useState } from 'react';
 import {
   Activity,
+  Check,
   ChevronDown,
   ChevronRight,
+  ClipboardPaste,
+  Copy,
   Layers,
+  MoreVertical,
   Plus,
+  Power,
+  RotateCcw,
   Sparkles,
   Trash2,
   Undo2,
@@ -76,11 +82,185 @@ import {
   ParticleEmitterBehaviorControls,
   StrokeWiggleBehaviorControls,
 } from './behaviors/VisualAndSurvivalBehaviorControls';
+import { useContextMenuTrigger } from '../hooks/useContextMenuTrigger';
+import { FloatingContextMenu, FloatingContextMenuItem } from './shared/FloatingContextMenu';
+import { CopiedBehaviorPayload } from '../utils/behaviorClipboardHelpers';
 
 interface BehaviorManagerProps {
   entity: Entity;
   selectedStateId?: string;
   onEditStateDrawing?: (stateId: string) => void;
+}
+
+interface BehaviorCardRowProps {
+  entityId: string;
+  behavior: EntityBehavior;
+  cardKey: string;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  hasOverride: boolean;
+  targetStateName?: string;
+  isEffectiveEnabled: boolean;
+  copiedBehavior: CopiedBehaviorPayload | null;
+  justCopied: boolean;
+  justPasted: boolean;
+  onCopy: () => void;
+  onPasteValues: () => void;
+  onToggleEnabled: (checked: boolean) => void;
+  onDelete: () => void;
+  onOpenContextMenu: (coords: { x: number; y: number }) => void;
+  children?: React.ReactNode;
+}
+
+function BehaviorCardRow({
+  behavior,
+  isExpanded,
+  onToggleExpand,
+  hasOverride,
+  targetStateName,
+  isEffectiveEnabled,
+  copiedBehavior,
+  justCopied,
+  justPasted,
+  onCopy,
+  onPasteValues,
+  onToggleEnabled,
+  onDelete,
+  onOpenContextMenu,
+  children,
+}: BehaviorCardRowProps) {
+  const canPasteSameType = Boolean(copiedBehavior && copiedBehavior.behavior.type === behavior.type);
+
+  const { bind: headerContextBind, consumeLongPressClick } = useContextMenuTrigger(
+    (coords) => onOpenContextMenu(coords),
+    { ignoreInteractiveChildren: true }
+  );
+
+  return (
+    <div
+      className={`bg-white rounded-2xl border transition-all shadow-2xs overflow-hidden ${
+        hasOverride
+          ? 'border-amber-300 ring-2 ring-amber-100/80'
+          : 'border-slate-200 hover:border-slate-300'
+      }`}
+    >
+      {/* Carte En-tête */}
+      <div
+        {...headerContextBind}
+        onClick={(e) => {
+          if (consumeLongPressClick(e)) return;
+          onToggleExpand();
+        }}
+        className="p-2.5 flex items-center justify-between gap-2 cursor-pointer select-none"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            type="button"
+            className="text-slate-400 hover:text-slate-600 cursor-pointer"
+          >
+            {isExpanded ? (
+              <ChevronDown className="w-4 h-4" />
+            ) : (
+              <ChevronRight className="w-4 h-4" />
+            )}
+          </button>
+          <div className="w-7 h-7 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0">
+            {getBehaviorIcon(behavior.type)}
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 truncate">
+              <span>{getBehaviorTitle(behavior.type)}</span>
+            </div>
+            <div className="text-[10px] text-slate-400 flex items-center gap-1 truncate">
+              {hasOverride ? (
+                <span className="text-amber-700 font-semibold flex items-center gap-0.5">
+                  <Sparkles className="w-2.5 h-2.5 text-amber-500" /> Override {targetStateName}
+                </span>
+              ) : (
+                <span className="text-slate-400">Partagé</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+          {/* Copier les valeurs du composant */}
+          <button
+            type="button"
+            onClick={onCopy}
+            className={`p-1 rounded-lg cursor-pointer transition-colors ${
+              justCopied
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'
+            }`}
+            title={
+              hasOverride
+                ? `Copier les réglages (${targetStateName})`
+                : 'Copier les réglages de ce composant'
+            }
+          >
+            {justCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+
+          {/* Coller les valeurs si le presse-papier contient le même type */}
+          {canPasteSameType && (
+            <button
+              type="button"
+              onClick={onPasteValues}
+              className={`p-1 rounded-lg cursor-pointer transition-colors ${
+                justPasted
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200'
+              }`}
+              title={`Coller les valeurs copiées depuis ${copiedBehavior?.sourceEntityName}`}
+            >
+              {justPasted ? (
+                <Check className="w-3.5 h-3.5" />
+              ) : (
+                <ClipboardPaste className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
+
+          {/* Toggle activation on/off */}
+          <label className="relative inline-flex items-center cursor-pointer mx-0.5">
+            <input
+              type="checkbox"
+              checked={isEffectiveEnabled}
+              onChange={(e) => onToggleEnabled(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3.5 after:transition-all peer-checked:bg-indigo-600"></div>
+          </label>
+
+          {/* Menu contextuel (⋯) accessible souris & tablette */}
+          <button
+            type="button"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              onOpenContextMenu({ x: rect.right - 200, y: rect.bottom + 6 });
+            }}
+            className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer"
+            title="Actions du composant (Copier, Coller, Réinitialiser, Supprimer)"
+          >
+            <MoreVertical className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Supprimer le composant de l'entité */}
+          <button
+            type="button"
+            onClick={onDelete}
+            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+            title="Supprimer ce composant"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {children}
+    </div>
+  );
 }
 
 export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }: BehaviorManagerProps) {
@@ -99,6 +279,10 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
   const deleteCustomParticle = useSceneStore((state) => state.deleteCustomParticle);
   const expandedBehaviorCards = useSceneStore((state) => state.expandedBehaviorCards || EMPTY_RECORD);
   const setBehaviorCardExpanded = useSceneStore((state) => state.setBehaviorCardExpanded);
+  const copiedBehavior = useSceneStore((state) => state.copiedBehavior);
+  const copyEntityBehavior = useSceneStore((state) => state.copyEntityBehavior);
+  const pasteBehaviorToEntity = useSceneStore((state) => state.pasteBehaviorToEntity);
+  const resetEntityBehavior = useSceneStore((state) => state.resetEntityBehavior);
 
   const baseBehaviors = entity.behaviors || [];
   const stateList = Object.values(entity.states);
@@ -111,12 +295,32 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
     [expandedBehaviorCards, entity.id]
   );
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [feedbackBadge, setFeedbackBadge] = useState<{
+    behaviorId: string;
+    kind: 'copied' | 'pasted';
+  } | null>(null);
+  const [behaviorContextMenu, setBehaviorContextMenu] = useState<{
+    x: number;
+    y: number;
+    behavior: EntityBehavior;
+    hasOverride: boolean;
+    isEffectiveEnabled: boolean;
+  } | null>(null);
   const [particleEditorState, setParticleEditorState] = useState<{
     behaviorId: string;
     isOverridden: boolean;
     initialView?: 'studio' | 'draw_custom';
     editingPreset?: CustomParticlePreset;
   } | null>(null);
+
+  const triggerFeedback = (behaviorId: string, kind: 'copied' | 'pasted') => {
+    setFeedbackBadge({ behaviorId, kind });
+    window.setTimeout(() => {
+      setFeedbackBadge((cur) =>
+        cur && cur.behaviorId === behaviorId && cur.kind === kind ? null : cur
+      );
+    }, 1400);
+  };
 
   // Sync with selectedStateId if it changes from parent Inspector
   React.useEffect(() => {
@@ -256,23 +460,116 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
     }
   };
 
+  const buildBehaviorMenuItems = (): FloatingContextMenuItem[] => {
+    if (!behaviorContextMenu) return [];
+    const { behavior, hasOverride, isEffectiveEnabled } = behaviorContextMenu;
+    const canPasteSameType = Boolean(
+      copiedBehavior && copiedBehavior.behavior.type === behavior.type
+    );
+    return [
+      {
+        id: 'copy',
+        label: hasOverride ? `Copier (${targetState?.name})` : 'Copier ce composant',
+        icon: <Copy className="w-3.5 h-3.5 text-indigo-600" />,
+        onSelect: () => {
+          if (copyEntityBehavior(entity.id, behavior.id, hasOverride ? targetState?.id : undefined)) {
+            triggerFeedback(behavior.id, 'copied');
+          }
+        },
+      },
+      {
+        id: 'paste_values',
+        label: canPasteSameType
+          ? `Coller valeurs (${copiedBehavior?.sourceEntityName})`
+          : 'Coller valeurs (type différent)',
+        icon: <ClipboardPaste className="w-3.5 h-3.5 text-indigo-600" />,
+        disabled: !canPasteSameType,
+        onSelect: () => {
+          if (
+            pasteBehaviorToEntity(
+              entity.id,
+              behavior.id,
+              hasOverride ? targetState?.id : undefined
+            )
+          ) {
+            triggerFeedback(behavior.id, 'pasted');
+          }
+        },
+      },
+      ...(copiedBehavior
+        ? [
+            {
+              id: 'paste_new',
+              label: `Ajouter copie de « ${getBehaviorTitle(copiedBehavior.behavior.type)} »`,
+              icon: <Plus className="w-3.5 h-3.5 text-emerald-600" />,
+              onSelect: () => {
+                pasteBehaviorToEntity(entity.id);
+              },
+            } as FloatingContextMenuItem,
+          ]
+        : []),
+      {
+        id: 'toggle',
+        label: isEffectiveEnabled ? 'Désactiver le composant' : 'Activer le composant',
+        icon: <Power className="w-3.5 h-3.5 text-slate-600" />,
+        dividerBefore: true,
+        onSelect: () => {
+          if (hasOverride) {
+            handleUpdateOverride(behavior.id, { enabled: !isEffectiveEnabled });
+          } else {
+            handleUpdateBaseBehavior(behavior.id, { enabled: !isEffectiveEnabled });
+          }
+        },
+      },
+      {
+        id: 'reset',
+        label: 'Réinitialiser par défaut',
+        icon: <RotateCcw className="w-3.5 h-3.5 text-amber-600" />,
+        onSelect: () => resetEntityBehavior(entity.id, behavior.id),
+      },
+      {
+        id: 'delete',
+        label: 'Supprimer le composant',
+        icon: <Trash2 className="w-3.5 h-3.5" />,
+        danger: true,
+        dividerBefore: true,
+        onSelect: () => handleDeleteBehavior(behavior.id),
+      },
+    ];
+  };
+
   return (
     <div className="space-y-3">
       {/* En-tête de section */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-1.5 flex-wrap">
         <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
           <Activity className="w-4 h-4 text-indigo-600" />
           <span>Composants & Physique</span>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setIsAddModalOpen(true)}
-          className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 cursor-pointer shadow-2xs transition-all active:scale-95"
-          title="Ajouter un composant à cet objet"
-        >
-          <Plus className="w-3.5 h-3.5" /> Ajouter
-        </button>
+        <div className="flex items-center gap-1.5">
+          {copiedBehavior && (
+            <button
+              type="button"
+              onClick={() => pasteBehaviorToEntity(entity.id)}
+              className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 px-2 py-1 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 cursor-pointer shadow-2xs transition-all active:scale-95 max-w-[145px]"
+              title={`Coller « ${getBehaviorTitle(copiedBehavior.behavior.type)} » copié depuis ${copiedBehavior.sourceEntityName} comme nouveau composant`}
+            >
+              <ClipboardPaste className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">
+                Coller {getBehaviorTitle(copiedBehavior.behavior.type)}
+              </span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setIsAddModalOpen(true)}
+            className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 cursor-pointer shadow-2xs transition-all active:scale-95"
+            title="Ajouter un composant à cet objet"
+          >
+            <Plus className="w-3.5 h-3.5" /> Ajouter
+          </button>
+        </div>
       </div>
 
       {/* Sélecteur d'état inspecté si plusieurs états existent */}
@@ -321,80 +618,62 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
             hasOverride && override?.enabled !== undefined ? override.enabled : behavior.enabled;
 
           return (
-            <div
+            <BehaviorCardRow
               key={behavior.id}
-              className={`bg-white rounded-2xl border transition-all shadow-2xs overflow-hidden ${
-                hasOverride
-                  ? 'border-amber-300 ring-2 ring-amber-100/80'
-                  : 'border-slate-200 hover:border-slate-300'
-              }`}
+              entityId={entity.id}
+              behavior={behavior}
+              cardKey={cardKey}
+              isExpanded={isExpanded}
+              onToggleExpand={() => setBehaviorCardExpanded(cardKey, !isExpanded)}
+              hasOverride={hasOverride}
+              targetStateName={targetState?.name}
+              isEffectiveEnabled={isEffectiveEnabled}
+              copiedBehavior={copiedBehavior}
+              justCopied={
+                feedbackBadge?.behaviorId === behavior.id && feedbackBadge.kind === 'copied'
+              }
+              justPasted={
+                feedbackBadge?.behaviorId === behavior.id && feedbackBadge.kind === 'pasted'
+              }
+              onCopy={() => {
+                if (
+                  copyEntityBehavior(
+                    entity.id,
+                    behavior.id,
+                    hasOverride ? targetState?.id : undefined
+                  )
+                ) {
+                  triggerFeedback(behavior.id, 'copied');
+                }
+              }}
+              onPasteValues={() => {
+                if (
+                  pasteBehaviorToEntity(
+                    entity.id,
+                    behavior.id,
+                    hasOverride ? targetState?.id : undefined
+                  )
+                ) {
+                  triggerFeedback(behavior.id, 'pasted');
+                }
+              }}
+              onToggleEnabled={(checked) => {
+                if (hasOverride) {
+                  handleUpdateOverride(behavior.id, { enabled: checked });
+                } else {
+                  handleUpdateBaseBehavior(behavior.id, { enabled: checked });
+                }
+              }}
+              onDelete={() => handleDeleteBehavior(behavior.id)}
+              onOpenContextMenu={(coords) =>
+                setBehaviorContextMenu({
+                  ...coords,
+                  behavior,
+                  hasOverride,
+                  isEffectiveEnabled,
+                })
+              }
             >
-              {/* Carte En-tête */}
-              <div
-                onClick={() => setBehaviorCardExpanded(cardKey, !isExpanded)}
-                className="p-2.5 flex items-center justify-between gap-2 cursor-pointer select-none"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <button
-                    type="button"
-                    className="text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    {isExpanded ? (
-                      <ChevronDown className="w-4 h-4" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4" />
-                    )}
-                  </button>
-                  <div className="w-7 h-7 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0">
-                    {getBehaviorIcon(behavior.type)}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 truncate">
-                      <span>{getBehaviorTitle(behavior.type)}</span>
-                    </div>
-                    <div className="text-[10px] text-slate-400 flex items-center gap-1 truncate">
-                      {hasOverride ? (
-                        <span className="text-amber-700 font-semibold flex items-center gap-0.5">
-                          <Sparkles className="w-2.5 h-2.5 text-amber-500" /> Override {targetState?.name}
-                        </span>
-                      ) : (
-                        <span className="text-slate-400">Partagé</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                  {/* Toggle activation on/off */}
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isEffectiveEnabled}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        if (hasOverride) {
-                          handleUpdateOverride(behavior.id, { enabled: checked });
-                        } else {
-                          handleUpdateBaseBehavior(behavior.id, { enabled: checked });
-                        }
-                      }}
-                      className="sr-only peer"
-                    />
-                    <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3.5 after:transition-all peer-checked:bg-indigo-600"></div>
-                  </label>
-
-                  {/* Supprimer le composant de l'entité */}
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteBehavior(behavior.id)}
-                    className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
-                    title="Supprimer ce composant"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
               {/* Tiroir de Réglages du Composant */}
               {isExpanded && (
                 <div className="px-3 pb-3 pt-1 border-t border-slate-100 bg-slate-50/50 space-y-2 text-xs">
@@ -495,7 +774,7 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
                   })}
                 </div>
               )}
-            </div>
+            </BehaviorCardRow>
           );
         })}
 
@@ -518,6 +797,17 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
           onEditStateDrawing={onEditStateDrawing}
         />
       </div>
+
+      {behaviorContextMenu && (
+        <FloatingContextMenu
+          x={behaviorContextMenu.x}
+          y={behaviorContextMenu.y}
+          title={getBehaviorTitle(behaviorContextMenu.behavior.type)}
+          subtitle={entity.name}
+          items={buildBehaviorMenuItems()}
+          onClose={() => setBehaviorContextMenu(null)}
+        />
+      )}
 
       {/* Modal / Sélecteur d'Ajout de Composant */}
       <AddBehaviorModal
@@ -644,7 +934,7 @@ export function BehaviorManager({ entity, selectedStateId, onEditStateDrawing }:
   );
 }
 
-function renderBehaviorControls({
+export function renderBehaviorControls({
   entityId,
   stateId,
   behavior,
@@ -667,7 +957,7 @@ function renderBehaviorControls({
   hasPhysicsJointParent,
   onActivateGroundedPhysics,
 }: {
-  entityId: string;
+  entityId?: string;
   stateId?: string;
   behavior: EntityBehavior;
   override?: BehaviorOverride;
@@ -705,6 +995,7 @@ function renderBehaviorControls({
         <InteractivePuppetControls
           behavior={{ ...behavior, ...(override || {}) } as InteractivePuppetBehaviorConfig}
           update={update}
+          entityId={entityId}
           stateList={stateList}
           targetEntityOptions={targetEntityOptions}
           entityTypeOptions={entityTypeOptions}
@@ -718,6 +1009,7 @@ function renderBehaviorControls({
         <PhysicsBehaviorControls
           b={{ ...behavior, ...(override || {}) } as PhysicsBehaviorConfig}
           update={update}
+          entityId={entityId}
           stateList={stateList}
           onQuickCreateState={onQuickCreateState}
           onEditStateDrawing={onEditStateDrawing}
@@ -732,6 +1024,7 @@ function renderBehaviorControls({
         <KeyboardControlBehaviorControls
           b={{ ...behavior, ...(override || {}) } as KeyboardControlBehaviorConfig}
           update={update}
+          entityId={entityId}
           stateList={stateList}
           onQuickCreateState={onQuickCreateState}
           onEditStateDrawing={onEditStateDrawing}
@@ -742,6 +1035,7 @@ function renderBehaviorControls({
         <PatrolBehaviorControls
           b={{ ...behavior, ...(override || {}) } as PatrolBehaviorConfig}
           update={update}
+          entityId={entityId}
           targetEntityOptions={targetEntityOptions}
           entityTypeOptions={entityTypeOptions}
           availableTags={availableTags}
@@ -758,6 +1052,7 @@ function renderBehaviorControls({
         <WanderingBehaviorControls
           b={{ ...behavior, ...(override || {}) } as WanderingBehaviorConfig}
           update={update}
+          entityId={entityId}
           stateList={stateList}
           onQuickCreateState={onQuickCreateState}
           onEditStateDrawing={onEditStateDrawing}
@@ -771,6 +1066,7 @@ function renderBehaviorControls({
         <MoveToBehaviorControls
           b={{ ...behavior, ...(override || {}) } as MoveToBehaviorConfig}
           update={update}
+          entityId={entityId}
           targetEntityOptions={targetEntityOptions}
           entityTypeOptions={entityTypeOptions}
           availableTags={availableTags}
@@ -781,6 +1077,7 @@ function renderBehaviorControls({
         <LookAtBehaviorControls
           b={{ ...behavior, ...(override || {}) } as LookAtBehaviorConfig}
           update={update}
+          entityId={entityId}
           targetEntityOptions={targetEntityOptions}
           entityTypeOptions={entityTypeOptions}
           availableTags={availableTags}
@@ -791,6 +1088,7 @@ function renderBehaviorControls({
         <FollowBehaviorControls
           b={{ ...behavior, ...(override || {}) } as FollowBehaviorConfig}
           update={update}
+          entityId={entityId}
           targetEntityOptions={targetEntityOptions}
           entityTypeOptions={entityTypeOptions}
           availableTags={availableTags}
@@ -807,6 +1105,7 @@ function renderBehaviorControls({
         <FleeBehaviorControls
           b={{ ...behavior, ...(override || {}) } as FleeBehaviorConfig}
           update={update}
+          entityId={entityId}
           targetEntityOptions={targetEntityOptions}
           entityTypeOptions={entityTypeOptions}
           availableTags={availableTags}
@@ -816,7 +1115,13 @@ function renderBehaviorControls({
         />
       );
     case 'boundary_behavior':
-      return <BoundaryBehaviorControls b={{ ...behavior, ...(override || {}) } as BoundaryBehaviorConfig} update={update} />;
+      return (
+        <BoundaryBehaviorControls
+          b={{ ...behavior, ...(override || {}) } as BoundaryBehaviorConfig}
+          update={update}
+          entityId={entityId}
+        />
+      );
     case 'particle_emitter':
       return (
         <ParticleEmitterBehaviorControls
@@ -836,6 +1141,7 @@ function renderBehaviorControls({
         <HealthBehaviorControls
           b={{ ...behavior, ...(override || {}) } as HealthBehaviorConfig}
           update={update}
+          entityId={entityId}
           availableTags={availableTags}
           stateList={stateList}
           onQuickCreateState={onQuickCreateState}
@@ -851,7 +1157,13 @@ function renderBehaviorControls({
         />
       );
     case 'stroke_wiggle':
-      return <StrokeWiggleBehaviorControls b={{ ...behavior, ...(override || {}) } as StrokeWiggleBehaviorConfig} update={update} />;
+      return (
+        <StrokeWiggleBehaviorControls
+          b={{ ...behavior, ...(override || {}) } as StrokeWiggleBehaviorConfig}
+          update={update}
+          entityId={entityId}
+        />
+      );
     case 'slider':
       return <SliderBehaviorControls b={{ ...behavior, ...(override || {}) } as SliderBehaviorConfig} update={update} />;
     case 'rotate_drag':
@@ -877,6 +1189,7 @@ function renderBehaviorControls({
         <DrivenAnimationBehaviorControls
           b={{ ...behavior, ...(override || {}) } as DrivenAnimationBehaviorConfig}
           update={update}
+          entityId={entityId}
           targetEntityOptions={targetEntityOptions}
           entityTypeOptions={entityTypeOptions}
           availableTags={availableTags}

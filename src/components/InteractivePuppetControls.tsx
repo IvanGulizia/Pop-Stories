@@ -8,18 +8,23 @@ import {
 import {
   ChevronDown,
   ChevronRight,
+  Hand,
   Layers,
   Paintbrush,
   Plus,
+  Sliders,
   Sparkles,
   Trash2,
 } from 'lucide-react';
 import { GrabPhysicsControls } from './behaviors/GrabPhysicsControls';
 import { EditableNumericValue } from './shared/EditableNumericValue';
+import { BehaviorSubSection } from './behaviors/BehaviorSubSection';
+import { BehaviorRuleShortcutButton } from './behaviors/BehaviorRuleShortcutButton';
 
 interface InteractivePuppetControlsProps {
   behavior: InteractivePuppetBehaviorConfig;
   update: (partial: Partial<InteractivePuppetBehaviorConfig>) => void;
+  entityId?: string;
   stateList: EntityState[];
   targetEntityOptions: Entity[];
   entityTypeOptions: { type: string; label: string }[];
@@ -31,6 +36,7 @@ interface InteractivePuppetControlsProps {
 export function InteractivePuppetControls({
   behavior: b,
   update,
+  entityId,
   stateList,
   targetEntityOptions,
   entityTypeOptions,
@@ -160,21 +166,51 @@ export function InteractivePuppetControls({
   return (
     <div className="space-y-2">
       {/* 1. Drag, Inertie au lancer & Saisie physique précise */}
-      <GrabPhysicsControls
-        config={b}
-        update={update}
-        accent="violet"
-        throwSubtitle="Projette la marionnette au lâcher (avec composant Physique)"
-        preciseSubtitle="Utilise la contrainte physique au coin/bord saisi (si Physique ou Joint actif)"
-      />
+      <BehaviorSubSection
+        title="Saisie, Drag & Inertie"
+        subtitle="Attraper, lancer & saisie physique"
+        icon={<Hand className="w-3.5 h-3.5 text-violet-600" />}
+        summaryBadge={b.throwable ? 'Lancer actif' : undefined}
+        persistKey={entityId ? `${entityId}:${b.id}:puppet_grab` : undefined}
+        defaultOpen={true}
+        headerActions={
+          <div className="flex items-center gap-1">
+            <BehaviorRuleShortcutButton
+              entityId={entityId}
+              triggerType="drag"
+              triggerPhase="drag_start"
+              label="Début Drag"
+            />
+            <BehaviorRuleShortcutButton
+              entityId={entityId}
+              triggerType="drag"
+              triggerPhase="drag_release"
+              label="Relâcher Drag"
+            />
+          </div>
+        }
+      >
+        <GrabPhysicsControls
+          config={b}
+          update={update}
+          accent="violet"
+          throwSubtitle="Projette la marionnette au lâcher (avec composant Physique)"
+          preciseSubtitle="Utilise la contrainte physique au coin/bord saisi (si Physique ou Joint actif)"
+        />
+      </BehaviorSubSection>
 
       {/* 2. Balancement & Pendule */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
-        <div>
-          <div className="font-bold text-slate-700 text-xs">Balancement pendant le Drag</div>
-          <div className="text-[10px] text-slate-400">
-            Testez l'inclinaison pendulaire, les états visuels ou les deux combinés
-          </div>
+      <BehaviorSubSection
+        title="Balancement & Pendule"
+        subtitle="Inclinaison pendulaire et seuils"
+        summaryBadge={
+          swingMode === 'both' ? 'Pendule + États' : swingMode === 'pendulum' ? 'Pendule' : 'États'
+        }
+        persistKey={entityId ? `${entityId}:${b.id}:puppet_swing` : undefined}
+        defaultOpen={true}
+      >
+        <div className="text-[10px] text-slate-400">
+          Testez l'inclinaison pendulaire, les états visuels ou les deux combinés
         </div>
 
         <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl">
@@ -333,11 +369,25 @@ export function InteractivePuppetControls({
             </div>
           </div>
         )}
-      </div>
+      </BehaviorSubSection>
 
       {/* 3. Paliers d'approche & Temporisations */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
-        <div className="font-bold text-slate-700 text-xs">Paliers d'approche & Seuils</div>
+      <BehaviorSubSection
+        title="Paliers d'approche & Seuils"
+        subtitle="Distances d'approche et délais de transition"
+        icon={<Sliders className="w-3.5 h-3.5 text-violet-600" />}
+        summaryBadge={`${b.approachNearDistance ?? 120}/${b.approachFarDistance ?? 280} px`}
+        persistKey={entityId ? `${entityId}:${b.id}:puppet_thresholds` : undefined}
+        defaultOpen={false}
+        headerActions={
+          <BehaviorRuleShortcutButton
+            entityId={entityId}
+            triggerType="hover"
+            triggerPhase="hover_enter"
+            label="Survol (Hover)"
+          />
+        }
+      >
 
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -661,30 +711,32 @@ export function InteractivePuppetControls({
             </div>
           </div>
         )}
-      </div>
+      </BehaviorSubSection>
 
       {/* 4. Drag au-dessus d'entités ou #tags */}
-      <div className="p-2 bg-amber-50/50 rounded-xl border border-amber-200/80 space-y-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <div className="font-bold text-amber-950 text-xs flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-              <span>Drag au-dessus d'une cible</span>
-            </div>
-            <div className="text-[10px] text-amber-800/75">
-              Sous-état affiché quand on tient l'objet au-dessus d'une entité ou d'un #tag
-            </div>
-          </div>
+      <BehaviorSubSection
+        title="Drag au-dessus d'une cible"
+        subtitle="Sous-état affiché quand on tient l'objet au-dessus d'une entité ou d'un #tag"
+        icon={<Sparkles className="w-3.5 h-3.5 text-amber-600" />}
+        summaryBadge={dragOverTargets.length > 0 ? `${dragOverTargets.length} cible${dragOverTargets.length > 1 ? 's' : ''}` : undefined}
+        persistKey={entityId ? `${entityId}:${b.id}:puppet_dragover` : undefined}
+        defaultOpen={dragOverTargets.length > 0}
+        tone="amber"
+        headerActions={
           <button
             type="button"
             onClick={handleAddDragOverRule}
-            className="px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-bold flex items-center gap-1 cursor-pointer shrink-0"
+            className="px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-bold flex items-center gap-1 cursor-pointer shrink-0"
           >
             <Plus className="w-3 h-3" /> Cible
           </button>
-        </div>
-
-        {dragOverTargets.length > 0 && (
+        }
+      >
+        {dragOverTargets.length === 0 ? (
+          <div className="text-[10px] text-amber-800/75 italic">
+            Ajoutez une cible pour afficher un sous-état visuel pendant le drag au-dessus d'un #tag, d'une entité ou d'un type.
+          </div>
+        ) : (
           <div className="space-y-1.5">
             {dragOverTargets.map((rule) => (
               <div
@@ -809,18 +861,20 @@ export function InteractivePuppetControls({
             ))}
           </div>
         )}
-      </div>
+      </BehaviorSubSection>
 
       {/* 5. Liaisons automatiques d'états visuels + Garde-fou */}
-      <div className="p-2.5 bg-violet-50/60 rounded-xl border border-violet-200/80 space-y-2">
-        <div>
-          <div className="font-bold text-violet-950 text-xs flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5 text-violet-600" />
-            <span>États visuels automatiques (Garde-fou actif)</span>
-          </div>
-          <div className="text-[10px] text-violet-800/80 leading-snug mt-0.5">
-            Ne liez que les états utiles : les emplacements vides sont ignorés et les états externes restent intacts.
-          </div>
+      <BehaviorSubSection
+        title="États visuels automatiques"
+        subtitle="Garde-fou actif : les emplacements vides sont ignorés"
+        icon={<Layers className="w-3.5 h-3.5 text-violet-600" />}
+        summaryBadge={`${hoverCount + dragCount + airCount} liés`}
+        persistKey={entityId ? `${entityId}:${b.id}:puppet_states` : undefined}
+        defaultOpen={true}
+        tone="violet"
+      >
+        <div className="text-[10px] text-violet-800/80 leading-snug">
+          Ne liez que les états utiles : les emplacements vides sont ignorés et les états externes restent intacts.
         </div>
 
         <label className="flex items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-violet-100 cursor-pointer">
@@ -908,7 +962,7 @@ export function InteractivePuppetControls({
             </>
           )}
         </div>
-      </div>
+      </BehaviorSubSection>
     </div>
   );
 }

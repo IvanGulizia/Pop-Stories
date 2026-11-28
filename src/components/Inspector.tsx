@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useSceneStore, EMPTY_RECORD } from '../store/useSceneStore';
+import { useSceneStore, EMPTY_LIST, EMPTY_RECORD } from '../store/useSceneStore';
 import { Entity, EntityPivot, EntityState, ParentOffset } from '../types';
 import {
   Sparkles,
@@ -31,6 +31,7 @@ import { BehaviorManager } from './BehaviorManager';
 import { DEFAULT_PIVOT, resolveRawPivot, sanitizePivot } from '../utils/physics/pivotHelpers';
 import { EditableNumericValue } from './shared/EditableNumericValue';
 import { ParentOffsetFieldsEditor } from './shared/ParentOffsetFieldsEditor';
+import { MultiSelectionInspector } from './MultiSelectionInspector';
 
 const INSPECTOR_PIVOT_PRESETS: { label: string; x: number; y: number }[] = [
   { label: 'Haut-Gauche', x: 0, y: 0 },
@@ -46,6 +47,7 @@ const INSPECTOR_PIVOT_PRESETS: { label: string; x: number; y: number }[] = [
 
 export function Inspector() {
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
+  const selectedEntityIds = useSceneStore((state) => state.selectedEntityIds || EMPTY_LIST);
   const entities = useSceneStore((state) => state.entities);
   const updateEntityDetails = useSceneStore((state) => state.updateEntityDetails);
   const setEntityDisabledCascade = useSceneStore((state) => state.setEntityDisabledCascade);
@@ -104,6 +106,15 @@ export function Inspector() {
         vectorPaths: s.vectorPaths || (s.id === selectedEntity.currentStateId ? selectedEntity.vectorPaths : []),
       }));
   }, [editingStateDrawingId, selectedEntity]);
+
+  const resolvedMultiIds = useMemo(
+    () => selectedEntityIds.filter((id) => Boolean(entities[id])),
+    [selectedEntityIds, entities]
+  );
+
+  if (resolvedMultiIds.length > 1) {
+    return <MultiSelectionInspector entityIds={resolvedMultiIds} />;
+  }
 
   if (!selectedEntity) {
     return (

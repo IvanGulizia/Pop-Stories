@@ -77,8 +77,10 @@ export default function App() {
   const editorPanToolActive = useSceneStore((state) => state.editorPanToolActive);
   const setEditorPanToolActive = useSceneStore((state) => state.setEditorPanToolActive);
 
-  // Main UI View States
-  const [activeView, setActiveView] = useState<'canvas' | 'rules'>('canvas');
+  // Main UI View States (partagés avec les raccourcis ⚡ des composants)
+  const activeView = useSceneStore((state) => state.activeMainView);
+  const setActiveView = useSceneStore((state) => state.setActiveMainView);
+  const selectedEntityIds = useSceneStore((state) => state.selectedEntityIds || EMPTY_LIST);
   const [hasVisitedRules, setHasVisitedRules] = useState(false);
   const spawnCanvasPick = useSceneStore((state) => state.spawnCanvasPick);
   const prevSpawnPickRef = useRef(false);
@@ -311,7 +313,7 @@ export default function App() {
           st.setAppMode('edit');
         } else if (st.selectedLayerId) {
           st.selectLayer(null);
-        } else if (st.selectedEntityId) {
+        } else if ((st.selectedEntityIds?.length || 0) > 0 || st.selectedEntityId) {
           st.selectEntity(null);
         }
         return;
@@ -337,20 +339,30 @@ export default function App() {
         return;
       }
 
-      // Cmd/Ctrl + D : Dupliquer l'entité sélectionnée (hors mode dessin de calque)
+      // Cmd/Ctrl + D : Dupliquer l'entité ou la multi-sélection (hors mode dessin de calque)
       if (mod && key === 'd') {
-        if (st.selectedEntityId && !st.selectedLayerId) {
-          e.preventDefault();
-          st.duplicateEntity(st.selectedEntityId);
+        if (!st.selectedLayerId) {
+          if ((st.selectedEntityIds?.length || 0) > 1) {
+            e.preventDefault();
+            st.batchDuplicateEntities(st.selectedEntityIds);
+          } else if (st.selectedEntityId) {
+            e.preventDefault();
+            st.duplicateEntity(st.selectedEntityId);
+          }
         }
         return;
       }
 
-      // Suppr / Retour arrière : Supprimer l'entité sélectionnée
+      // Suppr / Retour arrière : Supprimer l'entité ou la multi-sélection
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (st.selectedEntityId && !st.selectedLayerId) {
-          e.preventDefault();
-          st.deleteEntity(st.selectedEntityId);
+        if (!st.selectedLayerId) {
+          if ((st.selectedEntityIds?.length || 0) > 1) {
+            e.preventDefault();
+            st.batchDeleteEntities(st.selectedEntityIds);
+          } else if (st.selectedEntityId) {
+            e.preventDefault();
+            st.deleteEntity(st.selectedEntityId);
+          }
         }
       }
     };
@@ -561,11 +573,17 @@ export default function App() {
               onClick={(e) => {
                 e.currentTarget.blur();
                 if (selectedLayerId) selectLayer(null);
-                else if (selectedEntityId) selectEntity(null);
+                else if (selectedEntityId || selectedEntityIds.length > 0) selectEntity(null);
                 else setIsClearModalOpen(true);
               }}
               className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-white/10 transition-all cursor-pointer"
-              title={selectedLayerId ? 'Terminer le dessin du calque' : selectedEntityId ? 'Désélectionner' : 'Nettoyer la scène'}
+              title={
+                selectedLayerId
+                  ? 'Terminer le dessin du calque'
+                  : selectedEntityId || selectedEntityIds.length > 0
+                  ? 'Désélectionner'
+                  : 'Nettoyer la scène'
+              }
             >
               <X className="w-3.5 h-3.5" strokeWidth={2} />
             </button>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, Paintbrush, Pin, Plus, RotateCcw } from 'lucide-react';
+import { Layers, Paintbrush, Pin, Plus, RotateCcw, Shield, Sliders } from 'lucide-react';
 import {
   AutoDestroyBehaviorConfig,
   BoundaryBehaviorConfig,
@@ -12,6 +12,8 @@ import {
 import { FlipControls, InertiaControls } from './BehaviorSharedControls';
 import { GrabPhysicsControls } from './GrabPhysicsControls';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
+import { BehaviorSubSection } from './BehaviorSubSection';
+import { BehaviorRuleShortcutButton } from './BehaviorRuleShortcutButton';
 
 export function DraggableBehaviorControls({
   b,
@@ -26,76 +28,110 @@ export function DraggableBehaviorControls({
 export function PhysicsBehaviorControls({
   b,
   update,
+  entityId,
   stateList = [],
   onQuickCreateState,
   onEditStateDrawing,
 }: {
   b: PhysicsBehaviorConfig;
   update: (partial: any) => void;
+  entityId?: string;
   stateList?: EntityState[];
   onQuickCreateState?: (suggestedName: string, folderName?: string) => string;
   onEditStateDrawing?: (stateId: string) => void;
 }) {
   return (
     <div className="space-y-1.5">
-      {/* Ligne 1: Collider Solide vs Trigger */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
-        <div>
-          <div className="font-bold text-slate-700 text-xs">Collider Solide</div>
-          <div className="text-[10px] text-slate-400">
-            {b.isTrigger ? 'Zone fantôme / Capteur (traverse sans bloquer)' : 'Corps solide (bloque et repousse)'}
-          </div>
-        </div>
-        <input
-          type="checkbox"
-          checked={b.isTrigger !== true}
-          onChange={(e) => update({ isTrigger: !e.target.checked })}
-          className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
-          title="Décocher pour en faire un Trigger (capteur sans collision physique)"
-        />
-      </div>
-
-      {/* Ligne 2: Obstacle Fixe */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
-        <div>
-          <div className="font-bold text-slate-700 text-xs">Obstacle Fixe (Inamovible)</div>
-          <div className="text-[10px] text-slate-400">
-            {b.isStatic ? 'Immobile / Solide fixe (Masse infinie)' : 'Corps physique mobile (Dynamique)'}
-          </div>
-        </div>
-        <input
-          type="checkbox"
-          checked={b.isStatic === true}
-          onChange={(e) =>
-            update({
-              isStatic: e.target.checked,
-              ...(e.target.checked ? { worldPinEnabled: false } : {}),
-            })
-          }
-          className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
-          title="Cocher pour un mur, un sol ou une plateforme infranchissable"
-        />
-      </div>
-
-      {/* Ligne 2.5: Plateforme traversable par le bas (One-Way) */}
-      {b.isStatic && !b.isTrigger && (
-        <div className="p-2 bg-emerald-50/50 rounded-xl border border-emerald-200 flex items-center justify-between">
+      {/* 1. Corps & Collider */}
+      <BehaviorSubSection
+        title="Corps & Collider"
+        subtitle={b.isTrigger ? 'Zone capteur (Trigger)' : b.isStatic ? 'Obstacle fixe' : 'Corps dynamique'}
+        icon={<Shield className="w-3.5 h-3.5 text-emerald-600" />}
+        summaryBadge={b.isTrigger ? 'Trigger' : b.isStatic ? 'Fixe' : 'Dynamique'}
+        persistKey={entityId ? `${entityId}:${b.id}:physics_body` : undefined}
+        defaultOpen={true}
+        headerActions={
+          <BehaviorRuleShortcutButton
+            entityId={entityId}
+            triggerType="collision"
+            triggerPhase="enter"
+            label="Collision"
+          />
+        }
+      >
+        {/* Ligne 1: Collider Solide vs Trigger */}
+        <div className="p-2 bg-slate-50/70 rounded-xl border border-slate-200 flex items-center justify-between">
           <div>
-            <div className="font-bold text-emerald-900 text-xs">Plateforme traversable (One-Way)</div>
-            <div className="text-[10px] text-emerald-700/80">
-              {b.oneWayPlatform
-                ? 'On peut sauter à travers par le bas et atterrir dessus par le haut'
-                : 'Solide sur les 4 côtés (mur / sol plein)'}
+            <div className="font-bold text-slate-700 text-xs">Collider Solide</div>
+            <div className="text-[10px] text-slate-400">
+              {b.isTrigger ? 'Zone fantôme / Capteur (traverse sans bloquer)' : 'Corps solide (bloque et repousse)'}
             </div>
           </div>
           <input
             type="checkbox"
-            checked={b.oneWayPlatform === true}
-            onChange={(e) => update({ oneWayPlatform: e.target.checked })}
+            checked={b.isTrigger !== true}
+            onChange={(e) => update({ isTrigger: !e.target.checked })}
             className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+            title="Décocher pour en faire un Trigger (capteur sans collision physique)"
           />
         </div>
-      )}
+
+        {/* Ligne 2: Obstacle Fixe */}
+        <div className="p-2 bg-slate-50/70 rounded-xl border border-slate-200 flex items-center justify-between">
+          <div>
+            <div className="font-bold text-slate-700 text-xs">Obstacle Fixe (Inamovible)</div>
+            <div className="text-[10px] text-slate-400">
+              {b.isStatic ? 'Immobile / Solide fixe (Masse infinie)' : 'Corps physique mobile (Dynamique)'}
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={b.isStatic === true}
+            onChange={(e) =>
+              update({
+                isStatic: e.target.checked,
+                ...(e.target.checked ? { worldPinEnabled: false } : {}),
+              })
+            }
+            className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+            title="Cocher pour un mur, un sol ou une plateforme infranchissable"
+          />
+        </div>
+
+        {/* Ligne 2.5: Plateforme traversable par le bas (One-Way) */}
+        {b.isStatic && !b.isTrigger && (
+          <div className="p-2 bg-emerald-50/50 rounded-xl border border-emerald-200 flex items-center justify-between">
+            <div>
+              <div className="font-bold text-emerald-900 text-xs">Plateforme traversable (One-Way)</div>
+              <div className="text-[10px] text-emerald-700/80">
+                {b.oneWayPlatform
+                  ? 'On peut sauter à travers par le bas et atterrir dessus par le haut'
+                  : 'Solide sur les 4 côtés (mur / sol plein)'}
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={b.oneWayPlatform === true}
+              onChange={(e) => update({ oneWayPlatform: e.target.checked })}
+              className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+            />
+          </div>
+        )}
+      </BehaviorSubSection>
+
+      {/* 2. Gravité & Matériau */}
+      <BehaviorSubSection
+        title="Gravité & Matériau"
+        subtitle="Gravité, rebond, friction et masse"
+        icon={<Sliders className="w-3.5 h-3.5 text-indigo-600" />}
+        summaryBadge={
+          b.isStatic
+            ? `Rebond ${Math.round((b.bounce ?? 0.4) * 100)}%`
+            : `g=${b.gravity ?? 400}`
+        }
+        persistKey={entityId ? `${entityId}:${b.id}:physics_material` : undefined}
+        defaultOpen={true}
+      >
 
       {/* Ligne 3: Gravité verticale (seulement si non statique) */}
       {!b.isStatic && (
@@ -255,14 +291,39 @@ export function PhysicsBehaviorControls({
         </div>
       )}
 
+      </BehaviorSubSection>
+
       {/* Ligne 8: Épingle au monde (World Pin avec résistance & rupture) */}
       {!b.isStatic && (
-        <div className="p-2 bg-amber-50/40 rounded-xl border border-amber-200 space-y-2">
+        <BehaviorSubSection
+          title="Épingle au monde (World Pin)"
+          subtitle="Maintien élastique & rupture à la traction"
+          icon={<Pin className="w-3.5 h-3.5 text-amber-600" />}
+          summaryBadge={
+            b.worldPinEnabled
+              ? b.worldPinBreakable !== false
+                ? `Cassable ${b.worldPinBreakDistance ?? 60}px`
+                : 'Fixe'
+              : 'Inactive'
+          }
+          persistKey={entityId ? `${entityId}:${b.id}:physics_pin` : undefined}
+          defaultOpen={Boolean(b.worldPinEnabled)}
+          tone="amber"
+          headerActions={
+            b.worldPinEnabled && b.worldPinBreakable !== false ? (
+              <BehaviorRuleShortcutButton
+                entityId={entityId}
+                triggerType="joint_break"
+                triggerPhase="joint_break"
+                label="Rupture Épingle"
+              />
+            ) : undefined
+          }
+        >
           <div className="flex items-center justify-between gap-2">
             <div>
-              <div className="font-bold text-amber-950 text-xs flex items-center gap-1.5">
-                <Pin className="w-3.5 h-3.5 text-amber-600" />
-                <span>Épingle au monde (Résistance & Rupture)</span>
+              <div className="font-bold text-amber-950 text-xs">
+                Activer l'épingle au monde
               </div>
               <div className="text-[10px] text-amber-800/75 leading-snug">
                 Maintient l'objet à son ancre avec une résistance élastique ; utilisable en override d'état pour fixer puis décoller au drag.
@@ -489,7 +550,7 @@ export function PhysicsBehaviorControls({
               )}
             </div>
           )}
-        </div>
+        </BehaviorSubSection>
       )}
     </div>
   );
@@ -604,18 +665,37 @@ export function ConstantVelocityBehaviorControls({
 export function KeyboardControlBehaviorControls({
   b,
   update,
+  entityId,
   stateList,
   onQuickCreateState,
   onEditStateDrawing,
 }: {
   b: KeyboardControlBehaviorConfig;
   update: (partial: any) => void;
+  entityId?: string;
   stateList: EntityState[];
   onQuickCreateState: (suggestedName: string, folderName?: string) => string;
   onEditStateDrawing?: (stateId: string) => void;
 }) {
+  const linkedKbdStates = [
+    b.stateBindings?.idleStateId,
+    b.stateBindings?.moveStateId,
+    b.mode === 'platformer' ? b.stateBindings?.jumpStateId : undefined,
+    b.mode === 'platformer' ? b.stateBindings?.fallStateId : undefined,
+    b.mode === 'platformer' ? b.stateBindings?.landStateId : undefined,
+  ].filter(Boolean).length;
+
   return (
     <div className="space-y-1.5">
+      {/* 1. Contrôles & Axes */}
+      <BehaviorSubSection
+        title="Contrôles & Axes"
+        subtitle="Mode, touches et directions"
+        icon={<Sliders className="w-3.5 h-3.5 text-indigo-600" />}
+        summaryBadge={b.mode === 'platformer' ? 'Plateforme' : '8 directions'}
+        persistKey={entityId ? `${entityId}:${b.id}:kbd_controls` : undefined}
+        defaultOpen={true}
+      >
       {/* Ligne 1: Mode de jeu */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
         <span className="font-bold text-slate-700 text-xs">Mode de jeu</span>
@@ -718,6 +798,17 @@ export function KeyboardControlBehaviorControls({
         </>
       )}
 
+      </BehaviorSubSection>
+
+      {/* 2. Vitesse, Saut & Inertie */}
+      <BehaviorSubSection
+        title="Vitesse, Saut & Inertie"
+        subtitle="Course, saut, accélération et flip"
+        icon={<RotateCcw className="w-3.5 h-3.5 text-indigo-600" />}
+        summaryBadge={`${b.speed} px/s`}
+        persistKey={entityId ? `${entityId}:${b.id}:kbd_motion` : undefined}
+        defaultOpen={true}
+      >
       {/* Ligne 6: Vitesse de déplacement */}
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
@@ -768,17 +859,20 @@ export function KeyboardControlBehaviorControls({
 
       <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0.8} update={update} />
       <FlipControls flipOnMove={b.flipOnMove} flipInvert={b.flipInvert} update={update} />
+      </BehaviorSubSection>
 
       {/* Ligne 8: Liaisons automatiques d'états visuels + Garde-fou */}
-      <div className="p-2.5 bg-indigo-50/50 rounded-xl border border-indigo-200/80 space-y-2">
-        <div>
-          <div className="font-bold text-indigo-900 text-xs flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5 text-indigo-600" />
-            <span>États visuels automatiques (Garde-fou actif)</span>
-          </div>
-          <div className="text-[10px] text-indigo-700/80 leading-snug mt-0.5">
-            Change d'état automatiquement selon le mouvement. Ne remplace jamais les autres états (ex : Blessé, Attaque).
-          </div>
+      <BehaviorSubSection
+        title="États visuels automatiques"
+        subtitle="Garde-fou actif"
+        icon={<Layers className="w-3.5 h-3.5 text-indigo-600" />}
+        summaryBadge={`${linkedKbdStates} liés`}
+        persistKey={entityId ? `${entityId}:${b.id}:kbd_states` : undefined}
+        defaultOpen={true}
+        tone="blue"
+      >
+        <div className="text-[10px] text-indigo-700/80 leading-snug">
+          Change d'état automatiquement selon le mouvement. Ne remplace jamais les autres états (ex : Blessé, Attaque).
         </div>
 
         <div className="space-y-1.5">
@@ -1093,7 +1187,7 @@ export function KeyboardControlBehaviorControls({
             </>
           )}
         </div>
-      </div>
+      </BehaviorSubSection>
     </div>
   );
 }
@@ -1101,13 +1195,33 @@ export function KeyboardControlBehaviorControls({
 export function BoundaryBehaviorControls({
   b,
   update,
+  entityId,
 }: {
   b: BoundaryBehaviorConfig;
   update: (partial: any) => void;
+  entityId?: string;
 }) {
   const boundarySpace = b.boundarySpace || 'world';
   return (
     <div className="space-y-1.5">
+      <BehaviorSubSection
+        title="Limites & Bords"
+        subtitle={boundarySpace === 'viewport' ? 'Cadre visible' : 'Bords du monde'}
+        icon={<Shield className="w-3.5 h-3.5 text-teal-600" />}
+        summaryBadge={
+          b.mode === 'bounce' ? 'Rebond' : b.mode === 'wrap' ? 'Wrap' : 'Clamp'
+        }
+        persistKey={entityId ? `${entityId}:${b.id}:boundary` : undefined}
+        defaultOpen={true}
+        headerActions={
+          <BehaviorRuleShortcutButton
+            entityId={entityId}
+            triggerType="boundary"
+            triggerPhase="boundary_hit"
+            label="Bord atteint"
+          />
+        }
+      >
       {/* Ligne 0: Référentiel Monde vs Cadre visible */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
         <span className="font-bold text-slate-700 text-xs block">Limites de référence</span>
@@ -1185,6 +1299,7 @@ export function BoundaryBehaviorControls({
           />
         </div>
       )}
+      </BehaviorSubSection>
     </div>
   );
 }

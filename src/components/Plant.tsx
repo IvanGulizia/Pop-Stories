@@ -15,6 +15,7 @@ export function Plant({ entity, style }: PlantProps) {
     showCanvasLabels,
     enableHoverScaleAnimation,
     isSelected,
+    showTransformHandles,
     isSameTypeSibling,
     currentState,
     hasSlider,
@@ -122,6 +123,7 @@ export function Plant({ entity, style }: PlantProps) {
           height={entity.size.height}
           rotation={currentState.rotation ?? 0}
           isRotating={isRotating}
+          showHandles={showTransformHandles}
           onResizePointerDown={handleResizePointerDown}
           onRotatePointerDown={handleRotatePointerDown}
         />

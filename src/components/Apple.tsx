@@ -15,6 +15,7 @@ export function Apple({ entity, style }: AppleProps) {
     showCanvasLabels,
     enableHoverScaleAnimation,
     isSelected,
+    showTransformHandles,
     isSameTypeSibling,
     currentState,
     canDragFromBehavior,
@@ -113,6 +114,7 @@ export function Apple({ entity, style }: AppleProps) {
           height={entity.size.height}
           rotation={currentState.rotation ?? 0}
           isRotating={isRotating}
+          showHandles={showTransformHandles}
           onResizePointerDown={handleResizePointerDown}
           onRotatePointerDown={handleRotatePointerDown}
         />

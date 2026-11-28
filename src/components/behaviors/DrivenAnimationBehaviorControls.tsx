@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clapperboard, Paintbrush, Plus } from 'lucide-react';
+import { Clapperboard, Layers, Paintbrush, Plus, Sliders, Sparkles } from 'lucide-react';
 import { EMPTY_RECORD, useSceneStore } from '../../store/useSceneStore';
 import {
   DrivenAnimationBehaviorConfig,
@@ -13,6 +13,8 @@ import {
   EntityState,
 } from '../../types';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
+import { BehaviorSubSection } from './BehaviorSubSection';
+import { BehaviorRuleShortcutButton } from './BehaviorRuleShortcutButton';
 
 const SOURCE_OPTIONS: {
   id: DrivenAnimationSourceType;
@@ -40,6 +42,7 @@ const QUICK_SOURCE_OPTIONS = SOURCE_OPTIONS.filter((o) => o.quick);
 export function DrivenAnimationBehaviorControls({
   b,
   update,
+  entityId,
   targetEntityOptions,
   entityTypeOptions,
   availableTags,
@@ -49,6 +52,7 @@ export function DrivenAnimationBehaviorControls({
 }: {
   b: DrivenAnimationBehaviorConfig;
   update: (partial: any) => void;
+  entityId?: string;
   targetEntityOptions: Entity[];
   entityTypeOptions: { type: string; label: string }[];
   availableTags: string[];
@@ -84,6 +88,8 @@ export function DrivenAnimationBehaviorControls({
     update(patch);
   };
 
+  const activeSourceLabel = SOURCE_OPTIONS.find((o) => o.id === sourceType)?.label || sourceType;
+
   return (
     <div className="space-y-2">
       {/* Encart explicatif style Kitty */}
@@ -95,8 +101,29 @@ export function DrivenAnimationBehaviorControls({
       </div>
 
       {/* 1. Source de pilotage (Raccourcis visibles + menu complet) */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
-        <span className="font-bold text-slate-700 text-xs block">1. Source qui pilote l’animation</span>
+      <BehaviorSubSection
+        title="1. Source qui pilote l’animation"
+        subtitle={activeSourceLabel}
+        summaryBadge={activeSourceLabel}
+        persistKey={entityId ? `${entityId}:${b.id}:driven_source` : undefined}
+        defaultOpen={true}
+        headerActions={
+          isCollisionSource ? (
+            <BehaviorRuleShortcutButton
+              entityId={entityId}
+              triggerType="collision"
+              triggerPhase="enter"
+              label="Collision (Anim. Pilotée)"
+            />
+          ) : sourceType === 'variable' ? (
+            <BehaviorRuleShortcutButton
+              entityId={entityId}
+              triggerType="variable"
+              label="Variable (Anim. Pilotée)"
+            />
+          ) : undefined
+        }
+      >
         <div className="grid grid-cols-3 gap-1">
           {QUICK_SOURCE_OPTIONS.map((opt) => (
             <button
@@ -602,11 +629,17 @@ export function DrivenAnimationBehaviorControls({
             </label>
           </div>
         )}
-      </div>
+      </BehaviorSubSection>
 
       {/* 2. Loi de progression : Réversible vs Irréversible */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
-        <span className="font-bold text-slate-700 text-xs block">2. Mémoire & Courbe</span>
+      <BehaviorSubSection
+        title="2. Mémoire & Courbe"
+        subtitle="Réversible, cliquet, lissage et boucle"
+        icon={<Sliders className="w-3.5 h-3.5 text-violet-600" />}
+        summaryBadge={progressionMode === 'irreversible' ? 'Cliquet' : 'Réversible'}
+        persistKey={entityId ? `${entityId}:${b.id}:driven_curve` : undefined}
+        defaultOpen={true}
+      >
         <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-lg">
           <button
             type="button"
@@ -711,11 +744,23 @@ export function DrivenAnimationBehaviorControls({
             <span>Reset si changement d’état</span>
           </label>
         </div>
-      </div>
+      </BehaviorSubSection>
 
       {/* 3. Cibles animées : Frames Flipbook & Transformations visuelles */}
-      <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
-        <span className="font-bold text-slate-700 text-xs block">3. Cible animée</span>
+      <BehaviorSubSection
+        title="3. Cible animée"
+        subtitle="Frames Flipbook, collider et transformations"
+        icon={<Layers className="w-3.5 h-3.5 text-violet-600" />}
+        summaryBadge={
+          b.driveFlipbook !== false && b.driveVisualTransform
+            ? 'Frames + Transform'
+            : b.driveVisualTransform
+            ? 'Transform'
+            : 'Frames'
+        }
+        persistKey={entityId ? `${entityId}:${b.id}:driven_target` : undefined}
+        defaultOpen={true}
+      >
         <label className="flex items-center justify-between text-[11px] text-slate-700 cursor-pointer">
           <span className="font-semibold">Piloter les Frames du Flipbook</span>
           <input
@@ -810,11 +855,24 @@ export function DrivenAnimationBehaviorControls({
             </div>
           </div>
         )}
-      </div>
+      </BehaviorSubSection>
 
       {/* 4. Sorties & Fin à 100% */}
-      <div className="p-2.5 bg-violet-50/50 rounded-xl border border-violet-200/80 space-y-1.5">
-        <span className="text-[11px] font-bold text-violet-950 block">4. Sorties & Actions à 100% (optionnel)</span>
+      <BehaviorSubSection
+        title="4. Sorties & Actions à 100%"
+        subtitle="Variables, état complété et destruction"
+        icon={<Sparkles className="w-3.5 h-3.5 text-violet-600" />}
+        summaryBadge={
+          b.triggerStateOnCompleteId || b.outputVariableName || b.outputFrameVariableName || b.destroyOnComplete
+            ? 'Actif'
+            : undefined
+        }
+        persistKey={entityId ? `${entityId}:${b.id}:driven_outputs` : undefined}
+        defaultOpen={Boolean(
+          b.triggerStateOnCompleteId || b.outputVariableName || b.outputFrameVariableName || b.destroyOnComplete
+        )}
+        tone="violet"
+      >
 
         <div className="bg-white p-1.5 rounded-lg border border-violet-100 space-y-1">
           <div className="flex items-center justify-between gap-2">
@@ -914,7 +972,7 @@ export function DrivenAnimationBehaviorControls({
             className="accent-rose-600"
           />
         </label>
-      </div>
+      </BehaviorSubSection>
     </div>
   );
 }

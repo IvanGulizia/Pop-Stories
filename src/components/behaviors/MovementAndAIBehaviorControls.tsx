@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowDown, ArrowUp, Paintbrush, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Layers, Navigation, Paintbrush, Plus, Shield, Sliders, Trash2 } from 'lucide-react';
 import {
   Entity,
   EntityState,
@@ -18,6 +18,8 @@ import {
   PhysicsGroundedHelperCard,
 } from './BehaviorSharedControls';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
+import { BehaviorSubSection } from './BehaviorSubSection';
+import { BehaviorRuleShortcutButton } from './BehaviorRuleShortcutButton';
 
 function LocomotionDragSnapPauseCard({
   pauseWhileDragged,
@@ -61,6 +63,7 @@ function LocomotionDragSnapPauseCard({
 export function PatrolBehaviorControls({
   b,
   update,
+  entityId,
   targetEntityOptions = [],
   entityTypeOptions = [],
   availableTags = [],
@@ -73,6 +76,7 @@ export function PatrolBehaviorControls({
 }: {
   b: PatrolBehaviorConfig;
   update: (partial: any) => void;
+  entityId?: string;
   targetEntityOptions?: Entity[];
   entityTypeOptions?: { type: string; label: string }[];
   availableTags?: string[];
@@ -117,8 +121,29 @@ export function PatrolBehaviorControls({
     update({ waypoints: next });
   };
 
+  const linkedPatrolStates = [
+    b.stateBindings?.idleStateId,
+    b.stateBindings?.moveStateId,
+    b.stateBindings?.turnStateId,
+    b.stateBindings?.fallStateId,
+  ].filter(Boolean).length;
+
   return (
     <div className="space-y-1.5">
+      <BehaviorSubSection
+        title="Parcours & Mode"
+        subtitle="Trajectoire, axe et points de passage"
+        icon={<Navigation className="w-3.5 h-3.5 text-blue-600" />}
+        summaryBadge={
+          patrolMode === 'waypoints'
+            ? `${waypoints.length} pts`
+            : patrolMode === 'one_way_return'
+            ? `Aller-retour ${b.range}px`
+            : `${b.range}px`
+        }
+        persistKey={entityId ? `${entityId}:${b.id}:patrol_path` : undefined}
+        defaultOpen={true}
+      >
       {/* Ligne 0: Mode de patrouille */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
         <span className="font-bold text-slate-700 text-xs block">Mode de patrouille</span>
@@ -363,7 +388,6 @@ export function PatrolBehaviorControls({
         </div>
       )}
 
-      {/* Assistant Physique au sol si horizontal ou waypoints grounded */}
       {((patrolMode !== 'waypoints' && b.axis === 'horizontal') ||
         (patrolMode === 'waypoints' && b.movementSpace === 'grounded')) && (
         <PhysicsGroundedHelperCard
@@ -372,7 +396,17 @@ export function PatrolBehaviorControls({
           onActivate={onActivateGroundedPhysics}
         />
       )}
+      </BehaviorSubSection>
 
+      {/* Vitesse & Pause */}
+      <BehaviorSubSection
+        title="Vitesse & Pause"
+        subtitle="Rythme de marche et pauses aux bornes"
+        icon={<Sliders className="w-3.5 h-3.5 text-indigo-600" />}
+        summaryBadge={`${b.speed} px/s`}
+        persistKey={entityId ? `${entityId}:${b.id}:patrol_speed` : undefined}
+        defaultOpen={true}
+      >
       {/* Ligne 3: Vitesse de patrouille */}
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
@@ -415,8 +449,27 @@ export function PatrolBehaviorControls({
           <span className="text-slate-400 text-xs">sec</span>
         </div>
       </div>
+      </BehaviorSubSection>
 
       {/* Détections physiques (Murs & Bords de plateforme) */}
+      <BehaviorSubSection
+        title="Collisions & Détections"
+        subtitle="Demi-tour sur murs, entités ou vide"
+        icon={<Shield className="w-3.5 h-3.5 text-blue-600" />}
+        summaryBadge={
+          b.turnOnCollision || b.turnOnWall || b.detectLedges ? 'Actif' : 'Standard'
+        }
+        persistKey={entityId ? `${entityId}:${b.id}:patrol_detect` : undefined}
+        defaultOpen={Boolean(b.turnOnWall || b.turnOnCollision || b.detectLedges)}
+        headerActions={
+          <BehaviorRuleShortcutButton
+            entityId={entityId}
+            triggerType="collision"
+            triggerPhase="enter"
+            label="Collision Patrouille"
+          />
+        }
+      >
       <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
         <div className="flex items-center justify-between">
           <div>
@@ -590,7 +643,16 @@ export function PatrolBehaviorControls({
           </div>
         )}
       </div>
+      </BehaviorSubSection>
 
+      <BehaviorSubSection
+        title="États, Inertie & Flip"
+        subtitle="Pause drag/snap, animations et orientation"
+        icon={<Layers className="w-3.5 h-3.5 text-indigo-600" />}
+        summaryBadge={linkedPatrolStates > 0 ? `${linkedPatrolStates} états` : undefined}
+        persistKey={entityId ? `${entityId}:${b.id}:patrol_states` : undefined}
+        defaultOpen={linkedPatrolStates > 0}
+      >
       <LocomotionDragSnapPauseCard
         pauseWhileDragged={b.pauseWhileDragged}
         pauseWhileSnapped={b.pauseWhileSnapped}
@@ -639,6 +701,7 @@ export function PatrolBehaviorControls({
 
       <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0} update={update} />
       <FlipControls flipOnMove={b.flipOnMove} flipInvert={b.flipInvert} update={update} />
+      </BehaviorSubSection>
     </div>
   );
 }
@@ -646,6 +709,7 @@ export function PatrolBehaviorControls({
 export function WanderingBehaviorControls({
   b,
   update,
+  entityId,
   stateList = [],
   onQuickCreateState,
   onEditStateDrawing,
@@ -655,6 +719,7 @@ export function WanderingBehaviorControls({
 }: {
   b: WanderingBehaviorConfig;
   update: (partial: any) => void;
+  entityId?: string;
   stateList?: EntityState[];
   onQuickCreateState?: (suggestedName: string, folderName?: string) => string;
   onEditStateDrawing?: (stateId: string) => void;
@@ -663,8 +728,22 @@ export function WanderingBehaviorControls({
   onActivateGroundedPhysics?: () => void;
 }) {
   const isHorizontal = b.mode === 'horizontal';
+  const linkedWanderStates = [
+    b.stateBindings?.idleStateId,
+    b.stateBindings?.moveStateId,
+    b.stateBindings?.fallStateId,
+  ].filter(Boolean).length;
+
   return (
     <div className="space-y-1.5">
+      <BehaviorSubSection
+        title="Zone & Type"
+        subtitle="Libre 2D ou au sol, rayon de déplacement"
+        icon={<Navigation className="w-3.5 h-3.5 text-indigo-600" />}
+        summaryBadge={`${b.radius ?? 160} px`}
+        persistKey={entityId ? `${entityId}:${b.id}:wander_zone` : undefined}
+        defaultOpen={true}
+      >
       {/* Ligne 1: Mode de déplacement */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
         <span className="font-bold text-slate-700 text-xs">Type de déplacement</span>
@@ -708,7 +787,16 @@ export function WanderingBehaviorControls({
           className="w-full accent-indigo-600"
         />
       </div>
+      </BehaviorSubSection>
 
+      <BehaviorSubSection
+        title="Rythme & Aléatoire"
+        subtitle="Vitesse, virages, pauses et orientation"
+        icon={<Sliders className="w-3.5 h-3.5 text-indigo-600" />}
+        summaryBadge={`${b.speed ?? 90} px/s`}
+        persistKey={entityId ? `${entityId}:${b.id}:wander_rhythm` : undefined}
+        defaultOpen={true}
+      >
       {/* Ligne 3: Vitesse */}
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
@@ -825,7 +913,16 @@ export function WanderingBehaviorControls({
           />
         </div>
       )}
+      </BehaviorSubSection>
 
+      <BehaviorSubSection
+        title="Détections & États"
+        subtitle="Murs, vide, pause drag et animations"
+        icon={<Layers className="w-3.5 h-3.5 text-indigo-600" />}
+        summaryBadge={linkedWanderStates > 0 ? `${linkedWanderStates} états` : undefined}
+        persistKey={entityId ? `${entityId}:${b.id}:wander_states` : undefined}
+        defaultOpen={linkedWanderStates > 0 || isHorizontal}
+      >
       {/* Détections physiques (Murs & Bords de plateforme en mode Au sol) */}
       {isHorizontal && (
         <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
@@ -920,6 +1017,7 @@ export function WanderingBehaviorControls({
 
       <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0.78} update={update} />
       <FlipControls flipOnMove={b.flipOnMove} flipInvert={b.flipInvert} update={update} />
+      </BehaviorSubSection>
     </div>
   );
 }
@@ -927,18 +1025,36 @@ export function WanderingBehaviorControls({
 export function MoveToBehaviorControls({
   b,
   update,
+  entityId,
   targetEntityOptions,
   entityTypeOptions,
   availableTags,
 }: {
   b: MoveToBehaviorConfig;
   update: (partial: any) => void;
+  entityId?: string;
   targetEntityOptions: Entity[];
   entityTypeOptions: { type: string; label: string }[];
   availableTags: string[];
 }) {
   return (
     <div className="space-y-1.5">
+      <BehaviorSubSection
+        title="Cible & Vitesse"
+        subtitle="Destination et vitesse de ralliement"
+        icon={<Navigation className="w-3.5 h-3.5 text-indigo-600" />}
+        summaryBadge={`${b.speed ?? 120} px/s`}
+        persistKey={entityId ? `${entityId}:${b.id}:moveto_target` : undefined}
+        defaultOpen={true}
+        headerActions={
+          <BehaviorRuleShortcutButton
+            entityId={entityId}
+            triggerType="target_arrived"
+            triggerPhase="target_arrived"
+            label="Arrivée sur cible"
+          />
+        }
+      >
       {/* Ligne 1: Type de cible */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
         <span className="font-bold text-slate-700 text-xs">Type de cible</span>
@@ -1073,7 +1189,15 @@ export function MoveToBehaviorControls({
           className="w-full accent-indigo-600"
         />
       </div>
+      </BehaviorSubSection>
 
+      <BehaviorSubSection
+        title="Inertie & Flip"
+        subtitle="Pause drag/snap, accélération et miroir"
+        icon={<Sliders className="w-3.5 h-3.5 text-indigo-600" />}
+        persistKey={entityId ? `${entityId}:${b.id}:moveto_motion` : undefined}
+        defaultOpen={false}
+      >
       <LocomotionDragSnapPauseCard
         pauseWhileDragged={b.pauseWhileDragged}
         pauseWhileSnapped={b.pauseWhileSnapped}
@@ -1082,6 +1206,7 @@ export function MoveToBehaviorControls({
 
       <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0} update={update} />
       <FlipControls flipOnMove={b.flipOnMove} flipInvert={b.flipInvert} update={update} />
+      </BehaviorSubSection>
     </div>
   );
 }
@@ -1089,6 +1214,7 @@ export function MoveToBehaviorControls({
 export function FollowBehaviorControls({
   b,
   update,
+  entityId,
   targetEntityOptions,
   entityTypeOptions,
   availableTags,
@@ -1101,6 +1227,7 @@ export function FollowBehaviorControls({
 }: {
   b: FollowBehaviorConfig;
   update: (partial: any) => void;
+  entityId?: string;
   targetEntityOptions: Entity[];
   entityTypeOptions: { type: string; label: string }[];
   availableTags: string[];
@@ -1112,8 +1239,31 @@ export function FollowBehaviorControls({
   onActivateGroundedPhysics?: () => void;
 }) {
   const isGrounded = b.movementSpace === 'grounded';
+  const linkedFollowStates = [
+    b.stateBindings?.idleStateId,
+    b.stateBindings?.moveStateId,
+    isGrounded ? b.stateBindings?.jumpStateId : undefined,
+    isGrounded ? b.stateBindings?.fallStateId : undefined,
+  ].filter(Boolean).length;
+
   return (
     <div className="space-y-1.5">
+      <BehaviorSubSection
+        title="Cible & Suivi"
+        subtitle="Cible suivie, distance et type de poursuite"
+        icon={<Navigation className="w-3.5 h-3.5 text-indigo-600" />}
+        summaryBadge={(b.followMode || 'constant_speed') === 'spring' ? 'Ressort' : `${b.speed} px/s`}
+        persistKey={entityId ? `${entityId}:${b.id}:follow_target` : undefined}
+        defaultOpen={true}
+        headerActions={
+          <BehaviorRuleShortcutButton
+            entityId={entityId}
+            triggerType="target_arrived"
+            triggerPhase="target_arrived"
+            label="Cible atteinte"
+          />
+        }
+      >
       {/* Ligne 1: Cible à suivre */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
         <span className="font-bold text-slate-700 text-xs">Cible à suivre</span>
@@ -1316,7 +1466,16 @@ export function FollowBehaviorControls({
           <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0.8} update={update} />
         </>
       )}
+      </BehaviorSubSection>
 
+      <BehaviorSubSection
+        title="Déplacement au sol & Sauts"
+        subtitle="Espace 2D / Plateforme et sauts auto"
+        icon={<Sliders className="w-3.5 h-3.5 text-sky-600" />}
+        summaryBadge={isGrounded ? (b.autoJump ? 'Sol + Saut' : 'Au sol') : 'Libre 2D'}
+        persistKey={entityId ? `${entityId}:${b.id}:follow_space` : undefined}
+        defaultOpen={isGrounded}
+      >
       {/* Espace de déplacement : Libre 2D vs Au sol / Plateforme */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
         <span className="font-bold text-slate-700 text-xs">Espace de déplacement</span>
@@ -1434,7 +1593,16 @@ export function FollowBehaviorControls({
           </div>
         </>
       )}
+      </BehaviorSubSection>
 
+      <BehaviorSubSection
+        title="États & Flip"
+        subtitle="Pause drag/snap, états et miroir"
+        icon={<Layers className="w-3.5 h-3.5 text-indigo-600" />}
+        summaryBadge={linkedFollowStates > 0 ? `${linkedFollowStates} états` : undefined}
+        persistKey={entityId ? `${entityId}:${b.id}:follow_states` : undefined}
+        defaultOpen={linkedFollowStates > 0}
+      >
       <LocomotionDragSnapPauseCard
         pauseWhileDragged={b.pauseWhileDragged}
         pauseWhileSnapped={b.pauseWhileSnapped}
@@ -1477,6 +1645,7 @@ export function FollowBehaviorControls({
       />
 
       <FlipControls flipOnMove={b.flipOnMove} flipInvert={b.flipInvert} update={update} />
+      </BehaviorSubSection>
     </div>
   );
 }
@@ -1484,6 +1653,7 @@ export function FollowBehaviorControls({
 export function FleeBehaviorControls({
   b,
   update,
+  entityId,
   targetEntityOptions,
   entityTypeOptions,
   availableTags,
@@ -1493,6 +1663,7 @@ export function FleeBehaviorControls({
 }: {
   b: FleeBehaviorConfig;
   update: (partial: any) => void;
+  entityId?: string;
   targetEntityOptions: Entity[];
   entityTypeOptions: { type: string; label: string }[];
   availableTags: string[];
@@ -1500,8 +1671,21 @@ export function FleeBehaviorControls({
   onQuickCreateState: (suggestedName: string, folderName?: string) => string;
   onEditStateDrawing?: (stateId: string) => void;
 }) {
+  const linkedFleeStates = [
+    b.stateBindings?.calmStateId,
+    b.stateBindings?.scaredStateId,
+  ].filter(Boolean).length;
+
   return (
     <div className="space-y-1.5">
+      <BehaviorSubSection
+        title="Menace & Détection"
+        subtitle="Cible crainte, rayon et vitesse de fuite"
+        icon={<Shield className="w-3.5 h-3.5 text-rose-600" />}
+        summaryBadge={`${b.fleeRadius ?? 220}px • ${b.speed ?? 160}px/s`}
+        persistKey={entityId ? `${entityId}:${b.id}:flee_threat` : undefined}
+        defaultOpen={true}
+      >
       {/* Ligne 1: Menace à fuir */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
         <span className="font-bold text-slate-700 text-xs">Menace à fuir</span>
@@ -1632,7 +1816,17 @@ export function FleeBehaviorControls({
           className="w-full accent-indigo-600"
         />
       </div>
+      </BehaviorSubSection>
 
+      <BehaviorSubSection
+        title="Comportement & États (Calme / Peur)"
+        subtitle="Axe, suspensions, états et inertie"
+        icon={<Layers className="w-3.5 h-3.5 text-rose-600" />}
+        summaryBadge={linkedFleeStates > 0 ? `${linkedFleeStates} états` : undefined}
+        persistKey={entityId ? `${entityId}:${b.id}:flee_states` : undefined}
+        defaultOpen={true}
+        tone="rose"
+      >
       {/* Axe de fuite */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
         <span className="font-bold text-slate-700 text-xs">Axe de déplacement</span>
@@ -1780,6 +1974,7 @@ export function FleeBehaviorControls({
 
       <InertiaControls acceleration={b.acceleration} damping={b.damping} defaultDamping={0.85} update={update} />
       <FlipControls flipOnMove={b.flipOnMove} flipInvert={b.flipInvert} update={update} />
+      </BehaviorSubSection>
     </div>
   );
 }

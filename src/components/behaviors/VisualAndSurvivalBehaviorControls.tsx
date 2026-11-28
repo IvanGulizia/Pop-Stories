@@ -1,5 +1,5 @@
 import React from 'react';
-import { Dices, Paintbrush, Plus } from 'lucide-react';
+import { Dices, Eye, HeartPulse, Layers, Paintbrush, Plus, Shield, Sliders, Sparkles } from 'lucide-react';
 import {
   CustomParticlePreset,
   Entity,
@@ -14,16 +14,20 @@ import { SCENE_TRANSITION_OPTIONS } from '../rulebook/ruleBookTypes';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 import { ParticleInspectorSummary } from '../particles/ParticleInspectorSummary';
 import { EMPTY_LIST, EMPTY_RECORD, useSceneStore } from '../../store/useSceneStore';
+import { BehaviorSubSection } from './BehaviorSubSection';
+import { BehaviorRuleShortcutButton } from './BehaviorRuleShortcutButton';
 
 export function LookAtBehaviorControls({
   b,
   update,
+  entityId,
   targetEntityOptions,
   entityTypeOptions,
   availableTags,
 }: {
   b: LookAtBehaviorConfig;
   update: (partial: any) => void;
+  entityId?: string;
   targetEntityOptions: Entity[];
   entityTypeOptions: { type: string; label: string }[];
   availableTags: string[];
@@ -36,6 +40,14 @@ export function LookAtBehaviorControls({
 
   return (
     <div className="space-y-1.5">
+      <BehaviorSubSection
+        title="Mode & Cible"
+        subtitle="Rotation ou orbite œil, cible suivie"
+        icon={<Eye className="w-3.5 h-3.5 text-indigo-600" />}
+        summaryBadge={lookMode === 'pupil_orbit' ? 'Orbite Œil' : 'Rotation'}
+        persistKey={entityId ? `${entityId}:${b.id}:lookat_target` : undefined}
+        defaultOpen={true}
+      >
       {/* Sélecteur de mode LookAt */}
       <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
         <div className="flex items-center justify-between">
@@ -138,7 +150,16 @@ export function LookAtBehaviorControls({
           </datalist>
         </div>
       )}
+      </BehaviorSubSection>
 
+      <BehaviorSubSection
+        title={lookMode === 'pupil_orbit' ? 'Orbite & Réactivité' : 'Angles, Cône & Lissage'}
+        subtitle="Limites, flip miroir et vitesse de suivi"
+        icon={<Sliders className="w-3.5 h-3.5 text-indigo-600" />}
+        summaryBadge={lookMode === 'pupil_orbit' ? `${rx}×${ry}px` : isFreeCone ? '360°' : `±${maxAngleVal}°`}
+        persistKey={entityId ? `${entityId}:${b.id}:lookat_angles` : undefined}
+        defaultOpen={true}
+      >
       {lookMode === 'rotate' ? (
         <>
           {/* Orientation du dessin & Flip contextuel Gauche/Droite */}
@@ -370,6 +391,7 @@ export function LookAtBehaviorControls({
           className="w-full accent-indigo-600"
         />
       </div>
+      </BehaviorSubSection>
     </div>
   );
 }
@@ -483,6 +505,7 @@ export function ParticleEmitterBehaviorControls({
 export function HealthBehaviorControls({
   b,
   update,
+  entityId,
   availableTags,
   stateList,
   onQuickCreateState,
@@ -490,6 +513,7 @@ export function HealthBehaviorControls({
 }: {
   b: HealthBehaviorConfig;
   update: (partial: any) => void;
+  entityId?: string;
   availableTags: string[];
   stateList: EntityState[];
   onQuickCreateState?: (suggestedName: string, folderName?: string) => string;
@@ -503,9 +527,26 @@ export function HealthBehaviorControls({
   const vulLeft = b.vulnerableLeft !== false;
   const vulRight = b.vulnerableRight !== false;
   const onDeath = b.onDeath || 'destroy';
+  const linkedHealthStates = [b.hurtStateId, b.recoverStateId, b.deathStateId].filter(Boolean).length;
 
   return (
     <div className="space-y-1.5">
+      <BehaviorSubSection
+        title="PV & Danger"
+        subtitle="Points de vie max et tag blessant"
+        icon={<HeartPulse className="w-3.5 h-3.5 text-rose-600" />}
+        summaryBadge={`${b.maxHp ?? 3} PV${b.damageTag ? ` • #${b.damageTag}` : ''}`}
+        persistKey={entityId ? `${entityId}:${b.id}:health_hp` : undefined}
+        defaultOpen={true}
+        headerActions={
+          <BehaviorRuleShortcutButton
+            entityId={entityId}
+            triggerType="collision"
+            triggerPhase="enter"
+            label="Dégât / Contact"
+          />
+        }
+      >
       {/* Points de vie max */}
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
@@ -552,8 +593,17 @@ export function HealthBehaviorControls({
           ))}
         </datalist>
       </div>
+      </BehaviorSubSection>
 
       {/* Côtés vulnérables / immunisés (style Goomba) */}
+      <BehaviorSubSection
+        title="Côtés vulnérables & Knockback"
+        subtitle="Directions protégées, invincibilité et recul"
+        icon={<Shield className="w-3.5 h-3.5 text-rose-600" />}
+        summaryBadge={`${b.knockbackForce ?? 220} px/s`}
+        persistKey={entityId ? `${entityId}:${b.id}:health_sides` : undefined}
+        defaultOpen={false}
+      >
       <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
         <div>
           <span className="font-bold text-slate-700 text-xs block">Côtés vulnérables aux dégâts</span>
@@ -688,8 +738,18 @@ export function HealthBehaviorControls({
           className="w-full accent-indigo-600"
         />
       </div>
+      </BehaviorSubSection>
 
       {/* État Blessé temporaire */}
+      <BehaviorSubSection
+        title="États & Action à 0 PV"
+        subtitle="Blessure, mort, transition scène et jauge"
+        icon={<Layers className="w-3.5 h-3.5 text-rose-600" />}
+        summaryBadge={linkedHealthStates > 0 ? `${linkedHealthStates} états` : onDeath}
+        persistKey={entityId ? `${entityId}:${b.id}:health_death` : undefined}
+        defaultOpen={true}
+        tone="rose"
+      >
       <div className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
           <span className="font-bold text-slate-700 text-xs block">État « Blessé » (Optionnel)</span>
@@ -933,6 +993,7 @@ export function HealthBehaviorControls({
           className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
         />
       </div>
+      </BehaviorSubSection>
     </div>
   );
 }
@@ -940,9 +1001,11 @@ export function HealthBehaviorControls({
 export function StrokeWiggleBehaviorControls({
   b,
   update,
+  entityId,
 }: {
   b: StrokeWiggleBehaviorConfig;
   update: (partial: any) => void;
+  entityId?: string;
 }) {
   const initialGameVariables = useSceneStore((s) => s.initialGameVariables || EMPTY_RECORD);
   const variableNames = Array.from(new Set(['score', ...Object.keys(initialGameVariables)])).sort();
@@ -951,6 +1014,14 @@ export function StrokeWiggleBehaviorControls({
 
   return (
     <div className="space-y-1.5">
+      <BehaviorSubSection
+        title="Amplitude & Rythme"
+        subtitle="Intensité, cadence FPS et boucles"
+        icon={<Sparkles className="w-3.5 h-3.5 text-cyan-600" />}
+        summaryBadge={`${b.amplitude ?? 2.2}px • ${b.fps ?? 6}Hz`}
+        persistKey={entityId ? `${entityId}:${b.id}:wiggle_rhythm` : undefined}
+        defaultOpen={true}
+      >
       {/* Amplitude */}
       <div className="p-2 bg-white rounded-xl border border-slate-200">
         <div className="flex justify-between items-center text-xs text-slate-700 mb-1">
@@ -1021,8 +1092,17 @@ export function StrokeWiggleBehaviorControls({
           className="w-full accent-cyan-600 cursor-pointer"
         />
       </div>
+      </BehaviorSubSection>
 
       {/* Finesse / Longueur d'onde (preset ou pas exact en px) */}
+      <BehaviorSubSection
+        title="Longueur d'onde & Direction"
+        subtitle="Espacement des vibrations, lissage et axe"
+        icon={<Sliders className="w-3.5 h-3.5 text-cyan-600" />}
+        summaryBadge={hasCustomStep ? `${b.segmentStep}px` : b.detail || 'medium'}
+        persistKey={entityId ? `${entityId}:${b.id}:wiggle_wave` : undefined}
+        defaultOpen={true}
+      >
       <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
         <div className="flex items-center justify-between">
           <span className="font-bold text-slate-700 text-xs">Espacement des vibrations</span>
@@ -1140,8 +1220,17 @@ export function StrokeWiggleBehaviorControls({
           </div>
         </div>
       </div>
+      </BehaviorSubSection>
 
       {/* Contrôles avancés : Anisotropie verticale, Stabilité des bouts & Graine */}
+      <BehaviorSubSection
+        title="Avancé & Graine"
+        subtitle="Échelle Y/X, bouts et graine aléatoire"
+        icon={<Dices className="w-3.5 h-3.5 text-cyan-600" />}
+        summaryBadge={`#${b.seed ?? 0}`}
+        persistKey={entityId ? `${entityId}:${b.id}:wiggle_advanced` : undefined}
+        defaultOpen={false}
+      >
       <div className="p-2 bg-white rounded-xl border border-slate-200 space-y-2">
         <div>
           <div className="flex justify-between items-center text-xs text-slate-700 mb-0.5">
@@ -1222,6 +1311,7 @@ export function StrokeWiggleBehaviorControls({
           />
         </div>
       </div>
+      </BehaviorSubSection>
 
       {/* Piloter par Variables (optionnel) */}
       <details

@@ -6,12 +6,31 @@ import { Apple } from './Apple';
 import { Plant } from './Plant';
 import { CustomShape } from './CustomShape';
 import {
-  Sparkles,
-  Paintbrush,
-  Magnet,
-  X,
+  ArrowDown,
+  ArrowDownToLine,
+  ArrowUp,
+  ArrowUpToLine,
+  CheckSquare,
+  ClipboardPaste,
+  Copy,
   Crosshair,
+  Eye,
+  EyeOff,
+  Magnet,
+  MoreHorizontal,
+  Paintbrush,
+  Plus,
+  Power,
+  RotateCcw,
+  Sparkles,
+  Square,
+  Trash2,
+  Unlink,
+  X,
 } from 'lucide-react';
+import { useContextMenuTrigger } from '../hooks/useContextMenuTrigger';
+import { FloatingContextMenu, FloatingContextMenuItem } from './shared/FloatingContextMenu';
+import { getBehaviorTitle } from './behaviors/behaviorMetadata';
 import { ParticleCanvasOverlay } from './ParticleCanvasOverlay';
 import { SceneGizmoOverlay } from './SceneGizmoOverlay';
 import { setLatestMouseWorldPos } from '../utils/particleSystem';
@@ -74,10 +93,23 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
   const entities = useSceneStore((state) => state.entities);
   const entityOrder = useSceneStore((state) => state.entityOrder);
   const selectedEntityId = useSceneStore((state) => state.selectedEntityId);
+  const selectedEntityIds = useSceneStore((state) => state.selectedEntityIds || EMPTY_LIST);
   const selectedLayerId = useSceneStore((state) => state.selectedLayerId);
   const setLayerVectorPaths = useSceneStore((state) => state.setLayerVectorPaths);
   const customArchetypes = useSceneStore((state) => state.customArchetypes || EMPTY_RECORD);
   const selectEntity = useSceneStore((state) => state.selectEntity);
+  const selectEntities = useSceneStore((state) => state.selectEntities);
+  const duplicateEntity = useSceneStore((state) => state.duplicateEntity);
+  const deleteEntity = useSceneStore((state) => state.deleteEntity);
+  const batchDuplicateEntities = useSceneStore((state) => state.batchDuplicateEntities);
+  const batchDeleteEntities = useSceneStore((state) => state.batchDeleteEntities);
+  const batchUpdateEntityDetails = useSceneStore((state) => state.batchUpdateEntityDetails);
+  const reorderEntityZStep = useSceneStore((state) => state.reorderEntityZStep);
+  const updateEntityDetails = useSceneStore((state) => state.updateEntityDetails);
+  const setEntityDisabledCascade = useSceneStore((state) => state.setEntityDisabledCascade);
+  const detachEntity = useSceneStore((state) => state.detachEntity);
+  const copiedBehavior = useSceneStore((state) => state.copiedBehavior);
+  const pasteBehaviorToEntity = useSceneStore((state) => state.pasteBehaviorToEntity);
   const spawnEntity = useSceneStore((state) => state.spawnEntity);
   const settings = useSceneStore((state) => state.settings);
   const appMode = useSceneStore((state) => state.appMode);
@@ -94,6 +126,18 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
 
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  const [marqueeBox, setMarqueeBox] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const suppressNextResetClickRef = useRef(false);
+  const [sceneContextMenu, setSceneContextMenu] = useState<
+    | { kind: 'entity'; entityId: string; x: number; y: number }
+    | { kind: 'canvas'; x: number; y: number }
+    | null
+  >(null);
 
   useEffect(() => {
     if (!activeSceneTransition) {
@@ -717,11 +761,339 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
     window.addEventListener('pointercancel', handleUp);
   };
 
+  useEffect(() => {
+    const onOpenEntityContext = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ entityId: string; x: number; y: number }>).detail;
+      if (!detail || useSceneStore.getState().appMode === 'play') return;
+      setSceneContextMenu({
+        kind: 'entity',
+        entityId: detail.entityId,
+        x: detail.x,
+        y: detail.y,
+      });
+    };
+    window.addEventListener('atelier:open-entity-context-menu', onOpenEntityContext);
+    return () => {
+      window.removeEventListener('atelier:open-entity-context-menu', onOpenEntityContext);
+    };
+  }, []);
+
+  const {
+    bind: canvasContextBind,
+    cancelLongPress: cancelCanvasLongPress,
+    consumeLongPressClick: consumeCanvasLongPressClick,
+  } = useContextMenuTrigger(
+    (coords) => {
+      const snap = useSceneStore.getState();
+      if (
+        snap.appMode === 'play' ||
+        snap.selectedLayerId ||
+        snap.spawnCanvasPick ||
+        snap.jointCanvasPick ||
+        snap.snapPinCanvasPick
+      ) {
+        return;
+      }
+      setSceneContextMenu({ kind: 'canvas', x: coords.x, y: coords.y });
+    },
+    { ignoreInteractiveChildren: false }
+  );
+
+  const handleCanvasMarqueePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (
+      isPlayMode ||
+      spawnCanvasPick ||
+      jointCanvasPick ||
+      snapPinCanvasPick ||
+      selectedLayerId ||
+      pendingCatalogSpawnType ||
+      isPanToolActive ||
+      isSpacePressed
+    ) {
+      return;
+    }
+
+    canvasContextBind.onPointerDown(e);
+
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement | null)?.closest('[data-camera-hud="true"]')) return;
+
+    const el = canvasContainerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const cam = getActiveCameraView('edit', editorCamera);
+    const startWorld = screenToWorldPoint(e.clientX, e.clientY, rect, cam);
+    const downClientX = e.clientX;
+    const downClientY = e.clientY;
+    const additiveShift = e.shiftKey || e.metaKey || e.ctrlKey;
+    const initialSelection = [...useSceneStore.getState().selectedEntityIds];
+    let didDragMarquee = false;
+
+    const handleMove = (mv: PointerEvent) => {
+      const dist = Math.hypot(mv.clientX - downClientX, mv.clientY - downClientY);
+      if (dist > 5) {
+        didDragMarquee = true;
+        cancelCanvasLongPress();
+        const curWorld = screenToWorldPoint(mv.clientX, mv.clientY, rect, cam);
+        setMarqueeBox({
+          x: Math.min(startWorld.x, curWorld.x),
+          y: Math.min(startWorld.y, curWorld.y),
+          width: Math.abs(curWorld.x - startWorld.x),
+          height: Math.abs(curWorld.y - startWorld.y),
+        });
+      }
+    };
+
+    const handleUp = (upEv: PointerEvent) => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+      window.removeEventListener('pointercancel', handleUp);
+      setMarqueeBox(null);
+
+      if (!didDragMarquee) {
+        if (!additiveShift && !consumeCanvasLongPressClick(upEv as any)) {
+          selectEntity(null);
+        }
+        return;
+      }
+
+      suppressNextResetClickRef.current = true;
+      const endWorld = screenToWorldPoint(upEv.clientX, upEv.clientY, rect, cam);
+      const minX = Math.min(startWorld.x, endWorld.x);
+      const maxX = Math.max(startWorld.x, endWorld.x);
+      const minY = Math.min(startWorld.y, endWorld.y);
+      const maxY = Math.max(startWorld.y, endWorld.y);
+
+      const snap = useSceneStore.getState();
+      const order = snap.entityOrder && snap.entityOrder.length > 0 ? snap.entityOrder : Object.keys(snap.entities);
+      const orderedIds = Array.from(new Set([...order, ...Object.keys(snap.entities)]));
+      const hitIds = orderedIds.filter((id) => {
+        const ent = snap.entities[id];
+        if (!ent || ent.visible === false) return false;
+        const ex1 = ent.position.x;
+        const ey1 = ent.position.y;
+        const ex2 = ex1 + ent.size.width;
+        const ey2 = ey1 + ent.size.height;
+        return ex1 <= maxX && ex2 >= minX && ey1 <= maxY && ey2 >= minY;
+      });
+
+      if (additiveShift) {
+        const merged = Array.from(new Set([...initialSelection, ...hitIds]));
+        selectEntities(merged);
+      } else {
+        selectEntities(hitIds);
+      }
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    window.addEventListener('pointercancel', handleUp);
+  };
+
+  const buildSceneContextMenuItems = (): FloatingContextMenuItem[] => {
+    if (!sceneContextMenu) return [];
+
+    if (sceneContextMenu.kind === 'entity') {
+      const target = entities[sceneContextMenu.entityId];
+      if (!target) return [];
+      const isVisible = target.visible !== false;
+      const isDisabled = Boolean(target.disabled);
+      const hasValidParent = Boolean(target.parentId && entities[target.parentId]);
+      const isTargetInMulti = selectedEntityIds.length > 1 && selectedEntityIds.includes(target.id);
+      const isTargetSelected = selectedEntityIds.includes(target.id) || selectedEntityId === target.id;
+      const items: FloatingContextMenuItem[] = [];
+
+      if (isTargetInMulti) {
+        const selectedObjects = selectedEntityIds.map((id) => entities[id]).filter(Boolean);
+        const allHidden = selectedObjects.every((e) => e.visible === false);
+        items.push(
+          {
+            id: 'ctx-batch-dup',
+            label: `Dupliquer la sélection (${selectedEntityIds.length})`,
+            icon: <Copy className="w-3.5 h-3.5 text-indigo-600" />,
+            onSelect: () => batchDuplicateEntities(selectedEntityIds),
+          },
+          {
+            id: 'ctx-batch-vis',
+            label: allHidden
+              ? `Tout afficher (${selectedEntityIds.length})`
+              : `Tout masquer (${selectedEntityIds.length})`,
+            icon: allHidden ? <Eye className="w-3.5 h-3.5 text-emerald-600" /> : <EyeOff className="w-3.5 h-3.5 text-amber-600" />,
+            onSelect: () => batchUpdateEntityDetails(selectedEntityIds, { visible: allHidden }),
+          },
+          {
+            id: 'ctx-batch-del',
+            label: `Supprimer la sélection (${selectedEntityIds.length})`,
+            icon: <Trash2 className="w-3.5 h-3.5" />,
+            danger: true,
+            dividerAfter: true,
+            onSelect: () => batchDeleteEntities(selectedEntityIds),
+          }
+        );
+      }
+
+      items.push(
+        {
+          id: 'ctx-toggle-sel',
+          label: isTargetSelected ? 'Retirer de la sélection' : 'Ajouter à la sélection',
+          icon: isTargetSelected ? (
+            <CheckSquare className="w-3.5 h-3.5 text-indigo-600" />
+          ) : (
+            <Square className="w-3.5 h-3.5 text-slate-500" />
+          ),
+          onSelect: () => selectEntity(target.id, { toggle: true }),
+        },
+        {
+          id: 'ctx-dup',
+          label: 'Dupliquer',
+          icon: <Copy className="w-3.5 h-3.5 text-indigo-600" />,
+          shortcut: '⌘D',
+          onSelect: () => duplicateEntity(target.id),
+        }
+      );
+
+      if (copiedBehavior) {
+        items.push({
+          id: 'ctx-paste-beh',
+          label: `Coller « ${getBehaviorTitle(copiedBehavior.behavior.type)} »`,
+          icon: <ClipboardPaste className="w-3.5 h-3.5 text-emerald-600" />,
+          onSelect: () => pasteBehaviorToEntity(target.id),
+        });
+      }
+
+      items.push(
+        {
+          id: 'ctx-z-up',
+          label: "Monter d'un cran",
+          icon: <ArrowUp className="w-3.5 h-3.5 text-slate-600" />,
+          dividerBefore: true,
+          onSelect: () => reorderEntityZStep(target.id, 'up'),
+        },
+        {
+          id: 'ctx-z-down',
+          label: "Descendre d'un cran",
+          icon: <ArrowDown className="w-3.5 h-3.5 text-slate-600" />,
+          onSelect: () => reorderEntityZStep(target.id, 'down'),
+        },
+        {
+          id: 'ctx-z-front',
+          label: 'Mettre tout devant',
+          icon: <ArrowUpToLine className="w-3.5 h-3.5 text-slate-600" />,
+          onSelect: () => reorderEntityZStep(target.id, 'front'),
+        },
+        {
+          id: 'ctx-z-back',
+          label: 'Mettre tout derrière',
+          icon: <ArrowDownToLine className="w-3.5 h-3.5 text-slate-600" />,
+          dividerAfter: true,
+          onSelect: () => reorderEntityZStep(target.id, 'back'),
+        },
+        {
+          id: 'ctx-vis',
+          label: isVisible ? 'Masquer sur la scène' : 'Afficher sur la scène',
+          icon: isVisible ? (
+            <EyeOff className="w-3.5 h-3.5 text-amber-600" />
+          ) : (
+            <Eye className="w-3.5 h-3.5 text-emerald-600" />
+          ),
+          onSelect: () => updateEntityDetails(target.id, { visible: !isVisible }),
+        },
+        {
+          id: 'ctx-dis',
+          label: isDisabled ? 'Activer (mode Play)' : 'Désactiver (mode Play)',
+          icon: <Power className={`w-3.5 h-3.5 ${isDisabled ? 'text-emerald-600' : 'text-rose-500'}`} />,
+          onSelect: () => setEntityDisabledCascade(target.id, !isDisabled, 'with_children'),
+        }
+      );
+
+      if (hasValidParent) {
+        items.push({
+          id: 'ctx-detach',
+          label: 'Détacher du parent',
+          icon: <Unlink className="w-3.5 h-3.5 text-indigo-600" />,
+          onSelect: () => detachEntity(target.id),
+        });
+      }
+
+      items.push({
+        id: 'ctx-del',
+        label: 'Supprimer',
+        icon: <Trash2 className="w-3.5 h-3.5" />,
+        danger: true,
+        dividerBefore: true,
+        onSelect: () => deleteEntity(target.id),
+      });
+
+      return items;
+    }
+
+    // Empty canvas menu
+    const visibleIds = Object.values(entities)
+      .filter((e) => e.visible !== false)
+      .map((e) => e.id);
+    const items: FloatingContextMenuItem[] = [];
+
+    if (copiedBehavior && selectedEntityId && entities[selectedEntityId]) {
+      items.push({
+        id: 'canvas-paste-beh',
+        label: `Coller « ${getBehaviorTitle(copiedBehavior.behavior.type)} » sur ${entities[selectedEntityId].name}`,
+        icon: <ClipboardPaste className="w-3.5 h-3.5 text-emerald-600" />,
+        dividerAfter: true,
+        onSelect: () => pasteBehaviorToEntity(selectedEntityId),
+      });
+    }
+
+    if (visibleIds.length > 0) {
+      items.push({
+        id: 'canvas-select-all',
+        label: `Tout sélectionner (${visibleIds.length})`,
+        icon: <CheckSquare className="w-3.5 h-3.5 text-indigo-600" />,
+        onSelect: () => selectEntities(visibleIds),
+      });
+    }
+
+    if (selectedEntityIds.length > 0) {
+      items.push({
+        id: 'canvas-clear-sel',
+        label: 'Tout désélectionner',
+        icon: <Square className="w-3.5 h-3.5 text-slate-500" />,
+        shortcut: 'Échap',
+        onSelect: () => selectEntity(null),
+      });
+    }
+
+    items.push({
+      id: 'canvas-reset-cam',
+      label: 'Réinitialiser la vue caméra',
+      icon: <RotateCcw className="w-3.5 h-3.5 text-slate-600" />,
+      dividerBefore: items.length > 0,
+      onSelect: () => setEditorCamera({ x: 0, y: 0, zoom: 1 }),
+    });
+
+    if (onOpenCreateModal) {
+      items.push({
+        id: 'canvas-create-entity',
+        label: 'Créer un objet…',
+        icon: <Plus className="w-3.5 h-3.5 text-indigo-600" />,
+        onSelect: () => onOpenCreateModal(),
+      });
+    }
+
+    return items;
+  };
+
   return (
     <div
       ref={outerContainerRef}
       className="relative w-full h-full min-h-0 bg-slate-100/70 overflow-hidden select-none flex flex-col items-center justify-start p-3 sm:p-4"
-      onClick={() => selectEntity(null)}
+      onClick={(e) => {
+        if (suppressNextResetClickRef.current) {
+          suppressNextResetClickRef.current = false;
+          return;
+        }
+        if (consumeCanvasLongPressClick(e)) return;
+        selectEntity(null);
+      }}
     >
       {/* CADRE DE SCÈNE AVEC RESPECT DU FORMAT / RATIO (Édition ou Play, sans bandes noires) */}
       <div
@@ -732,7 +1104,17 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
         onDrop={handleDrop}
         onWheel={handleContainerWheel}
         onPointerDownCapture={handleContainerPanPointerDownCapture}
+        onContextMenu={(e) => {
+          if (isPlayMode || selectedLayerId || spawnCanvasPick || jointCanvasPick || snapPinCanvasPick) {
+            return;
+          }
+          canvasContextBind.onContextMenu(e);
+        }}
+        onPointerDown={handleCanvasMarqueePointerDown}
         onPointerMove={(e) => {
+          if (!isPlayMode) {
+            canvasContextBind.onPointerMove(e);
+          }
           if (canvasContainerRef.current) {
             const rect = canvasContainerRef.current.getBoundingClientRect();
             const sx = e.clientX - rect.left;
@@ -747,7 +1129,18 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
             setLatestMouseWorldPos(mousePosRef.current);
           }
         }}
+        onPointerUp={() => {
+          if (!isPlayMode) {
+            canvasContextBind.onPointerUp();
+          }
+        }}
+        onPointerCancel={() => {
+          if (!isPlayMode) {
+            canvasContextBind.onPointerCancel();
+          }
+        }}
         onPointerLeave={() => {
+          cancelCanvasLongPress();
           mouseScreenPosRef.current = null;
           mousePosRef.current = null;
           setLatestMouseWorldPos(null);
@@ -1157,7 +1550,8 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
                   .map((id) => entities[id])
                   .filter((entity): entity is NonNullable<typeof entity> => Boolean(entity) && entity.visible !== false && !(isPlayMode && entity.disabled))
                   .map((entity, index) => {
-                    const isSelected = selectedEntityId === entity.id;
+                    const isSelected =
+                      selectedEntityId === entity.id || selectedEntityIds.includes(entity.id);
                     const zIndexStyle = { zIndex: isSelected && appMode !== 'play' ? 35 : 10 + index };
                     if (entity.type === 'plant') {
                       return <Plant key={entity.id} entity={entity} style={zIndexStyle} />;
@@ -1169,6 +1563,19 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
                   });
               })()}
             </MotionConfig>
+
+            {/* 2.8. RECTANGLE DE SÉLECTION MULTIPLE (MARQUEE) EN MODE ÉDITION */}
+            {!isPlayMode && marqueeBox && (
+              <div
+                className="absolute pointer-events-none z-[49] border-2 border-indigo-500 bg-indigo-500/12 rounded-md"
+                style={{
+                  left: marqueeBox.x,
+                  top: marqueeBox.y,
+                  width: marqueeBox.width,
+                  height: marqueeBox.height,
+                }}
+              />
+            )}
 
             {/* 3.5. CALQUE UNIFIÉ DE GIZMOS & DEBUG VISUEL (z-45) */}
             <SceneGizmoOverlay mousePosRef={mousePosRef} />
@@ -2194,7 +2601,74 @@ export function Scene({ onOpenCreateModal }: SceneProps) {
             />
           );
         })()}
+
+        {/* Barre flottante tactile / tablette pour actions rapides & menu contextuel sur la sélection */}
+        {!isPlayMode &&
+          !spawnCanvasPick &&
+          !jointCanvasPick &&
+          !snapPinCanvasPick &&
+          !selectedLayerId &&
+          !pendingCatalogSpawnType &&
+          selectedEntityIds.length > 0 &&
+          (() => {
+            const primary =
+              (selectedEntityId && entities[selectedEntityId]) ||
+              entities[selectedEntityIds[0]];
+            if (!primary) return null;
+            return (
+              <div
+                data-camera-hud="true"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                className="absolute top-3 right-3 z-45 flex items-center gap-1.5 bg-slate-900/90 text-white backdrop-blur-xs px-2.5 py-1.5 rounded-xl border border-slate-700/80 shadow-lg"
+              >
+                <span className="text-[11px] font-bold text-slate-200 max-w-[140px] truncate">
+                  {selectedEntityIds.length > 1
+                    ? `${selectedEntityIds.length} objets sélectionnés`
+                    : primary.name}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setSceneContextMenu({
+                      kind: 'entity',
+                      entityId: primary.id,
+                      x: rect.right - 200,
+                      y: rect.bottom + 8,
+                    });
+                  }}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-[11px] font-bold text-white cursor-pointer transition-colors"
+                  title="Ouvrir le menu d'actions (Clic droit ou appui long sur l'objet)"
+                >
+                  <MoreHorizontal className="w-3.5 h-3.5" />
+                  <span>Actions</span>
+                </button>
+              </div>
+            );
+          })()}
       </div>
+
+    {sceneContextMenu && (
+      <FloatingContextMenu
+        x={sceneContextMenu.x}
+        y={sceneContextMenu.y}
+        title={
+          sceneContextMenu.kind === 'entity'
+            ? entities[sceneContextMenu.entityId]?.name || 'Objet'
+            : 'Scène'
+        }
+        subtitle={
+          sceneContextMenu.kind === 'entity' &&
+          selectedEntityIds.length > 1 &&
+          selectedEntityIds.includes(sceneContextMenu.entityId)
+            ? `${selectedEntityIds.length} objets sélectionnés`
+            : undefined
+        }
+        items={buildSceneContextMenuItems()}
+        onClose={() => setSceneContextMenu(null)}
+      />
+    )}
     </div>
   );
 }

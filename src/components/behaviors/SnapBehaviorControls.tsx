@@ -1,5 +1,5 @@
 import React from 'react';
-import { Crosshair, Magnet, Paintbrush, Plus } from 'lucide-react';
+import { Crosshair, Link2, Magnet, Paintbrush, Plus, Sliders } from 'lucide-react';
 import {
   Entity,
   EntityState,
@@ -15,6 +15,8 @@ import {
 import { EMPTY_RECORD, useSceneStore } from '../../store/useSceneStore';
 import { EditableNumericValue } from '../shared/EditableNumericValue';
 import { SnapJointConfigFields } from '../shared/SnapJointConfigFields';
+import { BehaviorSubSection } from './BehaviorSubSection';
+import { BehaviorRuleShortcutButton } from './BehaviorRuleShortcutButton';
 
 const ANCHOR_OPTIONS: { value: SnapAnchorPreset; label: string }[] = [
   { value: 'center', label: 'Centre' },
@@ -71,6 +73,12 @@ export function SnapBehaviorControls({
   const unsnapDist = b.unsnapDistance ?? Math.round(radius * 1.5);
   const allowPullUnsnap = b.allowPullUnsnap !== false;
   const reSnapCooldown = b.reSnapCooldownSec ?? 0.35;
+  const linkedSnapStatesCount = [
+    b.approachingStateId,
+    b.snappedStateId,
+    b.pullingStateId,
+    b.unsnappedStateId,
+  ].filter(Boolean).length;
 
   const canPickSourceOnCanvas = Boolean(entityId && behaviorId && sceneEntities[entityId]);
 
@@ -95,150 +103,173 @@ export function SnapBehaviorControls({
   const canPickTargetOnCanvas = Boolean(entityId && behaviorId && resolvedTargetEntityId);
 
   return (
-    <div className="space-y-2.5">
-      {/* 0. Rôle du Snap : Objet aimanté vs Réceptacle */}
-      <div className="p-2.5 bg-white rounded-xl border border-slate-200 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-bold text-slate-700">Rôle de cet objet</span>
-          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[10px] font-bold">
-            <button
-              type="button"
-              onClick={() => update({ snapRole: 'magnet_object' })}
-              className={`px-2 py-1 rounded-md cursor-pointer transition-colors ${
-                !isReceptacle
-                  ? 'bg-cyan-600 text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Objet aimanté
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                update({
-                  snapRole: 'receptacle',
-                  maxCapacity: b.maxCapacity ?? 1,
-                })
-              }
-              className={`px-2 py-1 rounded-md cursor-pointer transition-colors ${
-                isReceptacle
-                  ? 'bg-violet-600 text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Réceptacle (Socle)
-            </button>
-          </div>
-        </div>
-
-        <div className="text-[10px] text-slate-500">
-          {isReceptacle
-            ? 'Attire et capture automatiquement les objets correspondants jusqu’à sa capacité max.'
-            : 'Cet objet vient se coller automatiquement vers une cible ou un socle.'}
-        </div>
-
-        {isReceptacle && (
-          <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-100">
-            <span className="text-[11px] font-bold text-violet-900">
-              Capacité max (nb d&apos;objets)
-            </span>
-            <input
-              type="number"
-              step="any"
-              value={b.maxCapacity ?? 1}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                if (Number.isFinite(v)) {
-                  update({ maxCapacity: Math.max(1, Math.round(v)) });
+    <div className="space-y-2">
+      {/* 0 & 1. Rôle & Cible du Snap */}
+      <BehaviorSubSection
+        title="Rôle & Cible d'aimantation"
+        subtitle={isReceptacle ? 'Réceptacle (Socle)' : 'Objet aimanté'}
+        icon={<Magnet className="w-3.5 h-3.5 text-cyan-600" />}
+        summaryBadge={isReceptacle ? 'Réceptacle' : targetType === 'any' ? 'Tous' : targetType}
+        persistKey={entityId ? `${entityId}:${b.id}:snap_role_target` : undefined}
+        defaultOpen={true}
+      >
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold text-slate-700">Rôle de cet objet</span>
+            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[10px] font-bold">
+              <button
+                type="button"
+                onClick={() => update({ snapRole: 'magnet_object' })}
+                className={`px-2 py-1 rounded-md cursor-pointer transition-colors ${
+                  !isReceptacle
+                    ? 'bg-cyan-600 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Objet aimanté
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  update({
+                    snapRole: 'receptacle',
+                    maxCapacity: b.maxCapacity ?? 1,
+                  })
                 }
-              }}
-              className="w-20 bg-violet-50 border border-violet-200 rounded-lg px-2 py-1 text-xs font-mono font-bold text-right text-violet-900"
-            />
+                className={`px-2 py-1 rounded-md cursor-pointer transition-colors ${
+                  isReceptacle
+                    ? 'bg-violet-600 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Réceptacle (Socle)
+              </button>
+            </div>
           </div>
-        )}
-      </div>
 
-      {/* 1. Cible de l'aimant */}
-      <div className="p-2.5 bg-white rounded-xl border border-slate-200 space-y-2">
-        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-          <Magnet className="w-3.5 h-3.5 text-cyan-600" />
-          <span>{isReceptacle ? 'Objets acceptés par le réceptacle' : "Cible d'aimantation"}</span>
-        </div>
+          <div className="text-[10px] text-slate-500">
+            {isReceptacle
+              ? 'Attire et capture automatiquement les objets correspondants jusqu’à sa capacité max.'
+              : 'Cet objet vient se coller automatiquement vers une cible ou un socle.'}
+          </div>
 
-        <select
-          value={targetType}
-          onChange={(e) => update({ targetType: e.target.value as SnapTargetType })}
-          className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-800"
-        >
-          <option value="any">N&apos;importe quel objet à portée</option>
-          <option value="entity">Une instance précise</option>
-          <option value="type">Un type d&apos;objet</option>
-          <option value="tag">Un #Tag spécifique</option>
-        </select>
+          {isReceptacle && (
+            <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-100">
+              <span className="text-[11px] font-bold text-violet-900">
+                Capacité max (nb d&apos;objets)
+              </span>
+              <input
+                type="number"
+                step="any"
+                value={b.maxCapacity ?? 1}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v)) {
+                    update({ maxCapacity: Math.max(1, Math.round(v)) });
+                  }
+                }}
+                className="w-20 bg-violet-50 border border-violet-200 rounded-lg px-2 py-1 text-xs font-mono font-bold text-right text-violet-900"
+              />
+            </div>
+          )}
 
-        {targetType === 'entity' && (
-          <select
-            value={b.targetEntityId || ''}
-            onChange={(e) => update({ targetEntityId: e.target.value || undefined })}
-            className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-800"
-          >
-            <option value="">-- Choisir l&apos;objet cible --</option>
-            {targetEntityOptions.map((ent) => (
-              <option key={ent.id} value={ent.id}>
-                {ent.name}
-              </option>
-            ))}
-          </select>
-        )}
+          <div className="pt-1.5 border-t border-slate-100 space-y-2">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+              <Magnet className="w-3.5 h-3.5 text-cyan-600" />
+              <span>{isReceptacle ? 'Objets acceptés par le réceptacle' : "Cible d'aimantation"}</span>
+            </div>
 
-        {targetType === 'type' && (
-          <select
-            value={b.targetEntityType || ''}
-            onChange={(e) => update({ targetEntityType: e.target.value || undefined })}
-            className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-800"
-          >
-            <option value="">-- Choisir un type --</option>
-            {entityTypeOptions.map((opt) => (
-              <option key={opt.type} value={opt.type}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        )}
-
-        {targetType === 'tag' && (
-          <div className="space-y-1">
-            <input
-              type="text"
-              value={b.targetTag || ''}
-              onChange={(e) => update({ targetTag: e.target.value })}
-              placeholder="ex: socle, slot, aimant..."
+            <select
+              value={targetType}
+              onChange={(e) => update({ targetType: e.target.value as SnapTargetType })}
               className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-800"
-            />
-            {availableTags.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {availableTags.slice(0, 8).map((tag) => (
-                  <button
-                    key={tag}
-                    type="button"
-                    onClick={() => update({ targetTag: tag })}
-                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold border cursor-pointer ${
-                      b.targetTag === tag
-                        ? 'bg-cyan-600 text-white border-cyan-700'
-                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-cyan-50'
-                    }`}
-                  >
-                    #{tag}
-                  </button>
+            >
+              <option value="any">N&apos;importe quel objet à portée</option>
+              <option value="entity">Une instance précise</option>
+              <option value="type">Un type d&apos;objet</option>
+              <option value="tag">Un #Tag spécifique</option>
+            </select>
+
+            {targetType === 'entity' && (
+              <select
+                value={b.targetEntityId || ''}
+                onChange={(e) => update({ targetEntityId: e.target.value || undefined })}
+                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-800"
+              >
+                <option value="">-- Choisir l&apos;objet cible --</option>
+                {targetEntityOptions.map((ent) => (
+                  <option key={ent.id} value={ent.id}>
+                    {ent.name}
+                  </option>
                 ))}
+              </select>
+            )}
+
+            {targetType === 'type' && (
+              <select
+                value={b.targetEntityType || ''}
+                onChange={(e) => update({ targetEntityType: e.target.value || undefined })}
+                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-800"
+              >
+                <option value="">-- Choisir un type --</option>
+                {entityTypeOptions.map((opt) => (
+                  <option key={opt.type} value={opt.type}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {targetType === 'tag' && (
+              <div className="space-y-1">
+                <input
+                  type="text"
+                  value={b.targetTag || ''}
+                  onChange={(e) => update({ targetTag: e.target.value })}
+                  placeholder="ex: socle, slot, aimant..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-800"
+                />
+                {availableTags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {availableTags.slice(0, 8).map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => update({ targetTag: tag })}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold border cursor-pointer ${
+                          b.targetTag === tag
+                            ? 'bg-cyan-600 text-white border-cyan-700'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-cyan-50'
+                        }`}
+                      >
+                        #{tag}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      </BehaviorSubSection>
 
       {/* 2. Déclenchement, Zone de snap & Champ d'attraction magnétique */}
-      <div className="p-2.5 bg-white rounded-xl border border-slate-200 space-y-2">
+      <BehaviorSubSection
+        title="Déclenchement & Magnétisme"
+        subtitle={`Capture ${radius}px`}
+        icon={<Sliders className="w-3.5 h-3.5 text-cyan-600" />}
+        summaryBadge={`${radius} px`}
+        persistKey={entityId ? `${entityId}:${b.id}:snap_magnet` : undefined}
+        defaultOpen={true}
+        headerActions={
+          <BehaviorRuleShortcutButton
+            entityId={entityId}
+            triggerType="snap"
+            triggerPhase="enter"
+            label="Objet aimanté (Snap)"
+          />
+        }
+      >
         <div className="grid grid-cols-2 gap-1.5">
           <div>
             <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Déclenchement</span>
@@ -383,10 +414,23 @@ export function SnapBehaviorControls({
             </div>
           )}
         </div>
-      </div>
+      </BehaviorSubSection>
 
       {/* 3. Alignement & Ancre */}
-      <div className="p-2.5 bg-white rounded-xl border border-slate-200 space-y-2">
+      <BehaviorSubSection
+        title="Alignement & Ancres"
+        subtitle="Points d'ancrage, repères canvas et rotation"
+        icon={<Crosshair className="w-3.5 h-3.5 text-cyan-600" />}
+        summaryBadge={
+          snapAlignment === 'center'
+            ? 'Centre'
+            : snapAlignment === 'anchor_offset'
+            ? 'Ancres'
+            : 'Bord proche'
+        }
+        persistKey={entityId ? `${entityId}:${b.id}:snap_alignment` : undefined}
+        defaultOpen={snapAlignment !== 'center'}
+      >
         <div>
           <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Alignement sur cible</span>
           <select
@@ -794,10 +838,47 @@ export function SnapBehaviorControls({
             />
           </div>
         )}
-      </div>
+      </BehaviorSubSection>
 
       {/* 4. Liaison après aimantation & Arrachement */}
-      <div className="p-2.5 bg-white rounded-xl border border-slate-200 space-y-2">
+      <BehaviorSubSection
+        title="Liaison après snap & Arrachement"
+        subtitle="Parentage, joint physique et détachement"
+        icon={<Link2 className="w-3.5 h-3.5 text-cyan-600" />}
+        summaryBadge={
+          attachBehavior === 'bidirectional_joint'
+            ? 'Bidirectionnel'
+            : attachBehavior === 'parent_physics_joint'
+            ? 'Joint Physique'
+            : attachBehavior === 'parent_spring'
+            ? 'Ressort'
+            : attachBehavior === 'parent_rigid'
+            ? 'Parent rigide'
+            : attachBehavior === 'freeze_physics'
+            ? 'Figer physique'
+            : 'Placer'
+        }
+        persistKey={entityId ? `${entityId}:${b.id}:snap_link` : undefined}
+        defaultOpen={true}
+        headerActions={
+          <div className="flex items-center gap-1">
+            <BehaviorRuleShortcutButton
+              entityId={entityId}
+              triggerType="snap"
+              triggerPhase="exit"
+              label="Objet détaché (Unsnap)"
+            />
+            {(attachBehavior === 'parent_physics_joint' || attachBehavior === 'bidirectional_joint') && (
+              <BehaviorRuleShortcutButton
+                entityId={entityId}
+                triggerType="joint_break"
+                triggerPhase="joint_break"
+                label="Rupture Joint"
+              />
+            )}
+          </div>
+        }
+      >
         <div>
           <span className="text-[10px] font-bold text-slate-500 block mb-0.5">
             Comportement après snap (Liaison)
@@ -1083,11 +1164,18 @@ export function SnapBehaviorControls({
             </div>
           </div>
         )}
-      </div>
+      </BehaviorSubSection>
 
       {/* 5. États visuels automatiques Approche / Snap / Unsnap */}
-      <div className="p-2.5 bg-cyan-50/50 rounded-xl border border-cyan-200/80 space-y-1.5">
-        <div className="text-[11px] font-bold text-cyan-950">États automatiques (optionnel)</div>
+      <BehaviorSubSection
+        title="États automatiques (optionnel)"
+        subtitle="Approche, aimanté, traction, libre"
+        icon={<Magnet className="w-3.5 h-3.5 text-cyan-600" />}
+        summaryBadge={`${linkedSnapStatesCount} liés`}
+        persistKey={entityId ? `${entityId}:${b.id}:snap_states` : undefined}
+        defaultOpen={linkedSnapStatesCount > 0}
+        tone="cyan"
+      >
         {[
           { key: 'approachingStateId' as const, label: "À l'approche (aimant)", suggested: 'Approche', val: b.approachingStateId },
           { key: 'snappedStateId' as const, label: 'État quand aimanté', suggested: 'Aimanté', val: b.snappedStateId },
@@ -1142,7 +1230,7 @@ export function SnapBehaviorControls({
             ? "Si un objet possède aussi son propre composant Snap « Objet aimanté », il pilote sa physique et ses ancres tandis que le Réceptacle gère sa capacité max et ses propres états."
             : "Compatible avec un Réceptacle : cet objet pilote ses ancres/physique, et le Réceptacle observe automatiquement la capture et sa capacité max."}
         </div>
-      </div>
+      </BehaviorSubSection>
     </div>
   );
 }
