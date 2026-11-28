@@ -596,14 +596,16 @@ export function ProjectSlotsModal({ isOpen, onClose }: ProjectSlotsModalProps) {
                       <span>Charger</span>
                     </button>
 
-                    <button
-                      onClick={() => handleOverwrite(slot)}
-                      className="px-2.5 py-1.5 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 hover:border-indigo-300 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
-                      title="Écraser ce slot avec l'état actuel de votre projet"
-                    >
-                      <Save className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>Écraser</span>
-                    </button>
+                    {isCurrent && (
+                      <button
+                        onClick={() => handleOverwrite(slot)}
+                        className="px-2.5 py-1.5 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 hover:border-indigo-300 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                        title="Écraser ce slot avec l'état actuel de votre projet"
+                      >
+                        <Save className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Écraser</span>
+                      </button>
+                    )}
 
                     <button
                       onClick={() => handleDuplicate(slot)}
